@@ -1,0 +1,5 @@
+name: docs
+title: Draw — Architecture
+version: ~
+nav:
+  - modules/ROOT/nav.adoc

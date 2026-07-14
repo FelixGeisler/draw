@@ -1,27 +1,25 @@
-# 8. Cross-cutting Concepts
+= 8. Cross-cutting Concepts
 
-[← back to index](index.md)
-
-## 8.1 Derived state over stored state
+== 8.1 Derived state over stored state
 
 Anything that can drift is computed at read time: drawability (SQL predicate),
 "in progress" (running time entry exists), XP/level/streak (aggregates over
 `completions`), weekly grade (aggregation over `time_entries`). Only facts are
 stored (tasks, entries, completions, unlocked achievements).
 
-## 8.2 The weight formula
+== 8.2 The weight formula
 
-```
+....
 weight = impact² / max(effort, 5)          leverage per minute
        × urgency(due_date)                 ×1 → ×4 over last 7 days, ×5 overdue
        × staleness(created/last_completed) up to ×2 over 30 days
        × 0.15 if drawn within cooldown     variety on "draw again"
-```
+....
 
 Household chores work without ratings: no goal → neutral impact 3, and staleness
 makes neglected chores progressively louder.
 
-## 8.3 Error handling
+== 8.3 Error handling
 
 - Server: consistent `{error: string}` bodies with proper status codes (404, 409 for
   domain conflicts, 503 for unconfigured AI).
@@ -30,7 +28,7 @@ makes neglected chores progressively louder.
   (`AuthenticationError` → friendly key hint, `RateLimitError` → 429,
   `APIConnectionError` → offline hint).
 
-## 8.4 AI usage rules
+== 8.4 AI usage rules
 
 Server-side only. `claude-opus-4-8` with adaptive thinking and structured outputs
 (`messages.parse` + `zodOutputFormat`; impact as literal union 1|2|3|4|5 because
@@ -39,7 +37,7 @@ numeric min/max is unsupported). Materials precede instructions in the prompt wi
 counting gates every call (estimate endpoint + 180K hard limit). No `temperature`,
 `budget_tokens`, or assistant prefill — all rejected by this model family.
 
-## 8.5 Security
+== 8.5 Security
 
 - API key only in `server/.env` (gitignored), never in the browser.
 - Upload filenames sanitized; stored under server-generated names; download/delete
@@ -47,33 +45,44 @@ counting gates every call (estimate endpoint + 180K hard limit). No `temperature
 - Upload restricted to PDF/txt/md, 50 MB cap.
 - Intended for localhost use only; no auth by design (single local user).
   Note: explicit 127.0.0.1 binding is tracked in
-  [issue #3](https://github.com/FelixGeisler/draw/issues/3) — without it the API
+  https://github.com/FelixGeisler/draw/issues/3[issue #3] — without it the API
   is technically reachable from the local network.
 
-## 8.6 Time handling
+== 8.6 Time handling
 
 Timestamps stored as ISO 8601 UTC strings. Date-only values (due dates) are
 compared as strings. Date-range arithmetic happens in UTC (`addDays` in
 `routes/stats.ts`) — local-timezone `Date` round-trips caused an off-by-one-day bug
-(see [section 11](11_risks_and_technical_debt.md)). Streak days use SQLite
+(see xref:11_risks_and_technical_debt.adoc[section 11]). Streak days use SQLite
 `date(..., 'localtime')` because a "day" is a user-local concept.
 
-## 8.7 Testing strategy
+== 8.7 Testing strategy
 
 Three levels, all mandatory per PR (enforced by CI):
 
-| Level | Tooling | Scope |
-|---|---|---|
-| Unit | Vitest | Pure logic: `urgencyFactor`/`stalenessFactor`/`weight`, `levelFromXp`, `classifyTask` |
-| Integration | Vitest + Supertest | Full REST API against `createApp()` with a real temp SQLite database per test file (`DATA_DIR` env, forked pool) |
-| End-to-end | Playwright | User journeys in a real browser: capture → breakdown → draw → complete → timer → stats; own ports (`API_PORT`/`VITE_PORT`) + throwaway DB, so a live dev server is undisturbed |
+[cols="1,1,3",options="header"]
+|===
+|Level |Tooling |Scope
+
+|Unit
+|Vitest
+|Pure logic: `urgencyFactor`/`stalenessFactor`/`weight`, `levelFromXp`, `classifyTask`
+
+|Integration
+|Vitest + Supertest
+|Full REST API against `createApp()` with a real temp SQLite database per test file (`DATA_DIR` env, forked pool)
+
+|End-to-end
+|Playwright
+|User journeys in a real browser: capture → breakdown → draw → complete → timer → stats; own ports (`API_PORT`/`VITE_PORT`) + throwaway DB, so a live dev server is undisturbed
+|===
 
 Design rules: tests never touch `server/data/`; journey E2E tests run serially
 without retries (shared DB state); integration tests encode the domain invariants
 (breakdown 409, one running timer, recurrence reset, XP-farming protection,
 AI degraded mode).
 
-## 8.8 Database migrations
+== 8.8 Database migrations
 
 `PRAGMA user_version` switch in `db.ts`: fresh databases execute `schema.sql`
 (always the current schema); existing databases run incremental `ALTER TABLE`

@@ -36,6 +36,9 @@ domain logic → unit, API behavior → integration, user-visible flows → E2E.
 
 ## Documentation
 
-Architecture documentation follows [arc42](https://arc42.org/) and lives in `docs/`,
-hosted via GitHub Pages. Keep it current: architectural decisions belong in
-section 9 (Architecture Decisions), new quality requirements in section 10.
+Architecture documentation follows [arc42](https://arc42.org/) and lives in
+`docs/modules/ROOT/pages/` (AsciiDoc, built with [Antora](https://antora.org/)
+— `npm run docs:build`, output in `build/site/`). It deploys to GitHub Pages via
+the `Docs` workflow on every push to `main` that touches `docs/`. Keep it
+current: architectural decisions belong in section 9 (Architecture Decisions),
+new quality requirements in section 10.

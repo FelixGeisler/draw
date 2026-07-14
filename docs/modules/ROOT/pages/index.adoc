@@ -1,0 +1,26 @@
+= Draw — Architecture Documentation
+
+This is the https://arc42.org/[arc42] architecture documentation for *Draw*,
+a local, single-user anti-procrastination task planner.
+
+Source code: https://github.com/FelixGeisler/draw[github.com/FelixGeisler/draw]
+
+== Sections
+
+. xref:01_introduction_and_goals.adoc[Introduction and Goals]
+. xref:02_architecture_constraints.adoc[Architecture Constraints]
+. xref:03_context_and_scope.adoc[Context and Scope]
+. xref:04_solution_strategy.adoc[Solution Strategy]
+. xref:05_building_block_view.adoc[Building Block View]
+. xref:06_runtime_view.adoc[Runtime View]
+. xref:07_deployment_view.adoc[Deployment View]
+. xref:08_crosscutting_concepts.adoc[Cross-cutting Concepts]
+. xref:09_architecture_decisions.adoc[Architecture Decisions]
+. xref:10_quality_requirements.adoc[Quality Requirements]
+. xref:11_risks_and_technical_debt.adoc[Risks and Technical Debt]
+. xref:12_glossary.adoc[Glossary]
+
+'''
+
+_Documentation format: https://arc42.org/[arc42] — template for architecture
+communication and documentation. Site generated with https://antora.org/[Antora]._
