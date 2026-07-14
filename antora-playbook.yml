@@ -1,0 +1,19 @@
+site:
+  title: Draw — Architecture Documentation
+  url: https://felixgeisler.github.io/draw
+  start_page: docs::index.adoc
+content:
+  sources:
+    - url: .
+      branches: HEAD
+      start_path: docs
+# The default UI bundle is vendored (built from gitlab.com/antora/antora-ui-default,
+# whose CI artifact downloads 404 as of 2026-07) — no network dependency at build time.
+ui:
+  bundle:
+    url: ./docs-ui/ui-bundle.zip
+output:
+  dir: build/site
+runtime:
+  log:
+    failure_level: warn
