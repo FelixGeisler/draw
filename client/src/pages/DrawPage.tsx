@@ -1,20 +1,25 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import confetti from "canvas-confetti";
-import { useCategories, useUpdateTask } from "../hooks/useTasks";
+import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
 import { useDraw, type DrawResponse } from "../hooks/useDraw";
 import { useStartTimer } from "../hooks/useTimer";
 import { TaskBadges } from "../components/TaskBadges";
+import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
+import { classifyTask } from "../lib/drawable";
+import type { NewTask } from "../api/types";
 import "./DrawPage.css";
 
 type Phase = "idle" | "shuffling" | "revealed";
 
 export function DrawPage() {
   const categories = useCategories();
+  const settings = useSettings();
   const draw = useDraw();
   const updateTask = useUpdateTask();
+  const deleteTask = useDeleteTask();
   const startTimer = useStartTimer();
 
   const goals = useGoals();
@@ -22,16 +27,39 @@ export function DrawPage() {
   const [goalId, setGoalId] = useState<number | undefined>();
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<DrawResponse | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [edited, setEdited] = useState(false);
 
   async function doDraw() {
     setPhase("shuffling");
     setResult(null);
+    setEditing(false);
+    setEdited(false);
     const [response] = await Promise.all([
       draw.mutateAsync({ categoryId, goalId }),
       new Promise((r) => setTimeout(r, 450)), // let the shuffle play
     ]);
     setResult(response);
     setPhase(response.task ? "revealed" : "idle");
+  }
+
+  // The card renders from local state, so the PATCH response must be written
+  // back into `result` — query invalidation alone would not refresh it.
+  async function saveEdit(patch: NewTask) {
+    if (!result?.task) return;
+    const response = await updateTask.mutateAsync({ id: result.task.id, ...patch });
+    setResult((prev) => (prev ? { ...prev, task: response.task } : prev));
+    setEdited(true);
+    setEditing(false);
+  }
+
+  async function deleteDrawn() {
+    if (!result?.task) return;
+    if (!confirm(`Delete "${result.task.title}"?`)) return;
+    await deleteTask.mutateAsync(result.task.id);
+    setResult(null);
+    setEditing(false);
+    setPhase("idle");
   }
 
   async function completeDrawn() {
@@ -44,6 +72,11 @@ export function DrawPage() {
 
   const task = result?.task ?? null;
   const category = task ? categories.data?.find((c) => c.id === task.categoryId) : null;
+  const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
+  // An edit can push the drawn card out of the deck (effort too big/cleared,
+  // status no longer open) — computed client-side, mirroring drawService.
+  const nonDrawable =
+    task != null && (task.status !== "open" || classifyTask(task, maxEffort) !== "ready");
 
   return (
     <div className="content" style={{ textAlign: "center" }}>
@@ -111,7 +144,14 @@ export function DrawPage() {
                   <p style={{ color: "var(--text-dim)", margin: 0 }}>{task.description}</p>
                 )}
                 <TaskBadges task={task} />
-                {result?.probability != null && (
+                {nonDrawable && (
+                  <div className="draw-hint">
+                    This card is now out of the deck — draw again for a playable one.
+                  </div>
+                )}
+                {/* The odds reflect the original draw; hide them once the
+                    task was edited instead of showing a stale number. */}
+                {!edited && result?.probability != null && (
                   <div className="draw-chance">
                     {Math.round(result.probability * 100)}% draw chance · {result.poolSize} card
                     {result.poolSize === 1 ? "" : "s"} in the deck
@@ -123,13 +163,37 @@ export function DrawPage() {
         </div>
       </div>
 
-      {phase === "revealed" && task && (
+      {phase === "revealed" && task && !editing && (
         <div className="draw-actions">
-          <button className="primary" onClick={() => startTimer.mutate(task.id)}>
+          <button
+            className={nonDrawable ? undefined : "primary"}
+            onClick={() => startTimer.mutate(task.id)}
+          >
             ▶ Start now
           </button>
           <button onClick={completeDrawn}>✓ Done</button>
-          <button onClick={doDraw}>Draw again</button>
+          <button onClick={() => setEditing(true)}>✎ Edit</button>
+          <button onClick={deleteDrawn} title="Delete task">
+            🗑 Delete
+          </button>
+          <button className={nonDrawable ? "primary" : undefined} onClick={doDraw}>
+            Draw again
+          </button>
+        </div>
+      )}
+
+      {phase === "revealed" && task && editing && (
+        <div className="panel" style={{ maxWidth: 680, margin: "8px auto 0", textAlign: "left" }}>
+          <TaskForm
+            key={task.id}
+            categories={categories.data ?? []}
+            goals={goals.data}
+            initial={task}
+            autoFocus
+            submitLabel="Save"
+            onSubmit={saveEdit}
+            onCancel={() => setEditing(false)}
+          />
         </div>
       )}
 
