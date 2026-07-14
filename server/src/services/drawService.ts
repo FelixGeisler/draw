@@ -180,9 +180,24 @@ export function clearCurrentDraw(taskId?: number) {
 }
 
 /**
+ * Clear the persisted draw when its task row no longer exists — covers the
+ * drawn subtask cascade-deleted with its parent as well as a direct delete.
+ * Deliberately eager, unlike the sideways-stale cases handled lazily below:
+ * `tasks.id` has no AUTOINCREMENT, so SQLite can re-bind a freed id to the
+ * next captured task before any restore validation runs, and the never-drawn
+ * newcomer would be restored — and paid the drawn bonus — under the old id.
+ */
+export function clearDanglingDraw() {
+  const id = getCurrentDrawTaskId();
+  if (id != null && !db.prepare("SELECT 1 FROM tasks WHERE id = ?").get(id)) {
+    deleteSetting(CURRENT_DRAW_SETTING);
+  }
+}
+
+/**
  * The persisted current draw, for restore after a reload. A pointer that went
- * stale sideways (task deleted with its parent, completed elsewhere, edited
- * out of the deck) is cleared lazily here and null is returned.
+ * stale sideways (task completed elsewhere, edited out of the deck, turned
+ * into a container) is cleared lazily here and null is returned.
  */
 export function currentDraw(): { task: Record<string, unknown> } | null {
   const id = getCurrentDrawTaskId();

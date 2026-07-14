@@ -131,9 +131,11 @@ Worse, the drawn-card XP bonus trusted a client `wasDrawn` flag, which was
 gone after a reload too.
 *Decision:* `POST /api/draw` stores the picked task id as
 `current_draw_task_id` in the `settings` table (single-user app — one current
-draw). The next draw overwrites it (an empty draw clears it), completing or
-deleting the drawn task clears it, and `GET /api/draw/current` exposes it for
-restore. That endpoint re-validates drawability with the same predicate as the
+draw). The next draw overwrites it (an empty draw clears it), completing the
+drawn task clears it, any task delete clears it once the pointed-to row no
+longer exists (covering the drawn subtask cascade-deleted with its parent),
+and `GET /api/draw/current` exposes it for restore. That endpoint
+re-validates drawability with the same predicate as the
 deck (ADR-2: open leaf, estimated, within `max_draw_effort`) and lazily clears
 a pointer that went stale sideways — task edited too big, completed elsewhere,
 turned into a container. The DrawPage restores the revealed card on mount
@@ -144,5 +146,9 @@ generous fallback); the client `wasDrawn` flag was removed.
 draw is app-level session state, not a task fact; lazy validation at restore
 instead of eager clearing on every task mutation keeps the write paths simple
 (one line each on complete/delete) and cannot drift — the same reasoning as
-ADR-2. Deriving the bonus server-side removes a client-trust quirk and makes
-the bonus reload-proof.
+ADR-2. The delete path is the one deliberate exception: `tasks.id` has no
+`AUTOINCREMENT`, so a freed id can be re-bound to the next captured task
+before any restore validation runs — deletes therefore clear the pointer
+eagerly whenever its row is gone, not only on an exact id match. Deriving the
+bonus server-side removes a client-trust quirk and makes the bonus
+reload-proof.

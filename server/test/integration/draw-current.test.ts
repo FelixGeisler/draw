@@ -138,6 +138,44 @@ describe("current draw lifecycle", () => {
     expect(await current()).toBeNull();
   });
 
+  it("deleting the drawn subtask's parent clears the draw — a capture reusing the id is not restored", async () => {
+    const { goalId, task: parent } = await seedGoalTask("cascade");
+    const [sub] = (
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({ subtasks: [{ title: "cascade sub", effortMinutes: 10 }] })
+        .expect(201)
+    ).body;
+    // The parent has an open child now, so the goal pool is exactly the sub.
+    expect((await draw(goalId)).task.id).toBe(sub.id);
+
+    // Deleting the PARENT cascade-deletes the drawn subtask.
+    await request(app).delete(`/api/tasks/${parent.id}`).expect(200);
+
+    // No GET /api/draw/current runs in between (the query is inactive while
+    // the DrawPage is unmounted) — and without AUTOINCREMENT, SQLite hands
+    // the freed ids back to the next captures: parent's first, then sub's.
+    await request(app)
+      .post("/api/tasks")
+      .send({ title: "captured after 1", categoryId: 1, effortMinutes: 10 })
+      .expect(201);
+    const reborn = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "captured after 2", categoryId: 1, effortMinutes: 10 })
+        .expect(201)
+    ).body;
+    expect(reborn.id).toBe(sub.id); // the drawn task's id really was re-bound
+
+    // The never-drawn newcomer must not come back as the current draw...
+    expect(await current()).toBeNull();
+    // ...and completing it pays plain XP, not the drawn bonus.
+    const done = (
+      await request(app).patch(`/api/tasks/${reborn.id}`).send({ status: "done" }).expect(200)
+    ).body;
+    expect(done.xpAwarded).toBe(10); // 10 × (3/3), no ×1.5
+  });
+
   it("a draw edited out of the deck is dropped on restore — and stays dropped", async () => {
     const { goalId, task } = await seedGoalTask("too-big");
     await draw(goalId);

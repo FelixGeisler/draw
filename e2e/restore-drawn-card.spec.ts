@@ -1,5 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
+import { drawFromGoal } from "./helpers.js";
 
 // Issue #25: the drawn card survives a page reload — the DrawPage restores it
 // from the server-persisted current draw, revealed and fully actionable.
@@ -19,23 +20,10 @@ async function seed(request: APIRequestContext) {
   });
 }
 
-// Earlier specs can leave a persisted draw behind, which now restores on
-// load — branch on the server state so the draw stays deterministic.
-async function drawFromGoal(page: Page) {
-  const current = await (await page.request.get("/api/draw/current")).json();
-  await page.goto("/");
-  await page.locator(".draw-filters select").selectOption({ label: `🎯 ${GOAL_TITLE}` });
-  if (current?.task) {
-    await page.getByRole("button", { name: "Draw again" }).click();
-  } else {
-    await page.locator(".draw-face.front").click();
-  }
-  await expect(page.locator(".draw-face.back h2")).toHaveText(TASK_TITLE);
-}
-
 test("draw → reload: the same card comes back revealed, no redraw needed", async ({ page }) => {
   await seed(page.request);
-  await drawFromGoal(page);
+  await drawFromGoal(page, GOAL_TITLE);
+  await expect(page.locator(".draw-face.back h2")).toHaveText(TASK_TITLE);
   await expect(page.locator(".draw-chance")).toBeVisible();
 
   await page.reload();

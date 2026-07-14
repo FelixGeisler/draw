@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "../db.js";
-import { clearCurrentDraw, getCurrentDrawTaskId } from "../services/drawService.js";
+import { clearDanglingDraw, getCurrentDrawTaskId } from "../services/drawService.js";
 import {
   completeTask,
   undoLatestCompletion,
@@ -191,8 +191,10 @@ tasksRouter.delete("/:id", (req, res) => {
   const id = Number(req.params.id);
   const result = db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
   if (result.changes === 0) return res.status(404).json({ error: "task not found" });
-  // A deleted card leaves the deck. (Cascade-deleted subtasks are caught
-  // lazily by the restore validation instead.)
-  clearCurrentDraw(id);
+  // A deleted card leaves the deck — whether it was deleted directly or
+  // cascade-deleted with its parent. Cleared on row absence, not id match:
+  // a freed id (no AUTOINCREMENT) could be re-bound to the next captured
+  // task before the lazy restore validation ever runs.
+  clearDanglingDraw();
   res.json({ ok: true });
 });
