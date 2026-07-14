@@ -42,6 +42,8 @@ function useInvalidateTasks() {
     qc.invalidateQueries({ queryKey: ["tasks"] });
     qc.invalidateQueries({ queryKey: ["gamification"] });
     qc.invalidateQueries({ queryKey: ["stats"] });
+    // Goal cards derive taskCount/doneCount from tasks — keep them in sync.
+    qc.invalidateQueries({ queryKey: ["goals"] });
   };
 }
 
