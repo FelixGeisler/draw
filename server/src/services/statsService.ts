@@ -6,8 +6,125 @@ export interface Stats {
   byImpact: { impact: number; minutes: number }[];
   byGoal: { goalId: number; title: string; minutes: number }[];
   completed: { count: number; avgEffortMinutes: number | null };
+  estimation: Estimation;
   leverageInsights: string[];
   weeklyGrade: string | null;
+}
+
+/** One task completed in range, as fetched from SQL (estimate may be missing). */
+export interface EstimationInputRow {
+  taskId: number;
+  title: string;
+  estimatedMinutes: number | null;
+  trackedMinutes: number;
+  categoryId: number;
+  categoryName: string;
+  categoryColor: string;
+}
+
+export type Tendency = "under" | "over" | "accurate";
+
+export interface Estimation {
+  tasks: {
+    taskId: number;
+    title: string;
+    estimatedMinutes: number;
+    trackedMinutes: number;
+    ratio: number;
+  }[];
+  summary: {
+    taskCount: number;
+    totalEstimatedMinutes: number;
+    totalTrackedMinutes: number;
+    accuracyRatio: number | null;
+    tendency: Tendency | null;
+  };
+  byCategory: {
+    categoryId: number;
+    name: string;
+    color: string;
+    estimatedMinutes: number;
+    trackedMinutes: number;
+    ratio: number;
+  }[];
+}
+
+/** Ratios within this band (inclusive, after rounding) count as accurate. */
+const ACCURATE_MIN = 0.9;
+const ACCURATE_MAX = 1.1;
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+function tendencyFor(ratio: number): Tendency {
+  // ratio = tracked / estimated: taking longer than planned means the
+  // estimate was too low — you *under*-estimate.
+  if (ratio > ACCURATE_MAX) return "under";
+  if (ratio < ACCURATE_MIN) return "over";
+  return "accurate";
+}
+
+/**
+ * Pure estimated-vs-tracked aggregation (no DB). Tasks without a positive
+ * effort estimate are excluded here rather than treated as 0 — a zero
+ * estimate would fake a broken ratio (and divide by zero). Tasks without
+ * any time entry never reach this function (INNER JOIN in computeStats).
+ */
+export function buildEstimation(rows: EstimationInputRow[]): Estimation {
+  const qualifying = rows.filter(
+    (r): r is EstimationInputRow & { estimatedMinutes: number } =>
+      r.estimatedMinutes !== null && r.estimatedMinutes > 0,
+  );
+
+  const tasks = qualifying
+    .map((r) => ({
+      taskId: r.taskId,
+      title: r.title,
+      estimatedMinutes: r.estimatedMinutes,
+      trackedMinutes: Math.round(r.trackedMinutes),
+      ratio: round2(r.trackedMinutes / r.estimatedMinutes),
+    }))
+    // Worst under-estimates first; taskId breaks ties deterministically.
+    .sort((a, b) => b.ratio - a.ratio || a.taskId - b.taskId);
+
+  const totalEstimated = qualifying.reduce((sum, r) => sum + r.estimatedMinutes, 0);
+  const totalTracked = qualifying.reduce((sum, r) => sum + r.trackedMinutes, 0);
+  const accuracyRatio = totalEstimated > 0 ? round2(totalTracked / totalEstimated) : null;
+
+  const catMap = new Map<
+    number,
+    { categoryId: number; name: string; color: string; estimatedMinutes: number; trackedMinutes: number }
+  >();
+  for (const r of qualifying) {
+    const cat = catMap.get(r.categoryId) ?? {
+      categoryId: r.categoryId,
+      name: r.categoryName,
+      color: r.categoryColor,
+      estimatedMinutes: 0,
+      trackedMinutes: 0,
+    };
+    cat.estimatedMinutes += r.estimatedMinutes;
+    cat.trackedMinutes += r.trackedMinutes;
+    catMap.set(r.categoryId, cat);
+  }
+  const byCategory = [...catMap.values()]
+    .map((c) => ({
+      ...c,
+      trackedMinutes: Math.round(c.trackedMinutes),
+      ratio: round2(c.trackedMinutes / c.estimatedMinutes),
+    }))
+    .sort((a, b) => b.trackedMinutes - a.trackedMinutes || a.categoryId - b.categoryId);
+
+  return {
+    tasks,
+    summary: {
+      taskCount: qualifying.length,
+      totalEstimatedMinutes: totalEstimated,
+      totalTrackedMinutes: Math.round(totalTracked),
+      accuracyRatio,
+      tendency: accuracyRatio === null ? null : tendencyFor(accuracyRatio),
+    },
+    byCategory,
+  };
 }
 
 /** Minutes per time entry, running entries counted up to now. */
@@ -59,6 +176,26 @@ export function computeStats(from: string, to: string): Stats {
     )
     .get(...range) as Stats["completed"];
 
+  // Tasks completed in range (EXISTS, not JOIN — recurring tasks may have
+  // several completions and must not double-count their entries) with ALL
+  // their time entries: work on a task completed this week may have started
+  // earlier, so entries are deliberately not range-filtered.
+  const estimationRows = db
+    .prepare(
+      `SELECT t.id AS taskId, t.title, t.effort_minutes AS estimatedMinutes,
+              c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor,
+              SUM(${MINUTES_EXPR}) AS trackedMinutes
+       FROM tasks t
+       JOIN categories c ON c.id = t.category_id
+       JOIN time_entries e ON e.task_id = t.id
+       WHERE EXISTS (
+         SELECT 1 FROM completions co
+         WHERE co.task_id = t.id AND co.completed_at >= ? AND co.completed_at < ?
+       )
+       GROUP BY t.id`,
+    )
+    .all(...range) as EstimationInputRow[];
+
   const totalMinutes = Math.round(total.minutes);
   const minutesAt = (pred: (impact: number) => boolean) =>
     byImpact.filter((r) => pred(r.impact)).reduce((a, r) => a + r.minutes, 0);
@@ -98,6 +235,7 @@ export function computeStats(from: string, to: string): Stats {
       count: completed.count,
       avgEffortMinutes: completed.avgEffortMinutes ? Math.round(completed.avgEffortMinutes) : null,
     },
+    estimation: buildEstimation(estimationRows),
     leverageInsights,
     weeklyGrade,
   };

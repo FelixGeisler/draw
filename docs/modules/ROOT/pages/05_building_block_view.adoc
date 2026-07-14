@@ -31,7 +31,7 @@ server/src/
 │   └── ai.ts                status, estimate, breakdown, plan-goal
 └── services/                Domain logic
     ├── drawService.ts       drawable predicate + weight formula + roulette selection
-    ├── statsService.ts      SQL aggregations, leverage insights, weekly grade
+    ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation accuracy
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
     └── aiService.ts         Anthropic client, material blocks, prompts, token guard
 ....
@@ -49,8 +49,8 @@ server/src/
 |XP/level/streak always derived from `completions`
 
 |`statsService`
-|Time aggregation
-|Running entries count up to _now_; date math in UTC
+|Time aggregation, estimated-vs-tracked accuracy
+|Running entries count up to _now_; date math in UTC; tasks without estimate or tracked time are excluded from accuracy, never counted as 0
 
 |`aiService`
 |Claude API access
