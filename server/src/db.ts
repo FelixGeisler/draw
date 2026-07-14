@@ -34,12 +34,27 @@ function migrate() {
 
 migrate();
 
+// Settings key for the Claude API key. Stored plaintext in the local
+// single-user SQLite DB (ADR-11) and excluded from every API response.
+export const API_KEY_SETTING = "anthropic_api_key";
+
 export function getSetting(key: string, fallback: number): number {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
     | { value: string }
     | undefined;
   const parsed = row ? Number(row.value) : NaN;
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function getSettingString(key: string): string | null {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+export function deleteSetting(key: string) {
+  db.prepare("DELETE FROM settings WHERE key = ?").run(key);
 }
 
 export function setSetting(key: string, value: string) {

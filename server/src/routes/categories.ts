@@ -5,6 +5,11 @@ export const categoriesRouter = Router();
 
 const SELECT = "SELECT id, name, color, is_default AS isDefault FROM categories";
 
+/** Only UNIQUE(name) violations map to the duplicate 409 — anything else is a real error. */
+function isDuplicateName(err: unknown): boolean {
+  return (err as { code?: string })?.code === "SQLITE_CONSTRAINT_UNIQUE";
+}
+
 categoriesRouter.get("/", (_req, res) => {
   res.json(db.prepare(`${SELECT} ORDER BY id`).all());
 });
@@ -17,7 +22,8 @@ categoriesRouter.post("/", (req, res) => {
       .prepare("INSERT INTO categories (name, color) VALUES (?, ?)")
       .run(name.trim(), color || "#888888");
     res.status(201).json(db.prepare(`${SELECT} WHERE id = ?`).get(r.lastInsertRowid));
-  } catch {
+  } catch (err) {
+    if (!isDuplicateName(err)) throw err;
     res.status(409).json({ error: "a category with that name already exists" });
   }
 });
@@ -36,20 +42,33 @@ categoriesRouter.patch("/:id", (req, res) => {
     params.push(color);
   }
   if (sets.length === 0) return res.status(400).json({ error: "nothing to update" });
-  const r = db.prepare(`UPDATE categories SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
-  if (r.changes === 0) return res.status(404).json({ error: "category not found" });
-  res.json(db.prepare(`${SELECT} WHERE id = ?`).get(id));
+  try {
+    const r = db
+      .prepare(`UPDATE categories SET ${sets.join(", ")} WHERE id = ?`)
+      .run(...params, id);
+    if (r.changes === 0) return res.status(404).json({ error: "category not found" });
+    res.json(db.prepare(`${SELECT} WHERE id = ?`).get(id));
+  } catch (err) {
+    if (!isDuplicateName(err)) throw err;
+    res.status(409).json({ error: "a category with that name already exists" });
+  }
 });
 
 categoriesRouter.delete("/:id", (req, res) => {
   const id = Number(req.params.id);
+  const exists = db.prepare("SELECT 1 FROM categories WHERE id = ?").get(id);
+  if (!exists) return res.status(404).json({ error: "category not found" });
   const inUse = db.prepare("SELECT COUNT(*) AS n FROM tasks WHERE category_id = ?").get(id) as {
     n: number;
   };
   if (inUse.n > 0) {
     return res.status(409).json({ error: "category has tasks — move or delete them first" });
   }
-  const r = db.prepare("DELETE FROM categories WHERE id = ?").run(id);
-  if (r.changes === 0) return res.status(404).json({ error: "category not found" });
+  // TaskForm needs at least one category to exist — never delete the final one.
+  const total = db.prepare("SELECT COUNT(*) AS n FROM categories").get() as { n: number };
+  if (total.n <= 1) {
+    return res.status(409).json({ error: "cannot delete the last category — at least one must remain" });
+  }
+  db.prepare("DELETE FROM categories WHERE id = ?").run(id);
   res.json({ ok: true });
 });
