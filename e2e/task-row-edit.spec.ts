@@ -9,6 +9,7 @@ import type { APIRequestContext } from "@playwright/test";
 test.describe.configure({ mode: "serial" });
 
 const GOAL_TITLE = "E2E row-edit goal";
+const SECOND_GOAL_TITLE = "E2E row-edit target goal";
 const TASK_TITLE = "Sort the e2e sock drawer";
 const EDITED_TITLE = "Sort the e2e sock drawer by colour";
 const DONE_TITLE = "Fold the e2e towels";
@@ -46,8 +47,8 @@ function row(page: Page, title: string): Locator {
   return page.getByText(title, { exact: true }).locator("..");
 }
 
-function goalCard(page: Page): Locator {
-  return page.locator(".panel").filter({ hasText: GOAL_TITLE });
+function goalCard(page: Page, title: string = GOAL_TITLE): Locator {
+  return page.locator(".panel").filter({ hasText: title });
 }
 
 test("edit from the row: prefilled form, cancel discards, save persists", async ({ page }) => {
@@ -122,4 +123,40 @@ test("subtask rows offer edit without the goal select; done rows offer none", as
   const doneRow = row(page, DONE_TITLE);
   await expect(doneRow.getByRole("checkbox")).toBeChecked();
   await expect(doneRow.getByTitle("Edit")).not.toBeVisible();
+});
+
+test("goal link on a broken-down task cascades to its subtasks", async ({ page }) => {
+  // Subtasks follow their parent's goal (their rows hide the select), so
+  // attach/move/detach on the parent must carry them along — goal counts
+  // and the goal-filtered draw key off each row's own goal link.
+  await page.request.post("/api/goals", { data: { title: SECOND_GOAL_TITLE } });
+
+  const goalSelect = page.getByTitle("Link to a goal (enables impact rating)");
+  async function setParentGoal(label: string) {
+    await page.goto("/tasks");
+    await row(page, PARENT_TITLE).getByTitle("Edit").click();
+    await goalSelect.selectOption({ label });
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(goalSelect).not.toBeVisible();
+    await page.goto("/goals");
+  }
+
+  // Attach: the goal counts the parent AND its subtask.
+  await setParentGoal(`🎯 ${GOAL_TITLE}`);
+  await expect(goalCard(page).getByText("0/2 tasks")).toBeVisible();
+
+  // Move: both rows follow; nothing stays stranded on the old goal.
+  await setParentGoal(`🎯 ${SECOND_GOAL_TITLE}`);
+  await expect(goalCard(page).getByText("0/0 tasks")).toBeVisible();
+  await expect(goalCard(page, SECOND_GOAL_TITLE).getByText("0/2 tasks")).toBeVisible();
+
+  // Detach: the subtask's link is cleared too.
+  await setParentGoal("no goal");
+  await expect(goalCard(page, SECOND_GOAL_TITLE).getByText("0/0 tasks")).toBeVisible();
+
+  const tasks: { title: string; goalId: number | null; subtasks: { goalId: number | null }[] }[] =
+    await (await page.request.get("/api/tasks")).json();
+  const parent = tasks.find((t) => t.title === PARENT_TITLE);
+  expect(parent?.goalId).toBeNull();
+  expect(parent?.subtasks.map((s) => s.goalId)).toEqual([null]);
 });

@@ -94,6 +94,7 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
           <button
             onClick={() => {
               setBreakingDown(false);
+              setAiPanel(false);
               setEditing(true);
             }}
             title="Edit"
