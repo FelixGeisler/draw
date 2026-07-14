@@ -48,11 +48,17 @@ function CategoryRow({ category }: { category: Category }) {
   const patch = useMutation({
     mutationFn: (body: { name?: string; color?: string }) =>
       api.patch(`/api/categories/${category.id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
+    onSuccess: () => {
+      remove.reset(); // a stale delete error must not outlive a successful edit
+      qc.invalidateQueries({ queryKey: ["categories"] });
+    },
   });
   const remove = useMutation({
     mutationFn: () => api.delete(`/api/categories/${category.id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
+    onSuccess: () => {
+      patch.reset();
+      qc.invalidateQueries({ queryKey: ["categories"] });
+    },
   });
 
   function commitRename() {

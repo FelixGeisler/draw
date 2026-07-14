@@ -5,6 +5,11 @@ export const categoriesRouter = Router();
 
 const SELECT = "SELECT id, name, color, is_default AS isDefault FROM categories";
 
+/** Only UNIQUE(name) violations map to the duplicate 409 — anything else is a real error. */
+function isDuplicateName(err: unknown): boolean {
+  return (err as { code?: string })?.code === "SQLITE_CONSTRAINT_UNIQUE";
+}
+
 categoriesRouter.get("/", (_req, res) => {
   res.json(db.prepare(`${SELECT} ORDER BY id`).all());
 });
@@ -17,7 +22,8 @@ categoriesRouter.post("/", (req, res) => {
       .prepare("INSERT INTO categories (name, color) VALUES (?, ?)")
       .run(name.trim(), color || "#888888");
     res.status(201).json(db.prepare(`${SELECT} WHERE id = ?`).get(r.lastInsertRowid));
-  } catch {
+  } catch (err) {
+    if (!isDuplicateName(err)) throw err;
     res.status(409).json({ error: "a category with that name already exists" });
   }
 });
@@ -42,7 +48,8 @@ categoriesRouter.patch("/:id", (req, res) => {
       .run(...params, id);
     if (r.changes === 0) return res.status(404).json({ error: "category not found" });
     res.json(db.prepare(`${SELECT} WHERE id = ?`).get(id));
-  } catch {
+  } catch (err) {
+    if (!isDuplicateName(err)) throw err;
     res.status(409).json({ error: "a category with that name already exists" });
   }
 });

@@ -4,6 +4,12 @@ import type express from "express";
 import { freshApp } from "../helpers.js";
 
 let app: express.Express;
+// Ids are captured from responses — the suite never assumes seed row ids.
+let workId: number;
+let studyId: number;
+let householdId: number;
+let fitnessId: number;
+
 beforeAll(async () => {
   app = await freshApp();
 });
@@ -18,6 +24,7 @@ describe("category management", () => {
       "Household",
     ]);
     expect(res.body[0].isDefault).toBe(1);
+    [workId, studyId, householdId] = res.body.map((c: { id: number }) => c.id);
   });
 
   it("creates a category and rejects duplicates", async () => {
@@ -26,45 +33,46 @@ describe("category management", () => {
       .send({ name: "Fitness", color: "#ff5533" })
       .expect(201);
     expect(created.body).toMatchObject({ name: "Fitness", color: "#ff5533", isDefault: 0 });
+    fitnessId = created.body.id;
 
     await request(app).post("/api/categories").send({ name: "Fitness" }).expect(409);
   });
 
   it("renames a category", async () => {
     const res = await request(app)
-      .patch("/api/categories/4")
+      .patch(`/api/categories/${fitnessId}`)
       .send({ name: "Health" })
       .expect(200);
-    expect(res.body).toMatchObject({ id: 4, name: "Health", color: "#ff5533" });
+    expect(res.body).toMatchObject({ id: fitnessId, name: "Health", color: "#ff5533" });
   });
 
   it("recolors a category without touching the name", async () => {
     const res = await request(app)
-      .patch("/api/categories/4")
+      .patch(`/api/categories/${fitnessId}`)
       .send({ color: "#00aa88" })
       .expect(200);
-    expect(res.body).toMatchObject({ id: 4, name: "Health", color: "#00aa88" });
+    expect(res.body).toMatchObject({ id: fitnessId, name: "Health", color: "#00aa88" });
   });
 
   it("rejects a rename to an existing name with 409 and keeps the original", async () => {
-    await request(app).patch("/api/categories/4").send({ name: "Work" }).expect(409);
+    await request(app).patch(`/api/categories/${fitnessId}`).send({ name: "Work" }).expect(409);
 
     const list = await request(app).get("/api/categories").expect(200);
-    expect(list.body.find((c: { id: number }) => c.id === 4).name).toBe("Health");
+    expect(list.body.find((c: { id: number }) => c.id === fitnessId).name).toBe("Health");
   });
 
   it("rejects an empty patch and an unknown id", async () => {
-    await request(app).patch("/api/categories/4").send({}).expect(400);
+    await request(app).patch(`/api/categories/${fitnessId}`).send({}).expect(400);
     await request(app).patch("/api/categories/999").send({ name: "Ghost" }).expect(404);
     await request(app).delete("/api/categories/999").expect(404);
   });
 
   it("refuses to delete a category that has tasks (409)", async () => {
     const task = (
-      await request(app).post("/api/tasks").send({ title: "Report", categoryId: 1 })
+      await request(app).post("/api/tasks").send({ title: "Report", categoryId: workId })
     ).body;
 
-    const res = await request(app).delete("/api/categories/1").expect(409);
+    const res = await request(app).delete(`/api/categories/${workId}`).expect(409);
     expect(res.body.error).toMatch(/has tasks/);
 
     // Clean up so later deletions are only blocked by the last-category guard.
@@ -72,9 +80,9 @@ describe("category management", () => {
   });
 
   it("deletes default categories once they are task-free", async () => {
-    await request(app).delete("/api/categories/2").expect(200); // Study, is_default = 1
-    await request(app).delete("/api/categories/3").expect(200); // Household, is_default = 1
-    await request(app).delete("/api/categories/4").expect(200); // Health
+    await request(app).delete(`/api/categories/${studyId}`).expect(200); // is_default = 1
+    await request(app).delete(`/api/categories/${householdId}`).expect(200); // is_default = 1
+    await request(app).delete(`/api/categories/${fitnessId}`).expect(200);
 
     const list = await request(app).get("/api/categories").expect(200);
     expect(list.body).toHaveLength(1);
@@ -82,7 +90,7 @@ describe("category management", () => {
   });
 
   it("refuses to delete the last remaining category (409)", async () => {
-    const res = await request(app).delete("/api/categories/1").expect(409);
+    const res = await request(app).delete(`/api/categories/${workId}`).expect(409);
     expect(res.body.error).toMatch(/last category/);
 
     const list = await request(app).get("/api/categories").expect(200);
