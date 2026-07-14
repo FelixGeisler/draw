@@ -45,7 +45,10 @@ counting gates every call (estimate endpoint + 180K hard limit). No `temperature
 - Upload filenames sanitized; stored under server-generated names; download/delete
   paths resolved and verified against the files directory (no traversal).
 - Upload restricted to PDF/txt/md, 50 MB cap.
-- App binds to localhost; no auth by design (single local user).
+- Intended for localhost use only; no auth by design (single local user).
+  Note: explicit 127.0.0.1 binding is tracked in
+  [issue #3](https://github.com/FelixGeisler/draw/issues/3) — without it the API
+  is technically reachable from the local network.
 
 ## 8.6 Time handling
 

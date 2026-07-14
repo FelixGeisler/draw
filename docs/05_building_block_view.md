@@ -49,10 +49,11 @@ server/src/
 client/src/
 ├── api/client.ts + types.ts   typed fetch wrapper, shared DTOs
 ├── hooks/                     TanStack Query wrappers (useTasks, useDraw, useTimer,
-│                              useStats, useGamification, useGoals, useAi)
-├── pages/                     Draw (centerpiece), Capture, Tasks, Goals, Stats, Settings
-└── components/                TaskRow/Form/Badges, SubtaskEditor, DrawCard (CSS 3D flip),
-                               TimerBar, GamificationHeader, TrophyDeck, AchievementToast,
+│                              useGamification, useGoals, useAi)
+├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip), Capture,
+│                              Tasks, Goals, Stats, Settings
+└── components/                TaskRow/Form/Badges, SubtaskEditor, TimerBar,
+                               GamificationHeader, TrophyDeck, AchievementToast,
                                MaterialsSection, AiSuggestionPanel (breakdown + plan panels)
 ```
 
