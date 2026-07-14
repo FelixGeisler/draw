@@ -90,7 +90,8 @@ describe("AI degraded mode (no API key)", () => {
   it("reports unconfigured status", async () => {
     const status = (await request(app).get("/api/ai/status").expect(200)).body;
     expect(status.configured).toBe(false);
-    expect(status.model).toBe("claude-opus-4-8");
+    // Don't pin the exact model — a model bump must not break this test.
+    expect(status.model).toMatch(/^claude-/);
   });
 
   it("returns 503 on all AI endpoints", async () => {
