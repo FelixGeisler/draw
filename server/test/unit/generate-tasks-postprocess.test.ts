@@ -163,6 +163,27 @@ describe("splitOversized (split, don't clamp)", () => {
     expect(split.parts.reduce((sum, p) => sum + p.minutes, 0)).toBe(55);
     expect(split.parts.every((p) => p.minutes <= 30)).toBe(true);
   });
+
+  it("re-splits evenly when expanding oversized model parts would blow the parts cap", () => {
+    // Review finding: 10 cap-compliant 60-min parts at maxEffort 30 flatMapped
+    // to 20 parts, violating the "<= MAX_PARTS_PER_ITEM on output" invariant.
+    const parts = Array.from({ length: 10 }, (_, i) => ({ title: `p${i}`, minutes: 60 }));
+    const split = splitOversized(task({ statedMinutes: 600, parts }), 30);
+    expect(split.parts).toHaveLength(MAX_PARTS_PER_ITEM);
+    expect(split.parts.reduce((sum, p) => sum + p.minutes, 0)).toBe(600); // total preserved
+    expect(split.statedMinutes).toBe(600); // material data untouched
+    // Sub-question boundaries are abandoned; parts are named after the item.
+    expect(split.parts[0].title).toMatch(/\(part 1\/10\)$/);
+  });
+
+  it("keeps sub-question boundaries when the expansion stays within the cap", () => {
+    const parts = Array.from({ length: 5 }, (_, i) => ({ title: `p${i}`, minutes: 60 }));
+    const split = splitOversized(task({ statedMinutes: 300, parts }), 30);
+    expect(split.parts).toHaveLength(10); // 5 × 2, exactly at the cap
+    expect(split.parts.map((p) => p.title)).toContain("p0 (part 1/2)");
+    expect(split.parts.reduce((sum, p) => sum + p.minutes, 0)).toBe(300);
+    expect(split.parts.every((p) => p.minutes <= 30)).toBe(true);
+  });
 });
 
 describe("capAndClean", () => {
@@ -171,8 +192,18 @@ describe("capAndClean", () => {
     expect(capAndClean(tasks)).toHaveLength(MAX_ITEMS);
   });
 
-  it("caps parts per item", () => {
+  it("drops an over-cap parts list entirely — truncating would silently erase material time", () => {
     const parts = Array.from({ length: MAX_PARTS_PER_ITEM + 5 }, (_, i) => ({
+      title: `part ${i}`,
+      minutes: 10,
+    }));
+    // splitOversized rebuilds a total-preserving split from statedMinutes;
+    // a .slice() here would keep 10 parts summing 100 of the stated 150.
+    expect(capAndClean([task({ parts, statedMinutes: 150 })])[0].parts).toEqual([]);
+  });
+
+  it("keeps a parts list exactly at the cap", () => {
+    const parts = Array.from({ length: MAX_PARTS_PER_ITEM }, (_, i) => ({
       title: `part ${i}`,
       minutes: 10,
     }));
@@ -243,5 +274,47 @@ describe("postprocessGenerateTasks (full pipeline)", () => {
     expect(high.parts).toHaveLength(3); // 90 min → 3 parts
     expect(high.parts.reduce((sum, p) => sum + p.minutes, 0)).toBe(90);
     expect(high.statedMinutes).toBe(90); // never clamped
+  });
+
+  it("enforces MAX_PARTS_PER_ITEM on the final output, not just on raw model parts", () => {
+    // Review finding 1 repro: 10 cap-compliant 60-min parts at maxEffort 30
+    // came out as 20 parts. The cap is an invariant of the OUTPUT.
+    const result = postprocessGenerateTasks(
+      {
+        sourceOverview: "s",
+        tasks: [
+          task({
+            statedMinutes: 600,
+            parts: Array.from({ length: 10 }, (_, i) => ({ title: `p${i}`, minutes: 60 })),
+          }),
+        ],
+      },
+      30,
+    );
+    expect(result.tasks[0].parts.length).toBeLessThanOrEqual(MAX_PARTS_PER_ITEM);
+    expect(result.tasks[0].parts.reduce((sum, p) => sum + p.minutes, 0)).toBe(600);
+  });
+
+  it("never lets the parts cap silently drop material time", () => {
+    // Review finding 2 repro: 15 × 10-min parts under statedMinutes 150 were
+    // sliced to 10 parts summing 100. Dropping them all lets splitOversized
+    // rebuild 5 × 30 from the stated total instead.
+    const result = postprocessGenerateTasks(
+      {
+        sourceOverview: "s",
+        tasks: [
+          task({
+            statedMinutes: 150,
+            parts: Array.from({ length: 15 }, (_, i) => ({ title: `q${i}`, minutes: 10 })),
+          }),
+        ],
+      },
+      30,
+    );
+    const parts = result.tasks[0].parts;
+    expect(parts.length).toBeLessThanOrEqual(MAX_PARTS_PER_ITEM);
+    expect(parts.reduce((sum, p) => sum + p.minutes, 0)).toBe(150); // stated total preserved
+    expect(parts.every((p) => p.minutes <= 30)).toBe(true);
+    expect(result.tasks[0].statedMinutes).toBe(150);
   });
 });

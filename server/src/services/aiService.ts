@@ -42,7 +42,15 @@ export function isConfigured(): boolean {
   return resolveApiKey() !== null;
 }
 
-const SYSTEM_PROMPT = `You are the planning brain of "Draw", an anti-procrastination app. The user struggles with two things: getting started, and spending time on low-leverage work (e.g. studying the comfortable intro chapter instead of past exam questions).
+// Planning modes (breakdown, plan-goal) curate small, startable tasks, so
+// their system prompt pushes hard toward 30-minute chunks and an easy first
+// step. Transcription mode (#28) must NOT inherit those directives: a system
+// prompt ordering "30 minutes or less" invites the model to shrink the
+// material's own numbers at the source — corruption the deterministic
+// post-processing can neither detect nor repair. It gets its own system
+// prompt: same persona and title/impact rules, but the material's numbers are
+// sacred and ordering follows the material, not activation energy.
+export const PLANNING_SYSTEM_PROMPT = `You are the planning brain of "Draw", an anti-procrastination app. The user struggles with two things: getting started, and spending time on low-leverage work (e.g. studying the comfortable intro chapter instead of past exam questions).
 
 Principles you always apply:
 - Every task you propose must be independently completable in 30 minutes or less.
@@ -50,6 +58,15 @@ Principles you always apply:
 - The FIRST task in any list must have near-zero activation energy — something the user can start within 10 seconds of reading it.
 - Impact ratings (1-5) measure leverage toward the goal's measured outcome, not effort or difficulty. Practicing what is graded beats consuming what is comfortable: past papers, exercises, and producing output rate high; passively re-reading intros rates low.
 - Be concrete and specific to the provided materials when they are given. Reference actual topics, chapters, or exercises from them.`;
+
+export const TRANSCRIPTION_SYSTEM_PROMPT = `You are the transcription engine of "Draw", an anti-procrastination app. You turn the user's own study materials into a faithful, complete list of work items — you enumerate what the material contains; you do not plan, curate, or resize.
+
+Principles you always apply:
+- The material is the single source of truth. Numbers printed in it (points, stated times, item labels) are copied VERBATIM — never adjust, shrink, or round them to fit any target size.
+- Enumerate every item the instruction asks for, in the material's own order. Do not skip items and do not merge several items into one.
+- Task titles start with a concrete physical action verb ("Open...", "Write...", "Solve...", "Sort..."), never vague ones ("Research...", "Look into...", "Prepare...").
+- Impact ratings (1-5) measure leverage toward the goal's measured outcome, not effort or difficulty. Practicing what is graded beats consuming what is comfortable: past papers, exercises, and producing output rate high; passively re-reading intros rates low.
+- Be concrete and specific to the provided materials. Reference actual topics, chapters, or exercises from them.`;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -267,12 +284,12 @@ function requireClient(): Anthropic {
   return new Anthropic({ apiKey: resolved.key });
 }
 
-async function guardTokens(blocks: ContentBlock[]): Promise<number> {
+async function guardTokens(blocks: ContentBlock[], system: string): Promise<number> {
   const c = requireClient();
   try {
     const count = await c.messages.countTokens({
       model: MODEL,
-      system: SYSTEM_PROMPT,
+      system,
       messages: [{ role: "user", content: blocks }],
     });
     if (count.input_tokens > MAX_INPUT_TOKENS) {
@@ -305,7 +322,7 @@ export async function estimate(input: {
   }
   // A generate-tasks instruction is part of the prompt, so it counts too.
   if (input.instruction) blocks.push({ type: "text", text: input.instruction });
-  const inputTokens = await guardTokens(blocks).catch((e: AiError) => {
+  const inputTokens = await guardTokens(blocks, PLANNING_SYSTEM_PROMPT).catch((e: AiError) => {
     // Even over-limit estimates should report the number, not fail.
     const match = /\(([\d,.]+) tokens/.exec(e.message);
     if (e.status === 400 && match) return Number(match[1].replace(/[,.]/g, ""));
@@ -320,16 +337,17 @@ export async function estimate(input: {
 async function runStructured<T>(
   blocks: ContentBlock[],
   schema: ZodType<T>,
-  opts: { maxTokens?: number } = {},
+  opts: { maxTokens?: number; system?: string } = {},
 ): Promise<T> {
   const c = requireClient();
-  await guardTokens(blocks);
+  const system = opts.system ?? PLANNING_SYSTEM_PROMPT;
+  await guardTokens(blocks, system);
   try {
     const response = await c.messages.parse({
       model: MODEL,
       max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       thinking: { type: "adaptive" },
-      system: SYSTEM_PROMPT,
+      system,
       messages: [{ role: "user", content: blocks }],
       output_config: { format: zodOutputFormat(schema) },
     });
@@ -378,6 +396,7 @@ export async function generateTasks(
   const blocks = [...materialBlocks(materialIds, goalId), ...generateTasksContext(goalId, instruction)];
   const result = await runStructured(blocks, generateTasksSchema, {
     maxTokens: GENERATE_TASKS_MAX_TOKENS,
+    system: TRANSCRIPTION_SYSTEM_PROMPT,
   });
   // Deterministic post-processing (ADR-13): points → impact quintiles, and
   // split-don't-clamp for oversized items. The Math.min clamp above would
