@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Category, Goal, NewTask, Task } from "../api/types";
+import { resolveSubmittedImpact } from "../lib/impact";
 
 interface Props {
   categories: Category[];
@@ -43,7 +44,7 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
       title: title.trim(),
       categoryId,
       goalId: goalId === "" ? null : goalId,
-      impact: goalId === "" ? 3 : impact,
+      impact: resolveSubmittedImpact(goalId, impact, initial),
       effortMinutes: effort ? Number(effort) : null,
       dueDate: dueDate || null,
       recurEveryDays: recur ? Number(recur) : null,

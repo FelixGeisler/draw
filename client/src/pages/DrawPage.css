@@ -81,6 +81,11 @@
   font-size: 12px;
 }
 
+.draw-hint {
+  color: var(--warn);
+  font-size: 13px;
+}
+
 .draw-actions {
   display: flex;
   gap: 10px;
