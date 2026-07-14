@@ -9,7 +9,9 @@ export default defineConfig({
     port: Number(process.env.VITE_PORT) || 5173,
     strictPort: true,
     proxy: {
-      "/api": `http://localhost:${process.env.API_PORT || 3001}`,
+      // 127.0.0.1 (not localhost): the API binds loopback IPv4 only, and
+      // localhost may resolve to ::1 first.
+      "/api": `http://127.0.0.1:${process.env.API_PORT || 3001}`,
     },
   },
 });

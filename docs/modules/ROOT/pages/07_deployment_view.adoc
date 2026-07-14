@@ -5,7 +5,7 @@ There is no production deployment — the application runs on the owner's machin
 ....
 Windows 11 PC
 └── Node.js 22+ process tree (npm run dev → concurrently)
-    ├── tsx watch server/src/index.ts     Express on :3001 (API_PORT)
+    ├── tsx watch server/src/index.ts     Express on 127.0.0.1:3001 (API_PORT)
     │     ├── server/data/app.db          SQLite (WAL mode)
     │     └── server/data/files/          uploaded goal materials
     └── vite                              client on :5173, /api proxied to :3001
