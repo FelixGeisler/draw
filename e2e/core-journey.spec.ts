@@ -70,9 +70,10 @@ test("draw and complete: card flips, XP and trophy deck react", async ({ page })
 
   await page.getByRole("button", { name: "✓ Done" }).click();
 
-  // Trophy deck appears with the completed card; XP is no longer 0
+  // Trophy deck appears with the completed card; XP is no longer 0.
+  // exact: true — substring matching would also hit totals ending in 0 ("30 XP").
   await expect(page.getByText(/Today's pile — 1 done/)).toBeVisible();
-  await expect(page.getByText("0 XP")).not.toBeVisible();
+  await expect(page.getByText("0 XP", { exact: true })).not.toBeVisible();
 
   // Achievement toasts for first draw + first completion
   await expect(page.getByText("🏆 Achievement unlocked").first()).toBeVisible();
