@@ -1,0 +1,295 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import type { ZodType } from "zod";
+import fs from "node:fs";
+import path from "node:path";
+import { db, filesDir, getSetting } from "../db.js";
+import { breakdownSchema, planGoalSchema, type BreakdownResult, type PlanGoalResult } from "../aiSchemas.js";
+
+export const MODEL = "claude-opus-4-8";
+const MAX_INPUT_TOKENS = 180_000;
+const INPUT_USD_PER_MTOK = 5;
+
+export const configured = Boolean(process.env.ANTHROPIC_API_KEY);
+const client = configured ? new Anthropic() : null;
+
+const SYSTEM_PROMPT = `You are the planning brain of "Draw", an anti-procrastination app. The user struggles with two things: getting started, and spending time on low-leverage work (e.g. studying the comfortable intro chapter instead of past exam questions).
+
+Principles you always apply:
+- Every task you propose must be independently completable in 30 minutes or less.
+- Task titles start with a concrete physical action verb ("Open...", "Write...", "Solve...", "Sort..."), never vague ones ("Research...", "Look into...", "Prepare...").
+- The FIRST task in any list must have near-zero activation energy — something the user can start within 10 seconds of reading it.
+- Impact ratings (1-5) measure leverage toward the goal's measured outcome, not effort or difficulty. Practicing what is graded beats consuming what is comfortable: past papers, exercises, and producing output rate high; passively re-reading intros rates low.
+- Be concrete and specific to the provided materials when they are given. Reference actual topics, chapters, or exercises from them.`;
+
+// ---------------------------------------------------------------------------
+// Errors
+
+export class AiError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+function mapSdkError(e: unknown): AiError {
+  if (e instanceof AiError) return e;
+  if (e instanceof Anthropic.AuthenticationError) {
+    return new AiError(502, "The Claude API key was rejected — check ANTHROPIC_API_KEY in server/.env");
+  }
+  if (e instanceof Anthropic.RateLimitError) {
+    return new AiError(429, "Claude API rate limit hit — wait a moment and try again");
+  }
+  if (e instanceof Anthropic.APIConnectionError) {
+    return new AiError(502, "Could not reach the Claude API — check your internet connection");
+  }
+  if (e instanceof Anthropic.APIError) {
+    return new AiError(502, `Claude API error: ${e.message}`);
+  }
+  return new AiError(500, e instanceof Error ? e.message : "unknown AI error");
+}
+
+// ---------------------------------------------------------------------------
+// Materials → content blocks (materials first, cache breakpoint on the last one)
+
+// Only text and document blocks carry materials/context (both support cache_control).
+type ContentBlock = Anthropic.Messages.TextBlockParam | Anthropic.Messages.DocumentBlockParam;
+
+interface MaterialRow {
+  id: number;
+  goal_id: number;
+  kind: "file" | "note";
+  filename: string | null;
+  stored_name: string | null;
+  mime_type: string | null;
+  note_text: string | null;
+}
+
+function materialBlocks(materialIds: number[], goalId: number | null): ContentBlock[] {
+  if (materialIds.length === 0) return [];
+  const placeholders = materialIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(`SELECT * FROM materials WHERE id IN (${placeholders})`)
+    .all(...materialIds) as MaterialRow[];
+
+  const blocks: ContentBlock[] = [];
+  for (const m of rows) {
+    if (goalId != null && m.goal_id !== goalId) continue; // only the task's own goal materials
+    if (m.kind === "note" && m.note_text) {
+      blocks.push({ type: "text", text: `<material name="user note">\n${m.note_text}\n</material>` });
+    } else if (m.kind === "file" && m.stored_name) {
+      const full = path.resolve(filesDir, m.stored_name);
+      if (!full.startsWith(path.resolve(filesDir)) || !fs.existsSync(full)) continue;
+      if (m.mime_type === "application/pdf") {
+        blocks.push({
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: fs.readFileSync(full).toString("base64"),
+          },
+          title: m.filename ?? "document",
+        });
+      } else {
+        blocks.push({
+          type: "text",
+          text: `<material name="${m.filename}">\n${fs.readFileSync(full, "utf-8")}\n</material>`,
+        });
+      }
+    }
+  }
+
+  // Cache breakpoint on the last material block: repeated calls against the
+  // same materials within the TTL read the prefix at ~10% cost.
+  const last = blocks[blocks.length - 1];
+  if (last) last.cache_control = { type: "ephemeral" };
+  return blocks;
+}
+
+// ---------------------------------------------------------------------------
+// Context assembly
+
+function taskContext(taskId: number): { blocks: ContentBlock[]; goalId: number | null } {
+  const task = db
+    .prepare(
+      `SELECT t.id, t.title, t.description, t.effort_minutes AS effort, t.due_date AS dueDate, t.goal_id AS goalId,
+              c.name AS category
+       FROM tasks t JOIN categories c ON c.id = t.category_id WHERE t.id = ?`,
+    )
+    .get(taskId) as
+    | { id: number; title: string; description: string | null; effort: number | null; dueDate: string | null; goalId: number | null; category: string }
+    | undefined;
+  if (!task) throw new AiError(404, "task not found");
+
+  const goal = task.goalId
+    ? (db.prepare("SELECT title, outcome, target_date AS targetDate FROM goals WHERE id = ?").get(task.goalId) as
+        | { title: string; outcome: string | null; targetDate: string | null }
+        | undefined)
+    : undefined;
+
+  const siblings = db
+    .prepare("SELECT title, status FROM tasks WHERE parent_id = ?")
+    .all(taskId) as { title: string; status: string }[];
+
+  const maxEffort = getSetting("max_draw_effort", 30);
+  const lines = [
+    `Break this task into 2-8 subtasks of at most ${maxEffort} minutes each.`,
+    ``,
+    `Task: ${task.title}`,
+    task.description ? `Description: ${task.description}` : "",
+    `Category: ${task.category}`,
+    task.effort ? `User's total effort estimate: ${task.effort} minutes` : "",
+    task.dueDate ? `Due date: ${task.dueDate} (today is ${new Date().toISOString().slice(0, 10)})` : "",
+    goal ? `Linked goal: ${goal.title}` : "",
+    goal?.outcome ? `Goal is measured by: ${goal.outcome}` : "",
+    goal?.targetDate ? `Goal target date: ${goal.targetDate}` : "",
+    siblings.length > 0
+      ? `Existing subtasks (do NOT duplicate these): ${siblings.map((s) => `"${s.title}" (${s.status})`).join(", ")}`
+      : "",
+    ``,
+    `Order subtasks by recommended execution sequence. Remember: the first one must be trivially easy to start.`,
+  ].filter(Boolean);
+
+  return { blocks: [{ type: "text", text: lines.join("\n") }], goalId: task.goalId };
+}
+
+function goalContext(goalId: number, userNotes?: string): ContentBlock[] {
+  const goal = db
+    .prepare("SELECT title, outcome, target_date AS targetDate FROM goals WHERE id = ?")
+    .get(goalId) as { title: string; outcome: string | null; targetDate: string | null } | undefined;
+  if (!goal) throw new AiError(404, "goal not found");
+
+  const existing = db
+    .prepare("SELECT title, status, impact FROM tasks WHERE goal_id = ? AND status != 'archived'")
+    .all(goalId) as { title: string; status: string; impact: number }[];
+
+  const today = new Date().toISOString().slice(0, 10);
+  const daysLeft = goal.targetDate
+    ? Math.ceil((new Date(goal.targetDate).getTime() - Date.now()) / 86_400_000)
+    : null;
+
+  const maxEffort = getSetting("max_draw_effort", 30);
+  const lines = [
+    `Plan backward from this goal's measured outcome.`,
+    ``,
+    `Goal: ${goal.title}`,
+    goal.outcome ? `Measured by: ${goal.outcome}` : `The user has not specified how success is measured — infer the most likely assessment and say so in your outcomeAnalysis.`,
+    goal.targetDate ? `Target date: ${goal.targetDate} (today is ${today}, ${daysLeft} days left)` : "",
+    userNotes ? `User notes for this planning session: ${userNotes}` : "",
+    existing.length > 0
+      ? `Existing tasks for this goal (do NOT duplicate): ${existing.map((t) => `"${t.title}" (${t.status}, ${t.impact}★)`).join(", ")}`
+      : "",
+    ``,
+    `First, in outcomeAnalysis: state concretely what gets assessed/measured (if materials include past exams or a syllabus, name the actual topics and question types).`,
+    `Then propose 4-10 tasks of at most ${maxEffort} minutes each, highest leverage first, phased as now/next/later relative to the time remaining.`,
+    `Bias hard toward practicing what is graded (past questions, producing output) over passive consumption.`,
+  ].filter(Boolean);
+
+  return [{ type: "text", text: lines.join("\n") }];
+}
+
+// ---------------------------------------------------------------------------
+// API calls
+
+function requireClient(): Anthropic {
+  if (!client) throw new AiError(503, "ai_not_configured");
+  return client;
+}
+
+async function guardTokens(blocks: ContentBlock[]): Promise<number> {
+  const c = requireClient();
+  try {
+    const count = await c.messages.countTokens({
+      model: MODEL,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: blocks }],
+    });
+    if (count.input_tokens > MAX_INPUT_TOKENS) {
+      throw new AiError(
+        400,
+        `Selected materials are too large (${count.input_tokens.toLocaleString()} tokens, limit ${MAX_INPUT_TOKENS.toLocaleString()}) — deselect some materials`,
+      );
+    }
+    return count.input_tokens;
+  } catch (e) {
+    throw mapSdkError(e);
+  }
+}
+
+export async function estimate(input: {
+  taskId?: number;
+  goalId?: number;
+  materialIds?: number[];
+}): Promise<{ inputTokens: number; estimatedUsd: number }> {
+  const materialIds = input.materialIds ?? [];
+  let blocks: ContentBlock[];
+  if (input.taskId != null) {
+    const ctx = taskContext(input.taskId);
+    blocks = [...materialBlocks(materialIds, ctx.goalId), ...ctx.blocks];
+  } else if (input.goalId != null) {
+    blocks = [...materialBlocks(materialIds, input.goalId), ...goalContext(input.goalId)];
+  } else {
+    throw new AiError(400, "taskId or goalId required");
+  }
+  const inputTokens = await guardTokens(blocks).catch((e: AiError) => {
+    // Even over-limit estimates should report the number, not fail.
+    const match = /\(([\d,.]+) tokens/.exec(e.message);
+    if (e.status === 400 && match) return Number(match[1].replace(/[,.]/g, ""));
+    throw e;
+  });
+  return {
+    inputTokens,
+    estimatedUsd: Math.round((inputTokens * INPUT_USD_PER_MTOK) / 1_000) / 1_000,
+  };
+}
+
+async function runStructured<T>(blocks: ContentBlock[], schema: ZodType<T>): Promise<T> {
+  const c = requireClient();
+  await guardTokens(blocks);
+  try {
+    const response = await c.messages.parse({
+      model: MODEL,
+      max_tokens: 16_000,
+      thinking: { type: "adaptive" },
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: blocks }],
+      output_config: { format: zodOutputFormat(schema) },
+    });
+    if (!response.parsed_output) {
+      throw new AiError(502, "Claude returned an unparseable response — try again");
+    }
+    return response.parsed_output as T;
+  } catch (e) {
+    throw mapSdkError(e);
+  }
+}
+
+export async function breakdown(taskId: number, materialIds: number[] = []): Promise<BreakdownResult> {
+  const ctx = taskContext(taskId);
+  const blocks = [...materialBlocks(materialIds, ctx.goalId), ...ctx.blocks];
+  const result = await runStructured(blocks, breakdownSchema);
+  const maxEffort = getSetting("max_draw_effort", 30);
+  // Belt and braces: clamp efforts to the drawable limit.
+  result.subtasks = result.subtasks.map((s) => ({
+    ...s,
+    effortMinutes: Math.min(Math.max(1, Math.round(s.effortMinutes)), maxEffort),
+  }));
+  return result;
+}
+
+export async function planGoal(
+  goalId: number,
+  materialIds: number[] = [],
+  userNotes?: string,
+): Promise<PlanGoalResult> {
+  const blocks = [...materialBlocks(materialIds, goalId), ...goalContext(goalId, userNotes)];
+  const result = await runStructured(blocks, planGoalSchema);
+  const maxEffort = getSetting("max_draw_effort", 30);
+  result.tasks = result.tasks.map((t) => ({
+    ...t,
+    effortMinutes: Math.min(Math.max(1, Math.round(t.effortMinutes)), maxEffort),
+  }));
+  return result;
+}
