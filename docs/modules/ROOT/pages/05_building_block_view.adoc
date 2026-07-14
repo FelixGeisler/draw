@@ -12,7 +12,8 @@ F:\Project (npm workspaces)
 
 ....
 server/src/
-├── index.ts                 entry point: loads .env, listens on API_PORT
+├── index.ts                 entry point: loads .env, starts the server
+├── server.ts                startServer() — binds 127.0.0.1:API_PORT (testable)
 ├── app.ts                   createApp() — Express app + router mounting (testable)
 ├── db.ts                    SQLite bootstrap, PRAGMA user_version migrations
 ├── schema.sql               Current full schema (fresh installs)
