@@ -45,6 +45,8 @@ function useInvalidateTasks() {
     // Task mutations can clear or invalidate the server-persisted current
     // draw (complete/delete clear it, edits can push it out of the deck).
     qc.invalidateQueries({ queryKey: ["draw", "current"] });
+    // Goal cards derive taskCount/doneCount from tasks — keep them in sync.
+    qc.invalidateQueries({ queryKey: ["goals"] });
   };
 }
 

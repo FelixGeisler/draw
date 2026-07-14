@@ -99,3 +99,87 @@ describe("stats aggregation", () => {
     expect(stats.weeklyGrade).toBeNull();
   });
 });
+
+describe("estimation block (estimated vs. tracked)", () => {
+  // Fixed past range so the seeds cannot collide with entries/completions
+  // created by the earlier describes (which live in "now").
+  const RANGE = "from=2024-05-01&to=2024-05-07";
+
+  const seedEntry = (taskId: number, startedAt: string, endedAt: string) =>
+    db
+      .prepare("INSERT INTO time_entries (task_id, started_at, ended_at) VALUES (?, ?, ?)")
+      .run(taskId, startedAt, endedAt);
+  const seedCompletion = (taskId: number, completedAt: string) =>
+    db
+      .prepare("INSERT INTO completions (task_id, completed_at, xp_awarded) VALUES (?, ?, 10)")
+      .run(taskId, completedAt);
+
+  let report: { id: number };
+  let quickFix: { id: number };
+
+  beforeAll(async () => {
+    const create = async (body: Record<string, unknown>) =>
+      (await request(app).post("/api/tasks").send(body)).body as { id: number };
+
+    // Qualifies: estimate 30, tracked 35 + 15 = 50 min. The first entry
+    // starts BEFORE the range — completed-in-range counts all its work.
+    report = await create({ title: "write report", categoryId: 1, effortMinutes: 30 });
+    seedEntry(report.id, "2024-04-28T10:00:00.000Z", "2024-04-28T10:35:00.000Z");
+    seedEntry(report.id, "2024-05-03T10:00:00.000Z", "2024-05-03T10:15:00.000Z");
+    seedCompletion(report.id, "2024-05-03T12:00:00.000Z");
+
+    // Qualifies: estimate 20, tracked 10 min.
+    quickFix = await create({ title: "quick fix", categoryId: 2, effortMinutes: 20 });
+    seedEntry(quickFix.id, "2024-05-04T09:00:00.000Z", "2024-05-04T09:10:00.000Z");
+    seedCompletion(quickFix.id, "2024-05-04T12:00:00.000Z");
+
+    // Excluded: no estimate, despite an hour tracked and completed in range.
+    const noEstimate = await create({ title: "no estimate", categoryId: 1 });
+    seedEntry(noEstimate.id, "2024-05-02T08:00:00.000Z", "2024-05-02T09:00:00.000Z");
+    seedCompletion(noEstimate.id, "2024-05-02T10:00:00.000Z");
+
+    // Excluded: estimated and completed in range but never tracked.
+    const neverTracked = await create({ title: "never tracked", categoryId: 1, effortMinutes: 25 });
+    seedCompletion(neverTracked.id, "2024-05-04T10:00:00.000Z");
+
+    // Excluded: estimated and tracked, but completed after the range.
+    const completedLater = await create({ title: "completed later", categoryId: 1, effortMinutes: 10 });
+    seedEntry(completedLater.id, "2024-05-05T08:00:00.000Z", "2024-05-05T08:50:00.000Z");
+    seedCompletion(completedLater.id, "2024-06-01T10:00:00.000Z");
+  });
+
+  it("compares estimates with all tracked time for tasks completed in range", async () => {
+    const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
+
+    expect(stats.estimation.tasks).toEqual([
+      // 50/30 → worst under-estimate sorts first
+      { taskId: report.id, title: "write report", estimatedMinutes: 30, trackedMinutes: 50, ratio: 1.67 },
+      { taskId: quickFix.id, title: "quick fix", estimatedMinutes: 20, trackedMinutes: 10, ratio: 0.5 },
+    ]);
+    expect(stats.estimation.summary).toEqual({
+      taskCount: 2,
+      totalEstimatedMinutes: 50,
+      totalTrackedMinutes: 60,
+      accuracyRatio: 1.2, // 60/50 — estimate-less and untracked tasks do not skew it
+      tendency: "under",
+    });
+  });
+
+  it("breaks the ratio down per category", async () => {
+    const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
+
+    expect(stats.estimation.byCategory).toEqual([
+      { categoryId: 1, name: "Work", color: "#4f8cff", estimatedMinutes: 30, trackedMinutes: 50, ratio: 1.67 },
+      { categoryId: 2, name: "Study", color: "#a06bff", estimatedMinutes: 20, trackedMinutes: 10, ratio: 0.5 },
+    ]);
+  });
+
+  it("returns a null ratio (not Infinity/NaN) for a range without qualifying tasks", async () => {
+    const stats = (
+      await request(app).get("/api/stats?from=2000-01-01&to=2000-01-02").expect(200)
+    ).body;
+    expect(stats.estimation.tasks).toEqual([]);
+    expect(stats.estimation.summary.accuracyRatio).toBeNull();
+    expect(stats.estimation.summary.tendency).toBeNull();
+  });
+});

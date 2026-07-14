@@ -33,7 +33,10 @@ test("capture: an oversized task lands in 'too big', a small one is ready", asyn
 
 test("breakdown: subtasks make the parent drawable ready work", async ({ page }) => {
   await page.goto("/tasks");
-  await page.getByRole("button", { name: "Break down" }).first().click();
+  // Scope to the oversized task's row — .first() would hit the newest task
+  // (rows are ordered created_at DESC), not the one that needs breaking down.
+  const parentRow = page.getByText("Prepare exam statistics").locator("..");
+  await parentRow.getByRole("button", { name: "Break down" }).click();
 
   const rows = page.getByPlaceholder("Small, concrete step…");
   const minutes = page.getByPlaceholder("min");
@@ -45,6 +48,10 @@ test("breakdown: subtasks make the parent drawable ready work", async ({ page })
 
   await expect(page.getByText("Open past paper, list topics")).toBeVisible();
 
+  // The parent's minutes chip now shows the remaining work of its open
+  // subtasks (15 + 25), not the stale stored 90-minute estimate.
+  await expect(parentRow.locator(".chip", { hasText: "min" })).toHaveText("40 min");
+
   // Subtasks are now in the deck; the container parent is not.
   await page.goto("/capture");
   const ready = section(page, "Ready to draw");
@@ -55,7 +62,9 @@ test("breakdown: subtasks make the parent drawable ready work", async ({ page })
 test("draw and complete: card flips, XP and trophy deck react", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("Lv 1")).toBeVisible();
-  await expect(page.getByText("0 XP")).toBeVisible();
+  // exact: substring matching would collide with awards ending in 0 — a
+  // 20-min impact-3 drawn card pays 30 XP, and "0 XP" is inside "30 XP".
+  await expect(page.getByText("0 XP", { exact: true })).toBeVisible();
 
   await page.locator(".draw-face.front").click();
   await expect(page.locator(".draw-card")).toHaveClass(/flipped/);
@@ -65,7 +74,7 @@ test("draw and complete: card flips, XP and trophy deck react", async ({ page })
 
   // Trophy deck appears with the completed card; XP is no longer 0
   await expect(page.getByText(/Today's pile — 1 done/)).toBeVisible();
-  await expect(page.getByText("0 XP")).not.toBeVisible();
+  await expect(page.getByText("0 XP", { exact: true })).not.toBeVisible();
 
   // Achievement toasts for first draw + first completion
   await expect(page.getByText("🏆 Achievement unlocked").first()).toBeVisible();
@@ -93,4 +102,9 @@ test("stats: the leverage view renders with tracked data", async ({ page }) => {
   await expect(page.getByText("minutes tracked")).toBeVisible();
   await expect(page.getByText("tasks completed")).toBeVisible();
   await expect(page.getByText("Where your time went — by impact")).toBeVisible();
+
+  // #22: the estimation section renders; the journey's only completed task
+  // was never timed, so it must show the empty state, not a fake 0× ratio.
+  await expect(page.getByText("Estimates vs. reality")).toBeVisible();
+  await expect(page.getByText(/No completed task in this range/)).toBeVisible();
 });
