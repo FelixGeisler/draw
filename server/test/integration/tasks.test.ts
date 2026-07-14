@@ -118,6 +118,109 @@ describe("task CRUD and breakdown rule", () => {
     expect(xpAfterReopen).toBe(xpBefore);
   });
 
+  it("derives remainingEffortMinutes from open subtasks, keeping stored effort intact", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Stale ninety", categoryId: 1, effortMinutes: 90 })
+    ).body;
+    await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({ subtasks: [{ title: "First slice", effortMinutes: 15 }, { title: "Second slice", effortMinutes: 25 }] })
+      .expect(201);
+
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.remainingEffortMinutes).toBe(40);
+    expect(listed.effortMinutes).toBe(90); // stored estimate untouched (edit forms prefill it)
+  });
+
+  it("completing a subtask shrinks the parent's remaining effort to the open ones", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Shrinking work", categoryId: 1, effortMinutes: 60 })
+    ).body;
+    const subs = (
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({ subtasks: [{ title: "Done soon", effortMinutes: 20 }, { title: "Still open", effortMinutes: 10 }] })
+    ).body;
+
+    await request(app).patch(`/api/tasks/${subs[0].id}`).send({ status: "done" }).expect(200);
+
+    let list = await request(app).get("/api/tasks").expect(200);
+    let listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.remainingEffortMinutes).toBe(10);
+
+    // All subtasks done: parent falls back to its own stored estimate.
+    await request(app).patch(`/api/tasks/${subs[1].id}`).send({ status: "done" }).expect(200);
+    list = await request(app).get("/api/tasks").expect(200);
+    listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.remainingEffortMinutes).toBe(60);
+  });
+
+  it("returns null remaining effort when open subtasks are all unestimated", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Unsized breakdown", categoryId: 1, effortMinutes: 45 })
+    ).body;
+    await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({ subtasks: [{ title: "No estimate yet" }, { title: "Also unsized" }] });
+
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.remainingEffortMinutes).toBeNull(); // no fallback to the parent's own 45
+  });
+
+  it("sums only the estimated open subtasks when estimates are mixed", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Half sized", categoryId: 1, effortMinutes: 50 })
+    ).body;
+    await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({ subtasks: [{ title: "Sized", effortMinutes: 12 }, { title: "Unsized" }] });
+
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.remainingEffortMinutes).toBe(12);
+  });
+
+  it("leaf tasks report their own effort (or null) as remaining effort", async () => {
+    const sized = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Sized leaf", categoryId: 1, effortMinutes: 25 })
+    ).body;
+    const unsized = (
+      await request(app).post("/api/tasks").send({ title: "Unsized leaf", categoryId: 1 })
+    ).body;
+
+    const list = await request(app).get("/api/tasks").expect(200);
+    const sizedListed = list.body.find((t: { id: number }) => t.id === sized.id);
+    const unsizedListed = list.body.find((t: { id: number }) => t.id === unsized.id);
+    expect(sizedListed.remainingEffortMinutes).toBe(25);
+    expect(unsizedListed.remainingEffortMinutes).toBeNull();
+
+    // Subtask entries in the payload are leaves too and carry their own effort.
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Leaf check parent", categoryId: 1 })
+    ).body;
+    await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({ subtasks: [{ title: "Leaf child", effortMinutes: 5 }] });
+    const listed = (await request(app).get("/api/tasks")).body.find(
+      (t: { id: number }) => t.id === parent.id,
+    );
+    expect(listed.subtasks[0].remainingEffortMinutes).toBe(5);
+  });
+
   it("deletes a task with cascade to subtasks", async () => {
     const parent = (
       await request(app).post("/api/tasks").send({ title: "Doomed", categoryId: 1 })

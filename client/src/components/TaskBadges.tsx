@@ -12,9 +12,14 @@ export function ImpactStars({ value }: { value: number }) {
 
 export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolean }) {
   const due = isDueSoon(task.dueDate);
+  // Remaining work when the API derives it (list endpoint); task shapes without
+  // the field (drawn card, timer bar — always drawable leaves) fall back to the
+  // stored estimate. Present-but-null means "open subtasks, none estimated":
+  // hide the chip instead of showing the parent's stale own estimate.
+  const effort = task.remainingEffortMinutes !== undefined ? task.remainingEffortMinutes : task.effortMinutes;
   return (
     <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-      {task.effortMinutes != null && <span className="chip">{task.effortMinutes} min</span>}
+      {effort != null && <span className="chip">{effort} min</span>}
       {task.dueDate && (
         <span
           className="chip"
