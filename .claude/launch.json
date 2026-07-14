@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
       "port": 5173
+    },
+    {
+      "name": "docs",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["--yes", "http-server", "build/site", "-p", "8043", "-c-1"],
+      "port": 8043
     }
   ]
 }
