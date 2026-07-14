@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useCategories, useSettings } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
+import type { Category } from "../api/types";
 
 function SettingInput({
   label,
@@ -38,6 +39,88 @@ function SettingInput({
   );
 }
 
+function CategoryRow({ category }: { category: Category }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(category.name);
+  const cancelled = useRef(false);
+
+  const patch = useMutation({
+    mutationFn: (body: { name?: string; color?: string }) =>
+      api.patch(`/api/categories/${category.id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.delete(`/api/categories/${category.id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
+  });
+
+  function commitRename() {
+    setEditing(false);
+    const trimmed = name.trim();
+    if (cancelled.current || !trimmed || trimmed === category.name) {
+      cancelled.current = false;
+      setName(category.name);
+      return;
+    }
+    patch.mutate({ name: trimmed }, { onError: () => setName(category.name) });
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <input
+        type="color"
+        title={`Change color of ${category.name}`}
+        defaultValue={category.color}
+        onBlur={(e) => {
+          if (e.target.value !== category.color) patch.mutate({ color: e.target.value });
+        }}
+        style={{ width: 32, padding: 2 }}
+      />
+      {editing ? (
+        <input
+          autoFocus
+          aria-label="Rename category"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              cancelled.current = true;
+              e.currentTarget.blur();
+            }
+          }}
+          style={{ flex: 1 }}
+        />
+      ) : (
+        <span
+          style={{ flex: 1, cursor: "pointer" }}
+          title="Click to rename"
+          onClick={() => {
+            setName(category.name);
+            setEditing(true);
+          }}
+        >
+          {category.name}
+        </span>
+      )}
+      <button
+        style={{ padding: "2px 8px" }}
+        title={`Delete ${category.name}`}
+        onClick={() => remove.mutate()}
+      >
+        ✕
+      </button>
+      {(patch.error || remove.error) && (
+        <span style={{ color: "var(--danger)", fontSize: 13 }}>
+          {(patch.error ?? remove.error)?.message}
+        </span>
+      )}
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const settings = useSettings();
   const categories = useCategories();
@@ -52,10 +135,6 @@ export function SettingsPage() {
       qc.invalidateQueries({ queryKey: ["categories"] });
       setNewCat("");
     },
-  });
-  const deleteCategory = useMutation({
-    mutationFn: (id: number) => api.delete(`/api/categories/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
   });
 
   return (
@@ -106,15 +185,7 @@ export function SettingsPage() {
       <section className="panel" style={{ display: "grid", gap: 8, marginTop: 16 }}>
         <h3 style={{ margin: 0 }}>Categories</h3>
         {categories.data?.map((c) => (
-          <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span className="dot" style={{ background: c.color }} />
-            <span style={{ flex: 1 }}>{c.name}</span>
-            {!c.isDefault && (
-              <button style={{ padding: "2px 8px" }} onClick={() => deleteCategory.mutate(c.id)}>
-                ✕
-              </button>
-            )}
-          </div>
+          <CategoryRow key={c.id} category={c} />
         ))}
         <div style={{ display: "flex", gap: 8 }}>
           <input
@@ -133,10 +204,8 @@ export function SettingsPage() {
             Add
           </button>
         </div>
-        {(addCategory.error || deleteCategory.error) && (
-          <div style={{ color: "var(--danger)", fontSize: 13 }}>
-            {(addCategory.error ?? deleteCategory.error)?.message}
-          </div>
+        {addCategory.error && (
+          <div style={{ color: "var(--danger)", fontSize: 13 }}>{addCategory.error.message}</div>
         )}
       </section>
     </div>
