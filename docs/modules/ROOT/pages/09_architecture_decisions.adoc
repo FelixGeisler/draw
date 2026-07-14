@@ -89,3 +89,21 @@ directly on github.com and the deployment needs one Actions workflow.
 The default UI bundle is vendored at `docs-ui/ui-bundle.zip` (built from the
 official source) because the upstream GitLab CI artifact URLs 404 — builds have
 no network dependency.
+
+// ADR-11 is reserved by the in-flight API-key settings PR.
+
+== ADR-12: Completing a task closes its own running timer
+
+*Context:* Completion (`completeTask()`) never touched `time_entries`, so a
+running timer kept accruing minutes against a task that was already done until
+the user pressed Stop or started another timer.
+*Decision:* Inside the completion transaction, the completed task's open time
+entry (if any) is closed with `ended_at` = completion time. The check is per
+`task_id`: a running timer that belongs to a *different* task is left
+untouched. This applies equally on the recurring path (ADR-6): the task stays
+open with an advanced due date, but the work session that just earned XP is
+over, so its entry is finished — the next occurrence starts its own timer.
+*Rationale:* A completion is the strongest possible signal that the work
+session ended; leaving the entry open silently corrupts the leverage stats the
+app is built around. Closing only the task's own entry keeps the common
+"complete a quick task while a long timer runs elsewhere" flow intact.
