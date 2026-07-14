@@ -45,7 +45,7 @@ weight = impact² / effort × urgency × staleness
 ## Documentation
 
 Architecture documentation ([arc42](https://arc42.org/)) lives in [`docs/`](docs/index.md)
-and is hosted at **https://felixgeisler.github.io/draw-task-planner/**.
+and is hosted at **https://felixgeisler.github.io/draw/**.
 Workflow conventions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Stack

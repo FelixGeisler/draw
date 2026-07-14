@@ -44,4 +44,4 @@ Main features:
 | Role | Expectations |
 |---|---|
 | Owner/user (Felix) | Daily driver for work, study, and household planning; fun to use |
-| AI agents (Claude Code) | Maintain and extend the codebase via the issue/PR workflow ([CONTRIBUTING.md](https://github.com/FelixGeisler/draw-task-planner/blob/main/CONTRIBUTING.md)) |
+| AI agents (Claude Code) | Maintain and extend the codebase via the issue/PR workflow ([CONTRIBUTING.md](https://github.com/FelixGeisler/draw/blob/main/CONTRIBUTING.md)) |

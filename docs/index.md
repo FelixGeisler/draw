@@ -3,7 +3,7 @@
 This is the [arc42](https://arc42.org/) architecture documentation for **Draw**,
 a local, single-user anti-procrastination task planner.
 
-Source code: [github.com/FelixGeisler/draw-task-planner](https://github.com/FelixGeisler/draw-task-planner)
+Source code: [github.com/FelixGeisler/draw](https://github.com/FelixGeisler/draw)
 
 ## Sections
 
