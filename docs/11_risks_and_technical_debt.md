@@ -1,0 +1,14 @@
+# 11. Risks and Technical Debt
+
+[← back to index](index.md)
+
+| # | Risk / Debt | Impact | Mitigation / Status |
+|---|---|---|---|
+| R1 | **AI live path never verified** — no API key was available during initial development | Breakdown/plan-goal could fail on first real use | Degraded mode fully tested; code follows current SDK docs; verify on first key setup (see Q4/Q10 scenarios) |
+| R2 | **No automated tests** — all verification was manual/scripted | Regressions possible as features grow | Acceptable for a personal project; add targeted tests for `drawService` weighting and `gamificationService` XP if changes accumulate |
+| R3 | **Timezone handling is subtle** — a local/UTC round-trip bug already occurred in stats date ranges | Off-by-one-day stats | Fixed with UTC-only `addDays`; concept documented in [8.6](08_crosscutting_concepts.md); keep date math in UTC |
+| R4 | **`wasDrawn` heuristic** — completions via TimerBar count as "drawn" if the task was drawn within 6h | Slightly generous XP bonus | Deliberate: reinforces the draw habit; revisit if XP feels inflated |
+| R5 | **PDF materials are re-uploaded as base64 per AI call** | Large PDFs inflate request size and latency (cache only saves cost, not upload bandwidth) | Fine for personal use; Anthropic Files API would be the upgrade path |
+| R6 | **Single-user assumptions everywhere** (one running timer, no auth, localhost binding) | Not multi-user capable | By design; documented constraint |
+| R7 | **better-sqlite3 native binding** tied to Node major version | `npm install` fails on unsupported Node | README pins Node 22+; `node:sqlite` fallback documented in ADR-1 |
+| R8 | **Achievements checked in application code** on completion/draw paths | New completion paths could skip checks | Single entry point (`completeTask`) mitigates; keep completions flowing through it |
