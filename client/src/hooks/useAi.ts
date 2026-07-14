@@ -1,9 +1,10 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 
 export interface AiStatus {
   configured: boolean;
   model: string;
+  keySource: "database" | "environment" | null;
 }
 
 export interface AiEstimate {
@@ -37,6 +38,22 @@ export function useAiStatus() {
     queryKey: ["ai-status"],
     queryFn: () => api.get<AiStatus>("/api/ai/status"),
     staleTime: 60_000,
+  });
+}
+
+export function useSetApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.put<AiStatus>("/api/ai/key", { key }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-status"] }),
+  });
+}
+
+export function useRemoveApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete<AiStatus>("/api/ai/key"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ai-status"] }),
   });
 }
 
