@@ -37,3 +37,26 @@ export const planGoalSchema = z.object({
 });
 
 export type PlanGoalResult = z.infer<typeof planGoalSchema>;
+
+// Transcription-style generation (#28): unlike plan-goal's curated 4-10 tasks,
+// this enumerates every item the instruction asks for. statedMinutes/points are
+// the material's own data (kept verbatim); estimatedMinutes is the model's
+// estimate for items the material doesn't size. Exactly one nesting level
+// (parts) — task lists render only roots plus one child level.
+export const generateTasksSchema = z.object({
+  sourceOverview: z.string(),
+  tasks: z.array(
+    z.object({
+      label: z.union([z.string(), z.null()]),
+      title: z.string(),
+      points: z.union([z.number(), z.null()]),
+      statedMinutes: z.union([z.number(), z.null()]),
+      estimatedMinutes: z.number(),
+      suggestedImpact: impactSchema,
+      rationale: z.string(),
+      parts: z.array(z.object({ title: z.string(), minutes: z.number() })),
+    }),
+  ),
+});
+
+export type GenerateTasksResult = z.infer<typeof generateTasksSchema>;
