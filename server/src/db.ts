@@ -16,7 +16,7 @@ export const db = new Database(path.join(dataDir, "app.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -27,6 +27,11 @@ function migrate() {
   } else {
     if (version < 2) {
       db.exec("ALTER TABLE materials ADD COLUMN stored_name TEXT");
+    }
+    if (version < 3) {
+      // Snooze/block (issue #19, ADR-14).
+      db.exec("ALTER TABLE tasks ADD COLUMN deferred_until TEXT");
+      db.exec("ALTER TABLE tasks ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);

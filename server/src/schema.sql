@@ -28,7 +28,11 @@ CREATE TABLE tasks (
   status TEXT NOT NULL CHECK (status IN ('open', 'done', 'archived')) DEFAULT 'open',
   created_at TEXT NOT NULL,
   completed_at TEXT,
-  last_drawn_at TEXT
+  last_drawn_at TEXT,
+  -- Snooze/block (ADR-14): deferred_until is retained after expiry as the wake
+  -- timestamp for staleness; drawability stays a derived predicate (ADR-2).
+  deferred_until TEXT,
+  blocked INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_tasks_parent ON tasks(parent_id);

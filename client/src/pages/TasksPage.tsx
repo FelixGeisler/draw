@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useCategories, useSettings, useTasks } from "../hooks/useTasks";
 import { TaskRow } from "../components/TaskRow";
+import { classifyTask } from "../lib/drawable";
+import type { Task } from "../api/types";
 
 export function TasksPage() {
   const categories = useCategories();
@@ -9,6 +11,12 @@ export function TasksPage() {
   const tasks = useTasks({ status: showDone ? "all" : "open" });
 
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
+  // Snoozed/blocked roots leave the main view but stay findable below.
+  // classifyTask (not bare isSnoozed) keeps blocked containers in the main
+  // list — their open subtasks are still visible, in the deck, and workable.
+  const isSnoozedRoot = (t: Task) =>
+    t.status === "open" && classifyTask(t, maxEffort) === "snoozed";
+  const snoozedRoots = (tasks.data ?? []).filter(isSnoozedRoot);
 
   return (
     <div className="content">
@@ -20,7 +28,9 @@ export function TasksPage() {
         </label>
       </div>
       {categories.data?.map((cat) => {
-        const catTasks = (tasks.data ?? []).filter((t) => t.categoryId === cat.id);
+        const catTasks = (tasks.data ?? []).filter(
+          (t) => t.categoryId === cat.id && !isSnoozedRoot(t),
+        );
         if (catTasks.length === 0) return null;
         return (
           <section key={cat.id} style={{ marginTop: 20 }}>
@@ -36,6 +46,18 @@ export function TasksPage() {
           </section>
         );
       })}
+      {snoozedRoots.length > 0 && (
+        <details style={{ marginTop: 24 }}>
+          <summary style={{ cursor: "pointer", color: "var(--text-dim)" }}>
+            💤 Snoozed ({snoozedRoots.length})
+          </summary>
+          <div className="panel" style={{ padding: "0 8px", marginTop: 8 }}>
+            {snoozedRoots.map((t) => (
+              <TaskRow key={t.id} task={t} categories={categories.data ?? []} maxEffort={maxEffort} />
+            ))}
+          </div>
+        </details>
+      )}
       {(tasks.data?.length ?? 0) === 0 && (
         <p style={{ color: "var(--text-dim)" }}>No tasks yet — head to Capture.</p>
       )}

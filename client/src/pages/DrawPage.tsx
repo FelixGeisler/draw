@@ -5,6 +5,7 @@ import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hoo
 import { useGoals } from "../hooks/useGoals";
 import { useCurrentDraw, useDraw, type DrawResponse } from "../hooks/useDraw";
 import { useStartTimer } from "../hooks/useTimer";
+import { SnoozeMenu } from "../components/SnoozeMenu";
 import { TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
@@ -29,6 +30,7 @@ export function DrawPage() {
   const [result, setResult] = useState<DrawResponse | null>(null);
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState(false);
+  const [snoozing, setSnoozing] = useState(false);
 
   // Restore the server-persisted draw once per mount (issue #25) — a reload
   // lands straight on the revealed card, no shuffle, mirroring the TimerBar.
@@ -51,6 +53,7 @@ export function DrawPage() {
     setResult(null);
     setEditing(false);
     setEdited(false);
+    setSnoozing(false);
     const [response] = await Promise.all([
       draw.mutateAsync({ categoryId, goalId }),
       new Promise((r) => setTimeout(r, 450)), // let the shuffle play
@@ -84,6 +87,17 @@ export function DrawPage() {
     // persisted current draw (ADR-13), so it survives reloads too.
     await updateTask.mutateAsync({ id: result.task.id, status: "done" });
     confetti({ particleCount: 120, spread: 75, origin: { y: 0.6 } });
+    setResult(null);
+    setPhase("idle");
+  }
+
+  // "Not now" (issue #19): snooze or block the drawn card. The card leaves
+  // the deck server-side; the invalidated current-draw query then clears the
+  // stale persisted pointer, so a reload does not resurrect the card.
+  async function snoozeDrawn(patch: { deferredUntil?: string; blocked?: boolean }) {
+    if (!result?.task) return;
+    await updateTask.mutateAsync({ id: result.task.id, ...patch });
+    setSnoozing(false);
     setResult(null);
     setPhase("idle");
   }
@@ -190,13 +204,35 @@ export function DrawPage() {
             ▶ Start now
           </button>
           <button onClick={completeDrawn}>✓ Done</button>
-          <button onClick={() => setEditing(true)}>✎ Edit</button>
+          <button onClick={() => setSnoozing((s) => !s)} title="Take this card out of the deck">
+            💤 Not now
+          </button>
+          <button
+            onClick={() => {
+              setSnoozing(false);
+              setEditing(true);
+            }}
+          >
+            ✎ Edit
+          </button>
           <button onClick={deleteDrawn} title="Delete task">
             🗑 Delete
           </button>
           <button className={nonDrawable ? "primary" : undefined} onClick={doDraw}>
             Draw again
           </button>
+        </div>
+      )}
+
+      {phase === "revealed" && task && !editing && snoozing && (
+        <div className="panel" style={{ maxWidth: 680, margin: "8px auto 0" }}>
+          <p style={{ color: "var(--text-dim)", marginTop: 0, fontSize: 13 }}>
+            Out of the deck until…
+          </p>
+          <SnoozeMenu
+            onSnooze={(iso) => snoozeDrawn({ deferredUntil: iso })}
+            onBlock={() => snoozeDrawn({ blocked: true })}
+          />
         </div>
       )}
 

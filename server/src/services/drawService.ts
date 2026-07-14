@@ -16,6 +16,7 @@ export interface Candidate {
   recurEveryDays: number | null;
   lastDrawnAt: string | null;
   lastCompletedAt: string | null;
+  deferredUntil: string | null;
 }
 
 export interface DrawResult {
@@ -38,10 +39,14 @@ export function urgencyFactor(dueDate: string | null, now: Date): number {
 }
 
 export function stalenessFactor(candidate: Candidate, now: Date): number {
-  const since =
+  const base =
     candidate.recurEveryDays != null && candidate.lastCompletedAt
       ? new Date(candidate.lastCompletedAt)
       : new Date(candidate.createdAt);
+  // Snooze time is not "lying around": deferred_until is retained after expiry
+  // (ADR-14), so a woken card's staleness counts from its wake time.
+  const wake = candidate.deferredUntil ? new Date(candidate.deferredUntil) : null;
+  const since = wake && wake > base ? wake : base;
   const days = Math.max(0, (now.getTime() - since.getTime()) / DAY_MS);
   return 1 + Math.min(days, 30) / 30; // up to x2
 }
@@ -62,13 +67,17 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
   const cooldown = getSetting("draw_cooldown_minutes", 60);
   const now = new Date();
 
+  // Snooze/block (ADR-14): kept as a derived predicate alongside the rest —
+  // an expired deferred_until re-enters the pool with no write.
+  const SNOOZE_CONDITION = "t.blocked = 0 AND (t.deferred_until IS NULL OR t.deferred_until <= ?)";
   const conditions = [
     "t.status = 'open'",
     "t.effort_minutes IS NOT NULL",
     "t.effort_minutes <= ?",
+    SNOOZE_CONDITION,
     "NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')",
   ];
-  const params: unknown[] = [maxEffort];
+  const params: unknown[] = [maxEffort, now.toISOString()];
   if (filters.categoryId) {
     conditions.push("t.category_id = ?");
     params.push(filters.categoryId);
@@ -82,7 +91,7 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
     .prepare(
       `SELECT t.id, t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
               t.created_at AS createdAt, t.recur_every_days AS recurEveryDays,
-              t.last_drawn_at AS lastDrawnAt,
+              t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil,
               (SELECT MAX(completed_at) FROM completions WHERE task_id = t.id) AS lastCompletedAt
        FROM tasks t WHERE ${conditions.join(" AND ")}`,
     )
@@ -93,10 +102,13 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
     // reload doesn't resurrect a card the user already saw disappear.
     clearCurrentDraw();
     // Distinguish "nothing at all" from "only oversized/unestimated tasks".
+    // Snoozed/blocked cards are not "too big" — they come back on their own
+    // (or on wake), so they must not trigger the break-something-down hint.
     const anyOpen = db
       .prepare(
         `SELECT COUNT(*) AS n FROM tasks t
          WHERE t.status = 'open'
+           AND ${SNOOZE_CONDITION}
            AND NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')
            ${filters.categoryId ? "AND t.category_id = ?" : ""}
            ${filters.goalId ? "AND t.goal_id = ?" : ""}`,
@@ -130,17 +142,23 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
               t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
               t.recur_every_days AS recurEveryDays, t.status,
               t.created_at AS createdAt, t.completed_at AS completedAt,
-              t.last_drawn_at AS lastDrawnAt,
+              t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
               0 AS hasOpenChildren
        FROM tasks t WHERE t.id = ?`,
     )
     .get(chosen.id) as Record<string, unknown>;
 
   return {
-    task,
+    task: withBooleanBlocked(task),
     poolSize: candidates.length,
     probability: weights[picked] / total,
   };
+}
+
+/** SQLite stores booleans as 0/1 — task JSON payloads expose a real boolean. */
+export function withBooleanBlocked(task: Record<string, unknown>): Record<string, unknown> {
+  task.blocked = Boolean(task.blocked);
+  return task;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,17 +169,23 @@ export interface RestorableTask {
   status: string;
   effortMinutes: number | null;
   hasOpenChildren: number;
+  blocked: number | boolean;
+  deferredUntil: string | null;
 }
 
 /**
  * Restore-validation for a persisted draw. Mirrors the client's
  * `classifyTask` and the candidate WHERE clause above: only an open leaf
- * task with an estimate within the draw limit is still in the deck.
+ * task with an estimate within the draw limit, neither blocked nor snoozed
+ * into the future, is still in the deck. Pinned against the same vectors as
+ * the client (`shared/drawableVectors.ts`) so the two cannot drift.
  */
-export function isRestorable(task: RestorableTask, maxEffort: number): boolean {
+export function isRestorable(task: RestorableTask, maxEffort: number, now: Date): boolean {
   return (
     task.status === "open" &&
     !task.hasOpenChildren &&
+    !task.blocked &&
+    (task.deferredUntil == null || new Date(task.deferredUntil) <= now) &&
     task.effortMinutes != null &&
     task.effortMinutes <= maxEffort
   );
@@ -210,16 +234,16 @@ export function currentDraw(): { task: Record<string, unknown> } | null {
               t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
               t.recur_every_days AS recurEveryDays, t.status,
               t.created_at AS createdAt, t.completed_at AS completedAt,
-              t.last_drawn_at AS lastDrawnAt,
+              t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
               EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open') AS hasOpenChildren
        FROM tasks t WHERE t.id = ?`,
     )
     .get(id) as (Record<string, unknown> & RestorableTask) | undefined;
 
   const maxEffort = getSetting("max_draw_effort", 30);
-  if (!task || !isRestorable(task, maxEffort)) {
+  if (!task || !isRestorable(task, maxEffort, new Date())) {
     clearCurrentDraw();
     return null;
   }
-  return { task };
+  return { task: withBooleanBlocked(task) };
 }

@@ -13,6 +13,7 @@ function candidate(overrides: Partial<Candidate> = {}): Candidate {
     recurEveryDays: null,
     lastDrawnAt: null,
     lastCompletedAt: null,
+    deferredUntil: null,
     ...overrides,
   };
 }
@@ -66,6 +67,34 @@ describe("stalenessFactor", () => {
       lastCompletedAt: "2026-07-13T12:00:00Z", // but done yesterday
     });
     expect(stalenessFactor(recurring, NOW)).toBeCloseTo(1 + 1 / 30, 2);
+  });
+
+  // ADR-14: deferred_until is retained after expiry as the wake timestamp —
+  // snooze time must not count as "lying around".
+  it("counts from the wake time, not creation, after a snooze expired", () => {
+    const woken = candidate({
+      createdAt: "2026-01-01T00:00:00Z", // ~195 days old — would cap at x2
+      deferredUntil: "2026-07-09T12:00:00Z", // woke 5 days ago
+    });
+    expect(stalenessFactor(woken, NOW)).toBeCloseTo(1 + 5 / 30, 2);
+  });
+
+  it("ignores a wake time older than the creation date", () => {
+    const preDeferred = candidate({
+      createdAt: "2026-07-04T12:00:00Z", // 10 days old
+      deferredUntil: "2026-06-01T00:00:00Z", // snooze long before creation? keep createdAt
+    });
+    expect(stalenessFactor(preDeferred, NOW)).toBeCloseTo(1 + 10 / 30, 2);
+  });
+
+  it("recurring tasks count from the wake time when it is after the last completion", () => {
+    const recurringWoken = candidate({
+      recurEveryDays: 7,
+      createdAt: "2026-01-01T00:00:00Z",
+      lastCompletedAt: "2026-06-14T12:00:00Z", // a month ago
+      deferredUntil: "2026-07-12T12:00:00Z", // but woke 2 days ago
+    });
+    expect(stalenessFactor(recurringWoken, NOW)).toBeCloseTo(1 + 2 / 30, 2);
   });
 });
 

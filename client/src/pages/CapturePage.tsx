@@ -9,6 +9,7 @@ const GROUPS: { key: DrawGroup; title: string; hint: string }[] = [
   { key: "ready", title: "✅ Ready to draw", hint: "Small enough — these are in the deck." },
   { key: "needs-estimate", title: "⏱ Needs an estimate", hint: "Add minutes so they can enter the deck." },
   { key: "too-big", title: "🐘 Too big — break these down", hint: "Over the limit. Split them into small steps." },
+  { key: "snoozed", title: "💤 Snoozed", hint: "Out of the deck for now — they wake on their own, or from the Tasks page." },
 ];
 
 function EstimateInput({ task }: { task: Task }) {

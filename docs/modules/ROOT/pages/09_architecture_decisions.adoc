@@ -152,3 +152,35 @@ before any restore validation runs — deletes therefore clear the pointer
 eagerly whenever its row is gone, not only on an exact id match. Deriving the
 bonus server-side removes a client-trust quirk and makes the bonus
 reload-proof.
+
+== ADR-14: Snooze/block as retained timestamps, drawability stays derived
+
+*Context:* Some tasks are temporarily undoable (waiting on someone, wrong
+context); every redundant draw of such a card erodes trust in the deck. Cards
+need a timed removal (snooze) and a manual-wake removal (block).
+*Decision:* Two columns on `tasks` — `deferred_until` (nullable ISO timestamp)
+and `blocked` (0/1) — extend the drawable predicate (ADR-2):
+`blocked = 0 AND (deferred_until IS NULL OR deferred_until <= now)`. There is
+no stored "snoozed" state: an expired snooze re-enters the pool with *no
+write*, and `deferred_until` is deliberately *retained* after expiry as the
+wake timestamp. `stalenessFactor` uses
+`max(created_at | last_completed_at, deferred_until)` as its base date, so
+snooze time never counts as "lying around" and a woken card returns without an
+unfairly boosted weight. The client's "Wake" action PATCHes
+`deferredUntil = now` (not `null`) plus `blocked = false`, giving manually
+woken cards the same staleness treatment. Completing a task — including
+recurring ones, which stay open (ADR-6) — and reopening a done task clear
+both fields. The empty-pool fallback count applies the same predicate, so a
+pool of only snoozed/blocked cards reports `no_ready_tasks` (they come back on
+their own) instead of steering the user into breakdown with `all_too_big`.
+The restore validation for the persisted current draw (ADR-13, `isRestorable`)
+rejects snoozed/blocked cards, so snoozing the drawn card also drops it from
+reload-restore. The 💤/⛔ badges and the client's `classifyTask` group
+`snoozed` (precedence container → snoozed → needs-estimate → too-big → ready)
+are derived the same way; client and server predicates are pinned by shared
+test vectors (`shared/drawableVectors.ts`) run in both suites.
+*Rationale:* Retaining the expired timestamp gives a correct staleness base
+for free — one comparison instead of an extra "woken at" column and expiry
+writes that could drift (the ADR-2 argument). A separate `blocked` flag
+instead of a sentinel far-future date keeps "indefinite" semantically honest
+and trivially queryable.

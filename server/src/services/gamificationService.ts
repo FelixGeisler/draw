@@ -56,16 +56,19 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
     task.id,
   );
 
+  // Completion clears snooze/block state (ADR-14) — critical for recurring
+  // tasks, which stay open and must be drawable for the next occurrence.
   const recurring = task.recur_every_days != null && task.recur_every_days > 0;
   if (recurring) {
     const next = new Date(now);
     next.setDate(next.getDate() + task.recur_every_days!);
-    db.prepare("UPDATE tasks SET due_date = ? WHERE id = ?").run(isoDate(next), task.id);
+    db.prepare(
+      "UPDATE tasks SET due_date = ?, deferred_until = NULL, blocked = 0 WHERE id = ?",
+    ).run(isoDate(next), task.id);
   } else {
-    db.prepare("UPDATE tasks SET status = 'done', completed_at = ? WHERE id = ?").run(
-      now.toISOString(),
-      task.id,
-    );
+    db.prepare(
+      "UPDATE tasks SET status = 'done', completed_at = ?, deferred_until = NULL, blocked = 0 WHERE id = ?",
+    ).run(now.toISOString(), task.id);
   }
 
   // A completed card leaves the deck: drop the persisted current draw if it
