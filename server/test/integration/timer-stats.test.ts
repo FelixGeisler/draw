@@ -148,7 +148,7 @@ describe("estimation block (estimated vs. tracked)", () => {
     seedCompletion(completedLater.id, "2024-06-01T10:00:00.000Z");
   });
 
-  it("compares estimates with all tracked time for tasks completed in range", async () => {
+  it("compares estimates with all tracked time for one-shot tasks completed in range", async () => {
     const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
 
     expect(stats.estimation.tasks).toEqual([
@@ -181,5 +181,68 @@ describe("estimation block (estimated vs. tracked)", () => {
     expect(stats.estimation.tasks).toEqual([]);
     expect(stats.estimation.summary.accuracyRatio).toBeNull();
     expect(stats.estimation.summary.tendency).toBeNull();
+  });
+});
+
+describe("estimation with recurring tasks (#39)", () => {
+  // Own fixed past range — no overlap with the seeds above.
+  const RANGE = "from=2024-07-01&to=2024-07-07";
+
+  const seedEntry = (taskId: number, startedAt: string, endedAt: string) =>
+    db
+      .prepare("INSERT INTO time_entries (task_id, started_at, ended_at) VALUES (?, ?, ?)")
+      .run(taskId, startedAt, endedAt);
+  const seedCompletion = (taskId: number, completedAt: string) =>
+    db
+      .prepare("INSERT INTO completions (task_id, completed_at, xp_awarded) VALUES (?, ?, 10)")
+      .run(taskId, completedAt);
+
+  let chore: { id: number };
+
+  beforeAll(async () => {
+    // Recurring chore, estimated at 20 min per cycle.
+    chore = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "water plants", categoryId: 2, effortMinutes: 20, recurEveryDays: 3 })
+    ).body as { id: number };
+
+    // Cycle 1: 60 min, completed before the range.
+    seedEntry(chore.id, "2024-06-28T08:00:00.000Z", "2024-06-28T09:00:00.000Z");
+    seedCompletion(chore.id, "2024-06-28T10:00:00.000Z");
+
+    // Cycle 2: 30 min, completed in range — the cycle the stats should show.
+    seedEntry(chore.id, "2024-07-02T08:00:00.000Z", "2024-07-02T08:30:00.000Z");
+    seedCompletion(chore.id, "2024-07-02T09:00:00.000Z");
+
+    // Cycle 3 underway: 40 min tracked after the in-range completion, not
+    // completed yet — belongs to the next cycle, not this one.
+    seedEntry(chore.id, "2024-07-03T08:00:00.000Z", "2024-07-03T08:40:00.000Z");
+  });
+
+  it("scores only the cycle completed in range, not lifetime tracked time", async () => {
+    const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
+
+    // Lifetime attribution would report (60 + 30 + 40) / 20 = 6.5×.
+    expect(stats.estimation.tasks).toEqual([
+      { taskId: chore.id, title: "water plants", estimatedMinutes: 20, trackedMinutes: 30, ratio: 1.5 },
+    ]);
+    expect(stats.estimation.summary).toEqual({
+      taskCount: 1,
+      totalEstimatedMinutes: 20,
+      totalTrackedMinutes: 30,
+      accuracyRatio: 1.5,
+      tendency: "under",
+    });
+    expect(stats.estimation.byCategory).toEqual([
+      { categoryId: 2, name: "Study", color: "#a06bff", estimatedMinutes: 20, trackedMinutes: 30, ratio: 1.5 },
+    ]);
+  });
+
+  it("keeps every cycle's minutes in the range-filtered time totals", async () => {
+    // Per-cycle attribution narrows the estimation block only — total tracked
+    // time still counts the in-range entries of cycles 2 and 3 (30 + 40).
+    const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
+    expect(stats.totalMinutes).toBe(70);
   });
 });

@@ -67,7 +67,8 @@ function tendencyFor(ratio: number): Tendency {
  * Pure estimated-vs-tracked aggregation (no DB). Tasks without a positive
  * effort estimate are excluded here rather than treated as 0 — a zero
  * estimate would fake a broken ratio (and divide by zero). Tasks without
- * any time entry never reach this function (INNER JOIN in computeStats).
+ * tracked time in the attributed cycle never reach this function
+ * (computeStats drops them before calling).
  */
 export function buildEstimation(rows: EstimationInputRow[]): Estimation {
   const qualifying = rows.filter(
@@ -127,6 +128,32 @@ export function buildEstimation(rows: EstimationInputRow[]): Estimation {
   };
 }
 
+/**
+ * Tracked minutes attributable to the latest cycle a task completed in range:
+ * entries started after the previous completion (if any) and at or before the
+ * cycle's own completion. Recurring tasks (recur_every_days) complete over and
+ * over, so a lifetime sum would count every earlier cycle's entries against a
+ * single per-cycle estimate and inflate the ratio each cycle (#39). One-shot
+ * tasks have no previous completion, so all their work counts even when it
+ * started before the range. ISO-8601 strings compare lexicographically —
+ * `from`/`to` may be date-only prefixes, as in the SQL range filters.
+ */
+export function latestCycleTrackedMinutes(
+  completions: string[],
+  entries: { startedAt: string; minutes: number }[],
+  from: string,
+  to: string,
+): number {
+  const inRange = completions.filter((c) => c >= from && c < to);
+  if (inRange.length === 0) return 0;
+  const cycleEnd = inRange.reduce((a, b) => (a > b ? a : b));
+  // "" sorts before every timestamp: no previous completion = no lower bound.
+  const prev = completions.filter((c) => c < cycleEnd).reduce((a, b) => (a > b ? a : b), "");
+  return entries
+    .filter((e) => e.startedAt > prev && e.startedAt <= cycleEnd)
+    .reduce((sum, e) => sum + e.minutes, 0);
+}
+
 /** Minutes per time entry, running entries counted up to now. */
 const MINUTES_EXPR = `(julianday(COALESCE(e.ended_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))) - julianday(e.started_at)) * 1440.0`;
 
@@ -176,25 +203,42 @@ export function computeStats(from: string, to: string): Stats {
     )
     .get(...range) as Stats["completed"];
 
-  // Tasks completed in range (EXISTS, not JOIN — recurring tasks may have
-  // several completions and must not double-count their entries) with ALL
-  // their time entries: work on a task completed this week may have started
-  // earlier, so entries are deliberately not range-filtered.
-  const estimationRows = db
+  // Tasks completed in range, with tracked time attributed per cycle in
+  // latestCycleTrackedMinutes (#39): SQL only fetches the raw completions and
+  // entries per task — the deliberately unfiltered entry list lets one-shot
+  // tasks count work started before the range, while recurring tasks count
+  // only their latest completed cycle.
+  const completedInRange = db
     .prepare(
       `SELECT t.id AS taskId, t.title, t.effort_minutes AS estimatedMinutes,
-              c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor,
-              SUM(${MINUTES_EXPR}) AS trackedMinutes
+              c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor
        FROM tasks t
        JOIN categories c ON c.id = t.category_id
-       JOIN time_entries e ON e.task_id = t.id
        WHERE EXISTS (
          SELECT 1 FROM completions co
          WHERE co.task_id = t.id AND co.completed_at >= ? AND co.completed_at < ?
-       )
-       GROUP BY t.id`,
+       )`,
     )
-    .all(...range) as EstimationInputRow[];
+    .all(...range) as Omit<EstimationInputRow, "trackedMinutes">[];
+
+  const completionsStmt = db.prepare(
+    "SELECT completed_at AS completedAt FROM completions WHERE task_id = ?",
+  );
+  const entriesStmt = db.prepare(
+    `SELECT e.started_at AS startedAt, ${MINUTES_EXPR} AS minutes FROM time_entries e WHERE e.task_id = ?`,
+  );
+
+  const estimationRows: EstimationInputRow[] = [];
+  for (const task of completedInRange) {
+    const completions = (completionsStmt.all(task.taskId) as { completedAt: string }[]).map(
+      (r) => r.completedAt,
+    );
+    const entries = entriesStmt.all(task.taskId) as { startedAt: string; minutes: number }[];
+    const trackedMinutes = latestCycleTrackedMinutes(completions, entries, from, to);
+    // No tracked time in the attributed cycle — nothing to compare, same as
+    // a never-tracked task.
+    if (trackedMinutes > 0) estimationRows.push({ ...task, trackedMinutes });
+  }
 
   const totalMinutes = Math.round(total.minutes);
   const minutesAt = (pred: (impact: number) => boolean) =>
