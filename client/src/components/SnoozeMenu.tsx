@@ -1,4 +1,4 @@
-import { SNOOZE_PRESETS, wakeDateFromInput } from "../lib/snooze";
+import { SNOOZE_PRESETS, minWakeDateInput, wakeDateFromInput } from "../lib/snooze";
 
 interface Props {
   /** Called with the wake timestamp as a UTC ISO string. */
@@ -24,9 +24,15 @@ export function SnoozeMenu({ onSnooze, onBlock }: Props) {
       <input
         type="date"
         title="Snooze until date"
+        // Tomorrow at the earliest: today or earlier is an already-past wake
+        // time — no snooze, but it would still reset the staleness base.
+        min={minWakeDateInput()}
         style={{ padding: "4px 6px" }}
         onChange={(e) => {
-          if (e.target.value) onSnooze(wakeDateFromInput(e.target.value).toISOString());
+          // Re-checked here because a typed date bypasses the picker's min.
+          if (e.target.value && e.target.value >= minWakeDateInput()) {
+            onSnooze(wakeDateFromInput(e.target.value).toISOString());
+          }
         }}
       />
       <button onClick={onBlock} title="Out of the deck until you wake it">

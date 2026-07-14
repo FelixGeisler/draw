@@ -198,4 +198,44 @@ describe("interaction with the persisted current draw (ADR-13)", () => {
     await patchTask(task.id, { blocked: true });
     expect((await request(app).get("/api/draw/current").expect(200)).body).toBeNull();
   });
+
+  // Regression: the pointer must be cleared eagerly by the PATCH itself, not
+  // lazily by GET /api/draw/current — from the Tasks page the Draw page is
+  // unmounted, so block → wake happens with NO GET in between, and a lazily
+  // retained pointer would resurrect the dismissed card on the next visit.
+  it("block then wake without any GET in between — the first restore attempt is null", async () => {
+    const { goalId, task } = await seedGoalTask("block-wake-no-get");
+    expect((await draw(goalId)).task.id).toBe(task.id);
+
+    await patchTask(task.id, { blocked: true });
+    await patchTask(task.id, { deferredUntil: new Date().toISOString(), blocked: false });
+    // Task is back in the deck and restorable — only the eager clear keeps it out.
+    expect((await request(app).get("/api/draw/current").expect(200)).body).toBeNull();
+  });
+
+  it("snoozing the current draw clears the pointer at PATCH time — an expiring snooze cannot resurrect it", async () => {
+    const { goalId, task } = await seedGoalTask("snooze-expiry-no-get");
+    expect((await draw(goalId)).task.id).toBe(task.id);
+
+    await patchTask(task.id, { deferredUntil: inOneHour() });
+    // The persisted pointer is already gone, without any GET having run.
+    const pointer = db
+      .prepare("SELECT value FROM settings WHERE key = 'current_draw_task_id'")
+      .get();
+    expect(pointer).toBeUndefined();
+
+    // Simulate the snooze wearing off before the next Draw-page visit.
+    db.prepare("UPDATE tasks SET deferred_until = ? WHERE id = ?").run(oneHourAgo(), task.id);
+    expect((await request(app).get("/api/draw/current").expect(200)).body).toBeNull();
+  });
+
+  it("keeps the pointer when a snooze/block PATCH leaves the draw in the deck", async () => {
+    const { goalId, task } = await seedGoalTask("noop-patch-keeps");
+    expect((await draw(goalId)).task.id).toBe(task.id);
+
+    // blocked: false on a never-blocked card dismisses nothing.
+    await patchTask(task.id, { blocked: false });
+    const restored = await request(app).get("/api/draw/current").expect(200);
+    expect(restored.body.task.id).toBe(task.id);
+  });
 });

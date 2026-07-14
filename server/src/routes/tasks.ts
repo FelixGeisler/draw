@@ -1,9 +1,12 @@
 import { Router } from "express";
-import { db } from "../db.js";
+import { db, getSetting } from "../db.js";
 import {
+  clearCurrentDraw,
   clearDanglingDraw,
   getCurrentDrawTaskId,
+  isRestorable,
   withBooleanBlocked,
+  type RestorableTask,
 } from "../services/drawService.js";
 import {
   completeTask,
@@ -223,7 +226,23 @@ tasksRouter.patch("/:id", (req, res) => {
       db.prepare("UPDATE tasks SET goal_id = ? WHERE parent_id = ?").run(body.goalId ?? null, id);
     }
   })();
-  res.json({ task: getTask(id) });
+
+  const task = getTask(id)!;
+  // Snoozing/blocking the current draw dismisses the card, so the persisted
+  // pointer is cleared eagerly here, mirroring completeTask() — this is the
+  // one sideways mutation that must not wait for GET /api/draw/current's
+  // lazy validation (ADR-13): a snooze wears off (and a block can be woken
+  // from the Tasks page) without any GET in between, and the once-again
+  // restorable pointer would resurrect a card the user explicitly sent away
+  // (ADR-16).
+  if (
+    ("deferredUntil" in body || "blocked" in body) &&
+    getCurrentDrawTaskId() === id &&
+    !isRestorable(task as unknown as RestorableTask, getSetting("max_draw_effort", 30), new Date())
+  ) {
+    clearCurrentDraw(id);
+  }
+  res.json({ task });
 });
 
 tasksRouter.post("/:id/timer/start", (req, res) => {

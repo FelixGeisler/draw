@@ -38,3 +38,16 @@ export function wakeDateFromInput(dateStr: string): Date {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(y, m - 1, d);
 }
+
+/**
+ * Earliest meaningful "snooze until" date (local "YYYY-MM-DD"): tomorrow.
+ * Today or earlier would wake the task at an already-past local midnight —
+ * no actual snooze, but the retained timestamp (ADR-16) would silently
+ * shave accumulated staleness weight off the card.
+ */
+export function minWakeDateInput(now: Date = new Date()): string {
+  const d = new Date(now);
+  d.setDate(d.getDate() + 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}

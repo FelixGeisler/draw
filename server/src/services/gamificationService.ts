@@ -160,6 +160,9 @@ function unlockedKeys(): Set<string> {
   return new Set(rows.map((r) => r.key));
 }
 
+// Deliberately does NOT apply the snooze/block predicate (ADR-16): the
+// deck_clearer achievement must keep counting snoozed/blocked cards, or
+// snoozing the rest of the deck and completing one task would unlock it.
 function drawableCount(): number {
   const maxEffort = getSetting("max_draw_effort", 30);
   const row = db
