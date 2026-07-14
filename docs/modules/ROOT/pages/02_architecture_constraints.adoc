@@ -17,7 +17,7 @@
 |`ANTHROPIC_API_KEY` lives in `server/.env`, never reaches the browser
 
 |No over-engineering
-|No auth, no Docker, no CI pipelines, no ORM, no Redux — deliberate guardrails for a personal project
+|No auth, no Docker, no ORM, no Redux — deliberate guardrails for a personal project. CI is limited to tests + docs deployment (GitHub Actions)
 
 |Issue-driven workflow
 |Every change via GitHub issue + PR; branches `<IssueID>_Name`; commits `#<IssueId> Message`
@@ -26,5 +26,5 @@
 |Model `claude-opus-4-8`; adaptive thinking; structured outputs via `messages.parse()`; no `temperature`/`budget_tokens`/assistant prefill (rejected by the model)
 
 |Documentation
-|arc42, hosted via GitHub Pages from `docs/` on `main`
+|arc42 in AsciiDoc, built with Antora, hosted via GitHub Pages (Actions deployment)
 |===

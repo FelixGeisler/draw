@@ -86,3 +86,6 @@ the owner wants a proper documentation site generator for the architecture docs.
 sidebar, cross-reference validation at build time (broken xrefs fail the build),
 and a growth path to versioned docs. Trade-off accepted: docs no longer render
 directly on github.com and the deployment needs one Actions workflow.
+The default UI bundle is vendored at `docs-ui/ui-bundle.zip` (built from the
+official source) because the upstream GitLab CI artifact URLs 404 — builds have
+no network dependency.
