@@ -17,7 +17,12 @@ const TASK_SELECT = `
          recur_every_days AS recurEveryDays, status,
          created_at AS createdAt, completed_at AS completedAt,
          last_drawn_at AS lastDrawnAt,
-         EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open') AS hasOpenChildren
+         EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open') AS hasOpenChildren,
+         CASE
+           WHEN EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open')
+             THEN (SELECT SUM(c.effort_minutes) FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open')
+           ELSE effort_minutes
+         END AS remainingEffortMinutes
   FROM tasks`;
 
 function getTask(id: number) {

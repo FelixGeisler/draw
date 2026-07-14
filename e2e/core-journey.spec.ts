@@ -33,7 +33,10 @@ test("capture: an oversized task lands in 'too big', a small one is ready", asyn
 
 test("breakdown: subtasks make the parent drawable ready work", async ({ page }) => {
   await page.goto("/tasks");
-  await page.getByRole("button", { name: "Break down" }).first().click();
+  // Scope to the oversized task's row — .first() would hit the newest task
+  // (rows are ordered created_at DESC), not the one that needs breaking down.
+  const parentRow = page.getByText("Prepare exam statistics").locator("..");
+  await parentRow.getByRole("button", { name: "Break down" }).click();
 
   const rows = page.getByPlaceholder("Small, concrete step…");
   const minutes = page.getByPlaceholder("min");
@@ -44,6 +47,10 @@ test("breakdown: subtasks make the parent drawable ready work", async ({ page })
   await page.getByRole("button", { name: /Add 2 subtasks/ }).click();
 
   await expect(page.getByText("Open past paper, list topics")).toBeVisible();
+
+  // The parent's minutes chip now shows the remaining work of its open
+  // subtasks (15 + 25), not the stale stored 90-minute estimate.
+  await expect(parentRow.locator(".chip", { hasText: "min" })).toHaveText("40 min");
 
   // Subtasks are now in the deck; the container parent is not.
   await page.goto("/capture");
