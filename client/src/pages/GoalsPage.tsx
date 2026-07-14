@@ -4,7 +4,7 @@ import { useCreateGoal, useDeleteGoal, useUpdateGoal, useGoals } from "../hooks/
 import { useCategories, useCreateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
 import { MaterialsSection } from "../components/MaterialsSection";
-import { AiPlanPanel } from "../components/AiSuggestionPanel";
+import { AiGenerateTasksPanel, AiPlanPanel } from "../components/AiSuggestionPanel";
 import { TaskForm } from "../components/TaskForm";
 
 function daysUntil(dateStr: string): number {
@@ -19,7 +19,8 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
   const categories = useCategories();
   const aiStatus = useAiStatus();
   const [showMaterials, setShowMaterials] = useState(false);
-  const [planning, setPlanning] = useState(false);
+  // Plan backward and Generate tasks share the category select — one panel at a time.
+  const [aiPanel, setAiPanel] = useState<"plan" | "generate" | null>(null);
   const [planCategoryId, setPlanCategoryId] = useState<number | null>(null);
   const [addingTask, setAddingTask] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -155,11 +156,17 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
           <>
             <button
               style={{ padding: "2px 10px", borderColor: "var(--accent)" }}
-              onClick={() => setPlanning((p) => !p)}
+              onClick={() => setAiPanel((p) => (p === "plan" ? null : "plan"))}
             >
               ✨ Plan backward
             </button>
-            {planning && (
+            <button
+              style={{ padding: "2px 10px", borderColor: "var(--accent)" }}
+              onClick={() => setAiPanel((p) => (p === "generate" ? null : "generate"))}
+            >
+              ✨ Generate tasks
+            </button>
+            {aiPanel && (
               <select
                 value={planCategoryId ?? defaultCategory}
                 onChange={(e) => setPlanCategoryId(Number(e.target.value))}
@@ -191,10 +198,10 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
         </div>
       )}
       {showMaterials && <MaterialsSection goalId={goal.id} />}
-      {planning && (
+      {aiPanel === "plan" && (
         <AiPlanPanel
           goalId={goal.id}
-          onClose={() => setPlanning(false)}
+          onClose={() => setAiPanel(null)}
           onAccept={async (tasks) => {
             for (const t of tasks) {
               await createTask.mutateAsync({
@@ -206,6 +213,13 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
               });
             }
           }}
+        />
+      )}
+      {aiPanel === "generate" && (
+        <AiGenerateTasksPanel
+          goalId={goal.id}
+          categoryId={planCategoryId ?? defaultCategory}
+          onClose={() => setAiPanel(null)}
         />
       )}
     </div>

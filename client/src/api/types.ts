@@ -59,6 +59,8 @@ export interface NewTask {
 
 export interface NewSubtask {
   title: string;
+  /** Optional provenance line, e.g. "Exercise 7 · 8 pts · ~45 min · exam.pdf" (#28/#29). */
+  description?: string;
   effortMinutes?: number | null;
   impact?: number;
 }
