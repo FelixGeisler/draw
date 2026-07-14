@@ -122,3 +122,28 @@ tracked minutes were really worked, only the completion is undone.
 session ended; leaving the entry open silently corrupts the leverage stats the
 app is built around. Closing only the task's own entry keeps the common
 "complete a quick task while a long timer runs elsewhere" flow intact.
+
+== ADR-13: AI proposes full task lists; checkbox review remains the sole write path
+
+*Context:* `/api/ai/generate-tasks` transcribes goal materials (e.g. a
+40-exercise past exam with points and time estimates per item) into a complete
+task list. At that scale, AI auto-accept becomes tempting and silent rewrites
+of the material's own numbers become invisible.
+*Decision:* The endpoint returns a proposal only — no AI path ever writes to
+`tasks` (extends ADR-3/ADR-8); the client's review-before-accept panel stays
+the single write path. The proposal is shaped by two deterministic server-side
+post-processing rules (pure functions in `aiPostprocess.ts`): (1) when at
+least half the items carry points printed in the material, impact is the
+item's point-rank quintile (top fifth → 5★ … bottom → 1★, ties share a
+rating), with per-item fallback to the model's suggestion flagged as
+`impactSource: "model"`; (2) items longer than `max_draw_effort` are split
+into even parts that preserve the stated total ("split, don't clamp") — the
+`Math.min` effort clamp used by breakdown/plan-goal is explicitly banned on
+this path because it would silently rewrite the source material's time data.
+Time is not folded into impact: draw weight is already `impact²/effort`, so it
+would double-count effort.
+*Rationale:* Points are the material's own measure of leverage toward the
+graded outcome (ADR-4), so they beat a model guess whenever present — and a
+deterministic mapping is auditable during review, where every rationale cites
+its source row. Keeping the user's checkbox as the only write path preserves
+the app's trust boundary no matter how many tasks the AI proposes at once.
