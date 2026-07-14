@@ -1,4 +1,11 @@
-import { db, getSetting } from "../db.js";
+import {
+  CURRENT_DRAW_SETTING,
+  db,
+  deleteSetting,
+  getSetting,
+  getSettingString,
+  setSetting,
+} from "../db.js";
 
 export interface Candidate {
   id: number;
@@ -82,6 +89,9 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
     .all(...params) as Candidate[];
 
   if (candidates.length === 0) {
+    // The draw replaced whatever card was showing — even an empty draw, so a
+    // reload doesn't resurrect a card the user already saw disappear.
+    clearCurrentDraw();
     // Distinguish "nothing at all" from "only oversized/unestimated tasks".
     const anyOpen = db
       .prepare(
@@ -109,6 +119,9 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
 
   const chosen = candidates[picked];
   db.prepare("UPDATE tasks SET last_drawn_at = ? WHERE id = ?").run(now.toISOString(), chosen.id);
+  // Persist the draw so a page reload restores the card (ADR-13) — a new
+  // draw simply overwrites the previous one.
+  setSetting(CURRENT_DRAW_SETTING, String(chosen.id));
 
   const task = db
     .prepare(
@@ -128,4 +141,85 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
     poolSize: candidates.length,
     probability: weights[picked] / total,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Current draw — the drawn card persisted across reloads (ADR-13), restored
+// by the DrawPage the same way the TimerBar restores the running timer.
+
+export interface RestorableTask {
+  status: string;
+  effortMinutes: number | null;
+  hasOpenChildren: number;
+}
+
+/**
+ * Restore-validation for a persisted draw. Mirrors the client's
+ * `classifyTask` and the candidate WHERE clause above: only an open leaf
+ * task with an estimate within the draw limit is still in the deck.
+ */
+export function isRestorable(task: RestorableTask, maxEffort: number): boolean {
+  return (
+    task.status === "open" &&
+    !task.hasOpenChildren &&
+    task.effortMinutes != null &&
+    task.effortMinutes <= maxEffort
+  );
+}
+
+export function getCurrentDrawTaskId(): number | null {
+  const raw = getSettingString(CURRENT_DRAW_SETTING);
+  return raw == null ? null : Number(raw);
+}
+
+/** Clear the persisted draw — unconditionally, or only if it matches taskId. */
+export function clearCurrentDraw(taskId?: number) {
+  if (taskId === undefined || getCurrentDrawTaskId() === taskId) {
+    deleteSetting(CURRENT_DRAW_SETTING);
+  }
+}
+
+/**
+ * Clear the persisted draw when its task row no longer exists — covers the
+ * drawn subtask cascade-deleted with its parent as well as a direct delete.
+ * Deliberately eager, unlike the sideways-stale cases handled lazily below:
+ * `tasks.id` has no AUTOINCREMENT, so SQLite can re-bind a freed id to the
+ * next captured task before any restore validation runs, and the never-drawn
+ * newcomer would be restored — and paid the drawn bonus — under the old id.
+ */
+export function clearDanglingDraw() {
+  const id = getCurrentDrawTaskId();
+  if (id != null && !db.prepare("SELECT 1 FROM tasks WHERE id = ?").get(id)) {
+    deleteSetting(CURRENT_DRAW_SETTING);
+  }
+}
+
+/**
+ * The persisted current draw, for restore after a reload. A pointer that went
+ * stale sideways (task completed elsewhere, edited out of the deck, turned
+ * into a container) is cleared lazily here and null is returned.
+ */
+export function currentDraw(): { task: Record<string, unknown> } | null {
+  const id = getCurrentDrawTaskId();
+  if (id == null) return null;
+
+  const task = db
+    .prepare(
+      `SELECT t.id, t.title, t.description,
+              t.category_id AS categoryId, t.goal_id AS goalId, t.parent_id AS parentId,
+              t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
+              t.recur_every_days AS recurEveryDays, t.status,
+              t.created_at AS createdAt, t.completed_at AS completedAt,
+              t.last_drawn_at AS lastDrawnAt,
+              EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open') AS hasOpenChildren
+       FROM tasks t WHERE t.id = ?`,
+    )
+    .get(id) as (Record<string, unknown> & RestorableTask) | undefined;
+
+  const maxEffort = getSetting("max_draw_effort", 30);
+  if (!task || !isRestorable(task, maxEffort)) {
+    clearCurrentDraw();
+    return null;
+  }
+  return { task };
 }

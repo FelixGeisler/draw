@@ -398,7 +398,7 @@ export async function generateTasks(
     maxTokens: GENERATE_TASKS_MAX_TOKENS,
     system: TRANSCRIPTION_SYSTEM_PROMPT,
   });
-  // Deterministic post-processing (ADR-13): points → impact quintiles, and
+  // Deterministic post-processing (ADR-14): points → impact quintiles, and
   // split-don't-clamp for oversized items. The Math.min clamp above would
   // corrupt the material's own time data here.
   return postprocessGenerateTasks(result, getSetting("max_draw_effort", 30));

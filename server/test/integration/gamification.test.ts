@@ -25,8 +25,15 @@ describe("gamification", () => {
     const task = (
       await request(app).post("/api/tasks").send({ title: "t", categoryId: 1, effortMinutes: 20 })
     ).body;
+    // The bonus is derived server-side (issue #25), not from a client flag.
+    // Backdating last_drawn_at within 6h exercises the heuristic path without
+    // drawing — POST /api/draw here would steal first_draw from the test below.
+    db.prepare("UPDATE tasks SET last_drawn_at = ? WHERE id = ?").run(
+      new Date().toISOString(),
+      task.id,
+    );
     const done = (
-      await request(app).patch(`/api/tasks/${task.id}`).send({ status: "done", wasDrawn: true })
+      await request(app).patch(`/api/tasks/${task.id}`).send({ status: "done" })
     ).body;
     expect(done.xpAwarded).toBe(30); // 20 × (3/3) × 1.5
     expect(done.newAchievements).toContain("first_completion");

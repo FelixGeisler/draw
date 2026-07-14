@@ -10,6 +10,7 @@ User          Client (DrawPage)        Server (drawService)
  │                 │  (shuffle animation)   │ weight = impact²/effort
  │                 │                        │   × urgency × staleness × cooldown
  │                 │                        │ roulette pick, set last_drawn_at
+ │                 │                        │ persist current_draw_task_id
  │                 │◄───────────────────────│ {task, poolSize, probability}
  │ card flips      │ + achievement check    │
 ....
@@ -17,15 +18,22 @@ User          Client (DrawPage)        Server (drawService)
 Empty pool returns `{task: null, reason: 'no_ready_tasks' | 'all_too_big'}` —
 the UI turns this into a "break something down" call to action.
 
+The pick is persisted as the *current draw* (ADR-13). On mount the DrawPage
+restores it from `GET /api/draw/current` — revealed, no shuffle — the same
+pattern as the TimerBar (6.4). The endpoint validates the task is still
+drawable (open leaf, estimated, within `max_draw_effort`) and lazily clears a
+pointer that went stale, e.g. because the card was edited out of the deck.
+
 == 6.2 Completing a task (single transaction)
 
 ....
-PATCH /api/tasks/:id {status: 'done', wasDrawn?}
+PATCH /api/tasks/:id {status: 'done'}
   ├─ reject 409 if open subtasks exist
-  ├─ wasDrawn omitted → derived: last_drawn_at within 6h
+  ├─ drawn := task is the persisted current draw, or last_drawn_at within 6h
   └─ transaction:
        insert completions row (xp = effort × impact/3, ×1.5 if drawn)
        recurring? push due_date forward : set status done
+       clear current draw if it was this task
        check achievements → response {task, xpAwarded, newAchievements, levelUp}
 ....
 

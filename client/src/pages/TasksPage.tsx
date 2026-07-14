@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useCategories, useSettings, useTasks } from "../hooks/useTasks";
+import { useGoals } from "../hooks/useGoals";
 import { TaskRow } from "../components/TaskRow";
 
 export function TasksPage() {
   const categories = useCategories();
+  const goals = useGoals();
   const settings = useSettings();
   const [showDone, setShowDone] = useState(false);
   const tasks = useTasks({ status: showDone ? "all" : "open" });
@@ -30,7 +32,13 @@ export function TasksPage() {
             </h3>
             <div className="panel" style={{ padding: "0 8px" }}>
               {catTasks.map((t) => (
-                <TaskRow key={t.id} task={t} categories={categories.data!} maxEffort={maxEffort} />
+                <TaskRow
+                  key={t.id}
+                  task={t}
+                  categories={categories.data!}
+                  goals={goals.data}
+                  maxEffort={maxEffort}
+                />
               ))}
             </div>
           </section>

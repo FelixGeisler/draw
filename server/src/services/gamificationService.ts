@@ -1,4 +1,5 @@
 import { db, getSetting } from "../db.js";
+import { clearCurrentDraw } from "./drawService.js";
 
 export interface TaskRow {
   id: number;
@@ -66,6 +67,11 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
       task.id,
     );
   }
+
+  // A completed card leaves the deck: drop the persisted current draw if it
+  // was this task (ADR-13). Recurring too — the task stays open, but the
+  // drawn session just ended, matching how the client dismisses the card.
+  clearCurrentDraw(task.id);
 
   const levelAfter = levelFromXp(totalXp()).level;
   const newAchievements = checkAchievements({ completedTask: task });

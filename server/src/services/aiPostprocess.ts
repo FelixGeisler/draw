@@ -121,7 +121,7 @@ function splitPlan(title: string, minutes: number, maxEffort: number): Generated
  * follow the material's sub-question boundaries), but any single oversized
  * part is itself split so every leaf stays drawable.
  *
- * MAX_PARTS_PER_ITEM is an invariant of the OUTPUT (PR #42 / ADR-13), so it is
+ * MAX_PARTS_PER_ITEM is an invariant of the OUTPUT (PR #42 / ADR-14), so it is
  * re-checked after expansion: when splitting oversized model parts blows the
  * cap (e.g. 10×60-min parts at maxEffort 30 would become 20), the sub-question
  * boundaries are abandoned and the parts' summed minutes are re-split evenly —
