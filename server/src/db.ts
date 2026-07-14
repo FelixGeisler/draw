@@ -38,6 +38,11 @@ migrate();
 // single-user SQLite DB (ADR-11) and excluded from every API response.
 export const API_KEY_SETTING = "anthropic_api_key";
 
+// Settings key holding the id of the currently drawn task (ADR-13). Internal
+// session state — single-user app, one current draw — not a user setting, so
+// the generic settings endpoints exclude it.
+export const CURRENT_DRAW_SETTING = "current_draw_task_id";
+
 export function getSetting(key: string, fallback: number): number {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
     | { value: string }

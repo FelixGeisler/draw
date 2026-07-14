@@ -122,3 +122,27 @@ tracked minutes were really worked, only the completion is undone.
 session ended; leaving the entry open silently corrupts the leverage stats the
 app is built around. Closing only the task's own entry keeps the common
 "complete a quick task while a long timer runs elsewhere" flow intact.
+
+== ADR-13: Current draw persisted server-side
+
+*Context:* The drawn card lived only in DrawPage component state, so a page
+reload lost it — inconsistent with the timer, which restores from the server.
+Worse, the drawn-card XP bonus trusted a client `wasDrawn` flag, which was
+gone after a reload too.
+*Decision:* `POST /api/draw` stores the picked task id as
+`current_draw_task_id` in the `settings` table (single-user app — one current
+draw). The next draw overwrites it (an empty draw clears it), completing or
+deleting the drawn task clears it, and `GET /api/draw/current` exposes it for
+restore. That endpoint re-validates drawability with the same predicate as the
+deck (ADR-2: open leaf, estimated, within `max_draw_effort`) and lazily clears
+a pointer that went stale sideways — task edited too big, completed elsewhere,
+turned into a container. The DrawPage restores the revealed card on mount
+without the shuffle animation, mirroring the TimerBar. The completion bonus is
+now derived server-side (current draw, or `last_drawn_at` within 6h as the
+generous fallback); the client `wasDrawn` flag was removed.
+*Rationale:* A settings row rather than a tasks column because the current
+draw is app-level session state, not a task fact; lazy validation at restore
+instead of eager clearing on every task mutation keeps the write paths simple
+(one line each on complete/delete) and cannot drift — the same reasoning as
+ADR-2. Deriving the bonus server-side removes a client-trust quirk and makes
+the bonus reload-proof.

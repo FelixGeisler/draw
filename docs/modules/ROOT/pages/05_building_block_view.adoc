@@ -24,13 +24,13 @@ server/src/
 │   ├── goals.ts             CRUD with task/material counts
 │   ├── materials.ts         multer upload, download, delete (disk + row)
 │   ├── timer.ts             current/stop; start lives on tasks route
-│   ├── draw.ts              POST /api/draw
+│   ├── draw.ts              POST /api/draw, GET /api/draw/current (restore)
 │   ├── stats.ts             GET /api/stats (UTC date-range handling)
 │   ├── gamification.ts      GET /api/gamification
 │   ├── settings.ts          key-value settings
 │   └── ai.ts                status, estimate, breakdown, plan-goal
 └── services/                Domain logic
-    ├── drawService.ts       drawable predicate + weight formula + roulette selection
+    ├── drawService.ts       drawable predicate + weight formula + roulette selection + current draw
     ├── statsService.ts      SQL aggregations, leverage insights, weekly grade
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
     └── aiService.ts         Anthropic client, material blocks, prompts, token guard

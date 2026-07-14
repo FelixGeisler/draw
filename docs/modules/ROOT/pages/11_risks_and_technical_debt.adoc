@@ -20,7 +20,7 @@
 |Fixed with UTC-only `addDays`; concept documented in xref:08_crosscutting_concepts.adoc[8.6]; keep date math in UTC
 
 |R4
-|*`wasDrawn` heuristic* — completions via TimerBar count as "drawn" if the task was drawn within 6h
+|*Drawn-bonus heuristic* — the primary signal is the server-persisted current draw (ADR-13), but any completion still counts as "drawn" if the task was drawn within 6h, e.g. right after a redraw replaced it
 |Slightly generous XP bonus
 |Deliberate: reinforces the draw habit; revisit if XP feels inflated
 

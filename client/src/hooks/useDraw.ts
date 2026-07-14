@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Task } from "../api/types";
 import { announceAchievements } from "./useGamification";
@@ -19,7 +19,18 @@ export function useDraw() {
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["tasks"] });
       qc.invalidateQueries({ queryKey: ["gamification"] });
+      // Every draw replaces the server-persisted current draw.
+      qc.invalidateQueries({ queryKey: ["draw", "current"] });
       announceAchievements(data.newAchievements);
     },
+  });
+}
+
+/** The server-persisted current draw — lets the DrawPage restore the revealed
+ *  card after a reload (issue #25), mirroring the TimerBar restore. */
+export function useCurrentDraw() {
+  return useQuery({
+    queryKey: ["draw", "current"],
+    queryFn: () => api.get<{ task: Task } | null>("/api/draw/current"),
   });
 }

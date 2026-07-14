@@ -28,9 +28,17 @@ async function seed(request: APIRequestContext) {
 }
 
 async function drawFromGoal(page: Page) {
+  // Earlier specs can leave a persisted current draw behind (issue #25),
+  // which restores as a revealed card on load — the idle front face is then
+  // unclickable, so replace the card via "Draw again" instead.
+  const current = await (await page.request.get("/api/draw/current")).json();
   await page.goto("/");
   await page.locator(".draw-filters select").selectOption({ label: `🎯 ${GOAL_TITLE}` });
-  await page.locator(".draw-face.front").click();
+  if (current?.task) {
+    await page.getByRole("button", { name: "Draw again" }).click();
+  } else {
+    await page.locator(".draw-face.front").click();
+  }
   await expect(page.locator(".draw-card")).toHaveClass(/flipped/);
 }
 
