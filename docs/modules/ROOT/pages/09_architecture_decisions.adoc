@@ -177,3 +177,28 @@ graded outcome (ADR-4), so they beat a model guess whenever present — and a
 deterministic mapping is auditable during review, where every rationale cites
 its source row. Keeping the user's checkbox as the only write path preserves
 the app's trust boundary no matter how many tasks the AI proposes at once.
+
+== ADR-15: Bulk accept commits one umbrella parent plus one transactional subtasks batch
+
+*Context:* The plan-backward accept loop fires N sequential, non-atomic
+`POST /api/tasks` calls. For the generate-tasks flow (ADR-14) with 40+
+accepted rows that is unacceptable twice over: a mid-loop failure leaves a
+half-imported list, and 40 new root tasks would flood every list view.
+*Decision:* The review panel commits as *one umbrella parent* (created
+unestimated, so it classifies as a container — never drawn while children are
+open, ADR-2 — with remaining effort aggregated from the leaves) followed by
+*one* `POST /api/tasks/:id/subtasks` batch, which is already transactional
+and inherits category/goal from the parent. Each leaf carries a provenance
+`description` ("Exercise 7 · 8 pts · ~45 min · exam.pdf") citing the
+material's original numbers — the user's effort edits never rewrite it. If
+the batch fails, the client deletes the just-created parent (cascade), so no
+half-imported state survives. Exercises split into parts commit as flat
+part-leaves under the same parent, keeping the tree exactly two levels deep.
+*Rationale:* Reusing the two existing write endpoints avoids a third,
+AI-shaped bulk-import path and keeps their invariants (validation, category
+inheritance, one transaction per batch). The one non-atomic seam left —
+parent created, batch failed — is closed with a compensating delete, which is
+simpler than a new atomic endpoint and impossible to observe as a task list
+(a bare parent with zero children exists only between the two calls). Deeper
+nesting is banned because every list renders roots plus one child level:
+level-3 leaves would be draw-eligible yet invisible everywhere.

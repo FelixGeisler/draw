@@ -37,7 +37,10 @@ Server-side only. `claude-opus-4-8` with adaptive thinking and structured output
 (`messages.parse` + `zodOutputFormat`; impact as literal union 1|2|3|4|5 because
 numeric min/max is unsupported). Materials precede instructions in the prompt with a
 `cache_control` breakpoint on the last material block (prompt caching). Token
-counting gates every call (estimate endpoint + 180K hard limit). No `temperature`,
+counting gates every call (estimate endpoint + 180K hard limit); the estimate
+mirrors the exact prompt shape of the call it gates — a goal estimate carrying an
+`instruction` counts the generate-tasks context under the transcription system
+prompt, not plan-goal's (`estimateMode` in `aiService.ts`). No `temperature`,
 `budget_tokens`, or assistant prefill — all rejected by this model family.
 
 == 8.5 Security
