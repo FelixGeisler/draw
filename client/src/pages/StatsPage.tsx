@@ -3,12 +3,32 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
 
+interface Estimation {
+  tasks: { taskId: number; title: string; estimatedMinutes: number; trackedMinutes: number; ratio: number }[];
+  summary: {
+    taskCount: number;
+    totalEstimatedMinutes: number;
+    totalTrackedMinutes: number;
+    accuracyRatio: number | null;
+    tendency: "under" | "over" | "accurate" | null;
+  };
+  byCategory: {
+    categoryId: number;
+    name: string;
+    color: string;
+    estimatedMinutes: number;
+    trackedMinutes: number;
+    ratio: number;
+  }[];
+}
+
 interface Stats {
   totalMinutes: number;
   byCategory: { categoryId: number; name: string; color: string; minutes: number }[];
   byImpact: { impact: number; minutes: number }[];
   byGoal: { goalId: number; title: string; minutes: number }[];
   completed: { count: number; avgEffortMinutes: number | null };
+  estimation: Estimation;
   leverageInsights: string[];
   weeklyGrade: string | null;
 }
@@ -40,6 +60,86 @@ function Bar({ label, minutes, max, color }: { label: string; minutes: number; m
       </div>
       <span style={{ width: 70, fontVariantNumeric: "tabular-nums", fontSize: 13 }}>{minutes} min</span>
     </div>
+  );
+}
+
+const TENDENCY_COPY: Record<string, string> = {
+  under: "you under-estimate — tasks take longer than planned. Pad your next estimates.",
+  over: "you over-estimate — tasks finish faster than planned.",
+  accurate: "your estimates match reality. Trust them.",
+};
+
+/** Same band as the server: within 0.9–1.1 counts as accurate. */
+function ratioColor(ratio: number): string {
+  if (ratio > 1.1) return "var(--danger)";
+  if (ratio < 0.9) return "var(--warn)";
+  return "var(--ok)";
+}
+
+function EstimationSection({ estimation }: { estimation: Estimation }) {
+  const { tasks, summary, byCategory } = estimation;
+  const maxMinutes = Math.max(1, ...tasks.flatMap((t) => [t.estimatedMinutes, t.trackedMinutes]));
+
+  return (
+    <section style={{ marginTop: 24 }}>
+      <h3>Estimates vs. reality</h3>
+      {summary.accuracyRatio === null ? (
+        <div className="panel">
+          <p style={{ color: "var(--text-dim)" }}>
+            No completed task in this range has both an effort estimate and tracked time.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="panel" style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 32, fontWeight: 700, color: ratioColor(summary.accuracyRatio) }}>
+              {summary.accuracyRatio}×
+            </div>
+            <div style={{ color: "var(--text-dim)" }}>
+              {summary.tendency && TENDENCY_COPY[summary.tendency]}
+            </div>
+            <div style={{ color: "var(--text-dim)", fontSize: 13, marginTop: 4 }}>
+              {summary.taskCount} task{summary.taskCount === 1 ? "" : "s"} ·{" "}
+              {summary.totalEstimatedMinutes} min estimated · {summary.totalTrackedMinutes} min tracked
+            </div>
+          </div>
+
+          <div className="panel" style={{ marginTop: 12 }}>
+            {tasks.map((t) => (
+              <div key={t.taskId} style={{ padding: "6px 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 14 }}>
+                  <span>{t.title}</span>
+                  <span style={{ color: ratioColor(t.ratio), fontVariantNumeric: "tabular-nums" }}>
+                    {t.ratio}×
+                  </span>
+                </div>
+                <Bar label="estimated" minutes={t.estimatedMinutes} max={maxMinutes} color="#7a8093" />
+                <Bar label="tracked" minutes={t.trackedMinutes} max={maxMinutes} color={ratioColor(t.ratio)} />
+              </div>
+            ))}
+          </div>
+
+          {byCategory.length > 0 && (
+            <div className="panel" style={{ marginTop: 12 }}>
+              {byCategory.map((c) => (
+                <div
+                  key={c.categoryId}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "4px 0", fontSize: 13 }}
+                >
+                  <span style={{ width: 110, textAlign: "right", color: c.color }}>{c.name}</span>
+                  <span style={{ flex: 1, color: "var(--text-dim)" }}>
+                    {c.estimatedMinutes} min estimated · {c.trackedMinutes} min tracked
+                  </span>
+                  <span style={{ width: 70, color: ratioColor(c.ratio), fontVariantNumeric: "tabular-nums" }}>
+                    {c.ratio}×
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -200,6 +300,8 @@ export function StatsPage() {
               </div>
             </section>
           )}
+
+          <EstimationSection estimation={s.estimation} />
 
           <AchievementsGrid />
         </>
