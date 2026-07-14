@@ -89,3 +89,18 @@ directly on github.com and the deployment needs one Actions workflow.
 The default UI bundle is vendored at `docs-ui/ui-bundle.zip` (built from the
 official source) because the upstream GitLab CI artifact URLs 404 — builds have
 no network dependency.
+
+== ADR-11: Claude API key configurable at runtime, stored plaintext in SQLite
+
+*Context:* Requiring users to edit `server/.env` and restart the server to enable
+AI assistance is exactly the setup friction the app exists to remove.
+*Decision:* The key is stored in the existing `settings` table and managed only
+through dedicated endpoints (`PUT`/`DELETE /api/ai/key`). `aiService` resolves the
+key per request — DB value first, `ANTHROPIC_API_KEY` env var as fallback — so a
+key set in the Settings UI takes effect immediately. No endpoint ever returns the
+key: `GET`/`PATCH /api/settings` exclude the row, `GET /api/ai/status` reports only
+`configured`, `model`, and the key's source (`database`/`environment`).
+*Rationale:* Zero-restart configuration with the smallest surface. Plaintext at
+rest is a conscious trade-off: this is a local single-user app with no auth
+(section 2); encrypting with a locally stored secret would add complexity without
+a meaningful security boundary. Out of scope: key validation, encryption at rest.

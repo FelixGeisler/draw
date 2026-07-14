@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useCategories, useSettings } from "../hooks/useTasks";
-import { useAiStatus } from "../hooks/useAi";
+import { useAiStatus, useRemoveApiKey, useSetApiKey } from "../hooks/useAi";
 import type { Category } from "../api/types";
 
 function SettingInput({
@@ -36,6 +36,76 @@ function SettingInput({
       />
       {hint && <span style={{ color: "var(--text-dim)", fontSize: 13 }}>{hint}</span>}
     </label>
+  );
+}
+
+function AiKeySection() {
+  const aiStatus = useAiStatus();
+  const setKey = useSetApiKey();
+  const removeKey = useRemoveApiKey();
+  const [draft, setDraft] = useState("");
+
+  function save() {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    // The key is sent once and never read back — the input clears on success.
+    setKey.mutate(trimmed, { onSuccess: () => setDraft("") });
+  }
+
+  const status = aiStatus.data;
+  return (
+    <section className="panel" style={{ display: "grid", gap: 12 }}>
+      <h3 style={{ margin: 0 }}>AI assistance</h3>
+      {status?.configured ? (
+        <p style={{ margin: 0, color: "var(--ok)" }}>
+          ✓ Claude API key configured — model {status.model}
+          {status.keySource === "environment" && (
+            <span style={{ color: "var(--text-dim)" }}>
+              {" "}
+              (from <code>ANTHROPIC_API_KEY</code> in <code>server/.env</code>)
+            </span>
+          )}
+        </p>
+      ) : (
+        <p style={{ margin: 0, color: "var(--text-dim)" }}>
+          Not configured. Enter your Claude API key below to enable AI task breakdown and
+          backward planning — no restart needed. Everything else works without it.
+        </p>
+      )}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          type="password"
+          aria-label="Claude API key"
+          placeholder={status?.configured ? "Replace key (sk-ant-…)" : "sk-ant-…"}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") save();
+          }}
+          style={{ flex: 1, maxWidth: 380 }}
+        />
+        <button disabled={!draft.trim() || setKey.isPending} onClick={save}>
+          Save key
+        </button>
+        {status?.keySource === "database" && (
+          <button
+            title="Remove the stored API key"
+            disabled={removeKey.isPending}
+            onClick={() => removeKey.mutate()}
+          >
+            Remove key
+          </button>
+        )}
+      </div>
+      <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
+        Stored in the local database, never shown again after saving.
+      </p>
+      {(setKey.error || removeKey.error) && (
+        <div style={{ color: "var(--danger)", fontSize: 13 }}>
+          {(setKey.error ?? removeKey.error)?.message}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -130,7 +200,6 @@ function CategoryRow({ category }: { category: Category }) {
 export function SettingsPage() {
   const settings = useSettings();
   const categories = useCategories();
-  const aiStatus = useAiStatus();
   const qc = useQueryClient();
   const [newCat, setNewCat] = useState("");
   const [newColor, setNewColor] = useState("#4f8cff");
@@ -147,20 +216,7 @@ export function SettingsPage() {
     <div className="content">
       <h1>Settings</h1>
 
-      <section className="panel" style={{ display: "grid", gap: 12 }}>
-        <h3 style={{ margin: 0 }}>AI assistance</h3>
-        {aiStatus.data?.configured ? (
-          <p style={{ margin: 0, color: "var(--ok)" }}>
-            ✓ Claude API key configured — model {aiStatus.data.model}
-          </p>
-        ) : (
-          <p style={{ margin: 0, color: "var(--text-dim)" }}>
-            Not configured. Add <code>ANTHROPIC_API_KEY=…</code> to <code>server/.env</code> and
-            restart to enable AI task breakdown and backward planning. Everything else works
-            without it.
-          </p>
-        )}
-      </section>
+      <AiKeySection />
 
       <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
         <h3 style={{ margin: 0 }}>Draw tuning</h3>

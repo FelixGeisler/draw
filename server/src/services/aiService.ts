@@ -3,15 +3,27 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { ZodType } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { db, filesDir, getSetting } from "../db.js";
+import { API_KEY_SETTING, db, filesDir, getSetting, getSettingString } from "../db.js";
 import { breakdownSchema, planGoalSchema, type BreakdownResult, type PlanGoalResult } from "../aiSchemas.js";
 
 export const MODEL = "claude-opus-4-8";
 const MAX_INPUT_TOKENS = 180_000;
 const INPUT_USD_PER_MTOK = 5;
 
-export const configured = Boolean(process.env.ANTHROPIC_API_KEY);
-const client = configured ? new Anthropic() : null;
+// Resolved per request (not at module load) so a key set through the
+// Settings UI takes effect immediately, without a server restart.
+// DB value wins; the ANTHROPIC_API_KEY env var stays as fallback.
+export function resolveApiKey(): { key: string; source: "database" | "environment" } | null {
+  const dbKey = getSettingString(API_KEY_SETTING);
+  if (dbKey) return { key: dbKey, source: "database" };
+  const envKey = process.env.ANTHROPIC_API_KEY;
+  if (envKey) return { key: envKey, source: "environment" };
+  return null;
+}
+
+export function isConfigured(): boolean {
+  return resolveApiKey() !== null;
+}
 
 const SYSTEM_PROMPT = `You are the planning brain of "Draw", an anti-procrastination app. The user struggles with two things: getting started, and spending time on low-leverage work (e.g. studying the comfortable intro chapter instead of past exam questions).
 
@@ -37,7 +49,7 @@ export class AiError extends Error {
 function mapSdkError(e: unknown): AiError {
   if (e instanceof AiError) return e;
   if (e instanceof Anthropic.AuthenticationError) {
-    return new AiError(502, "The Claude API key was rejected — check ANTHROPIC_API_KEY in server/.env");
+    return new AiError(502, "The Claude API key was rejected — set a valid key in Settings");
   }
   if (e instanceof Anthropic.RateLimitError) {
     return new AiError(429, "Claude API rate limit hit — wait a moment and try again");
@@ -194,8 +206,9 @@ function goalContext(goalId: number, userNotes?: string): ContentBlock[] {
 // API calls
 
 function requireClient(): Anthropic {
-  if (!client) throw new AiError(503, "ai_not_configured");
-  return client;
+  const resolved = resolveApiKey();
+  if (!resolved) throw new AiError(503, "ai_not_configured");
+  return new Anthropic({ apiKey: resolved.key });
 }
 
 async function guardTokens(blocks: ContentBlock[]): Promise<number> {

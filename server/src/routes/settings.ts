@@ -1,14 +1,19 @@
 import { Router } from "express";
-import { db, setSetting } from "../db.js";
+import { API_KEY_SETTING, db, setSetting } from "../db.js";
 
 export const settingsRouter = Router();
 
+// The stored Claude API key must never leak through the generic settings
+// endpoints — it is managed exclusively via PUT/DELETE /api/ai/key.
+function publicSettings(): Record<string, string> {
+  const rows = db
+    .prepare("SELECT key, value FROM settings WHERE key != ?")
+    .all(API_KEY_SETTING) as { key: string; value: string }[];
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
 settingsRouter.get("/", (_req, res) => {
-  const rows = db.prepare("SELECT key, value FROM settings").all() as {
-    key: string;
-    value: string;
-  }[];
-  res.json(Object.fromEntries(rows.map((r) => [r.key, r.value])));
+  res.json(publicSettings());
 });
 
 settingsRouter.patch("/", (req, res) => {
@@ -17,9 +22,5 @@ settingsRouter.patch("/", (req, res) => {
   for (const key of allowed) {
     if (key in body) setSetting(key, String(body[key]));
   }
-  const rows = db.prepare("SELECT key, value FROM settings").all() as {
-    key: string;
-    value: string;
-  }[];
-  res.json(Object.fromEntries(rows.map((r) => [r.key, r.value])));
+  res.json(publicSettings());
 });
