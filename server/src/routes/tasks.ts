@@ -182,7 +182,15 @@ tasksRouter.patch("/:id", (req, res) => {
   }
   if (sets.length === 0) return res.status(400).json({ error: "nothing to update" });
 
-  db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+  db.transaction(() => {
+    db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+    // Subtasks follow their parent's goal: goal counts and the goal-filtered
+    // draw key off each row's own goal_id, so a goal change must cascade to
+    // the children (breakdown is one level deep — only roots can be split).
+    if ("goalId" in body) {
+      db.prepare("UPDATE tasks SET goal_id = ? WHERE parent_id = ?").run(body.goalId ?? null, id);
+    }
+  })();
   res.json({ task: getTask(id) });
 });
 
