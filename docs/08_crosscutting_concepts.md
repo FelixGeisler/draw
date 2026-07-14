@@ -58,7 +58,22 @@ compared as strings. Date-range arithmetic happens in UTC (`addDays` in
 (see [section 11](11_risks_and_technical_debt.md)). Streak days use SQLite
 `date(..., 'localtime')` because a "day" is a user-local concept.
 
-## 8.7 Database migrations
+## 8.7 Testing strategy
+
+Three levels, all mandatory per PR (enforced by CI):
+
+| Level | Tooling | Scope |
+|---|---|---|
+| Unit | Vitest | Pure logic: `urgencyFactor`/`stalenessFactor`/`weight`, `levelFromXp`, `classifyTask` |
+| Integration | Vitest + Supertest | Full REST API against `createApp()` with a real temp SQLite database per test file (`DATA_DIR` env, forked pool) |
+| End-to-end | Playwright | User journeys in a real browser: capture → breakdown → draw → complete → timer → stats; own ports (`API_PORT`/`VITE_PORT`) + throwaway DB, so a live dev server is undisturbed |
+
+Design rules: tests never touch `server/data/`; journey E2E tests run serially
+without retries (shared DB state); integration tests encode the domain invariants
+(breakdown 409, one running timer, recurrence reset, XP-farming protection,
+AI degraded mode).
+
+## 8.8 Database migrations
 
 `PRAGMA user_version` switch in `db.ts`: fresh databases execute `schema.sql`
 (always the current schema); existing databases run incremental `ALTER TABLE`

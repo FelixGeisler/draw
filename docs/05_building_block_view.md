@@ -14,7 +14,8 @@ F:\Project (npm workspaces)
 
 ```
 server/src/
-├── index.ts                 Express app, router mounting
+├── index.ts                 entry point: loads .env, listens on API_PORT
+├── app.ts                   createApp() — Express app + router mounting (testable)
 ├── db.ts                    SQLite bootstrap, PRAGMA user_version migrations
 ├── schema.sql               Current full schema (fresh installs)
 ├── aiSchemas.ts             zod schemas for structured AI outputs

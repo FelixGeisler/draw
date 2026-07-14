@@ -24,6 +24,7 @@ AI degradation > data integrity > cost transparency > responsiveness.
 | Q11 | Server killed mid-write | SQLite WAL keeps the database consistent |
 | Q12 | Fresh checkout on a new Windows machine | `npm install && npm run dev` works without a compiler toolchain (prebuilt binaries) |
 
-Q1–Q9 and Q12 were verified manually during initial development (2026-07-14);
-Q10 verified statistically (40-draw distribution test). Q4 pending live-key
-verification.
+Q1, Q3 (guardrail), Q6–Q10 are covered by the automated test suites (unit /
+integration / E2E — see [8.7](08_crosscutting_concepts.md)) and run in CI on every
+PR. Q2 and Q4 need a live API key and are verified manually; Q5 is covered by the
+E2E timer journey; Q11/Q12 are properties of SQLite WAL and prebuilt binaries.
