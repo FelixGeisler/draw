@@ -29,11 +29,11 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     }).then((r) => handle<T>(r)),
-  put: <T>(url: string, body: unknown) =>
+  put: <T>(url: string, body?: unknown) =>
     fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: body === undefined ? undefined : JSON.stringify(body),
     }).then((r) => handle<T>(r)),
   patch: <T>(url: string, body: unknown) =>
     fetch(url, {
