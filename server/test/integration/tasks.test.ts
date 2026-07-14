@@ -53,6 +53,54 @@ describe("task CRUD and breakdown rule", () => {
     expect(listedParent.subtasks).toHaveLength(2);
   });
 
+  it("persists an optional per-subtask description and leaves it null when absent", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Probeklausur 2023", categoryId: 2, effortMinutes: 120 })
+    ).body;
+
+    const provenance = "Exercise 7 · 8 pts · ~45 min · Probeklausur_2023.pdf";
+    const subs = await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({
+        subtasks: [
+          { title: "Solve exercise 7", effortMinutes: 45, description: provenance },
+          { title: "Solve exercise 8", effortMinutes: 20 },
+        ],
+      })
+      .expect(201);
+
+    expect(subs.body[0].description).toBe(provenance);
+    expect(subs.body[1].description).toBeNull();
+
+    // The description survives into the task list payload the client renders.
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.subtasks.map((s: { description: string | null }) => s.description)).toEqual([
+      provenance,
+      null,
+    ]);
+  });
+
+  it("keeps subtask creation transactional: one bad row rolls back the whole batch", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Atomic parent", categoryId: 1 })
+    ).body;
+
+    // Second row violates the impact CHECK constraint mid-transaction.
+    await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({ subtasks: [{ title: "would be created" }, { title: "constraint breaker", impact: 99 }] })
+      .expect(500);
+
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.subtasks).toEqual([]);
+  });
+
   it("blocks completing a parent while subtasks are open (409)", async () => {
     const parent = (
       await request(app)

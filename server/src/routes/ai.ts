@@ -1,5 +1,14 @@
 import { Router } from "express";
-import { AiError, breakdown, estimate, isConfigured, MODEL, planGoal, resolveApiKey } from "../services/aiService.js";
+import {
+  AiError,
+  breakdown,
+  estimate,
+  generateTasks,
+  isConfigured,
+  MODEL,
+  planGoal,
+  resolveApiKey,
+} from "../services/aiService.js";
 import { API_KEY_SETTING, deleteSetting, setSetting } from "../db.js";
 
 export const aiRouter = Router();
@@ -36,8 +45,8 @@ aiRouter.delete("/key", (_req, res) => {
 aiRouter.post("/estimate", async (req, res) => {
   if (!isConfigured()) return res.status(503).json({ error: "ai_not_configured" });
   try {
-    const { taskId, goalId, materialIds } = req.body ?? {};
-    res.json(await estimate({ taskId, goalId, materialIds }));
+    const { taskId, goalId, materialIds, instruction } = req.body ?? {};
+    res.json(await estimate({ taskId, goalId, materialIds, instruction }));
   } catch (e) {
     handle(res, e);
   }
@@ -60,6 +69,22 @@ aiRouter.post("/plan-goal", async (req, res) => {
     const { goalId, materialIds, userNotes } = req.body ?? {};
     if (!goalId) return res.status(400).json({ error: "goalId is required" });
     res.json(await planGoal(Number(goalId), materialIds ?? [], userNotes));
+  } catch (e) {
+    handle(res, e);
+  }
+});
+
+aiRouter.post("/generate-tasks", async (req, res) => {
+  try {
+    const { goalId, materialIds, instruction } = req.body ?? {};
+    // Malformed requests are 400 regardless of key state, so validation runs
+    // before the configuration check (and stays testable in degraded mode).
+    if (!goalId) return res.status(400).json({ error: "goalId is required" });
+    if (typeof instruction !== "string" || !instruction.trim()) {
+      return res.status(400).json({ error: "instruction is required" });
+    }
+    if (!isConfigured()) return res.status(503).json({ error: "ai_not_configured" });
+    res.json(await generateTasks(Number(goalId), materialIds ?? [], instruction.trim()));
   } catch (e) {
     handle(res, e);
   }
