@@ -44,4 +44,11 @@ test("completing a task from the tasks page removes the timer bar without reload
 
   // The server really closed the entry — not just a hidden bar.
   expect(await (await page.request.get("/api/timer/current")).json()).toBeNull();
+
+  // #22: this task is now completed WITH an estimate and a time entry — the
+  // one fixture in the journey that qualifies for "Estimates vs. reality".
+  await page.goto("/stats");
+  await expect(
+    page.locator("section").filter({ hasText: "Estimates vs. reality" }).getByText("Fold the laundry"),
+  ).toBeVisible();
 });

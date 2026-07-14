@@ -93,4 +93,9 @@ test("stats: the leverage view renders with tracked data", async ({ page }) => {
   await expect(page.getByText("minutes tracked")).toBeVisible();
   await expect(page.getByText("tasks completed")).toBeVisible();
   await expect(page.getByText("Where your time went — by impact")).toBeVisible();
+
+  // #22: the estimation section renders; the journey's only completed task
+  // was never timed, so it must show the empty state, not a fake 0× ratio.
+  await expect(page.getByText("Estimates vs. reality")).toBeVisible();
+  await expect(page.getByText(/No completed task in this range/)).toBeVisible();
 });
