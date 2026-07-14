@@ -4,7 +4,7 @@ import type express from "express";
 import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
 
-// Issue #19 (ADR-14): snooze and block take cards out of the deck as a
+// Issue #19 (ADR-16): snooze and block take cards out of the deck as a
 // derived predicate — blocked = 0 AND (deferred_until IS NULL OR <= now).
 // Each test draws from its own goal-scoped pool, like draw-current.test.ts,
 // so the roulette pick is deterministic.
@@ -83,7 +83,7 @@ describe("pool exclusion", () => {
 
     const res = await draw(goalId);
     expect(res.task.id).toBe(task.id);
-    expect(res.task.deferredUntil).toBe(past); // retained, not nulled (ADR-14)
+    expect(res.task.deferredUntil).toBe(past); // retained, not nulled (ADR-16)
 
     const row = db
       .prepare("SELECT deferred_until AS deferredUntil FROM tasks WHERE id = ?")

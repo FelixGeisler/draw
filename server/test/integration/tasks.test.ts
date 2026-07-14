@@ -53,6 +53,54 @@ describe("task CRUD and breakdown rule", () => {
     expect(listedParent.subtasks).toHaveLength(2);
   });
 
+  it("persists an optional per-subtask description and leaves it null when absent", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Probeklausur 2023", categoryId: 2, effortMinutes: 120 })
+    ).body;
+
+    const provenance = "Exercise 7 · 8 pts · ~45 min · Probeklausur_2023.pdf";
+    const subs = await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({
+        subtasks: [
+          { title: "Solve exercise 7", effortMinutes: 45, description: provenance },
+          { title: "Solve exercise 8", effortMinutes: 20 },
+        ],
+      })
+      .expect(201);
+
+    expect(subs.body[0].description).toBe(provenance);
+    expect(subs.body[1].description).toBeNull();
+
+    // The description survives into the task list payload the client renders.
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.subtasks.map((s: { description: string | null }) => s.description)).toEqual([
+      provenance,
+      null,
+    ]);
+  });
+
+  it("keeps subtask creation transactional: one bad row rolls back the whole batch", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Atomic parent", categoryId: 1 })
+    ).body;
+
+    // Second row violates the impact CHECK constraint mid-transaction.
+    await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({ subtasks: [{ title: "would be created" }, { title: "constraint breaker", impact: 99 }] })
+      .expect(500);
+
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.subtasks).toEqual([]);
+  });
+
   it("blocks completing a parent while subtasks are open (409)", async () => {
     const parent = (
       await request(app)
@@ -219,6 +267,61 @@ describe("task CRUD and breakdown rule", () => {
       (t: { id: number }) => t.id === parent.id,
     );
     expect(listed.subtasks[0].remainingEffortMinutes).toBe(5);
+  });
+
+  it("cascades a goal change on a broken-down parent to its subtasks", async () => {
+    // Issue #17: goal counts and the goal-filtered draw key off each task
+    // row's own goal_id, so attach/move/detach must reach the subtasks.
+    const goalA = (
+      await request(app).post("/api/goals").send({ title: "Cascade goal A" })
+    ).body;
+    const goalB = (
+      await request(app).post("/api/goals").send({ title: "Cascade goal B" })
+    ).body;
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Broken-down attachee", categoryId: 1, effortMinutes: 60 })
+    ).body;
+    const subs = (
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({ subtasks: [{ title: "Attach step 1", effortMinutes: 15 }, { title: "Attach step 2", effortMinutes: 20 }] })
+    ).body;
+
+    const goal = async (id: number) =>
+      (await request(app).get("/api/goals")).body.find((g: { id: number }) => g.id === id);
+    const listedParent = async () =>
+      (await request(app).get("/api/tasks")).body.find((t: { id: number }) => t.id === parent.id);
+
+    // Attach: subtasks follow, the goal counts all three rows...
+    await request(app).patch(`/api/tasks/${parent.id}`).send({ goalId: goalA.id }).expect(200);
+    let listed = await listedParent();
+    expect(listed.goalId).toBe(goalA.id);
+    expect(listed.subtasks.map((s: { goalId: number | null }) => s.goalId)).toEqual([goalA.id, goalA.id]);
+    expect((await goal(goalA.id)).taskCount).toBe(3);
+
+    // ...and the goal-filtered draw sees the ready subtasks (not an empty deck).
+    const draw = (await request(app).post("/api/draw").send({ goalId: goalA.id }).expect(200)).body;
+    expect(draw.task).not.toBeNull();
+    expect(subs.map((s: { id: number }) => s.id)).toContain(draw.task.id);
+    expect(draw.poolSize).toBe(2);
+
+    // A patch without goalId leaves the links alone.
+    await request(app).patch(`/api/tasks/${parent.id}`).send({ title: "Renamed attachee" }).expect(200);
+    expect((await goal(goalA.id)).taskCount).toBe(3);
+
+    // Move: nothing stays stranded on the old goal.
+    await request(app).patch(`/api/tasks/${parent.id}`).send({ goalId: goalB.id }).expect(200);
+    expect((await goal(goalA.id)).taskCount).toBe(0);
+    expect((await goal(goalB.id)).taskCount).toBe(3);
+
+    // Detach: subtasks are cleared too, not left pointing at goal B.
+    await request(app).patch(`/api/tasks/${parent.id}`).send({ goalId: null }).expect(200);
+    expect((await goal(goalB.id)).taskCount).toBe(0);
+    listed = await listedParent();
+    expect(listed.goalId).toBeNull();
+    expect(listed.subtasks.map((s: { goalId: number | null }) => s.goalId)).toEqual([null, null]);
   });
 
   it("deletes a task with cascade to subtasks", async () => {

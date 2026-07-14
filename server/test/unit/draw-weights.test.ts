@@ -69,7 +69,7 @@ describe("stalenessFactor", () => {
     expect(stalenessFactor(recurring, NOW)).toBeCloseTo(1 + 1 / 30, 2);
   });
 
-  // ADR-14: deferred_until is retained after expiry as the wake timestamp —
+  // ADR-16: deferred_until is retained after expiry as the wake timestamp —
   // snooze time must not count as "lying around".
   it("counts from the wake time, not creation, after a snooze expired", () => {
     const woken = candidate({

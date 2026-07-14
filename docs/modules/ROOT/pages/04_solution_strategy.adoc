@@ -11,7 +11,7 @@
 |*Drawability is a derived predicate*, not a flag: `status='open' AND effort ≤ max AND no open children AND not blocked AND (no deferred_until OR deferred_until ≤ now)`. Oversized tasks simply never appear in the deck — the UI funnels them into breakdown.
 
 |Undoable tasks erode trust in the deck
-|*Snooze/block* (ADR-14): a card can defer itself (`deferred_until`) or leave until manually woken (`blocked`). Both are part of the same derived predicate — an expired snooze re-enters the pool with no write, and staleness counts from the wake time so the card returns without an unfair boost.
+|*Snooze/block* (ADR-16): a card can defer itself (`deferred_until`) or leave until manually woken (`blocked`). Both are part of the same derived predicate — an expired snooze re-enters the pool with no write, and staleness counts from the wake time so the card returns without an unfair boost.
 
 |Low-leverage time use
 |Impact ratings only exist on goal-linked tasks (leverage is _toward_ something). Time tracking joins `time_entries × tasks` and aggregates minutes by impact; rule-based insights and a weekly A–F grade make the pattern visible.

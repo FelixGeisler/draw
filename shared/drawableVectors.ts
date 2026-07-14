@@ -1,5 +1,5 @@
 /**
- * Shared deck-eligibility test vectors (issue #19, ADR-14).
+ * Shared deck-eligibility test vectors (issue #19, ADR-16).
  *
  * The drawable predicate exists twice by design (ADR-2 mirrors, one per tier):
  *   - server: `drawService.ts` candidate WHERE clause + `isRestorable()`

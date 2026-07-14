@@ -3,7 +3,7 @@ import type { Task } from "../api/types";
 export type DrawGroup = "ready" | "needs-estimate" | "too-big" | "container" | "snoozed";
 
 /**
- * Derived snooze state (ADR-14): blocked, or deferredUntil in the future.
+ * Derived snooze state (ADR-16): blocked, or deferredUntil in the future.
  * Never read from a stored flag — an expired snooze ends with no write.
  */
 export function isSnoozed(

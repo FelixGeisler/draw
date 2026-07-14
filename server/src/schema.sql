@@ -29,7 +29,7 @@ CREATE TABLE tasks (
   created_at TEXT NOT NULL,
   completed_at TEXT,
   last_drawn_at TEXT,
-  -- Snooze/block (ADR-14): deferred_until is retained after expiry as the wake
+  -- Snooze/block (ADR-16): deferred_until is retained after expiry as the wake
   -- timestamp for staleness; drawability stays a derived predicate (ADR-2).
   deferred_until TEXT,
   blocked INTEGER NOT NULL DEFAULT 0

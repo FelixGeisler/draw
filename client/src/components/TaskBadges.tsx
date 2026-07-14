@@ -1,5 +1,6 @@
 import type { Task } from "../api/types";
 import { isDueSoon } from "../lib/drawable";
+import { displayEffort } from "../lib/effort";
 
 /** Compact local wake time for the 💤 chip, e.g. "2026-07-15 18:00". */
 function formatWake(iso: string): string {
@@ -19,11 +20,7 @@ export function ImpactStars({ value }: { value: number }) {
 
 export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolean }) {
   const due = isDueSoon(task.dueDate);
-  // Remaining work when the API derives it (list endpoint); task shapes without
-  // the field (drawn card, timer bar — always drawable leaves) fall back to the
-  // stored estimate. Present-but-null means "open subtasks, none estimated":
-  // hide the chip instead of showing the parent's stale own estimate.
-  const effort = task.remainingEffortMinutes !== undefined ? task.remainingEffortMinutes : task.effortMinutes;
+  const effort = displayEffort(task);
   return (
     <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       {effort != null && <span className="chip">{effort} min</span>}
@@ -47,7 +44,7 @@ export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolea
           ↻ {task.recurEveryDays}d
         </span>
       )}
-      {/* Derived, never a stored flag (ADR-14): 💤 only while the wake time
+      {/* Derived, never a stored flag (ADR-16): 💤 only while the wake time
           is still ahead — an expired snooze simply stops showing. */}
       {task.deferredUntil != null && new Date(task.deferredUntil) > new Date() && (
         <span className="chip" title={`Snoozed until ${formatWake(task.deferredUntil)}`}>

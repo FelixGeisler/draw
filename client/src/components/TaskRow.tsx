@@ -1,21 +1,23 @@
 import { useState } from "react";
-import type { Category, Task } from "../api/types";
+import type { Category, Goal, NewTask, Task } from "../api/types";
 import { useCreateSubtasks, useDeleteTask, useUpdateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
 import { isSnoozed } from "../lib/drawable";
 import { TaskBadges } from "./TaskBadges";
 import { SnoozeMenu } from "./SnoozeMenu";
+import { TaskForm } from "./TaskForm";
 import { SubtaskEditor } from "./SubtaskEditor";
 import { AiBreakdownPanel } from "./AiSuggestionPanel";
 
 interface Props {
   task: Task;
   categories: Category[];
+  goals?: Goal[];
   maxEffort: number;
   depth?: number;
 }
 
-export function TaskRow({ task, categories, maxEffort, depth = 0 }: Props) {
+export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props) {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const createSubtasks = useCreateSubtasks();
@@ -24,6 +26,7 @@ export function TaskRow({ task, categories, maxEffort, depth = 0 }: Props) {
   const [aiPanel, setAiPanel] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [snoozing, setSnoozing] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const category = categories.find((c) => c.id === task.categoryId);
   const hasSubtasks = (task.subtasks?.length ?? 0) > 0;
@@ -35,8 +38,28 @@ export function TaskRow({ task, categories, maxEffort, depth = 0 }: Props) {
     setSnoozing(false);
   }
 
+  async function saveEdit(patch: NewTask) {
+    await updateTask.mutateAsync({ id: task.id, ...patch });
+    setEditing(false);
+  }
+
   return (
     <div style={{ marginLeft: depth * 24 }}>
+      {editing ? (
+        <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+          <TaskForm
+            key={task.id}
+            categories={categories}
+            // Subtasks follow their parent's goal — no goal select for them.
+            goals={task.parentId == null ? goals : undefined}
+            initial={task}
+            autoFocus
+            submitLabel="Save"
+            onSubmit={saveEdit}
+            onCancel={() => setEditing(false)}
+          />
+        </div>
+      ) : (
       <div
         style={{
           display: "flex",
@@ -71,7 +94,7 @@ export function TaskRow({ task, categories, maxEffort, depth = 0 }: Props) {
         </span>
         <TaskBadges task={task} />
         {snoozed ? (
-          // Wake = deferredUntil now, not null (ADR-14): the retained value
+          // Wake = deferredUntil now, not null (ADR-16): the retained value
           // becomes the wake timestamp, so staleness counts from here.
           <button
             onClick={() => snooze({ deferredUntil: new Date().toISOString(), blocked: false })}
@@ -91,6 +114,20 @@ export function TaskRow({ task, categories, maxEffort, depth = 0 }: Props) {
             Break down
           </button>
         )}
+        {/* Done rows are not editable — reopen first (matches the checkbox flow). */}
+        {!done && (
+          <button
+            onClick={() => {
+              setBreakingDown(false);
+              setAiPanel(false);
+              setSnoozing(false);
+              setEditing(true);
+            }}
+            title="Edit"
+          >
+            ✎
+          </button>
+        )}
         <button
           onClick={() => {
             if (confirm(`Delete "${task.title}"${hasSubtasks ? " and its subtasks" : ""}?`)) {
@@ -102,6 +139,7 @@ export function TaskRow({ task, categories, maxEffort, depth = 0 }: Props) {
           🗑
         </button>
       </div>
+      )}
       {snoozing && !snoozed && (
         <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
           <SnoozeMenu
@@ -143,7 +181,14 @@ export function TaskRow({ task, categories, maxEffort, depth = 0 }: Props) {
       )}
       {expanded &&
         task.subtasks?.map((s) => (
-          <TaskRow key={s.id} task={s} categories={categories} maxEffort={maxEffort} depth={depth + 1} />
+          <TaskRow
+            key={s.id}
+            task={s}
+            categories={categories}
+            goals={goals}
+            maxEffort={maxEffort}
+            depth={depth + 1}
+          />
         ))}
     </div>
   );

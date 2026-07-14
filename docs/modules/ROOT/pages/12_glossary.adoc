@@ -29,7 +29,7 @@
 |A task with open subtasks; never drawn itself
 
 |*Snooze*
-|Timed removal from the deck: `deferred_until` in the future. Expires with no write — the retained timestamp becomes the wake time for staleness (ADR-14)
+|Timed removal from the deck: `deferred_until` in the future. Expires with no write — the retained timestamp becomes the wake time for staleness (ADR-16)
 
 |*Block*
 |Indefinite removal from the deck (`blocked`); returns only via the explicit Wake action

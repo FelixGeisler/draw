@@ -113,14 +113,16 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
   }
 
   const insert = db.prepare(
-    `INSERT INTO tasks (title, category_id, goal_id, parent_id, impact, effort_minutes, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const created = db.transaction(() => {
     const ids: number[] = [];
     for (const s of subtasks) {
       const r = insert.run(
         s.title.trim(),
+        // Optional provenance line, e.g. "Exercise 7 · 8 pts · ~45 min · exam.pdf" (#28)
+        s.description ?? null,
         parent.categoryId,
         parent.goalId ?? null,
         parent.id,
@@ -162,7 +164,7 @@ tasksRouter.patch("/:id", (req, res) => {
 
   // Reopening: undo the latest completion so XP stays honest. A reopened
   // task starts fresh in the deck — leftover snooze/block state is cleared
-  // (ADR-14), same as on completion.
+  // (ADR-16), same as on completion.
   if (body.status === "open" && raw.status === "done") {
     db.transaction(() => {
       undoLatestCompletion(id);
@@ -173,7 +175,7 @@ tasksRouter.patch("/:id", (req, res) => {
     return res.json({ task: getTask(id) });
   }
 
-  // Snooze/block fields (ADR-14). deferredUntil is normalized to a UTC ISO
+  // Snooze/block fields (ADR-16). deferredUntil is normalized to a UTC ISO
   // string because the pool predicate compares it lexicographically in SQL.
   if ("deferredUntil" in body && body.deferredUntil !== null) {
     const v = body.deferredUntil;
@@ -212,7 +214,15 @@ tasksRouter.patch("/:id", (req, res) => {
   }
   if (sets.length === 0) return res.status(400).json({ error: "nothing to update" });
 
-  db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+  db.transaction(() => {
+    db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+    // Subtasks follow their parent's goal: goal counts and the goal-filtered
+    // draw key off each row's own goal_id, so a goal change must cascade to
+    // the children (breakdown is one level deep — only roots can be split).
+    if ("goalId" in body) {
+      db.prepare("UPDATE tasks SET goal_id = ? WHERE parent_id = ?").run(body.goalId ?? null, id);
+    }
+  })();
   res.json({ task: getTask(id) });
 });
 

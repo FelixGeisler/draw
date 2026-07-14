@@ -153,7 +153,55 @@ eagerly whenever its row is gone, not only on an exact id match. Deriving the
 bonus server-side removes a client-trust quirk and makes the bonus
 reload-proof.
 
-== ADR-14: Snooze/block as retained timestamps, drawability stays derived
+== ADR-14: AI proposes full task lists; checkbox review remains the sole write path
+
+*Context:* `/api/ai/generate-tasks` transcribes goal materials (e.g. a
+40-exercise past exam with points and time estimates per item) into a complete
+task list. At that scale, AI auto-accept becomes tempting and silent rewrites
+of the material's own numbers become invisible.
+*Decision:* The endpoint returns a proposal only — no AI path ever writes to
+`tasks` (extends ADR-3/ADR-8); the client's review-before-accept panel stays
+the single write path. The proposal is shaped by two deterministic server-side
+post-processing rules (pure functions in `aiPostprocess.ts`): (1) when at
+least half the items carry points printed in the material, impact is the
+item's point-rank quintile (top fifth → 5★ … bottom → 1★, ties share a
+rating), with per-item fallback to the model's suggestion flagged as
+`impactSource: "model"`; (2) items longer than `max_draw_effort` are split
+into even parts that preserve the stated total ("split, don't clamp") — the
+`Math.min` effort clamp used by breakdown/plan-goal is explicitly banned on
+this path because it would silently rewrite the source material's time data.
+Time is not folded into impact: draw weight is already `impact²/effort`, so it
+would double-count effort.
+*Rationale:* Points are the material's own measure of leverage toward the
+graded outcome (ADR-4), so they beat a model guess whenever present — and a
+deterministic mapping is auditable during review, where every rationale cites
+its source row. Keeping the user's checkbox as the only write path preserves
+the app's trust boundary no matter how many tasks the AI proposes at once.
+
+== ADR-15: Estimation accuracy attributes tracked time per completion cycle
+
+*Context:* The "Estimates vs. reality" block (stats) compared a task's single
+per-cycle effort estimate against ALL of its lifetime time entries. Recurring
+tasks (`recur_every_days`) complete over and over, so every finished cycle
+inflated their ratio — and the summary/byCategory aggregates — a bit more.
+Recurring chores are exactly where users track time repeatedly.
+*Decision:* Tracked time is attributed per cycle: for each task completed in
+the requested range, only entries in the window
+`(previous completion, latest in-range completion]` count. One-shot tasks have
+no previous completion, so all their work still counts even when it started
+before the range; entries tracked after the in-range completion belong to the
+next, not-yet-completed cycle and are excluded. The window logic lives in the
+pure `latestCycleTrackedMinutes()` (statsService) fed by plain per-task
+queries, keeping it unit-testable like the draw weights. Recurring tasks
+completing several times in range score their latest cycle only — one
+estimate, one cycle. Range-filtered time totals (`totalMinutes`, byCategory
+minutes, leverage) are untouched: every tracked minute still counts there.
+*Rationale:* Per-cycle attribution over excluding recurring tasks from the
+block, because recurring work is where estimation feedback matters most;
+attribution in TypeScript over correlated SQL subqueries so the boundary rules
+are testable without a DB and readable next to `buildEstimation()`.
+
+== ADR-16: Snooze/block as retained timestamps, drawability stays derived
 
 *Context:* Some tasks are temporarily undoable (waiting on someone, wrong
 context); every redundant draw of such a card erodes trust in the deck. Cards
@@ -175,10 +223,13 @@ pool of only snoozed/blocked cards reports `no_ready_tasks` (they come back on
 their own) instead of steering the user into breakdown with `all_too_big`.
 The restore validation for the persisted current draw (ADR-13, `isRestorable`)
 rejects snoozed/blocked cards, so snoozing the drawn card also drops it from
-reload-restore. The 💤/⛔ badges and the client's `classifyTask` group
-`snoozed` (precedence container → snoozed → needs-estimate → too-big → ready)
-are derived the same way; client and server predicates are pinned by shared
-test vectors (`shared/drawableVectors.ts`) run in both suites.
+reload-restore — and because a snooze wears off on its own, the PATCH route
+clears the pointer *eagerly* (the wear-off would otherwise slip past ADR-13's
+lazy validation and resurrect a card the user explicitly sent away). The 💤/⛔
+badges and the client's `classifyTask` group `snoozed` (precedence container →
+snoozed → needs-estimate → too-big → ready) are derived the same way; client
+and server predicates are pinned by shared test vectors
+(`shared/drawableVectors.ts`) run in both suites.
 *Rationale:* Retaining the expired timestamp gives a correct staleness base
 for free — one comparison instead of an extra "woken at" column and expiry
 writes that could drift (the ADR-2 argument). A separate `blocked` flag

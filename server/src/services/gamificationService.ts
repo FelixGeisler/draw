@@ -56,7 +56,7 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
     task.id,
   );
 
-  // Completion clears snooze/block state (ADR-14) — critical for recurring
+  // Completion clears snooze/block state (ADR-16) — critical for recurring
   // tasks, which stay open and must be drawable for the next occurrence.
   const recurring = task.recur_every_days != null && task.recur_every_days > 0;
   if (recurring) {
