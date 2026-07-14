@@ -1,14 +1,16 @@
 import { Router } from "express";
-import { API_KEY_SETTING, db, setSetting } from "../db.js";
+import { API_KEY_SETTING, CURRENT_DRAW_SETTING, db, setSetting } from "../db.js";
 
 export const settingsRouter = Router();
 
 // The stored Claude API key must never leak through the generic settings
-// endpoints — it is managed exclusively via PUT/DELETE /api/ai/key.
+// endpoints — it is managed exclusively via PUT/DELETE /api/ai/key. The
+// current-draw pointer is internal session state (GET /api/draw/current),
+// not a user setting.
 function publicSettings(): Record<string, string> {
   const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key != ?")
-    .all(API_KEY_SETTING) as { key: string; value: string }[];
+    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?)")
+    .all(API_KEY_SETTING, CURRENT_DRAW_SETTING) as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 

@@ -62,7 +62,9 @@ test("breakdown: subtasks make the parent drawable ready work", async ({ page })
 test("draw and complete: card flips, XP and trophy deck react", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByText("Lv 1")).toBeVisible();
-  await expect(page.getByText("0 XP")).toBeVisible();
+  // exact: substring matching would collide with awards ending in 0 — a
+  // 20-min impact-3 drawn card pays 30 XP, and "0 XP" is inside "30 XP".
+  await expect(page.getByText("0 XP", { exact: true })).toBeVisible();
 
   await page.locator(".draw-face.front").click();
   await expect(page.locator(".draw-card")).toHaveClass(/flipped/);
@@ -72,7 +74,7 @@ test("draw and complete: card flips, XP and trophy deck react", async ({ page })
 
   // Trophy deck appears with the completed card; XP is no longer 0
   await expect(page.getByText(/Today's pile — 1 done/)).toBeVisible();
-  await expect(page.getByText("0 XP")).not.toBeVisible();
+  await expect(page.getByText("0 XP", { exact: true })).not.toBeVisible();
 
   // Achievement toasts for first draw + first completion
   await expect(page.getByText("🏆 Achievement unlocked").first()).toBeVisible();

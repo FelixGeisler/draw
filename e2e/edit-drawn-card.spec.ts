@@ -1,5 +1,6 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
+import { drawFromGoal } from "./helpers.js";
 
 // Issue #13: the drawn card offers Edit (reusing TaskForm) and Delete.
 // Runs after core-journey.spec.ts against the same database. To keep the
@@ -27,16 +28,9 @@ async function seed(request: APIRequestContext) {
   });
 }
 
-async function drawFromGoal(page: Page) {
-  await page.goto("/");
-  await page.locator(".draw-filters select").selectOption({ label: `🎯 ${GOAL_TITLE}` });
-  await page.locator(".draw-face.front").click();
-  await expect(page.locator(".draw-card")).toHaveClass(/flipped/);
-}
-
 test("edit: saving updates the card in place, drawn state preserved", async ({ page }) => {
   await seed(page.request);
-  await drawFromGoal(page);
+  await drawFromGoal(page, GOAL_TITLE);
   await expect(page.locator(".draw-face.back h2")).toHaveText(TASK_TITLE);
   await expect(page.locator(".draw-chance")).toBeVisible();
 
@@ -72,7 +66,7 @@ test("edit: saving updates the card in place, drawn state preserved", async ({ p
 test("edit above max_draw_effort: card stays with hint and draw-again offer", async ({
   page,
 }) => {
-  await drawFromGoal(page);
+  await drawFromGoal(page, GOAL_TITLE);
   await expect(page.locator(".draw-face.back h2")).toHaveText(EDITED_TITLE);
 
   await page.getByRole("button", { name: "✎ Edit" }).click();
@@ -97,7 +91,7 @@ test("delete from the card dismisses it and returns to the idle draw", async ({ 
   expect(task).toBeTruthy();
   await page.request.patch(`/api/tasks/${task.id}`, { data: { effortMinutes: 10 } });
 
-  await drawFromGoal(page);
+  await drawFromGoal(page, GOAL_TITLE);
   await expect(page.locator(".draw-face.back h2")).toHaveText(EDITED_TITLE);
 
   page.once("dialog", (dialog) => dialog.accept());

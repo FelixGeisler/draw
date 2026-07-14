@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import confetti from "canvas-confetti";
 import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
-import { useDraw, type DrawResponse } from "../hooks/useDraw";
+import { useCurrentDraw, useDraw, type DrawResponse } from "../hooks/useDraw";
 import { useStartTimer } from "../hooks/useTimer";
 import { TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
@@ -29,6 +29,22 @@ export function DrawPage() {
   const [result, setResult] = useState<DrawResponse | null>(null);
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState(false);
+
+  // Restore the server-persisted draw once per mount (issue #25) — a reload
+  // lands straight on the revealed card, no shuffle, mirroring the TimerBar.
+  // The one-shot guard keeps a late or stale response from resurrecting a
+  // card after the user already drew, completed, or deleted in this session.
+  const currentDraw = useCurrentDraw();
+  const restoreAttempted = useRef(false);
+  useEffect(() => {
+    if (restoreAttempted.current || currentDraw.isFetching || currentDraw.data === undefined)
+      return;
+    restoreAttempted.current = true;
+    if (currentDraw.data?.task && phase === "idle" && result === null) {
+      setResult({ task: currentDraw.data.task });
+      setPhase("revealed");
+    }
+  }, [currentDraw.isFetching, currentDraw.data, phase, result]);
 
   async function doDraw() {
     setPhase("shuffling");
@@ -64,7 +80,9 @@ export function DrawPage() {
 
   async function completeDrawn() {
     if (!result?.task) return;
-    await updateTask.mutateAsync({ id: result.task.id, status: "done", wasDrawn: true });
+    // No wasDrawn flag: the server derives the drawn-card bonus from the
+    // persisted current draw (ADR-13), so it survives reloads too.
+    await updateTask.mutateAsync({ id: result.task.id, status: "done" });
     confetti({ particleCount: 120, spread: 75, origin: { y: 0.6 } });
     setResult(null);
     setPhase("idle");
