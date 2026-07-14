@@ -103,6 +103,8 @@ entry (if any) is closed with `ended_at` = completion time. The check is per
 untouched. This applies equally on the recurring path (ADR-6): the task stays
 open with an advanced due date, but the work session that just earned XP is
 over, so its entry is finished — the next occurrence starts its own timer.
+Reopening a task (ADR-5) does *not* reopen the auto-closed time entry: the
+tracked minutes were really worked, only the completion is undone.
 *Rationale:* A completion is the strongest possible signal that the work
 session ended; leaving the entry open silently corrupts the leverage stats the
 app is built around. Closing only the task's own entry keeps the common

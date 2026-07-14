@@ -71,8 +71,8 @@ describe("completion closes the task's own timer", () => {
     const current = await request(app).get("/api/timer/current").expect(200);
     expect(current.body).toBeNull();
     const open = db
-      .prepare("SELECT COUNT(*) AS n FROM time_entries WHERE ended_at IS NULL")
-      .get() as { n: number };
+      .prepare("SELECT COUNT(*) AS n FROM time_entries WHERE task_id = ? AND ended_at IS NULL")
+      .get(chore.id) as { n: number };
     expect(open.n).toBe(0);
   });
 });

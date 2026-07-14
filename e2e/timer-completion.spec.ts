@@ -4,7 +4,6 @@ import { expect, test } from "@playwright/test";
 // timer must disappear without a reload (query invalidation, not refetch
 // interval). Runs after core-journey.spec.ts against the same database; it
 // only creates and completes its own uniquely-named task.
-test.describe.configure({ mode: "serial" });
 
 test("completing a task from the tasks page removes the timer bar without reload", async ({
   page,
