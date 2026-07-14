@@ -4,11 +4,28 @@ import type { ZodType } from "zod";
 import fs from "node:fs";
 import path from "node:path";
 import { API_KEY_SETTING, db, filesDir, getSetting, getSettingString } from "../db.js";
-import { breakdownSchema, planGoalSchema, type BreakdownResult, type PlanGoalResult } from "../aiSchemas.js";
+import {
+  breakdownSchema,
+  generateTasksSchema,
+  planGoalSchema,
+  type BreakdownResult,
+  type PlanGoalResult,
+} from "../aiSchemas.js";
+import {
+  MAX_ITEMS,
+  MAX_PARTS_PER_ITEM,
+  postprocessGenerateTasks,
+  type GenerateTasksProcessed,
+} from "./aiPostprocess.js";
 
 export const MODEL = "claude-opus-4-8";
 const MAX_INPUT_TOKENS = 180_000;
 const INPUT_USD_PER_MTOK = 5;
+// Adaptive thinking shares max_tokens with the output. A 40-item transcription
+// plus rationales does not fit the default 16K budget, so generate-tasks runs
+// with a raised cap; existing callers keep the default.
+const DEFAULT_MAX_TOKENS = 16_000;
+const GENERATE_TASKS_MAX_TOKENS = 32_000;
 
 // Resolved per request (not at module load) so a key set through the
 // Settings UI takes effect immediately, without a server restart.
@@ -167,7 +184,7 @@ function taskContext(taskId: number): { blocks: ContentBlock[]; goalId: number |
   return { blocks: [{ type: "text", text: lines.join("\n") }], goalId: task.goalId };
 }
 
-function goalContext(goalId: number, userNotes?: string): ContentBlock[] {
+function goalFacts(goalId: number) {
   const goal = db
     .prepare("SELECT title, outcome, target_date AS targetDate FROM goals WHERE id = ?")
     .get(goalId) as { title: string; outcome: string | null; targetDate: string | null } | undefined;
@@ -176,6 +193,12 @@ function goalContext(goalId: number, userNotes?: string): ContentBlock[] {
   const existing = db
     .prepare("SELECT title, status, impact FROM tasks WHERE goal_id = ? AND status != 'archived'")
     .all(goalId) as { title: string; status: string; impact: number }[];
+
+  return { goal, existing };
+}
+
+function goalContext(goalId: number, userNotes?: string): ContentBlock[] {
+  const { goal, existing } = goalFacts(goalId);
 
   const today = new Date().toISOString().slice(0, 10);
   const daysLeft = goal.targetDate
@@ -197,6 +220,39 @@ function goalContext(goalId: number, userNotes?: string): ContentBlock[] {
     `First, in outcomeAnalysis: state concretely what gets assessed/measured (if materials include past exams or a syllabus, name the actual topics and question types).`,
     `Then propose 4-10 tasks of at most ${maxEffort} minutes each, highest leverage first, phased as now/next/later relative to the time remaining.`,
     `Bias hard toward practicing what is graded (past questions, producing output) over passive consumption.`,
+  ].filter(Boolean);
+
+  return [{ type: "text", text: lines.join("\n") }];
+}
+
+// Transcription mode (#28): enumerate what the material contains instead of
+// curating a plan. The material's own numbers (points, stated minutes) are
+// sacred — they are copied verbatim and audited row-by-row during review.
+function generateTasksContext(goalId: number, instruction: string): ContentBlock[] {
+  const { goal, existing } = goalFacts(goalId);
+  const maxEffort = getSetting("max_draw_effort", 30);
+
+  const lines = [
+    `TRANSCRIPTION MODE — this is not a planning request. Enumerate EVERY exercise/item the instruction below asks for from the provided materials. Do not curate, do not skip items, do not merge several items into one.`,
+    ``,
+    `Goal: ${goal.title}`,
+    goal.outcome ? `Measured by: ${goal.outcome}` : "",
+    goal.targetDate ? `Target date: ${goal.targetDate} (today is ${new Date().toISOString().slice(0, 10)})` : "",
+    existing.length > 0
+      ? `Existing tasks for this goal (do NOT duplicate): ${existing.map((t) => `"${t.title}" (${t.status})`).join(", ")}`
+      : "",
+    ``,
+    `User instruction: ${instruction}`,
+    ``,
+    `Rules for each item:`,
+    `- sourceOverview: one short paragraph describing what the material contains, including the total item count you see.`,
+    `- label: the exercise/item number exactly as printed ("7", "7b"); null when the material shows none.`,
+    `- statedMinutes: a time estimate printed in the material, copied VERBATIM — never adjust it. points: as printed, null when absent.`,
+    `- estimatedMinutes: your own estimate, used only when the material states no time.`,
+    `- title: concrete action verb referencing the item's actual content, not just its number.`,
+    `- rationale: terse, and it MUST cite the source data (e.g. "Ex. 7, 12 pts, ~20 min per the PDF") so every row can be audited against the material.`,
+    `- Transcribe items at their true size — never shrink an estimate to fit. If an item exceeds ${maxEffort} minutes, split it into parts along the material's own sub-question boundaries (a/b/c), each part at most ${maxEffort} minutes. Otherwise leave parts empty.`,
+    `- Hard caps: at most ${MAX_ITEMS} items, at most ${MAX_PARTS_PER_ITEM} parts per item.`,
   ].filter(Boolean);
 
   return [{ type: "text", text: lines.join("\n") }];
@@ -235,6 +291,7 @@ export async function estimate(input: {
   taskId?: number;
   goalId?: number;
   materialIds?: number[];
+  instruction?: string;
 }): Promise<{ inputTokens: number; estimatedUsd: number }> {
   const materialIds = input.materialIds ?? [];
   let blocks: ContentBlock[];
@@ -246,6 +303,8 @@ export async function estimate(input: {
   } else {
     throw new AiError(400, "taskId or goalId required");
   }
+  // A generate-tasks instruction is part of the prompt, so it counts too.
+  if (input.instruction) blocks.push({ type: "text", text: input.instruction });
   const inputTokens = await guardTokens(blocks).catch((e: AiError) => {
     // Even over-limit estimates should report the number, not fail.
     const match = /\(([\d,.]+) tokens/.exec(e.message);
@@ -258,13 +317,17 @@ export async function estimate(input: {
   };
 }
 
-async function runStructured<T>(blocks: ContentBlock[], schema: ZodType<T>): Promise<T> {
+async function runStructured<T>(
+  blocks: ContentBlock[],
+  schema: ZodType<T>,
+  opts: { maxTokens?: number } = {},
+): Promise<T> {
   const c = requireClient();
   await guardTokens(blocks);
   try {
     const response = await c.messages.parse({
       model: MODEL,
-      max_tokens: 16_000,
+      max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       thinking: { type: "adaptive" },
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: blocks }],
@@ -305,4 +368,19 @@ export async function planGoal(
     effortMinutes: Math.min(Math.max(1, Math.round(t.effortMinutes)), maxEffort),
   }));
   return result;
+}
+
+export async function generateTasks(
+  goalId: number,
+  materialIds: number[] = [],
+  instruction: string,
+): Promise<GenerateTasksProcessed> {
+  const blocks = [...materialBlocks(materialIds, goalId), ...generateTasksContext(goalId, instruction)];
+  const result = await runStructured(blocks, generateTasksSchema, {
+    maxTokens: GENERATE_TASKS_MAX_TOKENS,
+  });
+  // Deterministic post-processing (ADR-13): points → impact quintiles, and
+  // split-don't-clamp for oversized items. The Math.min clamp above would
+  // corrupt the material's own time data here.
+  return postprocessGenerateTasks(result, getSetting("max_draw_effort", 30));
 }

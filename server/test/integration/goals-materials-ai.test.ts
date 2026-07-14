@@ -98,5 +98,38 @@ describe("AI degraded mode (no API key)", () => {
     await request(app).post("/api/ai/estimate").send({ taskId: 1 }).expect(503);
     await request(app).post("/api/ai/breakdown").send({ taskId: 1 }).expect(503);
     await request(app).post("/api/ai/plan-goal").send({ goalId: 1 }).expect(503);
+    await request(app)
+      .post("/api/ai/generate-tasks")
+      .send({ goalId: 1, instruction: "import every exercise" })
+      .expect(503);
+  });
+
+  it("estimate accepts the optional instruction field without changing the degraded contract", async () => {
+    // Token counting itself needs a live key; what must hold here is that the
+    // new field is accepted and existing instruction-less calls are unaffected.
+    const withInstruction = await request(app)
+      .post("/api/ai/estimate")
+      .send({ goalId: 1, instruction: "import every exercise" })
+      .expect(503);
+    const without = await request(app).post("/api/ai/estimate").send({ goalId: 1 }).expect(503);
+    expect(withInstruction.body).toEqual(without.body);
+  });
+
+  it("generate-tasks validates the request before the key check (400 even unconfigured)", async () => {
+    const noGoal = await request(app)
+      .post("/api/ai/generate-tasks")
+      .send({ instruction: "import every exercise" })
+      .expect(400);
+    expect(noGoal.body.error).toMatch(/goalId/);
+
+    const noInstruction = await request(app)
+      .post("/api/ai/generate-tasks")
+      .send({ goalId: 1 })
+      .expect(400);
+    expect(noInstruction.body.error).toMatch(/instruction/);
+
+    // Whitespace-only or non-string instructions are missing instructions.
+    await request(app).post("/api/ai/generate-tasks").send({ goalId: 1, instruction: "   " }).expect(400);
+    await request(app).post("/api/ai/generate-tasks").send({ goalId: 1, instruction: 42 }).expect(400);
   });
 });
