@@ -1,0 +1,123 @@
+/* Trophy pile (issue #40). The pile stays an overlapping, slightly rotated
+   stack; hovering, focusing, or tapping a card lifts it above its siblings to
+   make it readable. The lift is transform + z-index only — the card's box in
+   flow never changes, so surrounding layout cannot shift.
+
+   Stacking-context pitfall: every card carries a rotate() transform, which
+   makes each card its own stacking context — DOM order alone cannot raise a
+   card over a later sibling. The lifted card therefore gets an explicit
+   z-index, which applies because the cards are flex items (z-index works on
+   flex items without `position`). The visual card is an inner wrapper with
+   `min-height: 100%` so the lifted card can grow past the 126px flow box
+   (full title + details) without clipping or reflow. */
+
+.trophy-deck {
+  margin-top: 32px;
+}
+
+.trophy-deck h3 {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.trophy-pile {
+  display: flex;
+  justify-content: center;
+}
+
+.trophy-card {
+  width: 90px;
+  height: 126px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transform: rotate(var(--trophy-rot, 0deg));
+  transition: transform 0.18s ease;
+}
+
+.trophy-card + .trophy-card {
+  margin-left: -30px;
+}
+
+.trophy-card-inner {
+  width: 100%;
+  min-height: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: linear-gradient(160deg, #232735, #1b1e27);
+  padding: 8px;
+  font-size: 11px;
+  overflow: hidden;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 0.18s ease;
+}
+
+.trophy-card-glyph {
+  font-size: 16px;
+}
+
+.trophy-card-title {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.trophy-details {
+  display: none;
+  margin-top: 6px;
+  color: var(--text-dim);
+}
+
+.trophy-details .dot {
+  vertical-align: -1px;
+}
+
+.trophy-card-xp {
+  color: var(--ok);
+  margin-top: 4px;
+}
+
+/* The lifted state — identical for hover, keyboard focus, and tap toggle. */
+.trophy-card:hover,
+.trophy-card:focus-visible,
+.trophy-card.lifted {
+  transform: rotate(0deg) translateY(-26px) scale(1.5);
+  z-index: 30;
+}
+
+.trophy-card:focus-visible {
+  outline: none;
+}
+
+.trophy-card:focus-visible .trophy-card-inner {
+  border-color: var(--accent);
+}
+
+.trophy-card:hover .trophy-card-inner,
+.trophy-card:focus-visible .trophy-card-inner,
+.trophy-card.lifted .trophy-card-inner {
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.6);
+}
+
+.trophy-card:hover .trophy-card-title,
+.trophy-card:focus-visible .trophy-card-title,
+.trophy-card.lifted .trophy-card-title {
+  display: block;
+  -webkit-line-clamp: none;
+  overflow: visible;
+}
+
+.trophy-card:hover .trophy-details,
+.trophy-card:focus-visible .trophy-details,
+.trophy-card.lifted .trophy-details {
+  display: block;
+}
+
+/* Reduced motion: skip the transition, keep the lift itself. */
+@media (prefers-reduced-motion: reduce) {
+  .trophy-card,
+  .trophy-card-inner {
+    transition: none;
+  }
+}
