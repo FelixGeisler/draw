@@ -6,7 +6,8 @@ import path from "node:path";
 // E2E runs against its own server instance on separate ports with a
 // throwaway database — a live dev server on 3001/5173 is not disturbed.
 // E2E_API_PORT/E2E_VITE_PORT let parallel checkouts (worktrees, CI shards)
-// run their E2E suites side by side without colliding on the defaults.
+// run their E2E suites side by side without colliding on the defaults. The
+// E2E_ prefix keeps an ambient API_PORT from a dev shell out of E2E isolation.
 const E2E_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "draw-e2e-"));
 const API_PORT = process.env.E2E_API_PORT || "3101";
 const VITE_PORT = process.env.E2E_VITE_PORT || "5273";

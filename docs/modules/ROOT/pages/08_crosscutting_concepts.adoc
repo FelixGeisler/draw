@@ -4,8 +4,11 @@
 
 Anything that can drift is computed at read time: drawability (SQL predicate),
 "in progress" (running time entry exists), XP/level/streak (aggregates over
-`completions`), weekly grade (aggregation over `time_entries`). Only facts are
-stored (tasks, entries, completions, unlocked achievements).
+`completions`), weekly grade (aggregation over `time_entries`), and the displayed
+effort of a broken-down task (`remainingEffortMinutes` — SUM over its OPEN
+subtasks' estimates at query time; the stored estimate stays what the user typed
+and keeps feeding XP and edit forms). Only facts are stored (tasks, entries,
+completions, unlocked achievements).
 
 == 8.2 The weight formula
 

@@ -71,8 +71,9 @@ client/src/
                                MaterialsSection, AiSuggestionPanel (breakdown + plan panels)
 ....
 
-All server state flows through TanStack Query; mutations invalidate the
-`tasks`/`gamification`/`stats` query keys. There is no other state management.
+All server state flows through TanStack Query; task mutations invalidate the
+`tasks`/`gamification`/`stats`/`goals` query keys (goal cards derive their
+task counts from tasks). There is no other state management.
 
 == 5.4 Data Model
 

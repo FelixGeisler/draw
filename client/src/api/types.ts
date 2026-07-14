@@ -26,6 +26,13 @@ export interface Task {
   completedAt: string | null;
   lastDrawnAt: string | null;
   hasOpenChildren: number;
+  /**
+   * Derived at query time (never stored): sum of OPEN subtasks' estimates for a
+   * broken-down task, the task's own effortMinutes otherwise. Null when the open
+   * subtasks are all unestimated. Absent on task shapes from the draw/timer
+   * endpoints, which only ever carry drawable leaves.
+   */
+  remainingEffortMinutes?: number | null;
   subtasks?: Task[];
 }
 
