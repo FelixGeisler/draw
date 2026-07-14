@@ -42,6 +42,12 @@ weight = impact² / effort × urgency × staleness
 - `staleness` — the longer a task sits (or a chore goes undone), the louder it gets (up to ×2)
 - recently drawn cards are dampened ×0.15 for an hour, so "Draw again" gives variety
 
+## Documentation
+
+Architecture documentation ([arc42](https://arc42.org/)) lives in [`docs/`](docs/index.md)
+and is hosted at **https://felixgeisler.github.io/draw/**.
+Workflow conventions: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Stack
 
 React + TypeScript + Vite · TanStack Query · Express 5 · better-sqlite3 · @anthropic-ai/sdk (claude-opus-4-8, structured outputs, prompt caching)
