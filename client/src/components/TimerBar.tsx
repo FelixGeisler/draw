@@ -50,10 +50,11 @@ export function TimerBar() {
       <button onClick={() => stopTimer.mutate()}>Stop</button>
       <button
         className="primary"
-        onClick={async () => {
-          await stopTimer.mutateAsync();
-          await updateTask.mutateAsync({ id: task.id, status: "done" });
-        }}
+        onClick={() =>
+          // Completion closes the running entry server-side (ADR-12) — no
+          // separate stop call, so ended_at always equals completed_at.
+          updateTask.mutate({ id: task.id, status: "done" })
+        }
       >
         ✓ Done
       </button>

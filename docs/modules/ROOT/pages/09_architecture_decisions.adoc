@@ -104,3 +104,21 @@ key: `GET`/`PATCH /api/settings` exclude the row, `GET /api/ai/status` reports o
 rest is a conscious trade-off: this is a local single-user app with no auth
 (section 2); encrypting with a locally stored secret would add complexity without
 a meaningful security boundary. Out of scope: key validation, encryption at rest.
+
+== ADR-12: Completing a task closes its own running timer
+
+*Context:* Completion (`completeTask()`) never touched `time_entries`, so a
+running timer kept accruing minutes against a task that was already done until
+the user pressed Stop or started another timer.
+*Decision:* Inside the completion transaction, the completed task's open time
+entry (if any) is closed with `ended_at` = completion time. The check is per
+`task_id`: a running timer that belongs to a *different* task is left
+untouched. This applies equally on the recurring path (ADR-6): the task stays
+open with an advanced due date, but the work session that just earned XP is
+over, so its entry is finished — the next occurrence starts its own timer.
+Reopening a task (ADR-5) does *not* reopen the auto-closed time entry: the
+tracked minutes were really worked, only the completion is undone.
+*Rationale:* A completion is the strongest possible signal that the work
+session ended; leaving the entry open silently corrupts the leverage stats the
+app is built around. Closing only the task's own entry keeps the common
+"complete a quick task while a long timer runs elsewhere" flow intact.

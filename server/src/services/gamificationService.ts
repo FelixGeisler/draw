@@ -46,6 +46,15 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
     "INSERT INTO completions (task_id, completed_at, was_drawn, xp_awarded) VALUES (?, ?, ?, ?)",
   ).run(task.id, now.toISOString(), wasDrawn ? 1 : 0, xp);
 
+  // Completing ends the work session: close this task's own running timer at
+  // completion time. A different task's running timer stays untouched. This
+  // applies on the recurring path too — the task stays open, but XP was just
+  // awarded for the session, so the entry is finished (ADR-12).
+  db.prepare("UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL").run(
+    now.toISOString(),
+    task.id,
+  );
+
   const recurring = task.recur_every_days != null && task.recur_every_days > 0;
   if (recurring) {
     const next = new Date(now);

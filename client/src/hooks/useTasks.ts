@@ -55,11 +55,14 @@ export function useCreateTask() {
 
 export function useUpdateTask() {
   const invalidate = useInvalidateTasks();
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...patch }: { id: number } & Record<string, unknown>) =>
       api.patch<CompletionResponse>(`/api/tasks/${id}`, patch),
     onSuccess: (data) => {
       invalidate();
+      // Completing a task may have closed its running timer server-side.
+      qc.invalidateQueries({ queryKey: ["timer"] });
       announceAchievements(data.newAchievements);
     },
   });
