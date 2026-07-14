@@ -1,6 +1,6 @@
 import { db, getSetting } from "../db.js";
 
-interface Candidate {
+export interface Candidate {
   id: number;
   impact: number;
   effortMinutes: number;
@@ -20,7 +20,7 @@ export interface DrawResult {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function urgencyFactor(dueDate: string | null, now: Date): number {
+export function urgencyFactor(dueDate: string | null, now: Date): number {
   if (!dueDate) return 1;
   const due = new Date(`${dueDate}T23:59:59`);
   const daysLeft = (due.getTime() - now.getTime()) / DAY_MS;
@@ -30,7 +30,7 @@ function urgencyFactor(dueDate: string | null, now: Date): number {
   return 1 + (3 * (7 - daysLeft)) / 7;
 }
 
-function stalenessFactor(candidate: Candidate, now: Date): number {
+export function stalenessFactor(candidate: Candidate, now: Date): number {
   const since =
     candidate.recurEveryDays != null && candidate.lastCompletedAt
       ? new Date(candidate.lastCompletedAt)
@@ -39,7 +39,7 @@ function stalenessFactor(candidate: Candidate, now: Date): number {
   return 1 + Math.min(days, 30) / 30; // up to x2
 }
 
-function weight(c: Candidate, now: Date, cooldownMinutes: number, poolSize: number): number {
+export function weight(c: Candidate, now: Date, cooldownMinutes: number, poolSize: number): number {
   let w = (c.impact * c.impact) / Math.max(c.effortMinutes, 5);
   w *= urgencyFactor(c.dueDate, now);
   w *= stalenessFactor(c, now);

@@ -18,6 +18,22 @@ npm run dev        # Express :3001 + Vite :5173
 
 Type checks: `npm run build -w server` and `npx tsc --noEmit -p client/tsconfig.json`.
 
+## Tests — required for every PR
+
+Three levels; all must be green before a PR is merged (CI enforces this):
+
+| Level | Command | What it covers |
+|---|---|---|
+| Unit | `npm test` (part 1) | Pure logic: draw weights, XP/levels, drawability classification |
+| Integration | `npm test` (part 2) | REST API against a real temp SQLite DB (supertest) |
+| End-to-end | `npm run test:e2e` | Full user journeys in a real browser (Playwright, own ports + throwaway DB) |
+
+One-time setup for E2E: `npx playwright install chromium`.
+
+Tests never touch your real database — they run against temp directories via the
+`DATA_DIR` environment variable. New features need tests at the appropriate level:
+domain logic → unit, API behavior → integration, user-visible flows → E2E.
+
 ## Documentation
 
 Architecture documentation follows [arc42](https://arc42.org/) and lives in `docs/`,

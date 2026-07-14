@@ -5,7 +5,7 @@
 | # | Risk / Debt | Impact | Mitigation / Status |
 |---|---|---|---|
 | R1 | **AI live path never verified** — no API key was available during initial development | Breakdown/plan-goal could fail on first real use | Degraded mode fully tested; code follows current SDK docs; verify on first key setup (see Q4/Q10 scenarios) |
-| R2 | **No automated tests** — all verification was manual/scripted | Regressions possible as features grow | Acceptable for a personal project; add targeted tests for `drawService` weighting and `gamificationService` XP if changes accumulate |
+| R2 | ~~No automated tests~~ **Resolved:** unit (Vitest), integration (Supertest + temp SQLite), and E2E (Playwright) suites exist and run in CI on every PR | — | See [8.7 Testing strategy](08_crosscutting_concepts.md); keep suites green and extend them with every feature |
 | R3 | **Timezone handling is subtle** — a local/UTC round-trip bug already occurred in stats date ranges | Off-by-one-day stats | Fixed with UTC-only `addDays`; concept documented in [8.6](08_crosscutting_concepts.md); keep date math in UTC |
 | R4 | **`wasDrawn` heuristic** — completions via TimerBar count as "drawn" if the task was drawn within 6h | Slightly generous XP bonus | Deliberate: reinforces the draw habit; revisit if XP feels inflated |
 | R5 | **PDF materials are re-uploaded as base64 per AI call** | Large PDFs inflate request size and latency (cache only saves cost, not upload bandwidth) | Fine for personal use; Anthropic Files API would be the upgrade path |
