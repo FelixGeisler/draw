@@ -104,14 +104,16 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
   }
 
   const insert = db.prepare(
-    `INSERT INTO tasks (title, category_id, goal_id, parent_id, impact, effort_minutes, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const created = db.transaction(() => {
     const ids: number[] = [];
     for (const s of subtasks) {
       const r = insert.run(
         s.title.trim(),
+        // Optional provenance line, e.g. "Exercise 7 · 8 pts · ~45 min · exam.pdf" (#28)
+        s.description ?? null,
         parent.categoryId,
         parent.goalId ?? null,
         parent.id,
