@@ -18,6 +18,14 @@ export interface ProcessedTask extends GeneratedTask {
 export interface GenerateTasksProcessed {
   sourceOverview: string;
   tasks: ProcessedTask[];
+  /**
+   * True when at least one output part still exceeds `maxEffort`: an item
+   * longer than maxEffort × MAX_PARTS_PER_ITEM cannot be split into drawable
+   * parts without blowing the parts cap, and the cap wins (documented
+   * trade-off, PR #42 nit). The review UI surfaces this so the user knows
+   * those leaves land in "too big" until broken down further.
+   */
+  oversizedParts: boolean;
 }
 
 // Hygiene caps against model runaway; also stated in the prompt so the model
@@ -149,5 +157,6 @@ export function postprocessGenerateTasks(
   const tasks = normalizeImpacts(capAndClean(result.tasks)).map((t) =>
     splitOversized(t, maxEffort),
   );
-  return { sourceOverview: result.sourceOverview, tasks };
+  const oversizedParts = tasks.some((t) => t.parts.some((p) => p.minutes > maxEffort));
+  return { sourceOverview: result.sourceOverview, tasks, oversizedParts };
 }
