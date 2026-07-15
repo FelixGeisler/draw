@@ -1,0 +1,125 @@
+/* Drag-and-drop reorganize (#101). The handle is pointer-only by design —
+   the Move under…/⤴ buttons stay the keyboard-accessible path (#100). All
+   decorative motion sits behind prefers-reduced-motion: no-preference; the
+   ghost following the cursor is a position update, not an animation. */
+
+.dnd-handle {
+  cursor: grab;
+  touch-action: none; /* pointer events own the gesture on touch */
+  user-select: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 0 2px;
+}
+
+/* No text selection while a drag sweeps across rows. */
+.dnd-active {
+  user-select: none;
+}
+.dnd-active .dnd-handle {
+  cursor: grabbing;
+}
+
+/* Every eligible target glows for the whole drag; the hovered one glows
+   stronger. Blocked rows only speak when pointed at (.dnd-blocked). */
+[data-dnd-row].dnd-eligible {
+  outline: 1px dashed var(--accent);
+  outline-offset: -3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+[data-dnd-row].dnd-eligible.dnd-over {
+  outline-style: solid;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+[data-dnd-row].dnd-blocked {
+  outline: 1px dashed var(--danger);
+  outline-offset: -3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+.dnd-source {
+  opacity: 0.45;
+}
+
+/* The hovered blocked target names its rule right under the row. */
+.dnd-reason {
+  padding: 4px 10px;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.dnd-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  pointer-events: none; /* elementFromPoint must see the row underneath */
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: var(--bg-panel);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+}
+
+/* Fixed overlay (not in the flow): appearing mid-drag must not shift the
+   rows under the pointer, and it stays reachable however far the list
+   scrolls. */
+.dnd-root-zone {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  max-width: 70vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 10px 18px;
+  border-radius: 10px;
+  border: 1px dashed var(--border);
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 13px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.dnd-root-zone.dnd-zone-eligible {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.dnd-root-zone.dnd-zone-eligible.dnd-over {
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent) 20%, var(--bg-panel));
+}
+/* A blocked zone (dragging a task that is already top-level) stays quiet
+   until pointed at — then it wears the rule in danger colors. */
+.dnd-root-zone.dnd-zone-blocked.dnd-over {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .dnd-ghost {
+    animation: dnd-fade-in 0.12s ease-out;
+  }
+  .dnd-root-zone {
+    animation: dnd-fade-in 0.15s ease-out;
+  }
+  [data-dnd-row].dnd-eligible,
+  [data-dnd-row].dnd-blocked {
+    transition:
+      background-color 0.15s ease,
+      outline-color 0.15s ease;
+  }
+}
+
+@keyframes dnd-fade-in {
+  from {
+    opacity: 0;
+  }
+}

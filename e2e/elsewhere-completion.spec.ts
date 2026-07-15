@@ -23,15 +23,31 @@ async function seed(request: APIRequestContext, title: string) {
     goal = await (await request.post("/api/goals", { data: { title: GOAL_TITLE } })).json();
   }
   const categories: { id: number }[] = await (await request.get("/api/categories")).json();
-  await request.post("/api/tasks", {
-    data: { title, categoryId: categories[0].id, goalId: goal!.id, effortMinutes: 10 },
-  });
+  const task = await (
+    await request.post("/api/tasks", {
+      data: { title, categoryId: categories[0].id, goalId: goal!.id, effortMinutes: 10 },
+    })
+  ).json();
+  return task as { id: number };
+}
+
+/**
+ * Shared-DB hygiene: deleting the task cascades to its completion, so this
+ * file leaves no extra cards in today's trophy pile (a reopen would instead
+ * put the task back into the shared goal's pool and break the next test's
+ * deterministic single-card draw). The pile is a centered non-wrapping flex
+ * row — every leftover completion shrinks ALL cards, and below ~60px each
+ * card's hover center falls under its right neighbor, flaking the trophy
+ * specs' hover asserts.
+ */
+async function cleanup(request: APIRequestContext, taskId: number) {
+  await request.delete(`/api/tasks/${taskId}`);
 }
 
 test("completing the drawn card from the TimerBar dismisses it — no second ✓ Done", async ({
   page,
 }) => {
-  await seed(page.request, TIMER_TASK);
+  const task = await seed(page.request, TIMER_TASK);
   await drawFromGoal(page, GOAL_TITLE);
   await expect(page.locator(".draw-face.back h2")).toHaveText(TIMER_TASK);
 
@@ -61,12 +77,14 @@ test("completing the drawn card from the TimerBar dismisses it — no second ✓
   expect(completion.wasDrawn).toBe(1);
   expect(completion.xpAwarded).toBe(15);
   expect(await (await page.request.get("/api/draw/current")).json()).toBeNull();
+
+  await cleanup(page.request, task.id);
 });
 
 test("completing the drawn card from the Tasks page dismisses it on return — SPA nav, no reload", async ({
   page,
 }) => {
-  await seed(page.request, TASKS_PAGE_TASK);
+  const task = await seed(page.request, TASKS_PAGE_TASK);
   await drawFromGoal(page, GOAL_TITLE);
   await expect(page.locator(".draw-face.back h2")).toHaveText(TASKS_PAGE_TASK);
 
@@ -85,4 +103,6 @@ test("completing the drawn card from the Tasks page dismisses it on return — S
   await page.getByRole("link", { name: "Draw", exact: true }).click();
   await expect(page.getByText("click to draw")).toBeVisible();
   await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
+
+  await cleanup(page.request, task.id);
 });

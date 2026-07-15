@@ -11,7 +11,10 @@
  *
  * This mirrors the XP semantics: completeTask() awards the 1.5x bonus off the
  * same was_drawn flag, and impact 4-5 implies a goal-linked task (ADR-4) —
- * foil literally means "drawn high-leverage completion". Because impact rides
+ * foil literally means "drawn high-leverage completion". The wasDrawn these
+ * payloads carry is already `was_drawn AND NOT was_warmup` server-side: a
+ * warm-up deal (#57, ADR-30) was handed out, not gambled, and mints no
+ * rarity — display and XP agree on what counts as drawn. Because impact rides
  * the live tasks join (like title), editing a task's impact after completion
  * moves the rarity of today's card; accepted, consistent with the join.
  *

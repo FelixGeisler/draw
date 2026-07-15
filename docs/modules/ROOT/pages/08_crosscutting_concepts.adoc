@@ -27,7 +27,12 @@ module `lib/feasibility.ts` classifies on-track/tight/infeasible from
 required vs. actual pace; days to the target date count on the LOCAL wall
 clock to the end of the target day — a target date is a human-facing calendar
 day like the ADR-21 activity buckets, not a UTC instant. No feasibility
-snapshot is ever persisted. Only facts are stored
+snapshot is ever persisted. Split-in-place (#108) introduces no new derived
+state either: the archived original of a split falls out of every predicate
+above — the draw pool, the Tasks page child list, the effort rollups, the
+sequential hold-back and the parent-completion gate — through the existing
+`status` conditions alone, with no write beyond the one status flip.
+Only facts are stored
 (tasks, entries, completions, unlocked achievements).
 
 == 8.2 The weight formula
@@ -49,6 +54,16 @@ makes neglected chores progressively louder. Sibling damping keeps a 40-leaf
 import (#29) from drowning them: measured at 58% of the probability mass on
 day 0 (and rising with staleness), damped to ~18% — methodology and numbers in
 `server/scripts/sim-issue30.ts`, guarded by `test/unit/draw-weights.test.ts`.
+
+The *warm-up draw* (#57, ADR-30) deliberately bypasses this whole formula: one
+deal per `warmup_every_hours` on the idle deck picks the minimum-effort
+eligible card deterministically (tie-break most stale — the same staleness
+anchor — then lowest id), with the cooldown applied as exclusion instead of
+the ×0.15 dampener. Gamification keeps it honest: completed inside its
+`max(effort, 15)`-minute window it pays ×1.25 (never the drawn ×1.5 — it was
+handed out, not gambled), completing another card within 30 minutes of a
+warm-up completion pays momentum ×1.25 — every combined multiplier is capped
+at ×1.5, so warm-ups can never out-earn playing the deck.
 
 == 8.3 Error handling
 

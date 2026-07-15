@@ -44,17 +44,28 @@ resolved on-page, so the edit never turns into a hidden re-roll (#110).
 Changing the category/goal filter while a card is revealed applies to the next
 draw only.
 
+The *warm-up deal* (`POST /api/draw/warmup`, #57, ADR-30) is the "I can't
+start" escape hatch on the IDLE deck: it deterministically deals the
+smallest eligible card from the same pool (no weights, no probability),
+rate-limited to one per `warmup_every_hours`. It is not a re-roll — the
+endpoint answers 409 while a valid current draw exists, and the dealt card
+is the same commitment as a drawn one, marker and badge surviving reloads
+via `GET /api/draw/current`.
+
 == 6.2 Completing a task (single transaction)
 
 ....
 PATCH /api/tasks/:id {status: 'done'}
   ├─ reject 409 if open subtasks exist
   ├─ drawn := task is the persisted current draw, or last_drawn_at within 6h
+  │           (a warm-up deal's own stamp is excluded — handed out, not gambled)
   └─ transaction:
-       insert completions row (xp = effort × impact/3, ×1.5 if drawn)
+       multiplier := warm-up card? in window ×1.25, late ×1.0 (never ×1.5)
+                     : (drawn ×1.5) × (momentum ×1.25), capped at ×1.5 (ADR-30)
+       insert completions row (xp = round(round(effort × impact/3) × multiplier))
        recurring? push due_date forward : set status done
-       clear current draw if it was this task
-       check achievements → response {task, xpAwarded, newAchievements, levelUp}
+       clear current draw (and warm-up marker) if it was this task
+       check achievements → response {task, xpAwarded, bonus, newAchievements, levelUp}
 ....
 
 The client fires confetti, updates the trophy deck, and toasts new achievements

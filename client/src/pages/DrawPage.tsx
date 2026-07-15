@@ -3,7 +3,14 @@ import { Link } from "react-router-dom";
 import confetti from "canvas-confetti";
 import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
-import { useCurrentDraw, useCurrentDrawCache, useDraw, type DrawResponse } from "../hooks/useDraw";
+import {
+  useCurrentDraw,
+  useCurrentDrawCache,
+  useDraw,
+  useWarmupDraw,
+  useWarmupStatus,
+  type DrawResponse,
+} from "../hooks/useDraw";
 import { useCardArt } from "../hooks/useAi";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
 import { FocusOverlay } from "../components/FocusOverlay";
@@ -23,6 +30,8 @@ export function DrawPage() {
   const categories = useCategories();
   const settings = useSettings();
   const draw = useDraw();
+  const warmup = useWarmupDraw();
+  const warmupStatus = useWarmupStatus();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const startTimer = useStartTimer();
@@ -52,6 +61,9 @@ export function DrawPage() {
   // purpose: the view itself is DERIVED from timer + current draw (ADR-29),
   // so a reload while the timer runs on the drawn card re-enters focus.
   const [focusExited, setFocusExited] = useState(false);
+  // Why the last completion paid extra (#57) — shown once the card is gone,
+  // cleared by the next draw/deal.
+  const [bonusNote, setBonusNote] = useState<string | null>(null);
 
   // The standing card DERIVES from the server-persisted current draw (#110,
   // extending ADR-29): a reload restores it revealed, no shuffle (issue #25,
@@ -68,8 +80,19 @@ export function DrawPage() {
     editedOutOfDeck,
   });
   const phase: Phase = shuffling ? "shuffling" : task ? "revealed" : "idle";
+  // The warm-up marker rides GET /api/draw/current (#57), so the badge and
+  // window hint survive reloads exactly like the derived card itself; the
+  // session's deal response bridges any gap before the cache settles.
+  const warmupInfo =
+    task == null
+      ? undefined
+      : currentDraw.data?.warmup?.taskId === task.id
+        ? currentDraw.data.warmup
+        : result?.warmup?.taskId === task.id
+          ? result.warmup
+          : undefined;
 
-  async function doDraw() {
+  async function reveal(mutate: () => Promise<DrawResponse>) {
     setShuffling(true);
     setResult(null);
     setEditing(false);
@@ -77,16 +100,24 @@ export function DrawPage() {
     setEditedOutOfDeck(false);
     setSnoozing(false);
     setFocusExited(false);
+    setBonusNote(null);
     const [response] = await Promise.all([
-      draw.mutateAsync({ categoryId, goalId }),
+      mutate(),
       new Promise((r) => setTimeout(r, 450)), // let the shuffle play
     ]);
-    // The reveal works off the mutation response: useDraw wrote it through
-    // to the current-draw cache on success, so ending the shuffle flips
-    // straight to the drawn card — no refetch race in the animation.
+    // The reveal works off the mutation response: both draw hooks write it
+    // through to the current-draw cache on success, so ending the shuffle
+    // flips straight to the drawn card — no refetch race in the animation.
     setResult(response);
     setShuffling(false);
   }
+
+  const doDraw = () => reveal(() => draw.mutateAsync({ categoryId, goalId }));
+  // Warm-up (#57): deterministic deal of the smallest card — same filters,
+  // same reveal, but a handed-out commitment instead of a gamble. The deal
+  // persists the same current-draw pointer, so the derived card picks it up
+  // exactly like a regular draw.
+  const doWarmup = () => reveal(() => warmup.mutateAsync({ categoryId, goalId }));
 
   async function saveEdit(patch: NewTask) {
     if (!task) return;
@@ -99,7 +130,9 @@ export function DrawPage() {
     if (response.task.status !== "open" || classifyTask(response.task, maxEffort) !== "ready") {
       setEditedOutOfDeck(true);
     } else if (!editedOutOfDeck) {
-      setCurrentDraw({ task: response.task });
+      // Keep the warm-up marker (#57) riding the cache: an in-deck edit
+      // leaves the pointer — and thus the marker — intact server-side.
+      setCurrentDraw({ task: response.task, warmup: warmupInfo });
     }
     setEdited(true);
     setEditing(false);
@@ -121,11 +154,14 @@ export function DrawPage() {
     if (!task) return;
     // No wasDrawn flag: the server derives the drawn-card bonus from the
     // persisted current draw (ADR-13), so it survives reloads too.
-    await updateTask.mutateAsync({ id: task.id, status: "done" });
+    const response = await updateTask.mutateAsync({ id: task.id, status: "done" });
     // Celebration belongs to the acting surface (#110): confetti fires for
     // the page's own ✓ Done only — a completion arriving from the TimerBar
     // or the Tasks page dismisses the derived card without fanfare.
     confetti({ particleCount: 120, spread: 75, origin: { y: 0.6 } });
+    // Surface why the XP was higher (#57) alongside the confetti.
+    if (response.bonus === "warmup") setBonusNote("🔰 Warm-up bonus: +25% XP");
+    else if (response.bonus === "momentum") setBonusNote("⚡ Momentum bonus: +25% XP");
     setCurrentDraw(null);
     setResult(null);
     setEditedOutOfDeck(false);
@@ -254,6 +290,16 @@ export function DrawPage() {
                   <p style={{ color: "var(--text-dim)", margin: 0 }}>{task.description}</p>
                 )}
                 <TaskBadges task={task} />
+                {/* Warm-up deal (#57): badge + bonus-window hint. No odds
+                    line renders — a deal has no probability by construction. */}
+                {warmupInfo && (
+                  <div className="warmup-note">
+                    <span className="chip warmup-chip">🔰 Warm-up</span>
+                    <div className="warmup-window-hint">
+                      finish within ~{warmupInfo.windowMinutes} min for a bonus
+                    </div>
+                  </div>
+                )}
                 {nonDrawable && (
                   <div className="draw-hint">
                     This card is now out of the deck — complete, snooze, or delete it to draw a
@@ -274,6 +320,27 @@ export function DrawPage() {
           </div>
         </div>
       </div>
+
+      {/* Warm-up (#57): the "I can't start" escape hatch, offered on the IDLE
+          deck only (including the empty-deck state) — never while a card is
+          revealed, because the deal is a commitment, not a re-roll (#88). */}
+      {phase === "idle" && (
+        <div className="warmup-cta">
+          <button
+            disabled={!warmupStatus.data?.available || warmup.isPending}
+            onClick={doWarmup}
+            title="Deterministically deal the smallest eligible card"
+          >
+            🔰 Warm-up — deal my smallest card
+          </button>
+          {warmupStatus.data?.available === false && warmupStatus.data.nextWarmupAt && (
+            <div className="warmup-next-hint">
+              next warm-up at {new Date(warmupStatus.data.nextWarmupAt).toLocaleString()}
+            </div>
+          )}
+          {bonusNote && <div className="draw-bonus-note">{bonusNote}</div>}
+        </div>
+      )}
 
       {phase === "revealed" && task && !editing && (
         <div className="draw-actions">
@@ -359,7 +426,20 @@ export function DrawPage() {
 
       {phase === "idle" && result && !result.task && (
         <div className="panel" style={{ maxWidth: 420, margin: "0 auto" }}>
-          {result.reason === "all_outside_window" ? (
+          {result.reason === "cooling_down" ? (
+            <p>
+              Your smallest cards were dealt just recently and are still cooling down — draw
+              normally, or give them a few minutes.
+            </p>
+          ) : result.reason === "warmup_unavailable" ? (
+            <p>
+              The warm-up is used up for now
+              {result.nextWarmupAt
+                ? ` — the next one opens at ${new Date(result.nextWarmupAt).toLocaleString()}`
+                : ""}
+              .
+            </p>
+          ) : result.reason === "all_outside_window" ? (
             <p>
               Everything left is scheduled for later — those cards come back on their own when
               their <Link to="/capture" style={{ color: "var(--accent)" }}>availability window</Link> opens.
