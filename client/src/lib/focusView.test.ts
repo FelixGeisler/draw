@@ -19,6 +19,8 @@ describe("resolveDrawView", () => {
   it("timer running on ANOTHER task → revealed, never a dead overlay", () => {
     // e.g. a second tab started a different task; the refetch collapses focus
     expect(resolveDrawView(7, 8, false)).toBe("revealed");
+    // …and having Escaped earlier changes nothing about that
+    expect(resolveDrawView(7, 8, true)).toBe("revealed");
   });
 
   it("timer running on the drawn card → focus (also the reload restore)", () => {

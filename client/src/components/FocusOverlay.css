@@ -20,6 +20,13 @@
     var(--bg);
 }
 
+/* The container is focused programmatically on mount (tabindex="-1", modal
+   focus management) — no ring on the fullscreen surface itself; the real
+   focus indicators live on the ✓ Done / ■ Stop buttons a Tab away. */
+.focus-overlay:focus {
+  outline: none;
+}
+
 .focus-title {
   margin: 0;
   font-size: clamp(24px, 4vw, 40px);

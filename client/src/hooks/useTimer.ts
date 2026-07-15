@@ -34,7 +34,12 @@ export function useStopTimer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.post<unknown>("/api/timer/stop"),
-    onSuccess: () => {
+    // onSettled, not onSuccess (PR #105 review): a Stop that races a second
+    // tab hits an already-closed timer and 404s — the refetch must still
+    // happen so `["timer"]` returns null and the focus overlay collapses to
+    // the revealed card immediately (ADR-29: never a dead overlay) instead
+    // of counting down a dead entry until the next interval tick.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["timer"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["activity"] });

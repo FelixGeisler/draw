@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Category, Task } from "../api/types";
 import { focusClock } from "../lib/time";
 import "./FocusOverlay.css";
@@ -42,10 +43,35 @@ export function FocusOverlay({
     return () => document.removeEventListener("keydown", onKey);
   }, [onExit]);
 
+  // Modal focus management (PR #105 review): focus moves INTO the dialog on
+  // mount and back to the trigger on exit, and the app root is `inert` while
+  // the overlay is open — the portal below keeps the overlay itself outside
+  // the inert subtree. That inerts the covered page for keyboard AND pointer,
+  // so Tab cycles the dialog's own controls only instead of blindly operating
+  // invisible background buttons. `inert` is baseline in every evergreen
+  // browser (Chrome 102+, Firefox 112+, Safari 15.5+) — this local-first
+  // app's whole target range.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const trigger = document.activeElement;
+    const root = document.getElementById("root");
+    root?.setAttribute("inert", "");
+    dialogRef.current?.focus();
+    return () => {
+      // Un-inert BEFORE restoring — an inert element refuses focus.
+      root?.removeAttribute("inert");
+      // The trigger may be gone by exit time (✓ Done unmounts the action
+      // row); restoring is best-effort, never a crash.
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus();
+    };
+  }, []);
+
   const clock = focusClock(task.effortMinutes, startedAt, now);
 
-  return (
+  return createPortal(
     <div
+      ref={dialogRef}
+      tabIndex={-1}
       className="focus-overlay"
       role="dialog"
       aria-modal="true"
@@ -73,6 +99,9 @@ export function FocusOverlay({
         <button onClick={onStop}>■ Stop</button>
       </div>
       <div className="focus-hint">Esc exits the view — the timer keeps running</div>
-    </div>
+    </div>,
+    // Portal target: outside #root so the root-level `inert` (above) cannot
+    // swallow the dialog itself.
+    document.body,
   );
 }

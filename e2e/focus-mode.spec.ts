@@ -65,6 +65,43 @@ test("reloading while focused restores straight into the focus view", async ({ p
   await expect(overlay(page).locator(".focus-clock.countdown")).toHaveText(/^9:[0-5]\d$/);
 });
 
+test("the dialog takes focus, Tab never reaches the covered page, Escape hands focus back", async ({
+  page,
+}) => {
+  // Timer still runs on the drawn card, so the overlay derives on load.
+  await page.goto("/");
+  await expect(overlay(page)).toBeVisible();
+  // Focus moves INTO the dialog on mount (PR #105 review) — a keyboard or
+  // screen-reader user lands in the modal, not on a covered control.
+  await expect(overlay(page)).toBeFocused();
+
+  // The app root is inert while the overlay is open: Tab cycles the dialog's
+  // own controls only. The covered ▶ Start button, 💤/🗑 card actions and the
+  // sidenav must be unreachable — no blind operation of invisible controls.
+  for (let i = 0; i < 8; i++) {
+    await page.keyboard.press("Tab");
+    const escaped = await page.evaluate(() => {
+      const el = document.activeElement;
+      return el !== document.body && !document.querySelector(".focus-overlay")?.contains(el);
+    });
+    expect(escaped, `Tab press ${i + 1} left the dialog`).toBe(false);
+  }
+
+  // Exit, then re-enter via the trigger so the restore target is a real
+  // element: Escape must hand focus back to exactly that trigger.
+  await page.keyboard.press("Escape");
+  await expect(overlay(page)).toBeHidden();
+  const trigger = page.locator(".draw-actions").getByRole("button", { name: "▶ Start now" });
+  // Timer already points at the drawn card — re-entry must not restart it
+  // (the startFocus guard), so the countdown below keeps its history.
+  await trigger.click();
+  await expect(overlay(page)).toBeVisible();
+  await expect(overlay(page)).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(overlay(page)).toBeHidden();
+  await expect(trigger).toBeFocused();
+});
+
 test("Escape exits the view but never the timer", async ({ page }) => {
   await page.goto("/");
   await expect(overlay(page)).toBeVisible();
