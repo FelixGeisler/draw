@@ -30,6 +30,41 @@ https://platform.claude.com/). Restart. This enables:
 Every AI call shows a token/cost estimate first and requires your confirmation. Everything
 else works without a key.
 
+## Use it from Claude Code / Claude Desktop (MCP)
+
+Draw ships an [MCP](https://modelcontextprotocol.io/) server that exposes the domain
+operations — list/create/complete tasks, break them down, draw a card, timers, stats,
+goals and materials — so you can say *"what should I do right now?"* or *"import this
+exam as tasks"* from a conversation. It is a thin adapter over the same local HTTP API
+the web UI uses (ADR-19), so every domain rule holds identically.
+
+- The app must be running (`npm run dev`); the MCP server talks to
+  `http://127.0.0.1:3001` (override with `DRAW_API_URL`).
+- Needs **no** `ANTHROPIC_API_KEY` — the intelligence is the MCP client's.
+- No delete tools are exposed, and your MCP client asks you to approve each write.
+- Resources for context: `draw://deck` (drawable pool snapshot), `draw://gamification`
+  (XP/streak/achievements), `draw://materials/{id}` (goal notes and PDFs).
+
+**Claude Code** picks up the committed [`.mcp.json`](.mcp.json) automatically when you
+open this repo — approve the `draw` server when prompted, then try
+*"draw me a card"*.
+
+**Claude Desktop**: add the server to `claude_desktop_config.json` with an absolute
+path to your checkout, e.g. on Windows:
+
+```json
+{
+  "mcpServers": {
+    "draw": {
+      "command": "cmd",
+      "args": ["/c", "npm", "run", "-s", "mcp", "-w", "server", "--prefix", "C:/path/to/draw"]
+    }
+  }
+}
+```
+
+(macOS/Linux: `"command": "npm"`, `"args": ["run", "-s", "mcp", "-w", "server", "--prefix", "/path/to/draw"]`.)
+
 ## How the draw weighting works
 
 ```
@@ -51,4 +86,4 @@ Workflow conventions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Stack
 
-React + TypeScript + Vite · TanStack Query · Express 5 · better-sqlite3 · @anthropic-ai/sdk (claude-opus-4-8, structured outputs, prompt caching)
+React + TypeScript + Vite · TanStack Query · Express 5 · better-sqlite3 · @anthropic-ai/sdk (claude-opus-4-8, structured outputs, prompt caching) · @modelcontextprotocol/sdk (MCP server over stdio)

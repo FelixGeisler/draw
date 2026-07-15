@@ -298,3 +298,43 @@ dependency edges would be bookkeeping for a capability (arbitrary DAGs) the
 product explicitly does not want. Deriving hold-back keeps every mutation
 path (complete, reopen, delete, re-parent, toggle) automatically correct —
 the ADR-2 argument once more.
+
+== ADR-19: MCP adapter speaks HTTP to the local API; the client's approval flow replaces staged review
+
+*Context:* Issue #36 exposes Draw's domain operations to MCP clients (Claude
+Code, Claude Desktop). The MCP process could have opened the SQLite file
+directly — WAL makes a second better-sqlite3 process technically safe — but
+the domain invariants live in the Express layer, not in importable services:
+the complete-with-open-subtasks 409 and the XP/achievements/recurrence path,
+the single-running-timer rule, the draw's `last_drawn_at` stamp and
+achievement check. A direct-DB adapter would have to duplicate all of that
+(and run `migrate()` a second time). Separately, unlike the in-app AI, an MCP
+client has its own per-tool-call approval conversation.
+*Decision:* The MCP server (`server/src/mcp.ts`, stdio transport,
+`@modelcontextprotocol/sdk`) is a thin adapter: every tool call maps to an
+HTTP request against the running local API (`DRAW_API_URL`, default
+`http://127.0.0.1:3001`), so the >30-minute drawability rule, impact
+semantics, timer invariant, and gamification hold *identically by
+construction* — it is literally the same code path the web UI uses. The tool
+vocabulary lives in an SDK-free catalog (`server/src/tools/catalog.ts`, no
+MCP and no Anthropic imports) so #31 can bind the same contracts to staged
+executors; this surface binds live HTTP executors because the MCP client's
+tool-approval conversation IS the review surface — every write is shown to
+and approved by the user in the client, so staged changesets would review
+twice. Destructive operations are omitted entirely (no delete tools; key
+management is never exposed); read tools carry `readOnlyHint: true`,
+`draw_card` deliberately does not (it stamps `last_drawn_at` and can unlock
+achievements), and nothing is marked destructive. Read-heavy state ships as
+resources: `draw://deck` (backed by the new side-effect-free
+`GET /api/draw/pool`, reusing the ADR-2 candidate query), `draw://gamification`,
+and `draw://materials/{id}`. No `ANTHROPIC_API_KEY` is needed anywhere — the
+intelligence is the MCP client's.
+*Rationale:* Trade-off accepted: the dev server must be running —
+`ECONNREFUSED` maps to an actionable tool error naming `npm run dev`. In
+exchange, no invariant is duplicated, no second migration runner exists, and
+the drawability predicate keeps its single home (ADR-2). Direct writes
+without staging are safe precisely because the approval conversation moved
+into the MCP client; the in-app AI keeps checkbox review (ADR-14) because the
+web UI has no per-call gate. stdout stays a pure JSON-RPC channel (logs on
+stderr), and loopback-only remains untouched (section 2) — the MCP server is
+a local process talking to a local API.
