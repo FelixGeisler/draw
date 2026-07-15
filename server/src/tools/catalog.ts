@@ -232,16 +232,10 @@ const createTask = defineTool({
     destructiveHint: false,
     openWorldHint: false,
   },
+  // The ADR-4 impact-requires-goal gate is NOT duplicated here: the API
+  // enforces it on POST and PATCH alike (issue #65), and its 400 message is
+  // surfaced verbatim through httpErrorText.
   execute: async (api, args) => {
-    if (args.impact !== undefined && args.goalId === undefined) {
-      return {
-        isError: true,
-        text:
-          "impact is only meaningful for goal-linked tasks (ADR-4): pass goalId together with " +
-          "impact, or omit impact — goal-less tasks use the neutral default. list_goals shows " +
-          "the available goals.",
-      };
-    }
     const res = await call(api, "create_task", "POST", "/api/tasks", args);
     return res.ok ? ok(res.body) : res.outcome;
   },
@@ -253,7 +247,9 @@ const updateTask = defineTool({
     "Update fields of a task. Idempotent. status may be set to 'archived' (soft archive — the " +
     "task leaves every list but is not deleted) or back to 'open' (reopening a done task undoes " +
     "its latest completion so XP stays honest). To mark a task done, use complete_task instead — " +
-    "it runs the XP/achievements/recurrence path.",
+    "it runs the XP/achievements/recurrence path. impact follows ADR-4: it is only accepted on " +
+    "a task that has (or receives) a goalId, and unlinking the goal (goalId: null) resets impact " +
+    "to the neutral default 3.",
   inputSchema: {
     id: idSchema,
     title: z.string().min(1).optional(),

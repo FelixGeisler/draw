@@ -48,6 +48,10 @@ function getTask(id: number) {
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+const IMPACT_REQUIRES_GOAL =
+  "impact is only meaningful for goal-linked tasks (ADR-4): set a goalId together with " +
+  "impact, or omit it — goal-less tasks keep the neutral default 3";
+
 /**
  * Availability window (#33, ADR-20) — shared POST/PATCH validation. The
  * window is all-or-none: windowDays (weekday integers 0–6, JS getDay
@@ -147,6 +151,19 @@ tasksRouter.post("/", (req, res) => {
   if (!categoryId) {
     return res.status(400).json({ error: "categoryId is required" });
   }
+  // ADR-4 gate (#65): impact rates leverage toward a goal, so without a
+  // goalId only the neutral default 3 is accepted (the web form sends exactly
+  // that for goal-less creates). The API is the enforcement point — the MCP
+  // catalog and the web form both lean on this rejection rather than
+  // duplicating it.
+  if (impact != null) {
+    if (!Number.isInteger(impact) || impact < 1 || impact > 5) {
+      return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
+    }
+    if (goalId == null && impact !== 3) {
+      return res.status(400).json({ error: IMPACT_REQUIRES_GOAL });
+    }
+  }
   const win = parseWindowInput(req.body ?? {});
   if (!win.ok) return res.status(400).json({ error: win.error });
   const window = win.present ? win : { days: null, start: null, end: null };
@@ -224,7 +241,9 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
 
 tasksRouter.patch("/:id", (req, res) => {
   const id = Number(req.params.id);
-  const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as TaskRow | undefined;
+  const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+    | (TaskRow & { goal_id: number | null })
+    | undefined;
   if (!raw) return res.status(404).json({ error: "task not found" });
 
   const body = req.body ?? {};
@@ -279,6 +298,36 @@ tasksRouter.patch("/:id", (req, res) => {
   // no bookkeeping beyond this validation.
   if ("subtaskOrderMode" in body && body.subtaskOrderMode !== "parallel" && body.subtaskOrderMode !== "sequential") {
     return res.status(400).json({ error: "subtaskOrderMode must be 'parallel' or 'sequential'" });
+  }
+  // ADR-4 gate (#65): impact rates leverage toward a goal, so on a task that
+  // is (or stays) goal-less only the neutral default 3 — or a no-op resend of
+  // the stored value, which the edit form emits for grandfathered tasks (goal
+  // deletion keeps the historical rating) — is accepted. Deliberately
+  // unlinking the goal resets impact to 3 whether or not the client sends the
+  // explicit reset (client/src/lib/impact.ts does): the rating described
+  // leverage toward the goal that was just removed.
+  if ("impact" in body) {
+    // The column is NOT NULL with default 3, so null can only mean "reset".
+    if (body.impact == null) body.impact = 3;
+    if (!Number.isInteger(body.impact) || (body.impact as number) < 1 || (body.impact as number) > 5) {
+      return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
+    }
+  }
+  const goalAfter = "goalId" in body ? body.goalId : raw.goal_id;
+  if (goalAfter == null) {
+    const unlinking = "goalId" in body && raw.goal_id != null;
+    if (unlinking) {
+      if ("impact" in body && body.impact !== 3) {
+        return res.status(400).json({
+          error:
+            "unlinking the goal resets impact to the neutral default 3 (ADR-4) — to rate " +
+            "impact, set it together with a goalId",
+        });
+      }
+      body.impact = 3; // the server owns the unlink reset
+    } else if ("impact" in body && body.impact !== 3 && body.impact !== raw.impact) {
+      return res.status(400).json({ error: IMPACT_REQUIRES_GOAL });
+    }
   }
   // Availability window (#33): validated and normalized as a trio — the
   // three body keys are rewritten so the generic field map below always
