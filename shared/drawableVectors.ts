@@ -56,6 +56,15 @@ export function materializeWindow(
 export interface DrawableVector {
   name: string;
   hasOpenChildren: 0 | 1;
+  /**
+   * Parent lifecycle (#111, ADR-32): ANY non-archived child — done ones
+   * included — keeps a parent out of the deck; only archived-out or
+   * moved-away children revive it as a leaf. Optional: absent means "same as
+   * hasOpenChildren" (an open child is non-archived by definition, and the
+   * pre-#111 vectors never modeled done children). Both suites materialize
+   * it with `?? hasOpenChildren`.
+   */
+  hasNonArchivedChildren?: 0 | 1;
   blocked: boolean;
   deferredUntil: string | null;
   /**
@@ -395,6 +404,30 @@ export const DRAWABLE_VECTORS: DrawableVector[] = [
     effortMinutes: 10,
     maxEffort: 30,
     expected: "container",
+  },
+  // --- Parent lifecycle (#111, ADR-32): the subtasks own the estimate for
+  // as long as any non-archived one exists — even all-done.
+  {
+    name: "an all-done breakdown keeps the parent out of the deck — its own estimate stays inert",
+    hasOpenChildren: 0,
+    hasNonArchivedChildren: 1,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "container",
+  },
+  {
+    name: "all children archived: the parent is a leaf again on its stored estimate",
+    hasOpenChildren: 0,
+    hasNonArchivedChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "ready",
   },
 ];
 

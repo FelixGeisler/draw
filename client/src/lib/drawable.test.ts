@@ -54,6 +54,12 @@ describe("classifyTask", () => {
     expect(classifyTask(task({ hasOpenChildren: 1, effortMinutes: 10 }), 30)).toBe("container");
   });
 
+  it("treats parents with only done (non-archived) children as containers too (#111)", () => {
+    expect(
+      classifyTask(task({ hasOpenChildren: 0, hasNonArchivedChildren: 1, effortMinutes: 10 }), 30),
+    ).toBe("container");
+  });
+
   it("respects a custom effort limit", () => {
     expect(classifyTask(task({ effortMinutes: 45 }), 60)).toBe("ready");
   });
@@ -66,6 +72,9 @@ describe("classifyTask", () => {
       it(v.name, () => {
         const t = task({
           hasOpenChildren: v.hasOpenChildren,
+          // #111: absent in a vector means "same as hasOpenChildren" — an
+          // open child is non-archived by definition.
+          hasNonArchivedChildren: v.hasNonArchivedChildren ?? v.hasOpenChildren,
           blocked: v.blocked,
           deferredUntil: v.deferredUntil,
           heldBack: v.heldBack,

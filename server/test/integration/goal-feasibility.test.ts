@@ -72,10 +72,15 @@ describe("remainingOpenEffortMinutes (leaf-only sum)", () => {
     await request(app).patch(`/api/tasks/${subtasks[0].id}`).send({ status: "done" }).expect(200);
     expect((await goalRow(goal.id)).remainingOpenEffortMinutes).toBe(45);
 
-    // All steps closed: the still-open parent is a leaf again — its own
-    // estimate returns, mirroring the tasks list's remainingEffortMinutes.
+    // All steps closed: the parent auto-completes with them (#111, ADR-32) —
+    // no remaining work, and its own stored estimate never re-enters the sum.
     await request(app).patch(`/api/tasks/${subtasks[1].id}`).send({ status: "done" }).expect(200);
-    expect((await goalRow(goal.id)).remainingOpenEffortMinutes).toBe(75);
+    expect((await goalRow(goal.id)).remainingOpenEffortMinutes).toBe(15);
+
+    // Reopening a step reopens the parent, but only the open LEAF counts —
+    // the parent's own 60 stays inert while its breakdown exists.
+    await request(app).patch(`/api/tasks/${subtasks[1].id}`).send({ status: "open" }).expect(200);
+    expect((await goalRow(goal.id)).remainingOpenEffortMinutes).toBe(45);
   });
 
   it("is NULL when no open leaf carries an estimate — even under an estimated parent", async () => {

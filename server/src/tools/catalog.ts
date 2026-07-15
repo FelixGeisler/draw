@@ -241,7 +241,9 @@ const createTask = defineTool({
           "The subtask inherits the parent's goal and category: pass the parent's own " +
           "categoryId, omit goalId (impact then rates the inherited goal), and note that " +
           "a divergent goalId or categoryId is rejected. Omitted impact defaults to the " +
-          "parent's rating, like create_subtasks. " +
+          "parent's rating, like create_subtasks. Creating a subtask under a DONE parent " +
+          "reopens it, exactly like create_subtasks (its latest completion is undone so XP " +
+          "stays honest). " +
           "Breakdowns are one level deep: nesting under a task that is itself a subtask is rejected",
       ),
   },
@@ -265,7 +267,9 @@ const updateTask = defineTool({
   description:
     "Update fields of a task. Idempotent. status may be set to 'archived' (soft archive — the " +
     "task leaves every list but is not deleted) or back to 'open' (reopening a done task undoes " +
-    "its latest completion so XP stays honest). To mark a task done, use complete_task instead — " +
+    "its latest completion so XP stays honest; reopening or un-archiving a SUBTASK reopens its " +
+    "done parent the same way, and archiving the last open subtask next to a done sibling " +
+    "auto-completes the parent). To mark a task done, use complete_task instead — " +
     "it runs the XP/achievements/recurrence path. impact follows ADR-4: non-neutral impact (≠3) " +
     "requires a task that has (or receives) a goalId — the neutral 3 and a no-op resend of the " +
     "stored value are always accepted — and unlinking the goal (goalId: null) resets impact to " +
@@ -309,7 +313,8 @@ const updateTask = defineTool({
           "(ADR-16): the target must not itself be a subtask and a task with subtasks cannot " +
           "move; a recurring task cannot join a 'do in order' breakdown (ADR-23). Adoption " +
           "inherits the parent's goal and category; moving under a goal-less parent resets " +
-          "impact to the neutral 3. null promotes a subtask back to a top-level task, keeping " +
+          "impact to the neutral 3; adopting an OPEN task under a done root reopens the root " +
+          "(its completion is undone). null promotes a subtask back to a top-level task, keeping " +
           "goal, category and impact unchanged",
       ),
     status: z
@@ -336,7 +341,9 @@ const completeTask = defineTool({
     "Mark a task done. Awards XP (relayed as xpAwarded, with levelUp and newAchievements), " +
     "closes the task's own running timer, and — for recurring tasks — keeps the task open and " +
     "advances its due date (recurring: true in the result). Fails with an explanation if the " +
-    "task still has open subtasks.",
+    "task still has open subtasks. Completing the LAST open subtask auto-completes its " +
+    "non-recurring parent (a symbolic 1 XP — the subtasks already earned the effort XP); the " +
+    "result surfaces that as parentCompletion.",
   inputSchema: { id: idSchema },
   annotations: {
     title: "Complete task",
@@ -354,7 +361,8 @@ const createSubtasks = defineTool({
   name: "create_subtasks",
   description:
     "Break a task down: create several subtasks under a parent in one atomic batch. Subtasks " +
-    "inherit the parent's category and goal. Breakdowns are one level deep: the parent must be " +
+    "inherit the parent's category and goal. Adding subtasks to a DONE parent reopens it (its " +
+    "latest completion is undone so XP stays honest). Breakdowns are one level deep: the parent must be " +
     "a root task — a subtask cannot be broken down further (the API rejects nesting); split it " +
     "into more sibling subtasks under the same root parent instead. The breakdown rule: every " +
     "leaf must have effortMinutes of at most max_draw_effort (see get_settings) to be drawable " +

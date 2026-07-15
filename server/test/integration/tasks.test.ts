@@ -304,11 +304,15 @@ describe("task CRUD and breakdown rule", () => {
     let listed = list.body.find((t: { id: number }) => t.id === parent.id);
     expect(listed.remainingEffortMinutes).toBe(10);
 
-    // All subtasks done: parent falls back to its own stored estimate.
+    // All subtasks done: the parent auto-completes with them (#111, ADR-32),
+    // and its own stored estimate never comes back as "remaining" work —
+    // the pre-#111 fallback to the parent's 60 is gone.
     await request(app).patch(`/api/tasks/${subs[1].id}`).send({ status: "done" }).expect(200);
-    list = await request(app).get("/api/tasks").expect(200);
+    list = await request(app).get("/api/tasks?status=all").expect(200);
     listed = list.body.find((t: { id: number }) => t.id === parent.id);
-    expect(listed.remainingEffortMinutes).toBe(60);
+    expect(listed.status).toBe("done");
+    expect(listed.remainingEffortMinutes).toBeNull();
+    expect(listed.effortMinutes).toBe(60); // stored estimate retained, not nulled
   });
 
   it("returns null remaining effort when open subtasks are all unestimated", async () => {

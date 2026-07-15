@@ -136,6 +136,13 @@ export function poolWeights(candidates: Candidate[], now: Date, cooldownMinutes:
 // an expired deferred_until re-enters the pool with no write.
 const SNOOZE_CONDITION = "t.blocked = 0 AND (t.deferred_until IS NULL OR t.deferred_until <= ?)";
 
+// A drawable card is a LEAF: zero non-archived children (#111, ADR-32). The
+// pre-#111 form excluded only OPEN children, so a parent whose last subtask
+// closed re-entered the pool on its own stored estimate — under the parent
+// lifecycle the subtasks own the estimate for as long as any of them exists.
+const LEAF_CONDITION =
+  "NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status != 'archived')";
+
 /**
  * Derived hold-back predicate (#23, ADR-18): the task sits behind an older
  * open sibling under a 'sequential' parent. Creation order is
@@ -229,7 +236,11 @@ function queryCandidates(
     "t.effort_minutes IS NOT NULL",
     "t.effort_minutes <= ?",
     SNOOZE_CONDITION,
-    "NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')",
+    // Any NON-ARCHIVED child keeps a parent out of the deck (#111, ADR-32):
+    // while a breakdown exists — even all-done — the parent's own stored
+    // estimate is display/draw-inert; only archived-out children (split
+    // leftovers) or children moved away revive it as a drawable leaf.
+    LEAF_CONDITION,
     `NOT ${heldBackSql("t")}`,
     ...filter.conditions,
   ];
@@ -311,7 +322,7 @@ function emptyPoolReason(
       `SELECT COUNT(*) AS n FROM tasks t
        WHERE t.status = 'open'
          AND ${SNOOZE_CONDITION}
-         AND NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')
+         AND ${LEAF_CONDITION}
          AND NOT ${heldBackSql("t")}
          ${filter.conditions.map((c) => `AND ${c}`).join(" ")}`,
     )
@@ -335,7 +346,8 @@ const TRACKED_MINUTES_SQL = `(SELECT CAST(COALESCE(SUM(
        FROM time_entries e WHERE e.task_id = t.id AND e.ended_at IS NOT NULL)`;
 
 /** Full payload row for a freshly dealt card — a pool candidate is an open
- *  leaf by construction, so hasOpenChildren/heldBack are constant 0. */
+ *  leaf by construction (zero non-archived children, #111), so
+ *  hasOpenChildren/hasNonArchivedChildren/heldBack are constant 0. */
 function dealtTaskRow(id: number): Record<string, unknown> {
   return db
     .prepare(
@@ -347,7 +359,7 @@ function dealtTaskRow(id: number): Record<string, unknown> {
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
               t.subtask_order_mode AS subtaskOrderMode,
               t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
-              0 AS hasOpenChildren, 0 AS heldBack,
+              0 AS hasOpenChildren, 0 AS hasNonArchivedChildren, 0 AS heldBack,
               ${TRACKED_MINUTES_SQL} AS trackedMinutes
        FROM tasks t WHERE t.id = ?`,
     )
@@ -414,6 +426,12 @@ export interface RestorableTask {
   status: string;
   effortMinutes: number | null;
   hasOpenChildren: number;
+  /**
+   * Any non-archived child — done ones included — keeps the card out of the
+   * deck (#111, ADR-32). Optional: payload shapes that predate the field
+   * (or the dealt-card constant) simply skip the check.
+   */
+  hasNonArchivedChildren?: number | boolean;
   blocked: number | boolean;
   deferredUntil: string | null;
   heldBack: number | boolean;
@@ -438,6 +456,7 @@ export function isRestorable(task: RestorableTask, maxEffort: number, now: Date)
   return (
     task.status === "open" &&
     !task.hasOpenChildren &&
+    !task.hasNonArchivedChildren &&
     !task.blocked &&
     (task.deferredUntil == null || new Date(task.deferredUntil) <= now) &&
     !task.heldBack &&
@@ -504,6 +523,7 @@ export function currentDraw(): { task: Record<string, unknown>; warmup?: WarmupM
               t.subtask_order_mode AS subtaskOrderMode,
               t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
               EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open') AS hasOpenChildren,
+              EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status != 'archived') AS hasNonArchivedChildren,
               ${heldBackSql("t")} AS heldBack,
               ${TRACKED_MINUTES_SQL} AS trackedMinutes
        FROM tasks t WHERE t.id = ?`,

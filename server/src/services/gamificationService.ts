@@ -107,16 +107,40 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+export interface CompleteOptions {
+  /**
+   * Explicit effort override (#111, ADR-32): a parent with >= 1 non-archived
+   * subtask completes at effort 0 — its subtasks already earned the effort
+   * XP, and the `effort_minutes ?? 10` default would double-earn (or mint 10
+   * minutes of XP for an unestimated parent). The `xp < 1` floor below lifts
+   * the zero base to the symbolic 1 XP, keeping every completion row
+   * uniformly >= 1 for the trophy/today displays. The override also forces
+   * the warm-up branch off, for the same honesty reason as the caller-forced
+   * `wasDrawn: false` — see the marker read below.
+   */
+  effortMinutes?: number;
+}
+
 /**
  * Complete a task: award XP, log the completion, and either close the task
  * or (recurring) push its due date forward. Must run inside a transaction.
  */
-export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult {
+export function completeTask(
+  task: TaskRow,
+  wasDrawn: boolean,
+  opts?: CompleteOptions,
+): CompletionResult {
   const now = new Date();
   // Read the warm-up marker BEFORE clearCurrentDraw below wipes it. The
   // marker only ever describes the current draw, so a matching taskId means
-  // this completion resolves the dealt warm-up card.
-  const marker = getWarmupMarker();
+  // this completion resolves the dealt warm-up card. The effort override
+  // skips the read entirely (#111): a symbolic zero-effort completion never
+  // resolves the deal — a dealt card that was broken down auto-completes
+  // through here while the marker still points at it (POST /:id/subtasks
+  // leaves the pointer for ADR-13's lazy clear), and recording was_warmup = 1
+  // on that row would lie in the log and arm the ×1.25 momentum window off a
+  // completion the user never made on the dealt card.
+  const marker = opts?.effortMinutes == null ? getWarmupMarker() : null;
   const warmup =
     marker != null && marker.taskId === task.id
       ? {
@@ -128,7 +152,7 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
   const momentum = !warmup && hasMomentum(task.id, now);
   const { multiplier, bonus } = xpMultiplier({ wasDrawn, warmup, momentum });
 
-  const effort = task.effort_minutes ?? 10;
+  const effort = opts?.effortMinutes ?? task.effort_minutes ?? 10;
   // Same shape as ever: rounded base, single effective multiplier, round,
   // floor 1 — multiplier 1.5 reproduces the historical drawn values exactly.
   let xp = Math.round(Math.round(effort * (task.impact / 3)) * multiplier);
@@ -307,7 +331,7 @@ function drawableCount(): number {
     .prepare(
       `SELECT COUNT(*) AS n FROM tasks t
        WHERE t.status = 'open' AND t.effort_minutes IS NOT NULL AND t.effort_minutes <= ?
-         AND NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')`,
+         AND NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status != 'archived')`,
     )
     .get(maxEffort) as { n: number };
   return row.n;

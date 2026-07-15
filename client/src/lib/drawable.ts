@@ -54,7 +54,10 @@ export function isWithinWindow(
  * deck regardless of its window, and the queue explains why better.
  */
 export function classifyTask(task: Task, maxDrawEffort: number, now: Date = new Date()): DrawGroup {
-  if (task.hasOpenChildren) return "container";
+  // Any NON-ARCHIVED child makes a container (#111, ADR-32): while a
+  // breakdown exists — even all-done — the parent's own estimate is inert.
+  // hasOpenChildren stays as the fallback for payloads without the field.
+  if (task.hasOpenChildren || task.hasNonArchivedChildren) return "container";
   if (isSnoozed(task, now)) return "snoozed";
   if (task.heldBack) return "queued";
   if (!isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, now)) return "scheduled";

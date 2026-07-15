@@ -13,6 +13,7 @@ import {
   completeTask,
   undoLatestCompletion,
   wasRecentlyDrawn,
+  type CompletionResult,
   type TaskRow,
 } from "../services/gamificationService.js";
 import { AiError } from "../services/aiService.js";
@@ -21,6 +22,14 @@ import { startTimer } from "./timer.js";
 
 export const tasksRouter = Router();
 
+// remainingEffortMinutes (#111, ADR-32): while ANY non-archived subtask
+// exists the subtasks own the estimate — the sum over OPEN ones (NULL when
+// none are open or none estimated), NEVER the parent's own stored value. Only
+// a task with zero non-archived children (a true leaf, or a parent whose
+// children were all moved away or archived — PR #102's revival) reports its
+// own effort_minutes. The stored parent estimate is ignored, not nulled: it
+// keeps the sizing history and becomes meaningful again on revival (ADR-2 —
+// derive at read time, keep stored fields as source data).
 const TASK_SELECT = `
   SELECT id, title, description,
          category_id AS categoryId, goal_id AS goalId, parent_id AS parentId,
@@ -31,9 +40,10 @@ const TASK_SELECT = `
          subtask_order_mode AS subtaskOrderMode,
          window_days AS windowDays, window_start AS windowStart, window_end AS windowEnd,
          EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open') AS hasOpenChildren,
+         EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status != 'archived') AS hasNonArchivedChildren,
          ${heldBackSql("tasks")} AS heldBack,
          CASE
-           WHEN EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open')
+           WHEN EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status != 'archived')
              THEN (SELECT SUM(c.effort_minutes) FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open')
            ELSE effort_minutes
          END AS remainingEffortMinutes
@@ -213,6 +223,80 @@ function hasRecurringSubtask(parentId: number): boolean {
   );
 }
 
+function hasNonArchivedSubtask(parentId: number): boolean {
+  return Boolean(
+    db
+      .prepare("SELECT 1 FROM tasks WHERE parent_id = ? AND status != 'archived' LIMIT 1")
+      .get(parentId),
+  );
+}
+
+/**
+ * The all-done predicate (#111, ADR-32) — pure, exported for unit tests:
+ * >= 1 done subtask AND zero open ones; archived subtasks are ignored on
+ * BOTH sides. So a split-in-place (#108) never satisfies it (the archived
+ * original is replaced by open parts in the same transaction), while
+ * archiving the last open subtask next to a done sibling does. All-archived
+ * yields false — that parent has zero non-archived children and completes
+ * as an ordinary leaf.
+ */
+export function breakdownAllDone(childStatuses: string[]): boolean {
+  return (
+    childStatuses.some((s) => s === "done") && !childStatuses.some((s) => s === "open")
+  );
+}
+
+/**
+ * Auto-complete an open, non-recurring parent whose breakdown just became
+ * all-done (#111, ADR-32). Evaluated after every write that changes a
+ * subtask's status (complete, archive, reopen, un-archive) or removes one
+ * (DELETE — the trash button sits on every subtask row, so deleting the last
+ * open step next to a done sibling is an everyday finisher); must run inside
+ * the caller's transaction. Flows through completeTask() — a genuine
+ * completion row (ADR-5), achievements, timer close, daily/streak count —
+ * with effort overridden to 0 (the subtasks already earned the effort XP;
+ * the floor makes it the symbolic 1 XP) and wasDrawn false (a parent with
+ * children is never in the deck under rule 1, so it cannot have been the
+ * gamble). Recurring parents are EXCLUDED: their completion advances the due
+ * date while the subtasks would stay done, leaving every later occurrence an
+ * empty shell — they simply stay open; manual completion follows ADR-6
+ * unchanged.
+ */
+function maybeAutoCompleteParent(parentId: number): CompletionResult | null {
+  const parent = db.prepare("SELECT * FROM tasks WHERE id = ?").get(parentId) as
+    | (TaskRow & { parent_id: number | null })
+    | undefined;
+  if (!parent || parent.status !== "open" || parent.recur_every_days != null) return null;
+  const statuses = (
+    db.prepare("SELECT status FROM tasks WHERE parent_id = ?").all(parentId) as {
+      status: string;
+    }[]
+  ).map((r) => r.status);
+  if (!breakdownAllDone(statuses)) return null;
+  return completeTask(parent, false, { effortMinutes: 0 });
+}
+
+/**
+ * Reopen a done parent because an open subtask (re)appeared under it (#111,
+ * ADR-32): subtask created (single or batch), adopted via reparent, reopened,
+ * or un-archived. Deletes the parent's latest completion row (ADR-5 — this
+ * is exactly the auto-completion being undone; a harmless no-op on a legacy
+ * done parent without one) and clears snooze/block like every other reopen
+ * (ADR-17). Must run inside the caller's transaction. No-op unless the
+ * parent is actually done — open and archived parents are untouched
+ * (archived-root adoption policy stays open in #104).
+ */
+function reopenDoneParent(parentId: number): void {
+  const parent = db.prepare("SELECT status FROM tasks WHERE id = ?").get(parentId) as
+    | { status: string }
+    | undefined;
+  if (parent?.status !== "done") return;
+  undoLatestCompletion(parentId);
+  db.prepare(
+    "UPDATE tasks SET status = 'open', completed_at = NULL, deferred_until = NULL, blocked = 0 WHERE id = ?",
+  ).run(parentId);
+}
+
 /**
  * Availability window (#33, ADR-20) — shared POST/PATCH validation. The
  * window is all-or-none: windowDays (weekday integers 0–6, JS getDay
@@ -322,6 +406,7 @@ tasksRouter.post("/", (req, res) => {
         goalId: number | null;
         categoryId: number;
         impact: number;
+        status: string;
       }
     | undefined;
   if (parentId != null) {
@@ -333,7 +418,7 @@ tasksRouter.post("/", (req, res) => {
     parent = db
       .prepare(
         `SELECT parent_id AS grandparentId, subtask_order_mode AS orderMode,
-                goal_id AS goalId, category_id AS categoryId, impact
+                goal_id AS goalId, category_id AS categoryId, impact, status
          FROM tasks WHERE id = ?`,
       )
       .get(parentId) as typeof parent;
@@ -400,28 +485,35 @@ tasksRouter.post("/", (req, res) => {
   const win = parseWindowInput(body);
   if (!win.ok) return res.status(400).json({ error: win.error });
   const window = win.present ? win : { days: null, start: null, end: null };
-  const result = db
-    .prepare(
-      `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, due_date, recur_every_days, window_days, window_start, window_end, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      title.trim(),
-      description ?? null,
-      effectiveCategoryId,
-      effectiveGoalId,
-      parentId ?? null,
-      // Omitted impact defaults to the parent's rating on the parentId path —
-      // batch parity with `s.impact ?? parent.impact` below — else neutral 3.
-      impact ?? parent?.impact ?? 3,
-      effortMinutes ?? null,
-      dueDate ?? null,
-      recurEveryDays ?? null,
-      window.days,
-      window.start,
-      window.end,
-      new Date().toISOString(),
-    );
+  const result = db.transaction(() => {
+    const r = db
+      .prepare(
+        `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, due_date, recur_every_days, window_days, window_start, window_end, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        title.trim(),
+        description ?? null,
+        effectiveCategoryId,
+        effectiveGoalId,
+        parentId ?? null,
+        // Omitted impact defaults to the parent's rating on the parentId path —
+        // batch parity with `s.impact ?? parent.impact` below — else neutral 3.
+        impact ?? parent?.impact ?? 3,
+        effortMinutes ?? null,
+        dueDate ?? null,
+        recurEveryDays ?? null,
+        window.days,
+        window.start,
+        window.end,
+        new Date().toISOString(),
+      );
+    // A new open subtask under a DONE parent reopens it (#111, ADR-32) — same
+    // rule as the batch endpoint, so no creation path can leave an open child
+    // under a done parent.
+    if (parent?.status === "done") reopenDoneParent(parentId as number);
+    return r;
+  })();
   res.status(201).json(getTask(Number(result.lastInsertRowid)));
 });
 
@@ -509,6 +601,10 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
       );
       ids.push(Number(r.lastInsertRowid));
     }
+    // New open subtasks under a DONE parent reopen it (#111, ADR-32): status
+    // open, completed_at cleared, and the latest completion row deleted —
+    // the auto-completion undone (ADR-5).
+    if (parent.status === "done") reopenDoneParent(parent.id as number);
     return ids.map((id) => getTask(id));
   })();
 
@@ -760,13 +856,38 @@ tasksRouter.patch("/:id", (req, res) => {
     if (openChildren.n > 0) {
       return res.status(409).json({ error: "complete all subtasks first" });
     }
+    // Manual-completion parity (#111, ADR-32): a parent with >= 1 non-
+    // archived subtask (e.g. a legacy all-done-open row, or a reopened
+    // parent completed by hand) earns the SAME symbolic zero-effort XP as
+    // the auto-completion — its subtasks already paid out the effort XP, so
+    // its own stored estimate must never mint a second helping. wasDrawn is
+    // forced false with it: under rule 1 such a parent is never in the deck,
+    // so a recent last_drawn_at can only be a pre-breakdown leftover. A
+    // parent whose subtasks are ALL archived has zero non-archived children
+    // and completes as an ordinary leaf.
+    const zeroEffort = hasNonArchivedSubtask(id);
     // The drawn-card bonus is derived server-side, never from a client flag
     // (ADR-13): the persisted current draw survives reloads and long pauses;
     // the 6h last_drawn_at heuristic still covers a card completed shortly
     // after a redraw replaced it.
-    const drawn = getCurrentDrawTaskId() === id || wasRecentlyDrawn(raw);
-    const result = db.transaction(() => completeTask(raw, drawn))();
-    return res.json({ task: getTask(id), ...result });
+    const drawn = !zeroEffort && (getCurrentDrawTaskId() === id || wasRecentlyDrawn(raw));
+    const outcome = db.transaction(() => {
+      const result = completeTask(raw, drawn, zeroEffort ? { effortMinutes: 0 } : undefined);
+      // Completing the last open subtask cascades upward (#111, ADR-32): the
+      // parent auto-completes through completeTask in the same transaction.
+      const parentCompletion =
+        raw.parent_id != null ? maybeAutoCompleteParent(raw.parent_id) : null;
+      return { result, parentCompletion };
+    })();
+    return res.json({
+      task: getTask(id),
+      ...outcome.result,
+      // Surfaced so the client and MCP can announce the parent's XP,
+      // achievements and level-up without a second request (#111).
+      ...(outcome.parentCompletion
+        ? { parentCompletion: { task: getTask(raw.parent_id!), ...outcome.parentCompletion } }
+        : {}),
+    });
   }
 
   // Reopening: undo the latest completion so XP stays honest. A reopened
@@ -778,6 +899,10 @@ tasksRouter.patch("/:id", (req, res) => {
       db.prepare(
         "UPDATE tasks SET status = 'open', completed_at = NULL, deferred_until = NULL, blocked = 0 WHERE id = ?",
       ).run(id);
+      // Reopen symmetry (#111, ADR-32): a reopened subtask is an open child
+      // under a possibly-done parent — the state the lifecycle eliminates —
+      // so the parent reopens the same way (its auto-completion undone).
+      if (raw.parent_id != null) reopenDoneParent(raw.parent_id);
     })();
     return res.json({ task: getTask(id) });
   }
@@ -912,8 +1037,31 @@ tasksRouter.patch("/:id", (req, res) => {
   }
   if (sets.length === 0) return res.status(400).json({ error: "nothing to update" });
 
-  db.transaction(() => {
+  // Parent-lifecycle hooks on the generic write path (#111, ADR-32). The
+  // parent judged is the row's CURRENT parent after this write — the adoption
+  // target when the same PATCH reparents, the stored parent otherwise.
+  // Reparenting AWAY is deliberately not a trigger: like legacy all-done-open
+  // rows, an old parent left with only done children resolves on its next
+  // subtask status change or via manual completion (zero-effort XP).
+  const statusAfter = ("status" in body ? body.status : raw.status) as string;
+  const parentAfter = (reparenting ? (body.parentId as number | null) : raw.parent_id) ?? null;
+
+  const parentCompletion = db.transaction((): CompletionResult | null => {
     db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+    let completion: CompletionResult | null = null;
+    if (parentAfter != null) {
+      if (statusAfter === "open" && (reparenting || raw.status === "archived")) {
+        // An open child arrived under the parent — by adoption (#104 item 1,
+        // done roots) or by un-archiving — so a done parent reopens, its
+        // auto-completion undone (ADR-5). Archived roots are untouched: that
+        // adoption policy stays open in #104.
+        reopenDoneParent(parentAfter);
+      } else if (statusAfter === "archived" && raw.status !== "archived") {
+        // Archiving a subtask can finish the breakdown: with a done sibling
+        // and no open ones left, the all-done predicate fires.
+        completion = maybeAutoCompleteParent(parentAfter);
+      }
+    }
     // Subtasks follow their parent's goal: goal counts and the goal-filtered
     // draw key off each row's own goal_id, so a goal change must cascade to
     // the children (breakdown is one level deep — only roots can be split).
@@ -943,6 +1091,7 @@ tasksRouter.patch("/:id", (req, res) => {
         id,
       );
     }
+    return completion;
   })();
 
   const task = getTask(id)!;
@@ -969,7 +1118,12 @@ tasksRouter.patch("/:id", (req, res) => {
   ) {
     clearCurrentDraw(id);
   }
-  res.json({ task });
+  res.json({
+    task,
+    ...(parentCompletion
+      ? { parentCompletion: { task: getTask(parentAfter!), ...parentCompletion } }
+      : {}),
+  });
 });
 
 // AI card art (#27, ADR-22): serves the cached SVG or generates it exactly
@@ -1006,12 +1160,33 @@ tasksRouter.post("/:id/timer/start", (req, res) => {
 
 tasksRouter.delete("/:id", (req, res) => {
   const id = Number(req.params.id);
-  const result = db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-  if (result.changes === 0) return res.status(404).json({ error: "task not found" });
+  const row = db.prepare("SELECT parent_id AS parentId FROM tasks WHERE id = ?").get(id) as
+    | { parentId: number | null }
+    | undefined;
+  if (!row) return res.status(404).json({ error: "task not found" });
+  // Deleting a subtask can finish the breakdown (#111, ADR-32): "this
+  // remaining step is irrelevant" is a natural way to close one out, so the
+  // lifecycle hook runs here like on every status-changing write, in the
+  // same transaction. Deleting a parent's ONLY subtask instead leaves zero
+  // children — the all-done predicate needs >= 1 done one — and the parent
+  // revives as a leaf (PR #102), not as done. The reopen direction needs no
+  // hook: a delete only ever removes children, never adds an open one.
+  const parentCompletion = db.transaction((): CompletionResult | null => {
+    db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+    return row.parentId != null ? maybeAutoCompleteParent(row.parentId) : null;
+  })();
   // A deleted card leaves the deck — whether it was deleted directly or
   // cascade-deleted with its parent. Cleared on row absence, not id match:
   // a freed id (no AUTOINCREMENT) could be re-bound to the next captured
   // task before the lazy restore validation ever runs.
   clearDanglingDraw();
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    // Same cascade surface as the completion paths (#111): XP, achievements
+    // and level-up without a second request. The client's delete mutation
+    // invalidates gamification/stats/tasks anyway; MCP flows read it.
+    ...(parentCompletion
+      ? { parentCompletion: { task: getTask(row.parentId!), ...parentCompletion } }
+      : {}),
+  });
 });
