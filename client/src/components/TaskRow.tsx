@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import type { Category, Goal, NewTask, Task } from "../api/types";
 import { useCreateSubtasks, useDeleteTask, useUpdateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
 import { isSnoozed } from "../lib/drawable";
 import { sequentialLockedByRecurrence } from "../lib/orderMode";
-import { reparentTargets } from "../lib/reparent";
+import { offersMoveUnder, reparentTargets } from "../lib/reparent";
+import { classifyDrop } from "../lib/taskDnd";
+import { TaskDndContext } from "./TaskDnd";
 import { TaskBadges } from "./TaskBadges";
 import { SnoozeMenu } from "./SnoozeMenu";
 import { TaskForm } from "./TaskForm";
@@ -61,13 +63,33 @@ export function TaskRow({
   // Recurring × sequential guard (#66, ADR-23): a recurring subtask locks the
   // switch to 'do in order' — on the flip button and in both breakdown editors.
   const sequentialLocked = sequentialLockedByRecurrence(task.subtasks, task.subtaskOrderMode);
-  // Reparent targets (#100): shared rule source with the drag-and-drop
-  // follow-up (#101). Only root leaf rows offer "Move under…" — a task with
-  // subtasks cannot become a subtask itself (ADR-16).
+  // Reparent targets (#100): shared rule source with the drag-and-drop (#101)
+  // — offersMoveUnder is the same root-only gate classifyDrop routes on.
+  // Only leaf rows offer it: a task with subtasks cannot become a subtask
+  // itself (ADR-16).
   const moveTargets =
-    !done && task.parentId == null && !hasSubtasks && rootTasks
+    !done && offersMoveUnder(task) && !hasSubtasks && rootTasks
       ? reparentTargets(task, rootTasks)
       : [];
+
+  // Drag-and-drop (#101): context only exists on the Tasks page. During a
+  // drag every row derives its own verdict from the same classifyDrop the
+  // drop handler uses — eligible rows glow for the whole drag, the hovered
+  // blocked row names its rule, everything else stays inert.
+  const dnd = useContext(TaskDndContext);
+  const dragVerdict = dnd?.dragging ? classifyDrop(dnd.dragging, { type: "row", task }) : null;
+  const isDropOver = dnd?.overKey === `row:${task.id}`;
+  const eligibleTarget = dragVerdict?.kind === "nest" && dragVerdict.blockReason == null;
+  const dropBlockReason =
+    isDropOver && dragVerdict?.kind === "nest" ? dragVerdict.blockReason : null;
+  const dndClass = [
+    dnd?.dragging?.id === task.id ? "dnd-source" : "",
+    eligibleTarget ? "dnd-eligible" : "",
+    eligibleTarget && isDropOver ? "dnd-over" : "",
+    dropBlockReason ? "dnd-blocked" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   function snooze(patch: { deferredUntil?: string; blocked?: boolean }) {
     updateTask.mutate({ id: task.id, ...patch });
@@ -112,6 +134,8 @@ export function TaskRow({
         </div>
       ) : (
       <div
+        data-dnd-row={task.id}
+        className={dndClass || undefined}
         style={{
           display: "flex",
           alignItems: "center",
@@ -121,6 +145,19 @@ export function TaskRow({
           opacity: done ? 0.5 : 1,
         }}
       >
+        {/* Pointer-only by design (aria-hidden, not focusable): the drag is
+            an alternative input, the #100 buttons stay the keyboard path.
+            Living outside the row's buttons, it never fights their clicks. */}
+        {dnd && !done && (
+          <span
+            className="dnd-handle"
+            title="Drag to reorganize (keyboard: the Move under… and ⤴ buttons)"
+            aria-hidden="true"
+            onPointerDown={(e) => dnd.startDrag(task, e)}
+          >
+            ⠿
+          </span>
+        )}
         <input
           type="checkbox"
           checked={done}
@@ -246,6 +283,15 @@ export function TaskRow({
           🗑
         </button>
       </div>
+      )}
+      {dropBlockReason && (
+        /* data-dnd-row makes the strip part of this row's hit target: it
+           mounts right under the pointer, so drifting onto it must keep
+           overKey on this row — without it the strip unmounts, the rows
+           shift back up, and the feedback flickers under the cursor. */
+        <div className="dnd-reason" data-dnd-row={task.id} role="status">
+          Cannot drop here — {dropBlockReason}
+        </div>
       )}
       {orderModeError && (
         <div role="alert" style={{ padding: "4px 10px", color: "var(--danger)", fontSize: 13 }}>
