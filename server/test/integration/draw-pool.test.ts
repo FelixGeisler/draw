@@ -70,6 +70,41 @@ describe("GET /api/draw/pool", () => {
     expect(currentDraw).toBeUndefined();
   });
 
+  it("excludes held-back sequential siblings exactly like the draw (#23, ADR-18)", async () => {
+    // Pool parity: heldBackSql() is part of the shared candidate query, so a
+    // sequential parent with two open subtasks must expose exactly one
+    // candidate here — the same card POST /api/draw could pick.
+    const goal = (
+      await request(app).post("/api/goals").send({ title: "pool-parity" }).expect(201)
+    ).body;
+    const parent = await seed({ title: "Sequential parent", categoryId: 1, goalId: goal.id });
+    const subs = (
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({
+          subtasks: [
+            { title: "Step 1", effortMinutes: 10 },
+            { title: "Step 2", effortMinutes: 10 },
+          ],
+          orderMode: "sequential",
+        })
+        .expect(201)
+    ).body;
+
+    const res = await request(app).get(`/api/draw/pool?goalId=${goal.id}`).expect(200);
+    expect(res.body.poolSize).toBe(1);
+    expect(res.body.candidates.map((c: { id: number; title: string }) => c.title)).toEqual([
+      "Step 1",
+    ]);
+    expect(res.body.candidates[0].id).toBe(subs[0].id);
+    expect(res.body.candidates[0].probability).toBe(1);
+
+    // Completing the exposed step frees the sibling with no extra write.
+    await request(app).patch(`/api/tasks/${subs[0].id}`).send({ status: "done" }).expect(200);
+    const after = await request(app).get(`/api/draw/pool?goalId=${goal.id}`).expect(200);
+    expect(after.body.candidates.map((c: { title: string }) => c.title)).toEqual(["Step 2"]);
+  });
+
   it("applies category and goal filters like the draw", async () => {
     await seed({ title: "Household card", categoryId: 3, effortMinutes: 5 });
     const filtered = await request(app).get("/api/draw/pool?categoryId=3").expect(200);
