@@ -9,8 +9,10 @@ import { freshApp, testDb } from "../helpers.js";
 // transaction; the original ends archived (never deleted — its time entries
 // and completions survive) and falls out of every derived surface with no
 // write (ADR-2/8.1). Parts adopt the original's created_at verbatim, so under
-// a sequential parent they occupy its queue slot (ADR-18 amendment). Each
-// test draws from its own goal-scoped pool, like sequential-subtasks.test.ts.
+// a sequential parent they occupy its queue slot when sibling timestamps are
+// distinct; in a same-timestamp batch group the id tie-break puts them at the
+// group's end (ADR-18 amendment, both cases pinned below). Each test draws
+// from its own goal-scoped pool, like sequential-subtasks.test.ts.
 
 let app: express.Express;
 let db: Database.Database;
@@ -76,6 +78,18 @@ function backdate(ids: number[], startMsAgo = 3_600_000) {
   });
 }
 
+/**
+ * One shared created_at — the batch-group case. The batch endpoint usually
+ * stamps siblings within the same millisecond anyway, but not
+ * deterministically, so tests force it.
+ */
+function shareCreatedAt(ids: number[], msAgo = 3_600_000) {
+  const ts = new Date(Date.now() - msAgo).toISOString();
+  ids.forEach((id) => {
+    db.prepare("UPDATE tasks SET created_at = ? WHERE id = ?").run(ts, id);
+  });
+}
+
 const TWO_PARTS = [
   { title: "split part 1", effortMinutes: 25 },
   { title: "split part 2", effortMinutes: 20 },
@@ -114,6 +128,34 @@ describe("the split transaction", () => {
       .prepare("SELECT COUNT(*) AS n FROM time_entries WHERE task_id = ?")
       .get(original.id) as { n: number };
     expect(entries.n).toBe(1);
+  });
+
+  it("keeps the archived original's tracked minutes counted in GET /api/stats", async () => {
+    // The keep-as-archived promise at the surface where it matters: nothing
+    // in statsService filters by task status, so the original's history
+    // stays in the aggregates. A future "exclude archived from stats" filter
+    // must not silently break this (ADR-21 rationale).
+    const { parent } = await seedGoalParent("split-stats");
+    const [original] = await addSubtasks(parent.id, [
+      { title: "tracked step", effortMinutes: 45 },
+    ]);
+    const now = Date.now();
+    const baseline = (await request(app).get("/api/stats").expect(200)).body;
+    db.prepare(
+      "INSERT INTO time_entries (task_id, started_at, ended_at) VALUES (?, ?, ?)",
+    ).run(original.id, new Date(now - 30 * 60_000).toISOString(), new Date(now).toISOString());
+    expect((await request(app).get("/api/stats").expect(200)).body.totalMinutes).toBe(
+      baseline.totalMinutes + 30,
+    );
+
+    await split(original.id, TWO_PARTS);
+
+    // The 30 tracked minutes survive the archive — total and per-category.
+    const after = (await request(app).get("/api/stats").expect(200)).body;
+    expect(after.totalMinutes).toBe(baseline.totalMinutes + 30);
+    const catMinutes = (stats: any) =>
+      stats.byCategory.find((c: any) => c.categoryId === parent.categoryId)?.minutes ?? 0;
+    expect(catMinutes(after)).toBe(catMinutes(baseline) + 30);
   });
 
   it("writes nothing when a part mid-list is invalid — whole-body validation before the transaction", async () => {
@@ -266,6 +308,49 @@ describe("queue position under a sequential parent (ADR-18 amendment)", () => {
     // Child list order: done A, parts in B's slot, then C.
     const titles = (await listedTask(parent.id)).subtasks.map((s: any) => s.title);
     expect(titles).toEqual(["queue A", "split part 1", "split part 2", "queue C"]);
+  });
+
+  it("same-timestamp batch group: parts land at the group's end, the next sibling is exposed, flags stay honest (ADR-18 approximation)", async () => {
+    const { goalId, parent } = await seedGoalParent("split-batch-group");
+    const [stepA, stepB, stepC] = await addSubtasks(
+      parent.id,
+      [
+        { title: "batch A", effortMinutes: 45 },
+        { title: "batch B", effortMinutes: 5 },
+        { title: "batch C", effortMinutes: 5 },
+      ],
+      "sequential",
+    );
+    // The common creation path: one batch, one shared millisecond. Within
+    // the group only the id tie-break orders siblings, so A (lowest id) is
+    // the queue front.
+    shareCreatedAt([stepA.id, stepB.id, stepC.id]);
+
+    // Before the split, the too-big exposed front yields the honest reason.
+    expect((await draw(goalId)).reason).toBe("all_too_big");
+
+    const [part1, part2] = await split(stepA.id, TWO_PARTS);
+
+    // The parts adopt the shared created_at but carry the group's highest
+    // ids, so they land at the END of the group, not in A's slot — the
+    // accepted approximation. B becomes the exposed front and the flags say
+    // so rather than pretending part 1 is next.
+    expect((await draw(goalId)).task.id).toBe(stepB.id);
+    expect((await listedTask(part1.id)).heldBack).toBe(1);
+    expect((await listedTask(part2.id)).heldBack).toBe(1);
+    expect((await listedTask(stepC.id)).heldBack).toBe(1);
+    expect((await listedTask(parent.id)).subtasks.map((s: any) => s.title)).toEqual([
+      "batch B",
+      "batch C",
+      "split part 1",
+      "split part 2",
+    ]);
+
+    // The queue stays coherent end to end: B, then C, then the parts.
+    await request(app).patch(`/api/tasks/${stepB.id}`).send({ status: "done" }).expect(200);
+    expect((await draw(goalId)).task.id).toBe(stepC.id);
+    await request(app).patch(`/api/tasks/${stepC.id}`).send({ status: "done" }).expect(200);
+    expect((await draw(goalId)).task.id).toBe(part1.id);
   });
 
   it("the archived original never gates the queue — no write needed (ADR-2/8.1)", async () => {
