@@ -1,17 +1,7 @@
 import { useEffect, useState } from "react";
 import { useCurrentTimer, useStopTimer } from "../hooks/useTimer";
 import { useUpdateTask } from "../hooks/useTasks";
-
-function formatElapsed(startedAt: string, now: number): string {
-  const seconds = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  if (m >= 60) {
-    const h = Math.floor(m / 60);
-    return `${h}:${String(m % 60).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
+import { formatElapsed } from "../lib/time";
 
 export function TimerBar() {
   const timer = useCurrentTimer();

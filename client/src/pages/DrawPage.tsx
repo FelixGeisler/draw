@@ -5,12 +5,14 @@ import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hoo
 import { useGoals } from "../hooks/useGoals";
 import { useCurrentDraw, useDraw, type DrawResponse } from "../hooks/useDraw";
 import { useCardArt } from "../hooks/useAi";
-import { useStartTimer } from "../hooks/useTimer";
+import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
+import { FocusOverlay } from "../components/FocusOverlay";
 import { SnoozeMenu } from "../components/SnoozeMenu";
 import { TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
 import { classifyTask } from "../lib/drawable";
+import { resolveDrawView } from "../lib/focusView";
 import type { NewTask } from "../api/types";
 import "./DrawPage.css";
 
@@ -23,6 +25,8 @@ export function DrawPage() {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const startTimer = useStartTimer();
+  const stopTimer = useStopTimer();
+  const timer = useCurrentTimer();
 
   const goals = useGoals();
   const [categoryId, setCategoryId] = useState<number | undefined>();
@@ -32,6 +36,10 @@ export function DrawPage() {
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState(false);
   const [snoozing, setSnoozing] = useState(false);
+  // Escape peeked out of the focus view (issue #56). Session-local on
+  // purpose: the view itself is DERIVED from timer + current draw (ADR-29),
+  // so a reload while the timer runs on the drawn card re-enters focus.
+  const [focusExited, setFocusExited] = useState(false);
 
   // Restore the server-persisted draw once per mount (issue #25) — a reload
   // lands straight on the revealed card, no shuffle, mirroring the TimerBar.
@@ -55,6 +63,7 @@ export function DrawPage() {
     setEditing(false);
     setEdited(false);
     setSnoozing(false);
+    setFocusExited(false);
     const [response] = await Promise.all([
       draw.mutateAsync({ categoryId, goalId }),
       new Promise((r) => setTimeout(r, 450)), // let the shuffle play
@@ -105,6 +114,28 @@ export function DrawPage() {
 
   const task = result?.task ?? null;
   const category = task ? categories.data?.find((c) => c.id === task.categoryId) : null;
+
+  // "▶ Start now" (issue #56): one click starts the timer AND drops into the
+  // fullscreen focus view. The view itself is derived below, so re-entering
+  // after Escape — the timer already runs on this card — must NOT start
+  // again: that would close and reopen the entry, resetting the countdown
+  // and splitting the tracked time for no reason.
+  function startFocus() {
+    if (!task) return;
+    setSnoozing(false);
+    setFocusExited(false);
+    if (timer.data?.task.id !== task.id) startTimer.mutate(task.id);
+  }
+
+  // Focus is derived, never stored (ADR-29): the overlay shows exactly while
+  // the running timer points at the drawn card. Stopping or switching the
+  // timer elsewhere (second tab) collapses it back to the revealed card on
+  // the next timer refetch — never a dead overlay.
+  const view = resolveDrawView(
+    phase === "revealed" ? (task?.id ?? null) : null,
+    timer.data?.task.id ?? null,
+    focusExited,
+  );
   // AI card art (#27): kicked off by the reveal, never awaited by it. The
   // hook swallows every failure (incl. 503 degraded mode) into "no art".
   const cardArt = useCardArt(task?.id, phase === "revealed");
@@ -216,10 +247,7 @@ export function DrawPage() {
 
       {phase === "revealed" && task && !editing && (
         <div className="draw-actions">
-          <button
-            className={nonDrawable ? undefined : "primary"}
-            onClick={() => startTimer.mutate(task.id)}
-          >
+          <button className={nonDrawable ? undefined : "primary"} onClick={startFocus}>
             ▶ Start now
           </button>
           <button onClick={completeDrawn}>✓ Done</button>
@@ -280,6 +308,21 @@ export function DrawPage() {
             onCancel={() => setEditing(false)}
           />
         </div>
+      )}
+
+      {/* In-face actions ARE the DrawPage actions (no duplicated controls):
+          ✓ Done is completeDrawn (entry closed server-side, ADR-12), ■ Stop
+          is the timer stop — the persisted draw is untouched, so the card
+          stays restorable underneath. Escape exits the view only. */}
+      {view === "focus" && task && timer.data && (
+        <FocusOverlay
+          task={task}
+          category={category ?? null}
+          startedAt={timer.data.entry.startedAt}
+          onDone={completeDrawn}
+          onStop={() => stopTimer.mutate()}
+          onExit={() => setFocusExited(true)}
+        />
       )}
 
       <TrophyDeck />

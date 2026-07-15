@@ -791,3 +791,36 @@ exact drift ADR-5 exists to prevent. Deriving consumption keeps reads pure,
 re-aggregatable, and auditable, and the append-only log plus UNIQUE
 milestone day is the entire anti-farming story — no trigger, no counter,
 no reconciliation job.
+
+== ADR-29: Focus mode is a derived view — timer plus current draw decide, nothing is persisted
+
+*Context:* Focus mode (#56) flips the drawn card into a fullscreen countdown
+with the timer already running. It must survive reloads the way the drawn
+card (ADR-13) and the TimerBar already do, and it must not invent tracking:
+focus sessions are ordinary `time_entries`.
+*Decision:* The client never stores "in focus". The view is a pure function
+(`client/src/lib/focusView.ts`) of two facts the server already persists —
+the current draw (ADR-13) and the running timer (6.4) — plus one
+session-local "exited" flag for Escape: timer on the drawn card and not
+exited → fullscreen; timer missing or on another task → plain revealed
+card; no draw → idle deck. A reload re-derives: mid-focus it lands back in
+the overlay, after a Stop it lands on the revealed card, and after an
+Escape it re-enters focus. The Escape flag deliberately does NOT go to
+sessionStorage: while the timer runs on the drawn card, "working on this
+card" is the truthful state — Escape is a transient peek at the rest of the
+app, and a persisted flag would be exactly the derived-state drift ADR-2
+bans, going stale the moment the timer changes from a second tab. The
+countdown is sized to `effortMinutes` but display only: crossing zero flips
+to a visibly distinct overtime count-up and never stops the timer or
+completes the task (estimates are guesses — ADR-27 — and punishing an
+overrun teaches padding); a missing estimate degrades to a plain count-up.
+The in-face actions ARE the existing DrawPage actions, not copies: ✓ Done
+is the same completion PATCH (entry closed server-side, ADR-12, drawn bonus
+from the persisted draw), ■ Stop the same `POST /api/timer/stop` (the
+persisted draw is untouched, the card stays restorable). No new endpoints,
+columns, or tracking paths — focus sessions flow into the #22 estimates-vs-
+tracked stats as plain entries, overtime simply reads as a ratio > 1.
+*Rationale:* A persisted focus flag would duplicate what timer + draw
+already say and could contradict them (a dead overlay counting down for a
+stopped timer). Deriving keeps the invariant surface unchanged — one
+running entry, one persisted draw — and the whole feature stays client-only.

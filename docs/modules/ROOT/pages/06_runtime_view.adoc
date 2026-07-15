@@ -96,3 +96,22 @@ User commits           → POST /api/tasks            (one umbrella parent, no e
 `POST /api/tasks/:id/timer/start` closes any running entry and opens a new one in
 one transaction — at most one `time_entries` row with `ended_at IS NULL` exists.
 The TimerBar restores itself after reload from `GET /api/timer/current`.
+
+== 6.5 Focus mode (derived view)
+
+"▶ Start now" on the revealed card starts the timer (6.4) and drops into a
+fullscreen focus overlay: task title, a countdown sized to the effort
+estimate, ✓ Done and ■ Stop in-face. The overlay is never persisted —
+DrawPage derives it per render from the two facts above: current draw
+present AND running timer on that task AND not explicitly exited (Escape)
+→ focus; otherwise the revealed card or the idle deck (ADR-29). A reload
+mid-focus therefore restores straight into the overlay from the same two
+GETs that already restore the card (6.1) and the TimerBar (6.4); a timer
+stopped or moved to another task meanwhile degrades to the plain revealed
+card. The countdown is display only: past zero it flips to a visually
+distinct overtime count-up — nothing is auto-stopped or auto-completed.
+Escape exits the view only; the timer keeps running in the TimerBar, and
+the in-face actions are the DrawPage's own (✓ Done = the completion PATCH,
+■ Stop = the timer stop) — no duplicated controls, no new endpoints, and
+focus sessions are ordinary `time_entries` in the Stats page's
+estimates-vs-tracked block.

@@ -92,6 +92,11 @@ test("timer: start now shows the timer bar across pages and reloads", async ({ p
   await page.locator(".draw-face.front").click();
   await page.getByRole("button", { name: "▶ Start now" }).click();
 
+  // #56: Start now drops into fullscreen focus. Escape exits the VIEW only —
+  // the timer keeps running, which is exactly what this journey asserts.
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+
   await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
 
   // Timer persists across navigation and reload
