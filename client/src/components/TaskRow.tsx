@@ -109,6 +109,25 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
             </button>
           )
         )}
+        {/* Sequential subtask mode (#23): flip "do in order" after the fact.
+            Held-back siblings wear the ⏳ queued chip via TaskBadges. */}
+        {!done && hasSubtasks && (
+          <button
+            onClick={() =>
+              updateTask.mutate({
+                id: task.id,
+                subtaskOrderMode: task.subtaskOrderMode === "sequential" ? "parallel" : "sequential",
+              })
+            }
+            title={
+              task.subtaskOrderMode === "sequential"
+                ? "Subtasks are drawn in order — click to allow any order"
+                : "Subtasks are drawn in any order — click to draw them in the listed order"
+            }
+          >
+            {task.subtaskOrderMode === "sequential" ? "→ in order" : "⇄ any order"}
+          </button>
+        )}
         {!done && task.parentId == null && (
           <button onClick={() => setBreakingDown((b) => !b)} title="Split into small steps">
             Break down
@@ -163,17 +182,18 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
               taskId={task.id}
               goalId={task.goalId}
               onClose={() => setAiPanel(false)}
-              onAccept={async (subtasks) => {
-                await createSubtasks.mutateAsync({ parentId: task.id, subtasks });
+              onAccept={async (subtasks, orderMode) => {
+                await createSubtasks.mutateAsync({ parentId: task.id, subtasks, orderMode });
                 setBreakingDown(false);
               }}
             />
           )}
           <SubtaskEditor
             maxEffort={maxEffort}
+            initialOrderMode={task.subtaskOrderMode}
             onCancel={() => setBreakingDown(false)}
-            onAccept={async (subtasks) => {
-              await createSubtasks.mutateAsync({ parentId: task.id, subtasks });
+            onAccept={async (subtasks, orderMode) => {
+              await createSubtasks.mutateAsync({ parentId: task.id, subtasks, orderMode });
               setBreakingDown(false);
             }}
           />

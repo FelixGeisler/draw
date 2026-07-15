@@ -15,6 +15,7 @@ function task(overrides: Partial<RestorableTask> = {}): RestorableTask {
     hasOpenChildren: 0,
     blocked: 0,
     deferredUntil: null,
+    heldBack: 0,
     ...overrides,
   };
 }
@@ -63,5 +64,13 @@ describe("isRestorable", () => {
     expect(isRestorable(task({ deferredUntil: "2026-07-14T11:00:00.000Z" }), 30, NOW)).toBe(true);
     // Boundary: deferredUntil exactly now counts as woken, like the SQL `<=`.
     expect(isRestorable(task({ deferredUntil: NOW.toISOString() }), 30, NOW)).toBe(true);
+  });
+
+  // #23: a drawn card that fell behind a sequential sibling (parent toggled,
+  // or an older sibling reopened) left the deck — never restore it. SQLite
+  // hands the derived heldBack over as 0/1, so both representations count.
+  it("rejects a held-back sequential sibling (0/1 and boolean forms)", () => {
+    expect(isRestorable(task({ heldBack: 1 }), 30, NOW)).toBe(false);
+    expect(isRestorable(task({ heldBack: true }), 30, NOW)).toBe(false);
   });
 });

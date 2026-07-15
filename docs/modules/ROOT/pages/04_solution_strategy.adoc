@@ -8,7 +8,10 @@
 |A single *weighted random draw* replaces choosing. The weight formula encodes the product's opinion: leverage and urgency beat comfort.
 
 |Big tasks never get started
-|*Drawability is a derived predicate*, not a flag: `status='open' AND effort ≤ max AND no open children AND not blocked AND (no deferred_until OR deferred_until ≤ now)`. Oversized tasks simply never appear in the deck — the UI funnels them into breakdown.
+|*Drawability is a derived predicate*, not a flag: `status='open' AND effort ≤ max AND no open children AND not blocked AND (no deferred_until OR deferred_until ≤ now) AND not held back behind a sequential sibling`. Oversized tasks simply never appear in the deck — the UI funnels them into breakdown.
+
+|Ordered breakdowns drawn out of order
+|*Sequential subtask mode* (ADR-18): a per-parent `subtask_order_mode` lets a breakdown declare "do in order" — only the first open subtask in creation order enters the deck, later siblings queue up behind it (derived, like everything else). The AI breakdown suggests the mode (`orderMatters`); the user confirms.
 
 |Undoable tasks erode trust in the deck
 |*Snooze/block* (ADR-17): a card can defer itself (`deferred_until`) or leave until manually woken (`blocked`). Both are part of the same derived predicate — an expired snooze re-enters the pool with no write, and staleness counts from the wake time so the card returns without an unfair boost.

@@ -1,6 +1,6 @@
 import type { Task } from "../api/types";
 
-export type DrawGroup = "ready" | "needs-estimate" | "too-big" | "container" | "snoozed";
+export type DrawGroup = "ready" | "needs-estimate" | "too-big" | "container" | "snoozed" | "queued";
 
 /**
  * Derived snooze state (ADR-17): blocked, or deferredUntil in the future.
@@ -16,11 +16,15 @@ export function isSnoozed(
 /**
  * Mirrors the server's pool predicate (`drawService.ts`), pinned by the shared
  * vectors in `shared/drawableVectors.ts`. Precedence:
- * container → snoozed → needs-estimate → too-big → ready.
+ * container → snoozed → queued → needs-estimate → too-big → ready.
+ * Snoozed outranks queued: an explicit user action (snooze/block) is more
+ * informative than the derived queue position, and it keeps the Wake
+ * affordance visible — on wake the task simply re-classifies as queued.
  */
 export function classifyTask(task: Task, maxDrawEffort: number, now: Date = new Date()): DrawGroup {
   if (task.hasOpenChildren) return "container";
   if (isSnoozed(task, now)) return "snoozed";
+  if (task.heldBack) return "queued";
   if (task.effortMinutes == null) return "needs-estimate";
   if (task.effortMinutes > maxDrawEffort) return "too-big";
   return "ready";

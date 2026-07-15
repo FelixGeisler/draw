@@ -8,7 +8,13 @@
 |The set of currently drawable tasks
 
 |*Drawable*
-|Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks — a derived predicate, never stored
+|Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks, not snoozed/blocked and not held back — a derived predicate, never stored
+
+|*Sequential breakdown*
+|A parent with `subtask_order_mode = 'sequential'`: only its first open subtask in creation order enters the deck (ADR-18)
+
+|*Queued / held back*
+|An open subtask behind an older open sibling under a sequential parent — out of the deck until the steps in front close; derived at query time, shown as the ⏳ chip
 
 |*Draw*
 |Weighted random selection of one drawable task, presented as a card

@@ -84,8 +84,17 @@ export function useDeleteTask() {
 export function useCreateSubtasks() {
   const invalidate = useInvalidateTasks();
   return useMutation({
-    mutationFn: ({ parentId, subtasks }: { parentId: number; subtasks: NewSubtask[] }) =>
-      api.post<Task[]>(`/api/tasks/${parentId}/subtasks`, { subtasks }),
+    // orderMode (#23) persists "do in order" on the parent in the same
+    // transaction as the batch; omitted = leave the parent's mode untouched.
+    mutationFn: ({
+      parentId,
+      subtasks,
+      orderMode,
+    }: {
+      parentId: number;
+      subtasks: NewSubtask[];
+      orderMode?: Task["subtaskOrderMode"];
+    }) => api.post<Task[]>(`/api/tasks/${parentId}/subtasks`, { subtasks, orderMode }),
     onSuccess: invalidate,
   });
 }

@@ -261,6 +261,44 @@ writes that could drift (the ADR-2 argument). A separate `blocked` flag
 instead of a sentinel far-future date keeps "indefinite" semantically honest
 and trivially queryable.
 
+== ADR-18: Sequential subtask mode as one parent column, hold-back stays derived
+
+*Context:* Many breakdowns are inherently ordered (outline → draft →
+proofread) — drawing step 3 before step 1 makes the card useless — while
+others are independent chores. The AI breakdown already emits subtasks in
+execution order, which the draw ignored.
+*Decision:* One column on the parent — `subtask_order_mode`
+(`'parallel'` default | `'sequential'`) — and *no* per-subtask state. For a
+sequential parent only the first open subtask in creation order
+(`created_at ASC, id ASC` — the id tie-break keeps batch-inserted siblings
+deterministic) enters the draw pool; later open siblings are *held back* by a
+derived `NOT EXISTS(older open sibling under a sequential parent)` predicate
+(ADR-2), mirrored as the query-time `heldBack` field, the client's `queued`
+group (precedence container → snoozed → queued → needs-estimate → too-big →
+ready; an explicit snooze outranks the derived queue position, keeping the
+Wake affordance visible) and the ⏳ chip. Completing the exposed step frees
+the next one with *no write*. A snoozed first subtask still gates its
+siblings — "in order" means in order; the empty-pool reason stays honest:
+held-back siblings never count toward `all_too_big` (they surface by
+finishing the step in front, not by breakdown), while an oversized *exposed*
+first step still does. `isRestorable` (ADR-13) rejects held-back cards
+lazily — unlike a snooze wear-off there is no path where a held-back card
+becomes restorable again without a user action that legitimately frees it,
+so no eager pointer clear is needed. Manual ordering stays out of scope
+(creation order only, no `position` column). The "Do in order" toggle
+travels with the breakdown batch (`orderMode` on `POST /:id/subtasks`,
+persisted on the parent in the same transaction) and as a plain
+`subtaskOrderMode` PATCH; the AI breakdown returns an `orderMatters` boolean
+that only pre-sets the toggle — the user has the last word. Client and
+server predicates stay pinned by the shared vectors
+(`shared/drawableVectors.ts`).
+*Rationale:* A per-parent mode captures the actual property ("this breakdown
+is a sequence") with one write and zero synchronization; per-subtask
+dependency edges would be bookkeeping for a capability (arbitrary DAGs) the
+product explicitly does not want. Deriving hold-back keeps every mutation
+path (complete, reopen, delete, re-parent, toggle) automatically correct —
+the ADR-2 argument once more.
+
 == ADR-19: MCP adapter speaks HTTP to the local API; the client's approval flow replaces staged review
 
 *Context:* Issue #36 exposes Draw's domain operations to MCP clients (Claude

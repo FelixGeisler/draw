@@ -196,6 +196,7 @@ function taskContext(taskId: number): { blocks: ContentBlock[]; goalId: number |
       : "",
     ``,
     `Order subtasks by recommended execution sequence. Remember: the first one must be trivially easy to start.`,
+    `Set orderMatters to true only when the steps genuinely build on each other (e.g. outline -> draft -> proofread), so doing a later step first would be wasted work; set it to false when the steps are independent.`,
   ].filter(Boolean);
 
   return { blocks: [{ type: "text", text: lines.join("\n") }], goalId: task.goalId };

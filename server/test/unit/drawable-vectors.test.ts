@@ -19,6 +19,7 @@ describe("shared eligibility vectors (parity with classifyTask)", () => {
         hasOpenChildren: v.hasOpenChildren,
         blocked: v.blocked,
         deferredUntil: v.deferredUntil,
+        heldBack: v.heldBack,
       };
       expect(isRestorable(task, v.maxEffort, NOW)).toBe(v.expected === "ready");
     });

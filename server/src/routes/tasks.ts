@@ -4,6 +4,7 @@ import {
   clearCurrentDraw,
   clearDanglingDraw,
   getCurrentDrawTaskId,
+  heldBackSql,
   isRestorable,
   withBooleanBlocked,
   type RestorableTask,
@@ -25,7 +26,9 @@ const TASK_SELECT = `
          recur_every_days AS recurEveryDays, status,
          created_at AS createdAt, completed_at AS completedAt,
          last_drawn_at AS lastDrawnAt, deferred_until AS deferredUntil, blocked,
+         subtask_order_mode AS subtaskOrderMode,
          EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open') AS hasOpenChildren,
+         ${heldBackSql("tasks")} AS heldBack,
          CASE
            WHEN EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open')
              THEN (SELECT SUM(c.effort_minutes) FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open')
@@ -62,8 +65,10 @@ tasksRouter.get("/", (req, res) => {
     .prepare(`${TASK_SELECT} WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`)
     .all(...params) as Record<string, unknown>[];
 
+  // (created_at, id) is the canonical creation order — the same order the
+  // sequential hold-back predicate uses (#23), so the queue reads top-down.
   const childStmt = db.prepare(
-    `${TASK_SELECT} WHERE parent_id = ? AND status != 'archived' ORDER BY created_at ASC`,
+    `${TASK_SELECT} WHERE parent_id = ? AND status != 'archived' ORDER BY created_at ASC, id ASC`,
   );
   for (const root of roots) {
     withBooleanBlocked(root);
@@ -114,12 +119,21 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
       return res.status(400).json({ error: "every subtask needs a title" });
     }
   }
+  // "Do in order" travels with the breakdown itself (#23) — persisted on the
+  // parent in the same transaction, so batch and mode cannot disagree.
+  const orderMode = req.body?.orderMode;
+  if (orderMode !== undefined && orderMode !== "parallel" && orderMode !== "sequential") {
+    return res.status(400).json({ error: "orderMode must be 'parallel' or 'sequential'" });
+  }
 
   const insert = db.prepare(
     `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const created = db.transaction(() => {
+    if (orderMode) {
+      db.prepare("UPDATE tasks SET subtask_order_mode = ? WHERE id = ?").run(orderMode, parent.id);
+    }
     const ids: number[] = [];
     for (const s of subtasks) {
       const r = insert.run(
@@ -193,6 +207,12 @@ tasksRouter.patch("/:id", (req, res) => {
     }
     body.blocked = body.blocked ? 1 : 0;
   }
+  // Sequential subtask mode (#23): a plain column write — which subtask is
+  // exposed to the draw stays derived from it (ADR-18), so the toggle needs
+  // no bookkeeping beyond this validation.
+  if ("subtaskOrderMode" in body && body.subtaskOrderMode !== "parallel" && body.subtaskOrderMode !== "sequential") {
+    return res.status(400).json({ error: "subtaskOrderMode must be 'parallel' or 'sequential'" });
+  }
 
   const fields: Record<string, string> = {
     title: "title",
@@ -206,6 +226,7 @@ tasksRouter.patch("/:id", (req, res) => {
     status: "status",
     deferredUntil: "deferred_until",
     blocked: "blocked",
+    subtaskOrderMode: "subtask_order_mode",
   };
   const sets: string[] = [];
   const params: unknown[] = [];

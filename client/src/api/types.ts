@@ -32,7 +32,20 @@ export interface Task {
    */
   deferredUntil: string | null;
   blocked: boolean;
+  /**
+   * Sequential subtask mode (#23, ADR-18). Only meaningful on parents: a
+   * 'sequential' parent exposes only its first open subtask (creation order)
+   * to the draw pool.
+   */
+  subtaskOrderMode: "parallel" | "sequential";
   hasOpenChildren: number;
+  /**
+   * Derived at query time like hasOpenChildren (0/1): an older open sibling
+   * under a 'sequential' parent holds this task out of the deck until the
+   * earlier steps close. Never stored — completing the step in front frees
+   * the next one with no write.
+   */
+  heldBack: number;
   /**
    * Derived at query time (never stored): sum of OPEN subtasks' estimates for a
    * broken-down task, the task's own effortMinutes otherwise. Null when the open
