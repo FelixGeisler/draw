@@ -76,6 +76,8 @@
 |===
 
 *Scope boundaries:* no mobile app, no multi-device sync, no calendar integration,
-no notifications. The Claude API is the only *remote* system; MCP clients are a
-second local consumer of the same loopback API — nothing becomes reachable from
-the network (section 2).
+no notifications. These boundaries describe the current scope, not the product's
+identity — mobile and multi-device use are named as direction (not design) in
+the xref:01_introduction_and_goals.adoc#vision[section 1 vision]. The Claude API
+is the only *remote* system; MCP clients are a second local consumer of the same
+loopback API — nothing becomes reachable from the network (section 2).

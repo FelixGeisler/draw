@@ -2,8 +2,10 @@
 
 == 1.1 Requirements Overview
 
-*Draw* is a local, single-user web application that helps its user overcome two
-concrete productivity problems:
+*Draw* is a web application that helps its user overcome two concrete
+productivity problems. It currently runs as a local, single-user deployment
+(xref:02_architecture_constraints.adoc[section 2]) — a property of the present
+setup, not of the product itself (see <<vision>>):
 
 1. *Difficulty getting started.* Big, vague tasks create decision paralysis.
    Draw forces every task above a configurable effort threshold (default 30 minutes)
@@ -41,6 +43,19 @@ Main features:
 |Claude API breaks down tasks and plans backward from goals, using uploaded materials (lecture PDFs, past exams) as context
 |===
 
+[#vision]
+=== Vision
+
+The long-term direction is to use Draw beyond a single local machine: on
+several devices, on mobile, and possibly with multiple decks for different
+contexts (e.g. different workplaces). None of this is designed yet — there is
+no architecture and no schedule behind it. This subsection states direction,
+not design: constraints and scope statements elsewhere
+(xref:02_architecture_constraints.adoc[section 2],
+xref:03_context_and_scope.adoc[section 3]) describe the current deployment and
+point here, so that future multi-device features read as roadmap rather than
+constraint violations.
+
 == 1.2 Quality Goals
 
 [cols="1,2,3",options="header"]
@@ -49,7 +64,9 @@ Main features:
 
 |1
 |*Zero-friction local operation*
-|One command (`npm run dev`), no accounts, no cloud dependency for core features
+|One command (`npm run dev`), no accounts. Local-_first_, not local-forever:
+core features never depend on a cloud service — a property that must survive
+any future step toward the <<vision>>
 
 |2
 |*Graceful AI degradation*
@@ -74,7 +91,7 @@ Main features:
 |===
 |Role |Expectations
 
-|Owner/user (Felix)
+|Owner/user
 |Daily driver for work, study, and household planning; fun to use
 
 |AI agents (Claude Code)
