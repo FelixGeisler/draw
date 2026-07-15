@@ -3,6 +3,7 @@ import type { Goal } from "../api/types";
 import { useCreateGoal, useDeleteGoal, useUpdateGoal, useGoals } from "../hooks/useGoals";
 import { useCategories, useCreateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
+import { GoalTasksSection } from "../components/GoalTasksSection";
 import { MaterialsSection } from "../components/MaterialsSection";
 import { AiGenerateTasksPanel, AiPlanPanel } from "../components/AiSuggestionPanel";
 import { TaskForm } from "../components/TaskForm";
@@ -19,6 +20,7 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
   const categories = useCategories();
   const aiStatus = useAiStatus();
   const [showMaterials, setShowMaterials] = useState(false);
+  const [showTasks, setShowTasks] = useState(false);
   // Plan backward and Generate tasks share the category select — one panel at a time.
   const [aiPanel, setAiPanel] = useState<"plan" | "generate" | null>(null);
   const [planCategoryId, setPlanCategoryId] = useState<number | null>(null);
@@ -143,9 +145,15 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
             }}
           />
         </div>
-        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
+        {/* The progress count doubles as the toggle for the Tasks section
+            (#87) — same collapsible pattern as the 📎 materials button. */}
+        <button
+          style={{ padding: "2px 10px" }}
+          onClick={() => setShowTasks((s) => !s)}
+          title="Show this goal's tasks — unlink or attach existing ones"
+        >
           {goal.doneCount}/{goal.taskCount} tasks
-        </span>
+        </button>
         <button style={{ padding: "2px 10px" }} onClick={() => setAddingTask((a) => !a)}>
           + Add task
         </button>
@@ -197,6 +205,7 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
           />
         </div>
       )}
+      {showTasks && <GoalTasksSection goalId={goal.id} />}
       {showMaterials && <MaterialsSection goalId={goal.id} />}
       {aiPanel === "plan" && (
         <AiPlanPanel
