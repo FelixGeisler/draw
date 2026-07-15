@@ -824,3 +824,17 @@ tracked stats as plain entries, overtime simply reads as a ratio > 1.
 already say and could contradict them (a dead overlay counting down for a
 stopped timer). Deriving keeps the invariant surface unchanged — one
 running entry, one persisted draw — and the whole feature stays client-only.
+*Amendment (#110):* The same principle extends to the standing revealed
+card itself: the DrawPage derives it continuously from the persisted
+current draw (`resolveDrawnCard`, `client/src/lib/drawnCard.ts`) instead of
+a mount-time snapshot, so completing, snoozing, or deleting the drawn task
+on ANY surface — TimerBar, Tasks page, MCP, a second tab — dismisses the
+card on the next refetch of the current-draw query: mutation invalidation
+in-app, window focus or the 60s interval where no invalidation fires
+(cross-tab/MCP latency of up to a minute is accepted). The draw animation
+still reveals off the mutation response (written through to the query
+cache on success), celebration stays with the acting surface (confetti
+fires only for the page's own ✓ Done), and #88's sanctioned escape is the
+one session-local hold: a card edited out of the deck forfeits its pointer
+(cleared lazily, as before) but stays on screen with the resolve hint
+until resolved on-page — an edit must not become a hidden re-roll.

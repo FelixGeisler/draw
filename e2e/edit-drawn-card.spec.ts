@@ -96,6 +96,19 @@ test("edit above max_draw_effort: card stays with the resolve hint, no draw-agai
   await expect(page.getByRole("button", { name: "💤 Not now" })).toBeVisible();
 });
 
+test("reload after the out-of-deck edit: the lazily cleared pointer stays cleared", async ({
+  page,
+}) => {
+  // The SESSION held the 90-minute card above (#88's sanctioned escape), but
+  // the pointer was forfeited: GET /api/draw/current cleared it lazily when
+  // the edit's invalidation refetched. A fresh mount derives from that
+  // cleared pointer (#110) — the idle deck, never a resurrected card.
+  expect(await (await page.request.get("/api/draw/current")).json()).toBeNull();
+  await page.goto("/");
+  await expect(page.getByText("click to draw")).toBeVisible();
+  await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
+});
+
 test("delete from the card dismisses it and returns to the idle draw", async ({ page }) => {
   // The previous test left the task at 90 min — out of the deck. Make it
   // drawable again via the API so the goal-filtered draw finds it.
