@@ -154,8 +154,8 @@ export function latestCycleTrackedMinutes(
     .reduce((sum, e) => sum + e.minutes, 0);
 }
 
-/** Minutes per time entry, running entries counted up to now. */
-const MINUTES_EXPR = `(julianday(COALESCE(e.ended_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))) - julianday(e.started_at)) * 1440.0`;
+/** Minutes per time entry (alias `e`), running entries counted up to now. */
+export const MINUTES_EXPR = `(julianday(COALESCE(e.ended_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))) - julianday(e.started_at)) * 1440.0`;
 
 export function computeStats(from: string, to: string): Stats {
   // `to` is exclusive end-of-range (ISO date + 1 day handled by caller)

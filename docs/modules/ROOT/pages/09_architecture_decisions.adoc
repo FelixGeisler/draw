@@ -384,3 +384,32 @@ job to "reopen" cards, and no write when a window opens or closes. The
 TypeScript placement trades one SQL-side filter for immunity against the
 UTC/local mismatch that already bit the repo elsewhere (`isDueSoon` vs.
 `urgencyFactor`).
+
+== ADR-21: Activity history derived read-side, bucketed by local day
+
+*Context:* The gamification layer only showed *today* (trophy pile, #40) — at
+midnight the pile evaporates. The house-of-cards skyline (#53) needs a
+permanent, browsable per-day record of started and completed tasks, including
+the "abandonment trace": a task worked on but not finished that day stays
+face-down on that day forever.
+*Decision:* No new tables, columns, or write paths — `GET /api/activity`
+derives everything read-side from `time_entries` and `completions` (the ADR-5
+argument extended to history). The card set for local day D is *tasks with a
+time entry started on D* UNION *tasks completed on D*; the union keeps
+timer-less completions (PATCH status to done) visible. `completed` on a card
+means "a completion exists on that same local day", so an entry-only day stays
+face-down permanently and a later completion earns only that later day an
+upright card. Days bucket by **local** day, not UTC: the skyline is a
+human-facing record like streaks (`date(..., 'localtime')`), unlike the
+deliberately UTC-bucketed `/api/stats` ranges — which is also why activity is
+its own endpoint instead of a stats extension. Bucketing lives in one pure
+function (`localDayOf`, offset injectable for tests); SQL only pre-filters on
+a UTC window widened by a day per side. Tracked minutes reuse the stats
+`MINUTES_EXPR` (running entries count up to now); midnight-spanning entries
+attribute to their start day; per-day `totals` ride along for the #54 heatmap.
+Accepted limitation: deleting a task cascades its entries/completions away and
+with them its history — we do not add write-path tracking to preserve it.
+*Rationale:* Deriving keeps history incapable of contradicting its sources
+(no counters to drift, reopen/undo just works), and local-day bucketing puts a
+23:30 task on that evening's tower — the emotional ledger the feature exists
+for.

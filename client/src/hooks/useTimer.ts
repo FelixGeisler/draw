@@ -19,7 +19,11 @@ export function useStartTimer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (taskId: number) => api.post<{ ok: boolean }>(`/api/tasks/${taskId}/timer/start`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["timer"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["timer"] });
+      // Starting a timer lays a (face-down) card into today's skyline tower.
+      qc.invalidateQueries({ queryKey: ["activity"] });
+    },
   });
 }
 
@@ -30,6 +34,7 @@ export function useStopTimer() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["timer"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["activity"] });
     },
   });
 }
