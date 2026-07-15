@@ -9,6 +9,7 @@ import {
 import { useActivity, type ActivityCard, type ActivityDay } from "../hooks/useActivity";
 import { useCategories } from "../hooks/useTasks";
 import { addDays, asLocalDate, diffDays, formatDay, localToday } from "../lib/localDay";
+import { trophyRarity } from "../lib/trophyRarity";
 import "./HistoryPage.css";
 
 // House-of-cards skyline (#53): one tower per local day, upright cards for
@@ -56,6 +57,10 @@ function SkylineCard({
   onToggle: () => void;
   onLower: () => void;
 }) {
+  // Deterministic rarity (#62), shared with the trophy pile. Only upright
+  // cards can carry it: wasDrawn folds out of completions, so a face-down
+  // (worked, not done) card is always "none" by construction.
+  const rarity = trophyRarity(card);
   const outcome = card.completed
     ? `completed, +${card.xpAwarded} XP${card.wasDrawn ? " (drawn)" : ""}`
     : "not completed this day";
@@ -70,10 +75,13 @@ function SkylineCard({
         formatDay(date),
         `${card.trackedMinutes} min tracked`,
         outcome,
+        rarity !== "none" ? rarity : null,
       ]
         .filter(Boolean)
         .join(", ")}
-      className={`hoc-card ${card.completed ? "completed" : "face-down"} ${lifted ? "lifted" : ""}`}
+      className={`hoc-card ${card.completed ? "completed" : "face-down"} ${lifted ? "lifted" : ""}${
+        rarity !== "none" ? ` rarity-${rarity}` : ""
+      }`}
       // Data-driven size/color flow in as CSS custom properties — an inline
       // `height`/`transform` would out-specificity the CSS lift states.
       style={

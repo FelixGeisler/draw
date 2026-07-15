@@ -9,13 +9,30 @@ under a `sequential` parent — completing the step in front frees the next one
 with no write, ADR-18), "scheduled" (outside the task's availability window on
 the local wall clock — the window opening re-admits the card with no write,
 ADR-20), "in progress" (running time entry
-exists), XP/level/streak (aggregates over `completions`), weekly grade
+exists), XP/level/streak (aggregates over `completions`; the streak's rest
+days and freeze consumption are re-derived on every read from the rest-weekday
+setting and the append-only `streak_freezes` earn log — ADR-28), weekly grade
 (aggregation over `time_entries`), and the displayed effort of a broken-down
 task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at query
 time; the stored estimate stays what the user typed and keeps feeding XP and
 edit forms; the one-level sum is exact for every database because the API
 rejects new nested breakdowns, ADR-16, and the v7 startup migration
-re-parented any pre-guard nesting to the root, ADR-24). Only facts are stored
+re-parented any pre-guard nesting to the root, ADR-24). Goal feasibility
+(#60) is the same rule at goal scope: `GET /api/goals` derives
+`remainingOpenEffortMinutes` (SUM over the goal's open *leaf* tasks — a
+broken-down parent counts through its open subtasks, which inherit the goal
+link, never its own estimate on top) and `trackedMinutes14d` (stats
+`MINUTES_EXPR`, so a running entry counts up to now), and the pure client
+module `lib/feasibility.ts` classifies on-track/tight/infeasible from
+required vs. actual pace; days to the target date count on the LOCAL wall
+clock to the end of the target day — a target date is a human-facing calendar
+day like the ADR-21 activity buckets, not a UTC instant. No feasibility
+snapshot is ever persisted. Split-in-place (#108) introduces no new derived
+state either: the archived original of a split falls out of every predicate
+above — the draw pool, the Tasks page child list, the effort rollups, the
+sequential hold-back and the parent-completion gate — through the existing
+`status` conditions alone, with no write beyond the one status flip.
+Only facts are stored
 (tasks, entries, completions, unlocked achievements).
 
 == 8.2 The weight formula
@@ -26,11 +43,27 @@ weight = impact² / max(effort, 5)          leverage per minute
        × staleness(base date)              up to ×2 over 30 days; base = created,
                                            last completion (recurring), or the
                                            snooze wake time (ADR-17)
-       × 0.15 if drawn within cooldown     variety on "draw again"
+       × 0.15 if drawn within cooldown     variety across successive draws
+       ÷ sqrt(pool siblings)               sibling damping (ADR-25): a k-leaf
+                                           breakdown competes like ~√k cards;
+                                           k counts siblings in the pool
 ....
 
 Household chores work without ratings: no goal → neutral impact 3, and staleness
-makes neglected chores progressively louder.
+makes neglected chores progressively louder. Sibling damping keeps a 40-leaf
+import (#29) from drowning them: measured at 58% of the probability mass on
+day 0 (and rising with staleness), damped to ~18% — methodology and numbers in
+`server/scripts/sim-issue30.ts`, guarded by `test/unit/draw-weights.test.ts`.
+
+The *warm-up draw* (#57, ADR-30) deliberately bypasses this whole formula: one
+deal per `warmup_every_hours` on the idle deck picks the minimum-effort
+eligible card deterministically (tie-break most stale — the same staleness
+anchor — then lowest id), with the cooldown applied as exclusion instead of
+the ×0.15 dampener. Gamification keeps it honest: completed inside its
+`max(effort, 15)`-minute window it pays ×1.25 (never the drawn ×1.5 — it was
+handed out, not gambled), completing another card within 30 minutes of a
+warm-up completion pays momentum ×1.25 — every combined multiplier is capped
+at ×1.5, so warm-ups can never out-earn playing the deck.
 
 == 8.3 Error handling
 
@@ -107,4 +140,25 @@ AI degraded mode).
 
 `PRAGMA user_version` switch in `db.ts`: fresh databases execute `schema.sql`
 (always the current schema); existing databases run incremental `ALTER TABLE`
-steps. No migration framework.
+steps. No migration framework. Backup import (section 8.9) reuses the same
+`migrate()` after swapping in a restored database, so backups from older app
+versions are migrated forward exactly like an old database on boot.
+
+== 8.9 Backup and restore
+
+`GET /api/backup/export` streams one zip: an `app.db` snapshot taken with
+`VACUUM INTO` (safe under WAL — the live file is never copied raw), all
+material files, and a manifest (ADR-26). The Claude API key is stripped from
+the snapshot only — backups never contain it; the live DB keeps it.
+
+`POST /api/backup/import` **replaces everything** — tasks, goals, materials,
+settings, gamification history, the current draw. There is no merge and no
+partial restore. Safety nets, both inside `DATA_DIR`:
+
+- the previous database is kept as `app.db.bak` (overwritten on the next import),
+- the previous material files as `files.bak`.
+
+Every rejected import (foreign zip, corrupt or newer-versioned database,
+unsafe paths) is a `400` with the live data untouched: validation runs
+against staged temp copies before anything is swapped. The Settings page
+gates the restore behind an explicit warning plus typing `REPLACE`.

@@ -1,5 +1,16 @@
-import { db, getSetting } from "../db.js";
-import { clearCurrentDraw } from "./drawService.js";
+import { db, getSetting, getSettingString } from "../db.js";
+import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
+import {
+  computeStreak,
+  FREEZE_BANK_CAP,
+  shouldEarnFreeze,
+  type StreakState,
+} from "./streak.js";
+
+// Public setting (routes/settings.ts allowlist): JSON array of rest weekdays
+// in JS getDay convention (0=Sun..6=Sat), same as tasks.window_days. Absent
+// or empty = pre-#58 behavior (every day required).
+export const REST_WEEKDAYS_SETTING = "streak_rest_weekdays";
 
 export interface TaskRow {
   id: number;
@@ -12,18 +23,84 @@ export interface TaskRow {
   last_drawn_at: string | null;
 }
 
-/** A completion counts as "drawn" if the task came out of the deck recently. */
+/**
+ * A completion counts as "drawn" if the task came out of the deck recently.
+ * A warm-up deal (#57) also stamps last_drawn_at, but that card was handed
+ * out, not gambled: when the stamp IS the last warm-up deal of this very
+ * task, the heuristic must not turn it into the drawn ×1.5 — e.g. the dealt
+ * card was snoozed (marker gone) and later completed from the Tasks page. A
+ * later REGULAR draw re-stamps last_drawn_at with a different timestamp, so
+ * the exact-match comparison reinstates the bonus only for a real gamble.
+ */
 export function wasRecentlyDrawn(task: TaskRow): boolean {
   if (!task.last_drawn_at) return false;
   const hours = (Date.now() - new Date(task.last_drawn_at).getTime()) / 3_600_000;
-  return hours < 6;
+  if (hours >= 6) return false;
+  const lastWarmup = getLastWarmupDeal();
+  return !(
+    lastWarmup != null &&
+    lastWarmup.taskId === task.id &&
+    lastWarmup.dealtAt === task.last_drawn_at
+  );
 }
+
+/** Why a completion paid MORE than its plain XP (#57) — null when it didn't. */
+export type CompletionBonus = "warmup" | "momentum" | null;
 
 export interface CompletionResult {
   xpAwarded: number;
+  bonus: CompletionBonus;
   newAchievements: string[];
   recurring: boolean;
   levelUp: boolean;
+}
+
+/**
+ * The single effective XP multiplier (#57, ADR-30). Invariant: never above
+ * the drawn ×1.5, and a warm-up strictly below it.
+ *
+ * - Warm-up card: NEVER the drawn ×1.5, even though it is the persisted
+ *   current draw — it was handed out, not gambled. In its bonus window
+ *   ×1.25, late ×1.0. Momentum never applies to the warm-up itself, keeping
+ *   every warm-up multiplier at most ×1.25 < ×1.5, so warm-ups cannot become
+ *   the XP meta.
+ * - Any other card: drawn ×1.5, momentum ×1.25, combined but CAPPED at ×1.5
+ *   total — a drawn card already at ×1.5 gains nothing from momentum, by
+ *   design; momentum mainly rewards knocking out a non-drawn card while warm.
+ *
+ * `bonus` names the reason the XP is HIGHER than it would otherwise be:
+ * "warmup" only when the window ×1.25 applied, "momentum" only when it
+ * actually raised the multiplier (i.e. not on an already-×1.5 drawn card).
+ */
+export function xpMultiplier(input: {
+  wasDrawn: boolean;
+  warmup: { inWindow: boolean } | null;
+  momentum: boolean;
+}): { multiplier: number; bonus: CompletionBonus } {
+  if (input.warmup) {
+    return input.warmup.inWindow ? { multiplier: 1.25, bonus: "warmup" } : { multiplier: 1, bonus: null };
+  }
+  const multiplier = Math.min((input.wasDrawn ? 1.5 : 1) * (input.momentum ? 1.25 : 1), 1.5);
+  return { multiplier, bonus: input.momentum && !input.wasDrawn ? "momentum" : null };
+}
+
+/**
+ * Momentum (#57): a warm-up completion of a DIFFERENT task within the last 30
+ * minutes. Derived from the completions log, never from stored state (ADR-2):
+ * reopening the warm-up deletes its completion via undoLatestCompletion, which
+ * disarms momentum automatically. Both timestamps are UTC ISO strings, so the
+ * comparison stays in one format (SQLite datetime() would emit the space-
+ * separated form, which does not compare against ISO "T" strings).
+ */
+function hasMomentum(taskId: number, now: Date): boolean {
+  const cutoff = new Date(now.getTime() - 30 * 60_000).toISOString();
+  return Boolean(
+    db
+      .prepare(
+        "SELECT 1 FROM completions WHERE was_warmup = 1 AND task_id != ? AND completed_at >= ? LIMIT 1",
+      )
+      .get(taskId, cutoff),
+  );
 }
 
 function isoDate(d: Date): string {
@@ -35,17 +112,33 @@ function isoDate(d: Date): string {
  * or (recurring) push its due date forward. Must run inside a transaction.
  */
 export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult {
+  const now = new Date();
+  // Read the warm-up marker BEFORE clearCurrentDraw below wipes it. The
+  // marker only ever describes the current draw, so a matching taskId means
+  // this completion resolves the dealt warm-up card.
+  const marker = getWarmupMarker();
+  const warmup =
+    marker != null && marker.taskId === task.id
+      ? {
+          inWindow:
+            now.getTime() <=
+            new Date(marker.dealtAt).getTime() + marker.windowMinutes * 60_000,
+        }
+      : null;
+  const momentum = !warmup && hasMomentum(task.id, now);
+  const { multiplier, bonus } = xpMultiplier({ wasDrawn, warmup, momentum });
+
   const effort = task.effort_minutes ?? 10;
-  let xp = Math.round(effort * (task.impact / 3));
-  if (wasDrawn) xp = Math.round(xp * 1.5);
+  // Same shape as ever: rounded base, single effective multiplier, round,
+  // floor 1 — multiplier 1.5 reproduces the historical drawn values exactly.
+  let xp = Math.round(Math.round(effort * (task.impact / 3)) * multiplier);
   if (xp < 1) xp = 1;
 
   const levelBefore = levelFromXp(totalXp()).level;
 
-  const now = new Date();
   db.prepare(
-    "INSERT INTO completions (task_id, completed_at, was_drawn, xp_awarded) VALUES (?, ?, ?, ?)",
-  ).run(task.id, now.toISOString(), wasDrawn ? 1 : 0, xp);
+    "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, ?, ?, ?)",
+  ).run(task.id, now.toISOString(), wasDrawn ? 1 : 0, warmup ? 1 : 0, xp);
 
   // Completing ends the work session: close this task's own running timer at
   // completion time. A different task's running timer stays untouched. This
@@ -76,10 +169,21 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
   // drawn session just ended, matching how the client dismisses the card.
   clearCurrentDraw(task.id);
 
+  // Freeze token earn (#58, ADR-28): the 7th/14th/... REAL completion day of
+  // the unbroken run banks one token, capped at FREEZE_BANK_CAP unconsumed.
+  // shouldEarnFreeze's milestone-day check plus the UNIQUE(milestone_day)
+  // constraint make the earn idempotent — undo/redo cannot farm tokens.
+  const earnDay = localDate(now);
+  if (shouldEarnFreeze(streakState(), earnedFreezeDays(), earnDay)) {
+    db.prepare(
+      "INSERT OR IGNORE INTO streak_freezes (milestone_day, created_at) VALUES (?, ?)",
+    ).run(earnDay, now.toISOString());
+  }
+
   const levelAfter = levelFromXp(totalXp()).level;
   const newAchievements = checkAchievements({ completedTask: task });
 
-  return { xpAwarded: xp, newAchievements, recurring, levelUp: levelAfter > levelBefore };
+  return { xpAwarded: xp, bonus, newAchievements, recurring, levelUp: levelAfter > levelBefore };
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +209,11 @@ export function levelFromXp(xp: number): { level: number; intoLevel: number; nee
 }
 
 // ---------------------------------------------------------------------------
-// Streak — consecutive calendar days (local server time) with >= 1 completion.
+// Streak — real completion days (local server time) in an unbroken run.
+// Rest weekdays and freeze-covered days neither break nor extend (#58,
+// ADR-28). Fully derived on every read: completions log + rest setting +
+// append-only freeze earn log feed the pure fold in streak.ts — no stored
+// counter anywhere (ADR-2/ADR-5), and reads have no write side effects.
 
 function completionDays(): Set<string> {
   const rows = db
@@ -114,18 +222,44 @@ function completionDays(): Set<string> {
   return new Set(rows.map((r) => r.day));
 }
 
-export function currentStreak(): number {
-  const days = completionDays();
-  const cursor = new Date();
-  let streak = 0;
-  // Today counts if present, but doesn't break the streak if missing yet.
-  if (days.has(localDate(cursor))) streak++;
-  cursor.setDate(cursor.getDate() - 1);
-  while (days.has(localDate(cursor))) {
-    streak++;
-    cursor.setDate(cursor.getDate() - 1);
+function restWeekdays(): Set<number> {
+  const raw = getSettingString(REST_WEEKDAYS_SETTING);
+  if (!raw) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const days = new Set(
+        parsed.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6),
+      );
+      // All 7 never passes PATCH validation; a hand-edited row must not turn
+      // every missed day into a rest day, so fall back to "no rest days".
+      if (days.size < 7) return days;
+    }
+  } catch {
+    // malformed setting value — behave like the default
   }
-  return streak;
+  return new Set();
+}
+
+/** Milestone days of earned tokens, chronological (the fold replays by day). */
+function earnedFreezeDays(): string[] {
+  const rows = db
+    .prepare("SELECT milestone_day AS day FROM streak_freezes ORDER BY milestone_day")
+    .all() as { day: string }[];
+  return rows.map((r) => r.day);
+}
+
+export function streakState(): StreakState {
+  return computeStreak({
+    completionDays: completionDays(),
+    restWeekdays: restWeekdays(),
+    earnedFreezeDays: earnedFreezeDays(),
+    today: localDate(new Date()),
+  });
+}
+
+export function currentStreak(): number {
+  return streakState().streak;
 }
 
 function localDate(d: Date): string {
@@ -145,8 +279,12 @@ export interface AchievementDef {
 export const ACHIEVEMENTS: AchievementDef[] = [
   { key: "first_draw", title: "First draw", emoji: "🃏", description: "Draw your first card." },
   { key: "first_completion", title: "Off the mark", emoji: "✅", description: "Complete your first task." },
-  { key: "streak_7", title: "One week strong", emoji: "🔥", description: "A 7-day completion streak." },
-  { key: "streak_30", title: "Unstoppable", emoji: "🌋", description: "A 30-day completion streak." },
+  // Streak thresholds count REAL completion days (#58): rest and frozen days
+  // keep the run alive but never increment it, so 7 completed days may span
+  // more than 7 calendar days. Already-unlocked rows stay unlocked — the
+  // achievements table is append-only.
+  { key: "streak_7", title: "One week strong", emoji: "🔥", description: "7 completed days in one unbroken streak." },
+  { key: "streak_30", title: "Unstoppable", emoji: "🌋", description: "30 completed days in one unbroken streak." },
   { key: "monster_slayer", title: "Monster slayer", emoji: "🐉", description: "Finish every subtask of a big task." },
   { key: "leverage_master", title: "Leverage master", emoji: "🎯", description: "60% of a week's time on 4–5★ tasks." },
   { key: "deck_clearer", title: "Deck clearer", emoji: "🏜", description: "Empty the drawable deck by completing it." },
@@ -238,12 +376,17 @@ export function checkAchievements(event: { completedTask?: TaskRow; drew?: boole
 export function gamificationState() {
   const xp = totalXp();
   const { level, intoLevel, needed } = levelFromXp(xp);
-  const streak = currentStreak();
+  const streakInfo = streakState();
   const dailyGoal = getSetting("daily_goal_completions", 1);
 
+  // Surfaced drawn-ness derives as was_drawn AND NOT was_warmup (ADR-30): a
+  // warm-up deal was handed out, not gambled, so it must not mint the drawn
+  // trophy rarity (#62) or the "(drawn)" label — the same distinction
+  // completeTask() draws for the ×1.5. The row keeps both raw facts.
   const todayCompletions = db
     .prepare(
-      `SELECT co.id, co.completed_at AS completedAt, co.was_drawn AS wasDrawn, co.xp_awarded AS xpAwarded,
+      `SELECT co.id, co.completed_at AS completedAt,
+              (co.was_drawn AND NOT co.was_warmup) AS wasDrawn, co.xp_awarded AS xpAwarded,
               t.id AS taskId, t.title, t.category_id AS categoryId, t.impact
        FROM completions co JOIN tasks t ON t.id = co.task_id
        WHERE date(co.completed_at, 'localtime') = date('now', 'localtime')
@@ -261,7 +404,14 @@ export function gamificationState() {
     xp,
     level,
     levelProgress: { intoLevel, needed },
-    streak,
+    // streak stays a plain number for compatibility; the sibling fields let
+    // the client render rest/frozen days honestly (#58) — never as completed.
+    streak: streakInfo.streak,
+    todayKind: streakInfo.todayKind,
+    freezesBanked: streakInfo.freezesBanked,
+    freezeBankCap: FREEZE_BANK_CAP,
+    frozenDays: streakInfo.frozenDays,
+    restDays: streakInfo.restDays,
     dailyGoalMet: todayCompletions.length >= dailyGoal,
     dailyGoal,
     todayCompletions,

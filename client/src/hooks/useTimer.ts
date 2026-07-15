@@ -23,6 +23,9 @@ export function useStartTimer() {
       qc.invalidateQueries({ queryKey: ["timer"] });
       // Starting a timer lays a (face-down) card into today's skyline tower.
       qc.invalidateQueries({ queryKey: ["activity"] });
+      // Goal cards derive trackedMinutes14d from time_entries (#60), and a
+      // running entry already counts toward the window via MINUTES_EXPR.
+      qc.invalidateQueries({ queryKey: ["goals"] });
     },
   });
 }
@@ -31,10 +34,18 @@ export function useStopTimer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.post<unknown>("/api/timer/stop"),
-    onSuccess: () => {
+    // onSettled, not onSuccess (PR #105 review): a Stop that races a second
+    // tab hits an already-closed timer and 404s — the refetch must still
+    // happen so `["timer"]` returns null and the focus overlay collapses to
+    // the revealed card immediately (ADR-29: never a dead overlay) instead
+    // of counting down a dead entry until the next interval tick.
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ["timer"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["activity"] });
+      // The TimerBar is global: stopping while the Goals page is mounted must
+      // refresh the feasibility chip's trackedMinutes14d pace (#60).
+      qc.invalidateQueries({ queryKey: ["goals"] });
     },
   });
 }

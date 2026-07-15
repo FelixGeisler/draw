@@ -5,18 +5,30 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
-const dataDir = process.env.DATA_DIR
+export const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.resolve(here, "../data");
 export const filesDir = path.join(dataDir, "files");
+export const dbPath = path.join(dataDir, "app.db");
 
 fs.mkdirSync(filesDir, { recursive: true });
 
-export const db = new Database(path.join(dataDir, "app.db"));
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+function openDatabase(): Database.Database {
+  const handle = new Database(dbPath);
+  handle.pragma("journal_mode = WAL");
+  handle.pragma("foreign_keys = ON");
+  return handle;
+}
 
-const CURRENT_VERSION = 7;
+// `let`, not `const`: backup import (#61, ADR-26) swaps the database file on
+// disk and reopens the handle. ESM live bindings mean every module that
+// imports { db } sees the new handle on its next access — no code in this
+// repo caches prepared statements or transactions across requests, so a
+// reopen is safe between requests (better-sqlite3 is synchronous, and the
+// whole swap runs in one synchronous block: no request can interleave).
+export let db = openDatabase();
+
+export const CURRENT_VERSION = 9;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -64,8 +76,13 @@ function migrate() {
       // the guard's 400 message prescribes). Each pass reads a snapshot of
       // (id, grandparent) pairs first, so a pass moves every nested row
       // exactly one step up its original chain — the loop terminates because
-      // parent_id is only ever written at INSERT referencing an existing
-      // row, making the ancestor graph acyclic, and each pass strictly
+      // the ancestor graph is acyclic: every pre-v7 database was written by
+      // code that only ever set parent_id at INSERT referencing an existing
+      // row. (Since #100 parent_id is also rewritten by the reparent PATCH —
+      // which postdates this migration — but the guarantee carries over: a
+      // reparent target must be a root and the moved task must be childless,
+      // so the moved node never becomes anyone's ancestor and no cycle can
+      // be minted, ADR-24.) Each pass strictly
       // shrinks the maximum depth. Defensively the pass count is bounded
       // anyway (a chain of depth d holds d-2 nested rows, so acyclic data
       // needs at most one pass per initially nested row): a parent_id cycle
@@ -110,10 +127,13 @@ function migrate() {
         // follows the parent unconditionally, category_id only while open —
         // done/archived rows are historical records and keep the category
         // they were actually finished under (#44). impact is deliberately
-        // left as-is, even where the adopted goal_id is NULL: a parent goal
-        // unlink cascades NULL without resetting children's impact either,
-        // and the ADR-4 no-op tolerance keeps such rows editable —
-        // grandfathered, not an oversight.
+        // left as-is, even where the adopted goal_id is NULL: this repair
+        // moves rows the user never asked to move, so unlike a DELIBERATE
+        // goal wipe — a parent unlink (#76) or a #100 reparent into a
+        // goal-less root, both of which reset impact to the neutral 3 — the
+        // historical rating is grandfathered the way goal deletion
+        // grandfathers one, and the ADR-4 no-op tolerance keeps such rows
+        // editable. Not an oversight (ADR-24).
         const adopt = db.prepare(
           `UPDATE tasks
            SET goal_id = (SELECT r.goal_id FROM tasks r WHERE r.id = tasks.parent_id),
@@ -127,11 +147,40 @@ function migrate() {
         for (const id of reparented) adopt.run(id);
       })();
     }
+    if (version < 8) {
+      // Streak freeze tokens (issue #58, ADR-28): append-only earn log;
+      // consumption stays derived at read time.
+      db.exec(`CREATE TABLE streak_freezes (
+        id INTEGER PRIMARY KEY,
+        milestone_day TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+      )`);
+    }
+    if (version < 9) {
+      // Warm-up draw (issue #57, ADR-30): completions record whether the task
+      // was completed as the dealt warm-up card (momentum derives from these
+      // rows), and the rate limit becomes a user setting. INSERT OR IGNORE:
+      // a restored backup may already carry the row.
+      db.exec("ALTER TABLE completions ADD COLUMN was_warmup INTEGER NOT NULL DEFAULT 0");
+      db.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('warmup_every_hours', '8')");
+    }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);
 }
 
 migrate();
+
+/**
+ * Close the current handle (if still open) and reopen the database file at
+ * dbPath, running migrations forward. Used by backup import (#61, ADR-26)
+ * after it has swapped a restored snapshot into place — the snapshot may come
+ * from an older schema version, so migrate() must run exactly like on boot.
+ */
+export function reopenDatabase() {
+  if (db.open) db.close();
+  db = openDatabase();
+  migrate();
+}
 
 // Settings key for the Claude API key. Stored plaintext in the local
 // single-user SQLite DB (ADR-11) and excluded from every API response.
@@ -141,6 +190,18 @@ export const API_KEY_SETTING = "anthropic_api_key";
 // session state — single-user app, one current draw — not a user setting, so
 // the generic settings endpoints exclude it.
 export const CURRENT_DRAW_SETTING = "current_draw_task_id";
+
+// Warm-up draw (#57, ADR-30) — internal session state next to the current
+// draw, excluded from the settings endpoints exactly like it.
+// WARMUP_DRAW_SETTING marks the current draw as a warm-up deal (JSON:
+// {taskId, dealtAt, windowMinutes}); it is cleared everywhere the current
+// draw is cleared, so it can never point at a card that is no longer the
+// current draw. WARMUP_LAST_DEALT_SETTING records the last deal (JSON:
+// {taskId, dealtAt}) and is never cleared: dealing consumes the one-per-
+// `warmup_every_hours` allowance irrevocably — discarding the card does not
+// refund it, so the warm-up cannot be fished for a better card.
+export const WARMUP_DRAW_SETTING = "warmup_current_draw";
+export const WARMUP_LAST_DEALT_SETTING = "warmup_last_dealt";
 
 export function getSetting(key: string, fallback: number): number {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as

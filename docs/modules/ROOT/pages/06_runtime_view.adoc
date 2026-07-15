@@ -21,13 +21,36 @@ the UI turns `all_too_big` into a "break something down" call to action, while
 `all_outside_window` (every remaining candidate is outside its availability
 window, ADR-20) says "scheduled for later": those cards return on their own.
 
-The pick is persisted as the *current draw* (ADR-13). On mount the DrawPage
-restores it from `GET /api/draw/current` — revealed, no shuffle — the same
-pattern as the TimerBar (6.4). The endpoint validates the task is still
+The pick is persisted as the *current draw* (ADR-13). The DrawPage DERIVES
+the standing card from `GET /api/draw/current` continuously (#110, ADR-29
+amendment): a reload restores it — revealed, no shuffle, the same pattern as
+the TimerBar (6.4) — and a pointer cleared by a completion, snooze, or
+delete on another surface (TimerBar, Tasks page, MCP, a second tab)
+dismisses the card on the query's next refetch without a second ✓ Done.
+The endpoint validates the task is still
 drawable (open leaf, estimated, within `max_draw_effort`, not snoozed/blocked,
 not held back behind a sequential sibling, inside its availability window) and
 lazily clears a pointer that went stale, e.g. because the card was edited out
 of the deck.
+
+A revealed card offers no re-draw (#88): the draw is a commitment — re-rolling
+would mean fishing for a comfortable card, which defeats the
+anti-procrastination purpose. The card leaves the screen only by being
+resolved: completed, snoozed/blocked ("Not now", ADR-17), or deleted. Editing
+the card out of the deck (the "this card was a mistake" case) also resolves it
+— the lazy restore validation clears the persisted pointer on the next check,
+while the session keeps the card on screen with a resolve hint until it is
+resolved on-page, so the edit never turns into a hidden re-roll (#110).
+Changing the category/goal filter while a card is revealed applies to the next
+draw only.
+
+The *warm-up deal* (`POST /api/draw/warmup`, #57, ADR-30) is the "I can't
+start" escape hatch on the IDLE deck: it deterministically deals the
+smallest eligible card from the same pool (no weights, no probability),
+rate-limited to one per `warmup_every_hours`. It is not a re-roll — the
+endpoint answers 409 while a valid current draw exists, and the dealt card
+is the same commitment as a drawn one, marker and badge surviving reloads
+via `GET /api/draw/current`.
 
 == 6.2 Completing a task (single transaction)
 
@@ -35,11 +58,14 @@ of the deck.
 PATCH /api/tasks/:id {status: 'done'}
   ├─ reject 409 if open subtasks exist
   ├─ drawn := task is the persisted current draw, or last_drawn_at within 6h
+  │           (a warm-up deal's own stamp is excluded — handed out, not gambled)
   └─ transaction:
-       insert completions row (xp = effort × impact/3, ×1.5 if drawn)
+       multiplier := warm-up card? in window ×1.25, late ×1.0 (never ×1.5)
+                     : (drawn ×1.5) × (momentum ×1.25), capped at ×1.5 (ADR-30)
+       insert completions row (xp = round(round(effort × impact/3) × multiplier))
        recurring? push due_date forward : set status done
-       clear current draw if it was this task
-       check achievements → response {task, xpAwarded, newAchievements, levelUp}
+       clear current draw (and warm-up marker) if it was this task
+       check achievements → response {task, xpAwarded, bonus, newAchievements, levelUp}
 ....
 
 The client fires confetti, updates the trophy deck, and toasts new achievements
@@ -87,3 +113,22 @@ User commits           → POST /api/tasks            (one umbrella parent, no e
 `POST /api/tasks/:id/timer/start` closes any running entry and opens a new one in
 one transaction — at most one `time_entries` row with `ended_at IS NULL` exists.
 The TimerBar restores itself after reload from `GET /api/timer/current`.
+
+== 6.5 Focus mode (derived view)
+
+"▶ Start now" on the revealed card starts the timer (6.4) and drops into a
+fullscreen focus overlay: task title, a countdown sized to the effort
+estimate, ✓ Done and ■ Stop in-face. The overlay is never persisted —
+DrawPage derives it per render from the two facts above: current draw
+present AND running timer on that task AND not explicitly exited (Escape)
+→ focus; otherwise the revealed card or the idle deck (ADR-29). A reload
+mid-focus therefore restores straight into the overlay from the same two
+GETs that already restore the card (6.1) and the TimerBar (6.4); a timer
+stopped or moved to another task meanwhile degrades to the plain revealed
+card. The countdown is display only: past zero it flips to a visually
+distinct overtime count-up — nothing is auto-stopped or auto-completed.
+Escape exits the view only; the timer keeps running in the TimerBar, and
+the in-face actions are the DrawPage's own (✓ Done = the completion PATCH,
+■ Stop = the timer stop) — no duplicated controls, no new endpoints, and
+focus sessions are ordinary `time_entries` in the Stats page's
+estimates-vs-tracked block.

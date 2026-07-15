@@ -231,6 +231,18 @@ test("generate → review → commit: nothing written before commit, then one pa
   await expect(page.getByText(EDITED_LEAF_TITLE)).toBeVisible();
 });
 
+test("the import folds into one collapsible group on the Capture page (#30)", async ({ page }) => {
+  await page.goto("/capture");
+  const ready = page.locator("section").filter({ hasText: "Ready to draw" });
+  const group = ready.locator("details").filter({ hasText: PARENT_TITLE });
+  // One header row wearing the count — not four flat rows drowning the list.
+  await expect(group.locator("summary")).toContainText(PARENT_TITLE);
+  await expect(group.locator("summary")).toContainText("(4)");
+  await expect(group.getByText(EDITED_LEAF_TITLE)).not.toBeVisible();
+  await group.locator("summary").click();
+  await expect(group.getByText(EDITED_LEAF_TITLE)).toBeVisible();
+});
+
 test("a drawn leaf shows the provenance description on the card", async ({ page }) => {
   // All 4 leaves are ≤ max_draw_effort and the umbrella is a container, so a
   // goal-filtered draw always lands on a leaf carrying the provenance line.

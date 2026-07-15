@@ -13,8 +13,22 @@ import {
 // offset 0 = "server lives in UTC", offset 120 = UTC+2 (a Berlin summer).
 
 const META: ActivityTaskMeta[] = [
-  { taskId: 1, title: "write essay", categoryId: 1, categoryColor: "#4f8cff", effortMinutes: 30 },
-  { taskId: 2, title: "water plants", categoryId: 3, categoryColor: "#3fbf7f", effortMinutes: 10 },
+  {
+    taskId: 1,
+    title: "write essay",
+    categoryId: 1,
+    categoryColor: "#4f8cff",
+    effortMinutes: 30,
+    impact: 5,
+  },
+  {
+    taskId: 2,
+    title: "water plants",
+    categoryId: 3,
+    categoryColor: "#3fbf7f",
+    effortMinutes: 10,
+    impact: 3,
+  },
 ];
 
 const entry = (over: Partial<ActivityEntryRow>): ActivityEntryRow => ({
@@ -65,6 +79,10 @@ describe("buildActivityDays", () => {
     const [worked, done] = days[0].cards;
     expect(worked).toMatchObject({ taskId: 1, completed: false, trackedMinutes: 25, xpAwarded: 0 });
     expect(done).toMatchObject({ taskId: 2, completed: true, xpAwarded: 12, wasDrawn: true });
+    // Rarity facts (#62): impact passes through from the live task meta, so
+    // the client can derive foil/silver on upright cards without new state.
+    expect(worked.impact).toBe(5);
+    expect(done.impact).toBe(3);
   });
 
   it("keeps the earlier face-down card when the task completes a day later", () => {

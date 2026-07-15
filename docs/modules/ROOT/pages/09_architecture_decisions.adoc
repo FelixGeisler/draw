@@ -47,6 +47,17 @@ task and cascades the reset to its *open* subtasks — the ratings described
 leverage toward the goal that was just removed — while done/archived subtasks
 keep theirs as the historical stats record, mirroring the category cascade's
 open-only rule.
+*Single-create parity (#84):* `POST /api/tasks` with a `parentId` inherits the
+parent's goal and category exactly like the batch endpoint — an explicit
+divergent `goalId`/`categoryId` is rejected, the impact gate judges the
+*inherited* goal, and an omitted impact defaults to the parent's rating (the
+batch's `s.impact ?? parent.impact` fallback, not the root create's neutral
+3). Before, that path ignored the parent's goal entirely, so a
+child could carry its own goal under a goal-less parent; the parent edit
+form's no-op `goalId` resend would then cascade over the child *without* the
+unlink reset — a silent wipe that minted grandfathered ratings a third,
+undocumented way. Goal deletion and the goal-less batch stay the only two
+exceptions.
 
 == ADR-5: Gamification derived from the completions log
 
@@ -167,6 +178,13 @@ before any restore validation runs — deletes therefore clear the pointer
 eagerly whenever its row is gone, not only on an exact id match. Deriving the
 bonus server-side removes a client-trust quirk and makes the bonus
 reload-proof.
+*Amendment (#88):* the DrawPage no longer offers "Draw again" — the draw is a
+commitment, and the persisted pointer makes it reload-proof. A revealed card
+is resolved (completed, snoozed/blocked, deleted), never re-rolled; only the
+next draw after resolution overwrites the pointer. Editing the card out of
+the deck also counts as resolution: the lazy restore validation clears the
+stale pointer, so a reload after an edit-out lands on the idle deck — the
+sanctioned "this card was a mistake" escape hatch, not a re-roll.
 
 == ADR-14: AI proposes full task lists; checkbox review remains the sole write path
 
@@ -254,7 +272,26 @@ cannot create the nesting the UI already forbids (the one-level
 remaining-effort rollup and the one-level goal/category cascades rely on it).
 Databases that acquired nesting before that guard are repaired at startup by
 the v7 migration (#80, ADR-24), so the invariant holds for every database,
-not only for post-guard writes.
+not only for post-guard writes. Reparenting (#100, `PATCH parentId`) enforces
+the same invariant from both directions: the target must be a root task, and
+the moved task must be childless — children of *any* status, since a
+done/archived child is one status write away from being an open grandchild.
+Those two rules are also what keeps `parent_id` acyclic now that it is no
+longer INSERT-only (ADR-24): a childless mover can never become anyone's
+ancestor. An adopted task joins the breakdown in the universal
+(created_at, id) creation order (ADR-18). Split-in-place (#108) is the
+sanctioned path for *deep* decomposition within this ban: a subtask above the
+draw limit cannot be broken down further, so `POST /api/tasks/:id/split`
+*replaces* it with two or more parts as siblings under the same parent — the
+original ends `archived` in the same transaction, never deleted (its time
+entries and completions survive; a running entry is closed at split time,
+mirroring completion, ADR-12). Part estimates deliberately carry no
+`<= max_draw_effort` cap — a part that is still too big is itself split
+again. The tree stays exactly two levels everywhere; decomposition is
+unlimited *by repetition, not by depth*. Recurring originals are rejected
+(parts are one-shot rows — no part could carry the recurrence; the repair is
+ADR-23's: drop the recurrence first), and the parts INSERT carries no
+recurrence column, so a split can never mint the ADR-23 ban either.
 
 == ADR-17: Snooze/block as retained timestamps, drawability stays derived
 
@@ -314,8 +351,32 @@ finishing the step in front, not by breakdown), while an oversized *exposed*
 first step still does. `isRestorable` (ADR-13) rejects held-back cards
 lazily — unlike a snooze wear-off there is no path where a held-back card
 becomes restorable again without a user action that legitimately frees it,
-so no eager pointer clear is needed. Manual ordering stays out of scope
-(creation order only, no `position` column). The "Do in order" toggle
+so no eager pointer clear is needed — reparenting the drawn card into a
+held-back position (#100) is the exception: like a snooze wear-off, the card
+would become restorable again the moment the step in front completes, so the
+reparent PATCH clears the pointer eagerly. Manual ordering stays out of scope
+(creation order only, no `position` column); reparenting (#100) keeps that
+rule — a task adopted into a sequential breakdown queues by its original
+`created_at` like every other sibling, so a task older than the existing
+steps enters *ahead* of them and may jump the queue. One predicate, no
+stored positions; explicit sibling ordering remains a possible follow-up if
+queue-jumping proves wrong in practice. Split-in-place (#108) leans on the
+same mechanism as a deliberate trick: the parts of a split subtask adopt the
+original's `created_at` *verbatim*, so they sort into the original's queue
+slot — splitting step 2 of 5 must not make its parts run after steps 3–5 —
+while their new, higher ids keep the parts themselves in array order via the
+id tie-break. In-slot placement is exact whenever sibling timestamps differ
+(breakdowns grown over time, and any sibling created after the original).
+*Known approximation:* batch-created siblings share one `created_at` string
+and are ordered purely by id, and there is no `(created_at, id)` value
+between `(T, id5)` and `(T, id6)` for a new row with a higher id — exact
+placement inside such a group is impossible without mutating sibling rows,
+so parts land at the *end* of the same-timestamp group, still ahead of every
+later-timestamp sibling. Accepted and documented; if it bites in practice,
+the explicit `position` column above is the named escalation. Adopting
+`created_at` also inherits the original's staleness base (up to ×2) —
+deliberate, consistent with ADR-17's wake semantics: the work has genuinely
+been lying around since then. The "Do in order" toggle
 travels with the breakdown batch (`orderMode` on `POST /:id/subtasks`,
 persisted on the parent in the same transaction) and as a plain
 `subtaskOrderMode` PATCH; the AI breakdown returns an `orderMatters` boolean
@@ -357,7 +418,7 @@ management is never exposed); read tools carry `readOnlyHint: true`,
 achievements), and nothing is marked destructive. Read-heavy state ships as
 resources: `draw://deck` (backed by the new side-effect-free
 `GET /api/draw/pool`, reusing the ADR-2 candidate query), `draw://gamification`,
-and `draw://materials/{id}`. No `ANTHROPIC_API_KEY` is needed anywhere — the
+and `draw://materials/\{id}`. No `ANTHROPIC_API_KEY` is needed anywhere — the
 intelligence is the MCP client's.
 *Rationale:* Trade-off accepted: the dev server must be running —
 `ECONNREFUSED` maps to an actionable tool error naming `npm run dev`. In
@@ -510,7 +571,10 @@ be re-gated with no user action — cards oscillating in and out of the deck.
 create it, in the routes where all domain invariants live: creating a subtask
 with `recurEveryDays` under a `sequential` parent (`POST /api/tasks` with
 `parentId`; the batch endpoint's INSERT carries no recurrence at all), adding
-a recurrence to an existing subtask of a sequential parent (`PATCH`), and
+a recurrence to an existing subtask of a sequential parent (`PATCH`),
+reparenting a recurring task into a sequential breakdown (`PATCH parentId`,
+#100 — judged on the effective recurrence, so clearing the recurrence in the
+same PATCH legalizes the move), and
 flipping a parent to `sequential` — via `PATCH subtaskOrderMode` or the
 breakdown batch's `orderMode` — while *any* subtask carries a recurrence
 (any status: done and archived rows can be revived by a plain status write).
@@ -546,15 +610,20 @@ cascades one level and leaves the grandchild's `goal_id` stale, and
 completing the middle task 409s with no visible open subtask anywhere — an
 undiagnosable dead end. Elsewhere legacy rows are tolerated (ADR-4 impact,
 ADR-23 recurring-sequential), but those rows stay *operable*; a nested row
-breaks derived state and has no user-reachable repair (no re-parent edit
-exists in any UI or API).
+breaks derived state and had no user-reachable repair (at the time no
+re-parent edit existed in any UI or API — #100 added one later, after every
+stored database had already been repaired by this migration).
 *Decision:* The v6 → v7 migration (`server/src/db.ts`) re-parents every task
 whose parent is itself a subtask to its root ancestor — the exact flattening
 the guard's 400 message tells callers to perform — one level per pass until
 the tree is two levels deep everywhere (arbitrary legacy depth; terminates
-because `parent_id` is only ever written at INSERT referencing an existing
-row, so ancestor chains are acyclic and finite — and the pass count is
-bounded by the initial nested-row count anyway, so a corrupt cyclic chain
+because ancestor chains in the migrated data are acyclic and finite — every
+pre-v7 database was written by code that only ever set `parent_id` at INSERT
+referencing an existing row. Since #100 `parent_id` is also rewritten by the
+reparent PATCH, but the guarantee carries over: a reparent target must be a
+root and the moved task must be childless, so the moved node never becomes
+anyone's ancestor and no cycle can be minted. The pass count is bounded by
+the initial nested-row count anyway, so a corrupt cyclic chain
 aborts the boot with a diagnosable error instead of hanging it). Re-parented
 rows then join their new breakdown under the same cascade rules a parent
 edit applies (routes/tasks.ts): `goal_id` follows the root unconditionally,
@@ -572,9 +641,13 @@ recurrence pass), both user repairs stay open (drop the recurrence, or flip
 the root to parallel), and the transition guards prevent re-creating it once
 repaired — pinned by `server/test/integration/migration-v6-recurring.test.ts`.
 Second, under a goal-less root the cascade leaves re-parented rows with
-`goal_id` NULL and their stored impact untouched — route-cascade parity: a
-parent goal unlink cascades NULL without resetting children's impact either,
-and the ADR-4 no-op tolerance keeps such rows editable.
+`goal_id` NULL and their stored impact untouched — deliberate grandfathering,
+not route parity: a *deliberate* goal wipe resets impact to the neutral 3 (a
+parent unlink cascades the reset to open subtasks since #76, and a #100
+reparent into a goal-less root resets the moved task the same way), but the
+migration moves rows the user never asked to move, so it keeps the
+historical rating the way goal deletion keeps one, and the ADR-4 no-op
+tolerance keeps such rows editable.
 *Rationale:* Repair over grandfathering because every listed pathology is a
 *silent* corruption of derived state (ADR-2's core promise) rather than a
 stale-but-honest stored value, and the flattened result is exactly what the
@@ -582,3 +655,267 @@ user would have gotten had the guard existed all along. A read-side
 tolerance (recursive rollups, deep cascades, recursive hold-back) would have
 rebuilt the complexity ADR-16 banned to serve rows that should never have
 existed.
+
+== ADR-25: Draw weights are damped by the square root of the pool-sibling count
+
+*Context:* A #29 import commits ~40 comparable fresh leaves under one
+umbrella, each a full-weight pool candidate. Issue #30 mandated measuring
+before touching the formula. The deterministic simulation
+(`server/scripts/sim-issue30.ts`; deck pinned in `scripts/deckFixtures.ts`,
+guarded by `test/unit/draw-weights.test.ts`) put such an import at 58% of
+the probability mass on day 0 against a healthy 12-task organic deck — and
+rising (63% after a week, 74% after a month), because the fresh leaves climb
+the staleness ramp while the older organic tasks already sit at its ×2 cap.
+Leaner-but-normal decks fared worse (67% without the deck's overdue chore,
+72% against 6 organic tasks, 70% with a second 25-leaf import running in
+parallel). Waiting doesn't heal it, and the existing escape hatches don't
+either: the Draw page chips filter *into* the exam, not out of it, and
+sequential mode (#23) fixes the flood outright (0.6% share) but #29 commits
+default-parallel — deliberately, since exam exercises are independent.
+*Decision:* `drawService.poolWeights()` — the single home both `drawTask()`
+and `drawPool()` use — multiplies each candidate's weight by `1/sqrt(k)`,
+where k is the number of same-parent siblings *in the candidate pool*, not
+open siblings: held-back sequential steps (ADR-18), snoozed (ADR-17) and
+out-of-window (ADR-20) siblings don't flood the deck, so they must not
+dampen the one card representing them. k = 1 — every parentless task, only
+child, or sequential front card — is exactly ×1, and `weight()` itself is
+untouched. A 40-leaf import competes like √40 ≈ 6 cards (measured 18%
+share), and the damping decays smoothly as leaves complete (20 left → 13%,
+5 left → 6%) instead of the cliff a per-parent quota would create.
+*Rationale:* sqrt is the mildest standard damping that keeps aggregate group
+mass monotone in group size — a bigger breakdown still surfaces more often
+in total (the exam *is* important; its best leaf still draws at ~1% per
+draw), but sublinearly, so it can no longer starve chores and other goals:
+distinct organic cards seen in a 10-draw session recover from 3.6 to 6.3 of
+12, and a mid-weight organic card's chance to surface within 5 draws from
+7% to ~13% (pre-import: 16%). Per-goal quotas and changes to the
+urgency/staleness/cooldown factors were explicitly out of scope (#30).
+
+== ADR-26: Backups are one zip — VACUUM INTO snapshot + material files; import swaps files with the DB rename as commit point
+
+*Context:* All user data lives in `DATA_DIR`: the WAL-mode SQLite database
+and the uploaded goal materials under `files/` (#61). Hand-copying `app.db`
+while the server runs silently drops every commit still sitting in
+`app.db-wal`, and a DB-only backup would restore `materials.stored_name`
+rows that point at nothing. Restore is destructive by nature, and the app
+has exactly one live `better-sqlite3` handle opened at module scope.
+*Decision:* `backupService.ts` exports one archive: an `app.db` snapshot
+taken with `VACUUM INTO` (the safe online-copy path under WAL — never a raw
+file copy), every file under `files/`, and a `manifest.json` (app marker,
+timestamp, `user_version`, row counts) that lets import reject foreign zips
+up front. The `anthropic_api_key` settings row is deleted from the
+*snapshot* only (ADR-11: it is stored plaintext, and backups get copied
+around); the live DB keeps it. Import validates everything against staged
+temp copies first — readable zip, our manifest, `integrity_check`,
+`1 <= user_version <= CURRENT_VERSION`, required tables present, zip-slip
+guard on `files/` entries — and only then swaps: checkpoint + close, delete
+stale `-wal`/`-shm` (a leftover WAL would be replayed into the restored
+database — the torn-DB hazard), *copy* `app.db` to `app.db.bak` (copy, not
+rename: the live path never disappears, so a crash cannot boot into a fresh
+empty DB), swap `files/` (previous kept as `files.bak`), and last the
+staged snapshot is renamed onto `app.db` — a single same-volume rename, the
+atomic commit point. Reopen (`db` is an exported `let`; ESM live bindings
+update every importer) runs `migrate()`, so older backups move forward
+exactly like an old database would on boot. The whole swap is one
+synchronous block: better-sqlite3 is synchronous, so no request can
+interleave with a half-swapped state.
+*Rationale:* one archive keeps backups self-contained (acceptance was
+export → wipe → import → byte-identical material files); validating on
+staged copies means every rejection is a 400 with live data untouched; and
+ordering the swap around a final atomic rename means a crash at any step
+boots either the complete old state or the complete new state. `adm-zip`
+handles both zip directions synchronously, fitting the no-framework
+guardrails; `multer` (already a dependency) receives the upload.
+
+== ADR-27: Estimation coaching is read-only advice — hints never mutate, weights stay on stated estimates
+
+*Context:* The estimation block (ADR-15) measures per-category
+estimated-vs-tracked bias but stops short of coaching: nothing said *which
+kind* of work the user habitually misjudges, and nothing helped at the moment
+that matters most — while typing a new estimate (#55). The obvious stronger
+designs — pre-filling the corrected value, or letting the draw weigh tasks by
+bias-adjusted "effective effort" — both make the system silently disagree
+with the user's stated plan.
+*Decision:* Coaching is strictly read-only, in two surfaces. The Stats page
+renders a plain-language per-category statement ("Uni: tracked 1.4× estimated
+over 6 tasks — pad your Uni estimates") and TaskForm shows a dim, passive
+hint under the effort field ("history suggests ~45 min") once the entered
+estimate diverges more than 25% from the category's all-history ratio. Both
+gate on a minimum sample of 3 qualifying tasks; below it nothing renders, not
+even a placeholder. The hint never rewrites the field, never blocks submit,
+and the submitted `effortMinutes` is exactly what the user typed. Draw
+weights keep using stated estimates — an explicit non-goal fence. The
+all-history numbers come from a dedicated lightweight endpoint
+(`GET /api/stats/estimation-bias`) that reuses the estimation block's
+qualifying rules and per-cycle attribution (ADR-15, #48) with open-ended
+bounds, rather than stretching the range-scoped `/api/stats` payload;
+thresholds and wording live client-side in the pure
+`client/src/lib/estimationCoach.ts`. The server returns every category with
+its `taskCount` — showing or hiding is a display decision.
+*Rationale:* Passive advice over auto-correction because the estimate is the
+user's commitment, the same principle that keeps the draw un-rerollable
+(#88): tooling may inform the plan, never quietly rewrite it — and a
+pre-filled "corrected" estimate would poison the very tracked-vs-estimated
+feedback loop it learns from. Weights stay on stated estimates because
+bias-adjusting them would move cards between the ready/too-big piles based on
+invisible arithmetic, contradicting ADR-2's promise that drawability is
+explainable from what the user can see. A dedicated endpoint over reusing the
+stats query because TaskForm mounts on four surfaces and needs one small,
+stably-cacheable all-history array — not a week-scoped Stats object whose
+range semantics the hint would have to fight.
+
+== ADR-28: Streak rest days and freeze tokens — the streak stays derived, only earned freezes are state
+
+*Context:* The streak broke on any local day without a completion, including
+days off the user planned on purpose (#58). Punishing a deliberate Saturday
+teaches users to stop trusting the flame — but the fix must not violate
+ADR-2/ADR-5: no stored streak counter, ever, and `GET /api/gamification`
+must stay side-effect free.
+*Decision:* Three parts. (a) *Rest weekdays* are a plain setting
+(`streak_rest_weekdays`, JSON array in JS `getDay` convention, same as
+`tasks.window_days`; `PATCH /api/settings` rejects all 7 — at least one
+weekday must stay required). A rest weekday without a completion neither
+breaks nor extends the run; one *with* a completion counts +1 like any other
+day, so resting is never better than completing. (b) *Freeze tokens* are
+genuine state, but only the EARN side: `streak_freezes` is an append-only
+log of earned events (v8 migration), one row per 7-real-day milestone with
+the milestone's local day under a UNIQUE constraint — earning is idempotent
+per milestone, so complete → reopen (`undoLatestCompletion`) → complete
+again cannot farm tokens; the bank caps at 2 banked. *Consumption is
+never stored:* every read re-runs a deterministic fold (the pure
+`computeStreak()` in `streak.ts`) that replays the calendar FORWARD from
+the earliest completion/earn day with the bank as a plain counter: an earn
+adds a token (clamped to the cap inside the fold, so re-aggregation under a
+changed rest setting can never resurrect a token past it), a missed
+non-rest day inside a run consumes one banked token (earns bank only after
+their own day is classified, so a token covers strictly later days — never
+the day it was earned on or earlier), and a miss the bank cannot cover is a
+break: the run dies and the bank expires with it, so a dead run's tokens
+never shield a later streak and letting a streak die can never increase the
+balance (a broken gap consumes nothing — it expires, Duolingo-style).
+Today-in-progress still neither breaks nor consumes, and the replay is
+bounded by the earliest recorded fact, so even 6 configured rest weekdays
+terminate. The first cut walked BACKWARD, assigning each missed day the
+oldest unconsumed token earned strictly before it (issue #58's suggested
+reading), but the PR #98 review proved that shape wrong twice: the
+assignment flipped between reads — a new miss could steal the token that
+covered an older, already-frozen day and retroactively break the run there
+despite a feasible cover — and consumption inside runs the walk never
+reached evaporated, resurrecting dead runs' tokens past the cap. The
+counter-based forward replay is assignment-free (any feasible cover banks
+the same count, so coverage is maximal) and prefix-stable: a new miss can
+only affect days after the previous read, never rewrite committed
+history. (c) The streak number counts REAL completion days only — rest
+and frozen days keep the run alive but never increment it — and the API
+exposes `todayKind`/`frozenDays`/`restDays`/`freezesBanked` so the client
+renders four honest flame states instead of presenting covered days as
+completed. `streak_7`/`streak_30` keep testing `currentStreak() >= N`,
+which now means N completed days possibly spanning more calendar days;
+their copy says so, and already-unlocked rows stay (append-only table).
+*Rationale:* The earn events are facts (like `completions` rows) — they
+happened and survive an undo; a stored "banked" counter or consumed-rows
+would be writable from a GET path or need provably idempotent writes, the
+exact drift ADR-5 exists to prevent. Deriving consumption keeps reads pure,
+re-aggregatable, and auditable, and the append-only log plus UNIQUE
+milestone day is the entire anti-farming story — no trigger, no counter,
+no reconciliation job.
+
+== ADR-29: Focus mode is a derived view — timer plus current draw decide, nothing is persisted
+
+*Context:* Focus mode (#56) flips the drawn card into a fullscreen countdown
+with the timer already running. It must survive reloads the way the drawn
+card (ADR-13) and the TimerBar already do, and it must not invent tracking:
+focus sessions are ordinary `time_entries`.
+*Decision:* The client never stores "in focus". The view is a pure function
+(`client/src/lib/focusView.ts`) of two facts the server already persists —
+the current draw (ADR-13) and the running timer (6.4) — plus one
+session-local "exited" flag for Escape: timer on the drawn card and not
+exited → fullscreen; timer missing or on another task → plain revealed
+card; no draw → idle deck. A reload re-derives: mid-focus it lands back in
+the overlay, after a Stop it lands on the revealed card, and after an
+Escape it re-enters focus. The Escape flag deliberately does NOT go to
+sessionStorage: while the timer runs on the drawn card, "working on this
+card" is the truthful state — Escape is a transient peek at the rest of the
+app, and a persisted flag would be exactly the derived-state drift ADR-2
+bans, going stale the moment the timer changes from a second tab. The
+countdown is sized to `effortMinutes` but display only: crossing zero flips
+to a visibly distinct overtime count-up and never stops the timer or
+completes the task (estimates are guesses — ADR-27 — and punishing an
+overrun teaches padding); a missing estimate degrades to a plain count-up.
+The in-face actions ARE the existing DrawPage actions, not copies: ✓ Done
+is the same completion PATCH (entry closed server-side, ADR-12, drawn bonus
+from the persisted draw), ■ Stop the same `POST /api/timer/stop` (the
+persisted draw is untouched, the card stays restorable). No new endpoints,
+columns, or tracking paths — focus sessions flow into the #22 estimates-vs-
+tracked stats as plain entries, overtime simply reads as a ratio > 1.
+*Rationale:* A persisted focus flag would duplicate what timer + draw
+already say and could contradict them (a dead overlay counting down for a
+stopped timer). Deriving keeps the invariant surface unchanged — one
+running entry, one persisted draw — and the whole feature stays client-only.
+*Amendment (#110):* The same principle extends to the standing revealed
+card itself: the DrawPage derives it continuously from the persisted
+current draw (`resolveDrawnCard`, `client/src/lib/drawnCard.ts`) instead of
+a mount-time snapshot, so completing, snoozing, or deleting the drawn task
+on ANY surface — TimerBar, Tasks page, MCP, a second tab — dismisses the
+card on the next refetch of the current-draw query: mutation invalidation
+in-app, window focus or the 60s interval where no invalidation fires
+(cross-tab/MCP latency of up to a minute is accepted). The draw animation
+still reveals off the mutation response (written through to the query
+cache on success), celebration stays with the acting surface (confetti
+fires only for the page's own ✓ Done), and #88's sanctioned escape is the
+one session-local hold: a card edited out of the deck forfeits its pointer
+(cleared lazily, as before) but stays on screen with the resolve hint
+until resolved on-page — an edit must not become a hidden re-roll.
+
+== ADR-30: The warm-up draw is a deterministic deal — cooldown as exclusion, XP capped below the drawn ×1.5
+
+*Context:* The main draw is a gamble: it can serve a 30-minute card when
+even ten minutes feels impossible. The warm-up (#57) is the "I can't start"
+escape hatch — one secondary click on the IDLE Draw page deals the
+objectively smallest eligible card. It must not become a re-roll (#88), a
+fishing rod for comfortable cards, or the XP meta.
+*Decision:* (a) `warmupDraw()` reuses `queryCandidates()` — the exact
+eligibility pool of the weighted draw — but picks deterministically:
+minimum `effort_minutes`, tie-broken by most stale using the same
+`stalenessAnchor` the weight formula uses (creation, last completion for
+recurring tasks, bumped by a snooze wake — one definition of "stale",
+shared by construction), final tie-break lowest id. Impact, urgency, and
+the staleness weight are deliberately bypassed: the point is the smallest
+card, not a clever one. (b) The draw cooldown applies as EXCLUSION, not the
+regular ×0.15 dampening — a dampener is meaningless for a deterministic
+pick, and exclusion prevents deal → discard → deal-the-same-card churn; an
+exclusion-emptied pool answers `cooling_down`. (c) The deal is the same
+commitment as a draw: `last_drawn_at` stamped, persisted as the current
+draw (ADR-13, focus mode included), resolvable only via complete, snooze/
+block, or delete — and the route rejects a deal while a valid current draw
+exists, so the warm-up only ever exists on the idle deck (#88). A marker
+(internal settings key next to the pointer: task id, dealt-at, bonus-window
+minutes) is cleared everywhere the pointer is cleared and overwritten by
+every regular draw, so it can never describe a card that is not the current
+draw. (d) One deal per `warmup_every_hours` (public setting, default 8),
+consumed irrevocably AT DEAL TIME — discarding the card does not refund the
+allowance. (e) XP: a warm-up completion NEVER earns the drawn ×1.5 (it was
+handed out, not gambled — the `last_drawn_at` stamp of the deal is also
+excluded from the 6-hour drawn heuristic by exact-timestamp match): inside
+its window (`max(effort at deal time, 15)` minutes) ×1.25, late ×1.0.
+Completing any OTHER task within 30 minutes of a warm-up completion earns
+momentum ×1.25, combining with the drawn bonus but capped at ×1.5 total.
+Momentum never applies to a warm-up completion itself. Momentum is derived
+from `completions.was_warmup` rows at completion time, never stored —
+reopening the warm-up deletes its completion and disarms momentum
+automatically (ADR-2/ADR-5). (f) Display derivations agree with the XP:
+everywhere a completion is surfaced as "drawn" — the trophy pile's rarity
+and "(drawn)" label (#62), the History skyline — drawn-ness reads
+`was_drawn AND NOT was_warmup` at query time. The completion row keeps both
+raw facts (the card WAS the persisted current draw, and it got there by
+deal), so a warm-up impact-5 completion mints no foil, exactly as it earns
+no ×1.5.
+*Rationale:* The invariant the multipliers encode: no completion ever
+exceeds ×1.5, and a warm-up caps at ×1.25 — strictly below the gamble — so
+the escape hatch can never out-earn playing the deck. Exclusion-not-
+dampening and deal-time consumption close the two farming loops a
+deterministic pick would otherwise open (re-dealing the same card, and
+discard-until-happy). Reusing the pool predicate and the staleness anchor
+keeps one definition of "eligible" and "stale"; reusing the current-draw
+machinery keeps one commitment lifecycle — the warm-up adds a marker and a
+rate limit, not a second draw system.

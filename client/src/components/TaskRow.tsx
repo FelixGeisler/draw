@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import type { Category, Goal, NewTask, Task } from "../api/types";
-import { useCreateSubtasks, useDeleteTask, useUpdateTask } from "../hooks/useTasks";
+import { useCreateSubtasks, useDeleteTask, useSplitTask, useUpdateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
-import { isSnoozed } from "../lib/drawable";
+import { classifyTask, isSnoozed } from "../lib/drawable";
 import { sequentialLockedByRecurrence } from "../lib/orderMode";
+import { offersMoveUnder, reparentTargets } from "../lib/reparent";
+import { evenSplitPlan } from "../lib/splitPlan";
+import { classifyDrop } from "../lib/taskDnd";
+import { TaskDndContext } from "./TaskDnd";
 import { TaskBadges } from "./TaskBadges";
 import { SnoozeMenu } from "./SnoozeMenu";
 import { TaskForm } from "./TaskForm";
@@ -22,19 +26,38 @@ interface Props {
    * a recurring step would gate its siblings forever, and the API rejects it.
    */
   parentOrderMode?: Task["subtaskOrderMode"];
+  /**
+   * Every root task on the page (#100) — the "Move under…" picker's candidate
+   * pool. Only passed to root rows; subtask rows get "Promote to top-level"
+   * instead and need no targets.
+   */
+  rootTasks?: Task[];
 }
 
-export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentOrderMode }: Props) {
+export function TaskRow({
+  task,
+  categories,
+  goals,
+  maxEffort,
+  depth = 0,
+  parentOrderMode,
+  rootTasks,
+}: Props) {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const createSubtasks = useCreateSubtasks();
+  const splitTask = useSplitTask();
   const aiStatus = useAiStatus();
   const [breakingDown, setBreakingDown] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   const [aiPanel, setAiPanel] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [snoozing, setSnoozing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [orderModeError, setOrderModeError] = useState<string | null>(null);
+  const [movingUnder, setMovingUnder] = useState(false);
+  const [moveTargetId, setMoveTargetId] = useState("");
+  const [reparentError, setReparentError] = useState<string | null>(null);
 
   const category = categories.find((c) => c.id === task.categoryId);
   const hasSubtasks = (task.subtasks?.length ?? 0) > 0;
@@ -43,6 +66,37 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
   // Recurring × sequential guard (#66, ADR-23): a recurring subtask locks the
   // switch to 'do in order' — on the flip button and in both breakdown editors.
   const sequentialLocked = sequentialLockedByRecurrence(task.subtasks, task.subtaskOrderMode);
+  // Reparent targets (#100): shared rule source with the drag-and-drop (#101)
+  // — offersMoveUnder is the same root-only gate classifyDrop routes on.
+  // Only leaf rows offer it: a task with subtasks cannot become a subtask
+  // itself (ADR-16).
+  const moveTargets =
+    !done && offersMoveUnder(task) && !hasSubtasks && rootTasks
+      ? reparentTargets(task, rootTasks)
+      : [];
+  // Split-in-place (#108): where root rows show Break down, an open subtask
+  // row that classifies too-big offers Split — a subtask cannot be broken
+  // down further (ADR-16), so it is replaced by its parts as siblings.
+  const splittable = !done && task.parentId != null && classifyTask(task, maxEffort) === "too-big";
+
+  // Drag-and-drop (#101): context only exists on the Tasks page. During a
+  // drag every row derives its own verdict from the same classifyDrop the
+  // drop handler uses — eligible rows glow for the whole drag, the hovered
+  // blocked row names its rule, everything else stays inert.
+  const dnd = useContext(TaskDndContext);
+  const dragVerdict = dnd?.dragging ? classifyDrop(dnd.dragging, { type: "row", task }) : null;
+  const isDropOver = dnd?.overKey === `row:${task.id}`;
+  const eligibleTarget = dragVerdict?.kind === "nest" && dragVerdict.blockReason == null;
+  const dropBlockReason =
+    isDropOver && dragVerdict?.kind === "nest" ? dragVerdict.blockReason : null;
+  const dndClass = [
+    dnd?.dragging?.id === task.id ? "dnd-source" : "",
+    eligibleTarget ? "dnd-eligible" : "",
+    eligibleTarget && isDropOver ? "dnd-over" : "",
+    dropBlockReason ? "dnd-blocked" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   function snooze(patch: { deferredUntil?: string; blocked?: boolean }) {
     updateTask.mutate({ id: task.id, ...patch });
@@ -52,6 +106,19 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
   async function saveEdit(patch: NewTask) {
     await updateTask.mutateAsync({ id: task.id, ...patch });
     setEditing(false);
+  }
+
+  async function reparent(parentId: number | null) {
+    setReparentError(null);
+    try {
+      await updateTask.mutateAsync({ id: task.id, parentId });
+      setMovingUnder(false);
+      setMoveTargetId("");
+    } catch (e) {
+      // Server 400s (validation matrix) surface inline as the backstop, like
+      // the order-mode flip does.
+      setReparentError((e as Error).message);
+    }
   }
 
   return (
@@ -74,6 +141,8 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
         </div>
       ) : (
       <div
+        data-dnd-row={task.id}
+        className={dndClass || undefined}
         style={{
           display: "flex",
           alignItems: "center",
@@ -83,6 +152,19 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
           opacity: done ? 0.5 : 1,
         }}
       >
+        {/* Pointer-only by design (aria-hidden, not focusable): the drag is
+            an alternative input, the #100 buttons stay the keyboard path.
+            Living outside the row's buttons, it never fights their clicks. */}
+        {dnd && !done && (
+          <span
+            className="dnd-handle"
+            title="Drag to reorganize (keyboard: the Move under… and ⤴ buttons)"
+            aria-hidden="true"
+            onPointerDown={(e) => dnd.startDrag(task, e)}
+          >
+            ⠿
+          </span>
+        )}
         <input
           type="checkbox"
           checked={done}
@@ -105,7 +187,9 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
           )}
           {task.title}
         </span>
-        <TaskBadges task={task} />
+        {/* Subtasks follow their parent's goal (#76) — repeating the parent's
+            goal chip on every step would be noise, so only root rows get it. */}
+        <TaskBadges task={task} goals={task.parentId == null ? goals : undefined} />
         {snoozed ? (
           // Wake = deferredUntil now, not null (ADR-17): the retained value
           // becomes the wake timestamp, so staleness counts from here.
@@ -158,13 +242,49 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
             Break down
           </button>
         )}
+        {splittable && (
+          <button
+            onClick={() => {
+              setSnoozing(false);
+              setMovingUnder(false);
+              setSplitting((s) => !s);
+            }}
+            title="Too big to draw — replace this step with smaller parts at the same level"
+          >
+            Split
+          </button>
+        )}
+        {/* Reparent (#100): this menu is THE reparent control — drag-and-drop
+            arrives as an alternative input in #101, reusing lib/reparent.ts.
+            Plain buttons and a native select keep both actions keyboard-
+            operable by construction. */}
+        {moveTargets.length > 0 && (
+          <button
+            onClick={() => {
+              setBreakingDown(false);
+              setSnoozing(false);
+              setReparentError(null);
+              setMovingUnder((m) => !m);
+            }}
+            title="Move under another task (it becomes a subtask)"
+          >
+            Move under…
+          </button>
+        )}
+        {!done && task.parentId != null && (
+          <button onClick={() => reparent(null)} title="Promote to top-level">
+            ⤴
+          </button>
+        )}
         {/* Done rows are not editable — reopen first (matches the checkbox flow). */}
         {!done && (
           <button
             onClick={() => {
               setBreakingDown(false);
+              setSplitting(false);
               setAiPanel(false);
               setSnoozing(false);
+              setMovingUnder(false);
               setEditing(true);
             }}
             title="Edit"
@@ -184,9 +304,65 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
         </button>
       </div>
       )}
+      {dropBlockReason && (
+        /* data-dnd-row makes the strip part of this row's hit target: it
+           mounts right under the pointer, so drifting onto it must keep
+           overKey on this row — without it the strip unmounts, the rows
+           shift back up, and the feedback flickers under the cursor. */
+        <div className="dnd-reason" data-dnd-row={task.id} role="status">
+          Cannot drop here — {dropBlockReason}
+        </div>
+      )}
       {orderModeError && (
         <div role="alert" style={{ padding: "4px 10px", color: "var(--danger)", fontSize: 13 }}>
           {orderModeError}
+        </div>
+      )}
+      {movingUnder && !editing && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <label htmlFor={`move-under-${task.id}`} style={{ color: "var(--text-dim)", fontSize: 13 }}>
+            Move under
+          </label>
+          <select
+            id={`move-under-${task.id}`}
+            value={moveTargetId}
+            onChange={(e) => setMoveTargetId(e.target.value)}
+          >
+            <option value="">choose a task…</option>
+            {/* Blocked targets stay listed but disabled WITH their reason —
+                the rule is visible instead of the option silently missing. */}
+            {moveTargets.map(({ target, blockReason }) => (
+              <option key={target.id} value={target.id} disabled={blockReason != null}>
+                {target.title}
+                {blockReason ? ` — ${blockReason}` : ""}
+              </option>
+            ))}
+          </select>
+          <button disabled={moveTargetId === ""} onClick={() => reparent(Number(moveTargetId))}>
+            Move
+          </button>
+          <button
+            onClick={() => {
+              setMovingUnder(false);
+              setMoveTargetId("");
+              setReparentError(null);
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      {reparentError && (
+        <div role="alert" style={{ padding: "4px 10px", color: "var(--danger)", fontSize: 13 }}>
+          {reparentError}
         </div>
       )}
       {snoozing && !snoozed && (
@@ -196,6 +372,64 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
             onBlock={() => snooze({ blocked: true })}
           />
         </div>
+      )}
+      {/* Split-in-place (#108): the SubtaskEditor pattern reused — retitled,
+          without the "Do in order" toggle (parts join the parent's existing
+          mode), pre-filled with the deterministic even split, min 2 parts.
+          The AI suggest reuses the breakdown endpoint (taskContext works for
+          any task id); only the ACCEPT differs — it calls the split endpoint,
+          replacing this row with its parts as siblings. */}
+      {splitting && (
+        <>
+          {aiStatus.data?.configured && !aiPanel && (
+            <button
+              style={{ margin: "8px 0 0", borderColor: "var(--accent)" }}
+              onClick={() => setAiPanel(true)}
+            >
+              ✨ Suggest with AI
+            </button>
+          )}
+          {aiPanel && (
+            <AiBreakdownPanel
+              taskId={task.id}
+              goalId={task.goalId}
+              hideOrderToggle
+              acceptLabel={(n) => `Split into ${n} part${n === 1 ? "" : "s"}`}
+              onClose={() => setAiPanel(false)}
+              onAccept={async (parts) => {
+                // Sibling-replacement semantics on accept: the split endpoint,
+                // never createSubtasks (per-part impact stays out of scope —
+                // parts inherit the original's rating).
+                await splitTask.mutateAsync({
+                  id: task.id,
+                  parts: parts.map(({ title, effortMinutes }) => ({ title, effortMinutes })),
+                });
+                setSplitting(false);
+              }}
+            />
+          )}
+          <SubtaskEditor
+            maxEffort={maxEffort}
+            heading={`Split into parts — they replace this step at the same level (drawable ≤ ${maxEffort} min, bigger parts can be split again)`}
+            initialRows={evenSplitPlan(task.title, task.effortMinutes ?? 0, maxEffort)}
+            minRows={2}
+            requireMinutes
+            hideOrderToggle
+            acceptLabel={(n) => `Split into ${n} part${n === 1 ? "" : "s"}`}
+            onCancel={() => setSplitting(false)}
+            onAccept={async (parts) => {
+              await splitTask.mutateAsync({
+                id: task.id,
+                // requireMinutes gates accept, so effortMinutes is present.
+                parts: parts.map(({ title, effortMinutes }) => ({
+                  title,
+                  effortMinutes: effortMinutes!,
+                })),
+              });
+              setSplitting(false);
+            }}
+          />
+        </>
       )}
       {breakingDown && (
         <>

@@ -10,6 +10,7 @@ import { gamificationRouter } from "./routes/gamification.js";
 import { goalsRouter } from "./routes/goals.js";
 import { goalMaterialsRouter, materialsRouter } from "./routes/materials.js";
 import { aiRouter } from "./routes/ai.js";
+import { backupRouter } from "./routes/backup.js";
 
 export function createApp() {
   const app = express();
@@ -31,6 +32,7 @@ export function createApp() {
   app.use("/api/goals/:id/materials", goalMaterialsRouter);
   app.use("/api/materials", materialsRouter);
   app.use("/api/ai", aiRouter);
+  app.use("/api/backup", backupRouter);
 
   return app;
 }

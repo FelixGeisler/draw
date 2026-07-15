@@ -63,7 +63,12 @@ CREATE TABLE completions (
   task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   completed_at TEXT NOT NULL,
   was_drawn INTEGER NOT NULL DEFAULT 0,
-  xp_awarded INTEGER NOT NULL DEFAULT 0
+  xp_awarded INTEGER NOT NULL DEFAULT 0,
+  -- Warm-up draw (#57, ADR-30): 1 when the task was completed as the dealt
+  -- warm-up card. Momentum (×1.25 on the NEXT completion within 30 minutes)
+  -- is derived from these rows at completion time, never stored — undoing the
+  -- warm-up completion disarms it automatically (ADR-2/ADR-5).
+  was_warmup INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_completions_date ON completions(completed_at);
@@ -94,6 +99,18 @@ CREATE TABLE achievements (
   unlocked_at TEXT NOT NULL
 );
 
+-- Streak freeze tokens (#58, ADR-28): append-only log of EARNED events only.
+-- milestone_day is the local day the streak crossed a 7-real-day multiple;
+-- its UNIQUE constraint makes earning idempotent per milestone (undo/redo
+-- cannot farm). Consumption is never stored — it is derived on every read by
+-- the walk-back fold in streak.ts, keeping GET side-effect free (ADR-5: log
+-- over counters). The streak itself stays fully derived (ADR-2).
+CREATE TABLE streak_freezes (
+  id INTEGER PRIMARY KEY,
+  milestone_day TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -107,4 +124,5 @@ INSERT INTO categories (name, color, is_default) VALUES
 INSERT INTO settings (key, value) VALUES
   ('max_draw_effort', '30'),
   ('draw_cooldown_minutes', '60'),
-  ('daily_goal_completions', '1');
+  ('daily_goal_completions', '1'),
+  ('warmup_every_hours', '8');

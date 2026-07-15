@@ -136,6 +136,8 @@ export function AiBreakdownPanel({
   goalId,
   initialOrderMode,
   sequentialLocked,
+  hideOrderToggle,
+  acceptLabel,
   onAccept,
   onClose,
 }: {
@@ -153,6 +155,15 @@ export function AiBreakdownPanel({
    * toggle stays off and disabled, whatever the model's orderMatters says.
    */
   sequentialLocked?: boolean;
+  /**
+   * Split-in-place (#108) reuses this panel for its "✨ Suggest with AI":
+   * `hideOrderToggle` drops "Do in order" (parts join the parent's existing
+   * mode — there is nothing to choose) and `acceptLabel` renames the accept
+   * button; the caller's onAccept posts to the split endpoint instead of the
+   * subtasks batch.
+   */
+  hideOrderToggle?: boolean;
+  acceptLabel?: (count: number) => string;
   onAccept: (
     subtasks: { title: string; effortMinutes: number; impact: number }[],
     orderMode: Task["subtaskOrderMode"],
@@ -221,7 +232,7 @@ export function AiBreakdownPanel({
       )}
       {note && <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)" }}>💡 {note}</p>}
       {rows && <SuggestionList rows={rows} setRows={setRows} />}
-      {rows && (
+      {rows && !hideOrderToggle && (
         <label
           style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--text-dim)", fontSize: 13 }}
           title={
@@ -250,14 +261,27 @@ export function AiBreakdownPanel({
                 .filter((r) => r.included && r.data.title.trim())
                 .map((r) => ({
                   title: r.data.title.trim(),
-                  effortMinutes: r.data.effortMinutes,
+                  // The minutes field is editable to decimals (and reads 0
+                  // when cleared) but the API wants a positive integer (#84).
+                  effortMinutes: Math.max(1, Math.round(r.data.effortMinutes)),
                   impact: r.data.impact,
                 }));
-              if (accepted.length > 0) await onAccept(accepted, inOrder ? "sequential" : "parallel");
-              onClose();
+              setError(null);
+              try {
+                if (accepted.length > 0) {
+                  await onAccept(accepted, inOrder ? "sequential" : "parallel");
+                }
+                onClose();
+              } catch (e) {
+                // Keep the panel (and its rows) up with the message — the
+                // rejection used to vanish into an unhandled promise.
+                setError((e as Error).message);
+              }
             }}
           >
-            Add {rows.filter((r) => r.included).length} subtasks
+            {acceptLabel
+              ? acceptLabel(rows.filter((r) => r.included).length)
+              : `Add ${rows.filter((r) => r.included).length} subtasks`}
           </button>
         )}
       </div>
@@ -378,11 +402,17 @@ export function AiPlanPanel({
                 .filter((r) => r.included && r.data.title.trim())
                 .map((r) => ({
                   title: r.data.title.trim(),
-                  effortMinutes: r.data.effortMinutes,
+                  // Same send-boundary rounding as the breakdown panel (#84).
+                  effortMinutes: Math.max(1, Math.round(r.data.effortMinutes)),
                   impact: r.data.impact,
                 }));
-              if (accepted.length > 0) await onAccept(accepted);
-              onClose();
+              setError(null);
+              try {
+                if (accepted.length > 0) await onAccept(accepted);
+                onClose();
+              } catch (e) {
+                setError((e as Error).message);
+              }
             }}
           >
             Add {rows.filter((r) => r.included).length} tasks

@@ -14,6 +14,8 @@ import { freshApp, testDb } from "../helpers.js";
 //   v4 → v5 adds window_days/window_start/window_end   (issue #33)
 //   v5 → v6 creates the card_art cache table           (issue #27)
 //   v6 → v7 re-parents pre-guard nested breakdowns     (issue #80)
+//   v7 → v8 creates the streak_freezes earn log        (issue #58)
+//   v8 → v9 adds completions.was_warmup + seeds warmup_every_hours (issue #57)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence.
@@ -43,12 +45,20 @@ beforeAll(async () => {
       /last_drawn_at TEXT,[\s\S]*?window_end TEXT\r?\n/,
       "last_drawn_at TEXT\n",
     )
-    .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "");
+    .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "")
+    .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
+    // v9 (#57): strip the was_warmup column (and its comment block)…
+    .replace(/,\r?\n  -- Warm-up draw[\s\S]*?was_warmup INTEGER NOT NULL DEFAULT 0/, "")
+    // …and the warmup_every_hours seed row.
+    .replace(/,\r?\n  \('warmup_every_hours', '8'\)/, "");
   expect(v2Schema).not.toBe(current); // the strip actually removed the columns
   expect(v2Schema).not.toContain("deferred_until");
   expect(v2Schema).not.toContain("subtask_order_mode");
   expect(v2Schema).not.toContain("window_days");
   expect(v2Schema).not.toContain("card_art");
+  expect(v2Schema).not.toContain("streak_freezes");
+  expect(v2Schema).not.toContain("was_warmup");
+  expect(v2Schema).not.toContain("warmup_every_hours");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v2Schema);
@@ -224,10 +234,52 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v7 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting)", () => {
-  it("bumps user_version to 7", async () => {
+describe("migration v2 → v9 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup)", () => {
+  it("bumps user_version to 9", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(7);
+    expect(db.pragma("user_version", { simple: true })).toBe(9);
+  });
+
+  it("adds completions.was_warmup with default 0 and seeds warmup_every_hours (#57)", async () => {
+    const db = await testDb();
+    const columns = db.prepare("PRAGMA table_info(completions)").all() as {
+      name: string;
+      dflt_value: string | null;
+      notnull: number;
+    }[];
+    const wasWarmup = columns.find((c) => c.name === "was_warmup");
+    expect(wasWarmup).toBeTruthy();
+    expect(wasWarmup!.notnull).toBe(1);
+    expect(wasWarmup!.dflt_value).toBe("0");
+
+    const seed = db
+      .prepare("SELECT value FROM settings WHERE key = 'warmup_every_hours'")
+      .get() as { value: string } | undefined;
+    expect(seed?.value).toBe("8");
+    // The migrated setting is public and editable like a fresh install's.
+    const settings = await request(app).get("/api/settings").expect(200);
+    expect(settings.body.warmup_every_hours).toBe("8");
+  });
+
+  it("the migrated database can deal a warm-up (marker keys work without any seed)", async () => {
+    const status = await request(app).get("/api/draw/warmup").expect(200);
+    expect(status.body).toEqual({ available: true, nextWarmupAt: null });
+  });
+
+  it("creates the streak_freezes earn log with its UNIQUE milestone guard (#58)", async () => {
+    const db = await testDb();
+    const table = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'streak_freezes'")
+      .get();
+    expect(table).toBeTruthy();
+
+    const insert = db.prepare(
+      "INSERT INTO streak_freezes (milestone_day, created_at) VALUES (?, ?)",
+    );
+    insert.run("2026-01-07", new Date().toISOString());
+    // Idempotence backstop (#58): one earn row per milestone day, ever.
+    expect(() => insert.run("2026-01-07", new Date().toISOString())).toThrow(/UNIQUE/);
+    db.prepare("DELETE FROM streak_freezes WHERE milestone_day = ?").run("2026-01-07");
   });
 
   it("creates the card_art cache table with its cascade wired to tasks (#27)", async () => {

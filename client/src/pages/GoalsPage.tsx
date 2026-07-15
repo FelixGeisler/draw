@@ -3,13 +3,50 @@ import type { Goal } from "../api/types";
 import { useCreateGoal, useDeleteGoal, useUpdateGoal, useGoals } from "../hooks/useGoals";
 import { useCategories, useCreateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
+import { GoalTasksSection } from "../components/GoalTasksSection";
 import { MaterialsSection } from "../components/MaterialsSection";
 import { AiGenerateTasksPanel, AiPlanPanel } from "../components/AiSuggestionPanel";
 import { TaskForm } from "../components/TaskForm";
+import { daysUntil, feasibility, type Feasibility } from "../lib/feasibility";
 
-function daysUntil(dateStr: string): number {
-  const target = new Date(`${dateStr}T23:59:59`);
-  return Math.ceil((target.getTime() - Date.now()) / (24 * 3600 * 1000));
+const VERDICT_STYLE = {
+  "on-track": { label: "On track", color: "var(--ok)" },
+  tight: { label: "Tight", color: "var(--warn)" },
+  infeasible: { label: "Infeasible", color: "var(--danger)" },
+} as const;
+
+/**
+ * Burn-down chip (#60) next to the days-left chip. "unknown" shows the
+ * required pace without a verdict (no history to compare against); the
+ * infeasible chip carries the ✨ Re-plan shortcut — it only opens the same
+ * Plan-backward panel as the button below, no second AI path.
+ */
+function FeasibilityChip({ f, onReplan }: { f: Feasibility; onReplan?: () => void }) {
+  const pace = (n: number) => `~${Math.round(n)} min/day`;
+  if (f.state === "done") return <span className="chip">All tasks done</span>;
+  if (f.state === "unknown") {
+    return (
+      <span className="chip" title="Nothing tracked on this goal in the last 14 days — no verdict yet">
+        Need {pace(f.requiredPaceMinutesPerDay)}
+      </span>
+    );
+  }
+  const { label, color } = VERDICT_STYLE[f.state];
+  return (
+    <span className="chip" style={{ borderColor: color, color }}>
+      {label} — need {pace(f.requiredPaceMinutesPerDay)}
+      {f.actualPaceMinutesPerDay !== null && `, doing ${pace(f.actualPaceMinutesPerDay)}`}
+      {f.state === "infeasible" && onReplan && (
+        <button
+          style={{ padding: "0 6px", borderColor: "var(--accent)" }}
+          onClick={onReplan}
+          title="Re-plan this goal backward from the target date"
+        >
+          ✨ Re-plan
+        </button>
+      )}
+    </span>
+  );
 }
 
 function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
@@ -19,6 +56,7 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
   const categories = useCategories();
   const aiStatus = useAiStatus();
   const [showMaterials, setShowMaterials] = useState(false);
+  const [showTasks, setShowTasks] = useState(false);
   // Plan backward and Generate tasks share the category select — one panel at a time.
   const [aiPanel, setAiPanel] = useState<"plan" | "generate" | null>(null);
   const [planCategoryId, setPlanCategoryId] = useState<number | null>(null);
@@ -29,6 +67,7 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
   const [editDate, setEditDate] = useState("");
 
   const days = goal.targetDate ? daysUntil(goal.targetDate) : null;
+  const feas = feasibility(goal);
   const progress = goal.taskCount > 0 ? goal.doneCount / goal.taskCount : 0;
   const defaultCategory =
     categories.data?.find((c) => c.name === "Study")?.id ?? categories.data?.[0]?.id ?? 1;
@@ -92,7 +131,9 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
         </form>
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
+          {/* flexWrap: the feasibility chip (#60) can be long — wrapping keeps
+              the title readable instead of crushing it. */}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
             <h3 style={{ margin: 0, flex: 1 }}>🎯 {goal.title}</h3>
             {days != null && (
               <span
@@ -103,6 +144,12 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
               >
                 {days < 0 ? `${-days}d overdue` : `${days}d left`}
               </span>
+            )}
+            {feas && (
+              <FeasibilityChip
+                f={feas}
+                onReplan={aiStatus.data?.configured ? () => setAiPanel("plan") : undefined}
+              />
             )}
             <button style={{ padding: "2px 10px" }} onClick={startEdit} title="Edit goal">
               ✎
@@ -143,9 +190,15 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
             }}
           />
         </div>
-        <span style={{ fontSize: 13, color: "var(--text-dim)" }}>
+        {/* The progress count doubles as the toggle for the Tasks section
+            (#87) — same collapsible pattern as the 📎 materials button. */}
+        <button
+          style={{ padding: "2px 10px" }}
+          onClick={() => setShowTasks((s) => !s)}
+          title="Show this goal's tasks — unlink or attach existing ones"
+        >
           {goal.doneCount}/{goal.taskCount} tasks
-        </span>
+        </button>
         <button style={{ padding: "2px 10px" }} onClick={() => setAddingTask((a) => !a)}>
           + Add task
         </button>
@@ -197,6 +250,7 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
           />
         </div>
       )}
+      {showTasks && <GoalTasksSection goalId={goal.id} />}
       {showMaterials && <MaterialsSection goalId={goal.id} />}
       {aiPanel === "plan" && (
         <AiPlanPanel

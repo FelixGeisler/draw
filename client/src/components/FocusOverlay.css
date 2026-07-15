@@ -1,0 +1,73 @@
+/* Fullscreen focus mode (issue #56): a fixed overlay painted above the whole
+   layout — sidenav, GamificationHeader and TimerBar included — so the drawn
+   card's essentials and the clock are all that is on screen. Visibility is
+   derived by DrawPage (ADR-29); this file is presentation only. */
+.focus-overlay {
+  position: fixed;
+  inset: 0;
+  /* Above all page chrome (nothing else exceeds 30), but below the
+     AchievementToast (100) — unlocks stay visible mid-focus. */
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 32px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 32%, rgba(79, 140, 255, 0.14), transparent 62%),
+    var(--bg);
+}
+
+/* The container is focused programmatically on mount (tabindex="-1", modal
+   focus management) — no ring on the fullscreen surface itself; the real
+   focus indicators live on the ✓ Done / ■ Stop buttons a Tab away. */
+.focus-overlay:focus {
+  outline: none;
+}
+
+.focus-title {
+  margin: 0;
+  font-size: clamp(24px, 4vw, 40px);
+  line-height: 1.25;
+  max-width: 720px;
+}
+
+.focus-clock {
+  font-size: clamp(56px, 14vw, 128px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Overtime is allowed — the timer never auto-stops — but the flip past zero
+   must be unmistakable at a glance. */
+.focus-clock.overtime {
+  color: var(--warn);
+  font-size: clamp(40px, 10vw, 96px);
+}
+
+.focus-est {
+  color: var(--text-dim);
+  font-size: 14px;
+  min-height: 1em;
+}
+
+.focus-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.focus-actions button {
+  font-size: 17px;
+  padding: 12px 24px;
+}
+
+.focus-hint {
+  position: absolute;
+  bottom: 24px;
+  color: var(--text-dim);
+  font-size: 13px;
+}

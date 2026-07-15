@@ -1,6 +1,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { useGamification } from "../hooks/useGamification";
 import { useCategories } from "../hooks/useTasks";
+import { trophyRarity } from "../lib/trophyRarity";
 import "./TrophyDeck.css";
 
 export function TrophyDeck() {
@@ -41,6 +42,9 @@ export function TrophyDeck() {
           });
           const lifted = liftedId === c.id;
           const toggle = () => setLiftedId((prev) => (prev === c.id ? null : c.id));
+          // Deterministic rarity (issue #62), computed from the completion's
+          // own facts at render time — never stored (ADR-2/ADR-5 spirit).
+          const rarity = trophyRarity(c);
           return (
             <div
               key={c.id}
@@ -52,10 +56,13 @@ export function TrophyDeck() {
                 category?.name,
                 `completed ${time}`,
                 `+${c.xpAwarded} XP${c.wasDrawn ? " (drawn)" : ""}`,
+                rarity !== "none" ? rarity : null,
               ]
                 .filter(Boolean)
                 .join(", ")}
-              className={`trophy-card ${lifted ? "lifted" : ""}`}
+              className={`trophy-card ${lifted ? "lifted" : ""}${
+                rarity !== "none" ? ` rarity-${rarity}` : ""
+              }`}
               // The per-card rotation is data-driven, so it flows in as a CSS
               // custom property — an inline `transform` would out-specificity
               // the CSS lift states.

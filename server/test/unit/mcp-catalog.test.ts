@@ -115,6 +115,22 @@ describe("update_task input schema", () => {
     expect(schema.safeParse({ id: 1, status: "open" }).success).toBe(true);
     expect(schema.safeParse({ id: 1, status: "done" }).success).toBe(false);
   });
+
+  it("takes parentId as a positive integer or null, describing the reparent rules (#100)", () => {
+    expect(schema.safeParse({ id: 1, parentId: 2 }).success).toBe(true);
+    expect(schema.safeParse({ id: 1, parentId: null }).success).toBe(true);
+    for (const parentId of [0, -1, 1.5, "2"]) {
+      expect(schema.safeParse({ id: 1, parentId }).success).toBe(false);
+    }
+    // A schema-guided client must learn the semantics from the field itself:
+    // root targets only, null promotes, ADR-23 bans recurring × sequential,
+    // adoption inherits the parent's links.
+    const description = (tool("update_task").inputSchema.parentId as z.ZodType).description ?? "";
+    expect(description).toContain("ROOT");
+    expect(description).toContain("promotes");
+    expect(description).toContain("ADR-23");
+    expect(description).toContain("inherits");
+  });
 });
 
 describe("create_subtasks input schema", () => {

@@ -33,10 +33,12 @@ test("draw → reload: the same card comes back revealed, no redraw needed", asy
   await expect(page.locator(".draw-face.back h2")).toHaveText(TASK_TITLE);
   // The odds belonged to the original draw and are not restored.
   await expect(page.locator(".draw-chance")).not.toBeVisible();
-  // Every card action is available on the restored card.
-  for (const name of ["▶ Start now", "✓ Done", "✎ Edit", "🗑 Delete", "Draw again"]) {
+  // Every card action is available on the restored card — but never a
+  // "Draw again": the draw is a commitment (#88), reload or not.
+  for (const name of ["▶ Start now", "✓ Done", "💤 Not now", "✎ Edit", "🗑 Delete"]) {
     await expect(page.getByRole("button", { name })).toBeVisible();
   }
+  await expect(page.getByRole("button", { name: "Draw again" })).toHaveCount(0);
 });
 
 test("completing the restored card pays the drawn bonus and clears the draw", async ({

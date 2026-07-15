@@ -238,6 +238,10 @@ const createTask = defineTool({
       .optional()
       .describe(
         "Create as a subtask of this ROOT task (prefer create_subtasks for batches). " +
+          "The subtask inherits the parent's goal and category: pass the parent's own " +
+          "categoryId, omit goalId (impact then rates the inherited goal), and note that " +
+          "a divergent goalId or categoryId is rejected. Omitted impact defaults to the " +
+          "parent's rating, like create_subtasks. " +
           "Breakdowns are one level deep: nesting under a task that is itself a subtask is rejected",
       ),
   },
@@ -297,6 +301,17 @@ const updateTask = defineTool({
       .describe("Availability weekdays (0-6, 0 = Sunday); null clears the whole window"),
     windowStart: windowStartSchema.nullable().optional(),
     windowEnd: windowEndSchema.nullable().optional(),
+    parentId: idSchema
+      .nullable()
+      .optional()
+      .describe(
+        "Reparent the task. An id adopts it as a subtask of that ROOT task — one level deep " +
+          "(ADR-16): the target must not itself be a subtask and a task with subtasks cannot " +
+          "move; a recurring task cannot join a 'do in order' breakdown (ADR-23). Adoption " +
+          "inherits the parent's goal and category; moving under a goal-less parent resets " +
+          "impact to the neutral 3. null promotes a subtask back to a top-level task, keeping " +
+          "goal, category and impact unchanged",
+      ),
     status: z
       .enum(["open", "archived"])
       .optional()

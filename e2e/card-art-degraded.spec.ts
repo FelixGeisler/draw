@@ -37,7 +37,7 @@ test("degraded draw: card renders instantly with default styling, art 503 is swa
 
   // No error surfaced anywhere: the card stays fully actionable.
   await expect(page.getByText(/error|failed|not configured/i)).toHaveCount(0);
-  for (const name of ["▶ Start now", "✓ Done", "✎ Edit", "Draw again"]) {
+  for (const name of ["▶ Start now", "✓ Done", "💤 Not now", "✎ Edit"]) {
     await expect(page.getByRole("button", { name })).toBeVisible();
   }
 

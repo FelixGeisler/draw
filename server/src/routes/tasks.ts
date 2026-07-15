@@ -64,6 +64,15 @@ const NESTED_BREAKDOWN_ERROR =
   "breakdowns are one level deep (ADR-16): this task is itself a subtask and cannot be " +
   "broken down further — add the steps as additional subtasks of its root parent instead";
 
+// The reparent direction of the ADR-16 ban (#100): a task that HAS subtasks
+// cannot itself become one — adopting it would turn its children into
+// invisible grandchildren. Children of ANY status count, matching
+// hasRecurringSubtask's rationale below: a done/archived child is one status
+// write away from being an open grandchild.
+const PARENT_INTO_SUBTASK_ERROR =
+  "a task with subtasks cannot become a subtask itself (ADR-16): its subtasks would nest two " +
+  "levels deep — move the subtasks individually, or promote/delete them first";
+
 // Recurring × sequential ban (#66, ADR-23): a recurring step never closes —
 // completing it advances its due date instead (ADR-6) — so under a
 // 'sequential' parent it would hold every later sibling back forever
@@ -76,6 +85,119 @@ const RECURRING_SEQUENTIAL_ERROR =
   "recurring subtasks cannot be part of a sequential breakdown (ADR-23): a recurring step " +
   "never closes — completing it advances its due date (ADR-6) — so it would hold every " +
   "later step back forever. Drop the recurrence, or keep the parent's subtasks parallel";
+
+// Subtasks follow their parent's goal and category. The batch endpoint
+// inherits both by construction; since #84 the single-create path does too —
+// before, POST with parentId ignored the parent's goal entirely, so a child
+// could carry its OWN goal under a goal-less parent (PR #82). In that
+// divergent state the parent edit form's no-op goalId resend would cascade
+// goal_id over the child WITHOUT the ADR-4 unlink reset (`unlinking` is
+// false) — silently wiping the child's link while its non-neutral rating
+// survived: an undocumented third grandfathering path. Divergence is gated
+// explicitly (a conflicting value is rejected, not silently overridden);
+// omitted values inherit.
+const SUBTASK_GOAL_ERROR =
+  "subtasks follow their parent's goal: omit goalId when creating with a parentId (it is " +
+  "inherited), or pass the parent's own goalId";
+const SUBTASK_CATEGORY_ERROR =
+  "subtasks inherit their parent's category: omit categoryId when creating with a parentId, " +
+  "or pass the parent's own categoryId (a subtask's category stays editable afterwards)";
+
+/**
+ * Request-shape validation (#84): malformed field types used to surface as
+ * raw 500s — better-sqlite3 binding TypeErrors or CHECK-constraint
+ * violations — instead of honest 400s. Shared by POST /, POST /:id/subtasks
+ * (per row) and PATCH /:id; only keys present in the body are judged, so
+ * PATCH's sparse bodies pass untouched fields through.
+ */
+function fieldShapeError(body: Record<string, unknown>): string | null {
+  if ("title" in body && (typeof body.title !== "string" || !body.title.trim())) {
+    return "title must be a non-empty string";
+  }
+  if (body.description != null && typeof body.description !== "string") {
+    return "description must be a string";
+  }
+  if (
+    body.effortMinutes != null &&
+    (!Number.isInteger(body.effortMinutes) || (body.effortMinutes as number) < 1)
+  ) {
+    return "effortMinutes must be a positive integer";
+  }
+  if (body.dueDate != null && typeof body.dueDate !== "string") {
+    return "dueDate must be a YYYY-MM-DD string";
+  }
+  if ("status" in body && body.status !== "open" && body.status !== "done" && body.status !== "archived") {
+    return "status must be 'open', 'done' or 'archived'";
+  }
+  return null;
+}
+
+/**
+ * Split-in-place part validation (#108) — pure, exported for unit tests.
+ * Whole-body: any invalid part fails the entire request before a single row
+ * is written. Length >= 2 because one part is a rename (use edit). Each part
+ * needs a non-empty title and a positive-integer effortMinutes — required,
+ * unlike the batch endpoint's optional estimate: the split exists to divide
+ * a known-oversized estimate, so unestimated parts would defeat it. There is
+ * deliberately NO effortMinutes <= max_draw_effort cap: a part may still be
+ * too big — it can itself be split again (decomposition is unlimited by
+ * repetition, not by depth). Shape checks ride on fieldShapeError.
+ */
+export function splitPartsError(parts: unknown): string | null {
+  if (!Array.isArray(parts) || parts.length < 2) {
+    return "parts must be an array of at least 2 parts — splitting into one part is a rename, use edit instead";
+  }
+  for (const p of parts) {
+    if (p == null || typeof p !== "object" || Array.isArray(p)) {
+      return "every part must be an object with title and effortMinutes";
+    }
+    const part = p as Record<string, unknown>;
+    if (!("title" in part)) return "every part needs a title";
+    if (part.effortMinutes == null) {
+      return "every part needs effortMinutes (a positive integer)";
+    }
+    const shape = fieldShapeError(part);
+    if (shape) return shape;
+  }
+  return null;
+}
+
+/**
+ * recurEveryDays type normalization (#84, PR #81): the web form and MCP send
+ * numbers, but a raw-HTTP resend of a stored value as a string ("2" for 2)
+ * must keep reading as the no-op the ADR-23 legacy tolerance detects with a
+ * strict !== against the stored number — so numeric strings are coerced
+ * BEFORE the guards compare, and everything else non-null must be a positive
+ * integer (the promise the MCP schema already makes). Mutates body in place;
+ * returns the 400 message or null. categoryId/goalId deliberately get no
+ * such coercion — they carry no resend-tolerance semantics.
+ */
+function normalizeRecurInput(body: Record<string, unknown>): string | null {
+  if (!("recurEveryDays" in body) || body.recurEveryDays == null) return null;
+  const raw = body.recurEveryDays;
+  const value = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    return "recurEveryDays must be a positive integer (days)";
+  }
+  body.recurEveryDays = value;
+  return null;
+}
+
+// FK targets are validated up front (#84): a null/absent/nonexistent
+// categoryId used to die as the NOT NULL / FK constraint's raw 500 mid-
+// transaction (PR #77) — atomic, but unhelpful — and a nonexistent goalId
+// the same way. The existence checks make the 400 name the real problem.
+function categoryIdError(id: unknown): string | null {
+  if (!Number.isInteger(id) || (id as number) < 1) return "categoryId must be a positive integer";
+  if (!db.prepare("SELECT 1 FROM categories WHERE id = ?").get(id)) return "category not found";
+  return null;
+}
+
+function goalIdError(id: unknown): string | null {
+  if (!Number.isInteger(id) || (id as number) < 1) return "goalId must be a positive integer or null";
+  if (!db.prepare("SELECT 1 FROM goals WHERE id = ?").get(id)) return "goal not found";
+  return null;
+}
 
 /**
  * Any-status check on purpose: done and archived subtasks can be revived by a
@@ -182,44 +304,100 @@ tasksRouter.get("/", (req, res) => {
 });
 
 tasksRouter.post("/", (req, res) => {
-  const { title, description, categoryId, goalId, parentId, impact, effortMinutes, dueDate, recurEveryDays } =
-    req.body ?? {};
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const { title, description, categoryId, goalId, parentId, impact, effortMinutes, dueDate } = body;
   if (!title || typeof title !== "string" || !title.trim()) {
     return res.status(400).json({ error: "title is required" });
   }
-  if (!categoryId) {
-    return res.status(400).json({ error: "categoryId is required" });
-  }
-  // ADR-4 gate (#65): impact rates leverage toward a goal, so without a
-  // goalId only the neutral default 3 is accepted (the web form sends exactly
-  // that for goal-less creates). The API is the enforcement point — the MCP
-  // catalog and the web form both lean on this rejection rather than
-  // duplicating it.
-  if (impact != null) {
-    if (!Number.isInteger(impact) || impact < 1 || impact > 5) {
-      return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
-    }
-    if (goalId == null && impact !== 3) {
-      return res.status(400).json({ error: IMPACT_REQUIRES_GOAL });
-    }
-  }
+  const shapeError = fieldShapeError(body);
+  if (shapeError) return res.status(400).json({ error: shapeError });
+  const recurError = normalizeRecurInput(body);
+  if (recurError) return res.status(400).json({ error: recurError });
+  const recurEveryDays = body.recurEveryDays as number | null | undefined;
+
+  let parent:
+    | {
+        grandparentId: number | null;
+        orderMode: string;
+        goalId: number | null;
+        categoryId: number;
+        impact: number;
+      }
+    | undefined;
   if (parentId != null) {
-    const parentRow = db
-      .prepare("SELECT parent_id AS grandparentId, subtask_order_mode AS orderMode FROM tasks WHERE id = ?")
-      .get(parentId) as { grandparentId: number | null; orderMode: string } | undefined;
+    // Shape check first: a non-integer parentId used to reach the driver as
+    // a binding TypeError (raw 500) instead of an honest 400 (#84).
+    if (!Number.isInteger(parentId) || (parentId as number) < 1) {
+      return res.status(400).json({ error: "parentId must be a positive integer" });
+    }
+    parent = db
+      .prepare(
+        `SELECT parent_id AS grandparentId, subtask_order_mode AS orderMode,
+                goal_id AS goalId, category_id AS categoryId, impact
+         FROM tasks WHERE id = ?`,
+      )
+      .get(parentId) as typeof parent;
     // A clear 400 instead of the FK violation's opaque 500.
-    if (!parentRow) return res.status(400).json({ error: "parent task not found" });
-    if (parentRow.grandparentId != null) {
+    if (!parent) return res.status(400).json({ error: "parent task not found" });
+    if (parent.grandparentId != null) {
       return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
     }
     // #66 (ADR-23): a NEW subtask may not bring a recurrence into a
     // sequential breakdown. (The batch endpoint needs no twin check — its
     // INSERT has no recurrence column at all.)
-    if (recurEveryDays != null && parentRow.orderMode === "sequential") {
+    if (recurEveryDays != null && parent.orderMode === "sequential") {
       return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
     }
+    // #84: the single-create path inherits goal and category exactly like
+    // the batch; a conflicting explicit value is divergence and rejected
+    // (see SUBTASK_GOAL_ERROR above). goalId: null counts as "not specified"
+    // — at create it has never meant "unlink", the web form sends it for
+    // every goal-less create.
+    if (goalId != null) {
+      const gError = goalIdError(goalId);
+      if (gError) return res.status(400).json({ error: gError });
+      if (goalId !== parent.goalId) return res.status(400).json({ error: SUBTASK_GOAL_ERROR });
+    }
+    if (categoryId != null) {
+      const cError = categoryIdError(categoryId);
+      if (cError) return res.status(400).json({ error: cError });
+      if (categoryId !== parent.categoryId) {
+        return res.status(400).json({ error: SUBTASK_CATEGORY_ERROR });
+      }
+    }
+  } else {
+    if (categoryId == null) {
+      return res.status(400).json({ error: "categoryId is required" });
+    }
+    const cError = categoryIdError(categoryId);
+    if (cError) return res.status(400).json({ error: cError });
+    if (goalId != null) {
+      const gError = goalIdError(goalId);
+      if (gError) return res.status(400).json({ error: gError });
+    }
   }
-  const win = parseWindowInput(req.body ?? {});
+  // The row's effective links: inherited on the parentId path (whether the
+  // caller omitted them or resent the parent's own values), the caller's on
+  // a root create.
+  const effectiveGoalId = parent ? parent.goalId : ((goalId as number | null | undefined) ?? null);
+  const effectiveCategoryId = parent ? parent.categoryId : (categoryId as number);
+
+  // ADR-4 gate (#65): impact rates leverage toward a goal, so without a goal
+  // only the neutral default 3 is accepted (the web form sends exactly that
+  // for goal-less creates). The API is the enforcement point — the MCP
+  // catalog and the web form both lean on this rejection rather than
+  // duplicating it. Judged against the EFFECTIVE goal (#84): a subtask under
+  // a goal-linked parent rates its inherited goal, while the goal-less
+  // sibling-ranking exception (#76) stays batch-only.
+  if (impact != null) {
+    if (!Number.isInteger(impact) || (impact as number) < 1 || (impact as number) > 5) {
+      return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
+    }
+    if (effectiveGoalId == null && impact !== 3) {
+      return res.status(400).json({ error: IMPACT_REQUIRES_GOAL });
+    }
+  }
+  const win = parseWindowInput(body);
   if (!win.ok) return res.status(400).json({ error: win.error });
   const window = win.present ? win : { days: null, start: null, end: null };
   const result = db
@@ -230,10 +408,12 @@ tasksRouter.post("/", (req, res) => {
     .run(
       title.trim(),
       description ?? null,
-      categoryId,
-      goalId ?? null,
+      effectiveCategoryId,
+      effectiveGoalId,
       parentId ?? null,
-      impact ?? 3,
+      // Omitted impact defaults to the parent's rating on the parentId path —
+      // batch parity with `s.impact ?? parent.impact` below — else neutral 3.
+      impact ?? parent?.impact ?? 3,
       effortMinutes ?? null,
       dueDate ?? null,
       recurEveryDays ?? null,
@@ -264,6 +444,15 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
     // 500. The ADR-4 goal gate is deliberately NOT applied here, see below.
     if (s.impact != null && (!Number.isInteger(s.impact) || s.impact < 1 || s.impact > 5)) {
       return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
+    }
+    // Same shape sweep as POST / (#84): a non-string description or a
+    // non-numeric effortMinutes used to blow up as a better-sqlite3 binding
+    // TypeError mid-transaction — rolled back, but a raw 500.
+    if (s.description != null && typeof s.description !== "string") {
+      return res.status(400).json({ error: "subtask description must be a string" });
+    }
+    if (s.effortMinutes != null && (!Number.isInteger(s.effortMinutes) || s.effortMinutes < 1)) {
+      return res.status(400).json({ error: "subtask effortMinutes must be a positive integer" });
     }
   }
   // "Do in order" travels with the breakdown itself (#23) — persisted on the
@@ -326,6 +515,135 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
   res.status(201).json(created);
 });
 
+// Split-in-place (#108): a too-big SUBTASK dead-ends — ADR-16 keeps the tree
+// two levels, so it cannot be broken down further. Instead it is REPLACED by
+// its parts as siblings at the same level; decomposition becomes unlimited by
+// repetition, not by depth. The original is kept as ARCHIVED, never deleted:
+// delete would cascade its time_entries and completions away (the ADR-21
+// accepted limitation, which a routine planning action must not trigger),
+// while an archived subtask falls out of every derived surface with NO write
+// (the ADR-2/8.1 property) — the pool (status = 'open'), the Tasks page child
+// list (status != 'archived'), the remainingEffortMinutes rollup (open
+// children only), the sequential hold-back (open siblings only) and the
+// parent-completion 409 gate (open-children count). There is deliberately no
+// too-big gate on the original: the UI scopes the affordance to too-big rows,
+// but coupling the endpoint to a settings value buys nothing.
+tasksRouter.post("/:id/split", (req, res) => {
+  const id = Number(req.params.id);
+  const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+    | {
+        id: number;
+        parent_id: number | null;
+        status: string;
+        recur_every_days: number | null;
+        impact: number;
+        due_date: string | null;
+        window_days: string | null;
+        window_start: string | null;
+        window_end: string | null;
+        created_at: string;
+      }
+    | undefined;
+  if (!raw) return res.status(404).json({ error: "task not found" });
+  if (raw.parent_id == null) {
+    return res.status(400).json({
+      error:
+        "splitting in place is for subtasks — break a too-big root task down into subtasks instead",
+    });
+  }
+  if (raw.status !== "open") {
+    return res
+      .status(400)
+      .json({ error: "only an open subtask can be split — a done or archived row has nothing to split" });
+  }
+  // Recurring × split is incoherent: parts are one-shot rows, and "which part
+  // recurs?" has no answer. Same repair as ADR-23's: drop the recurrence
+  // first, then split. (No drop-recurrence-with-flag convenience — the
+  // surface stays small.)
+  if (raw.recur_every_days != null) {
+    return res.status(400).json({
+      error:
+        "a recurring subtask cannot be split — parts are one-shot rows, so no part could carry " +
+        "the recurrence; drop the recurrence first, then split",
+    });
+  }
+  // Whole-body validation BEFORE the transaction: any invalid part means
+  // nothing is written.
+  const partsError = splitPartsError(req.body?.parts);
+  if (partsError) return res.status(400).json({ error: partsError });
+  const parts = req.body.parts as { title: string; effortMinutes: number; description?: string }[];
+
+  const parent = db
+    .prepare("SELECT category_id AS categoryId, goal_id AS goalId FROM tasks WHERE id = ?")
+    .get(raw.parent_id) as { categoryId: number; goalId: number | null };
+
+  // Parts inherit exactly like the batch endpoint does by construction:
+  // category_id/goal_id from the PARENT (a subtask's category stays editable
+  // afterwards, but new rows of the breakdown start from the parent, like the
+  // batch), impact from the ORIGINAL — the parts continue the same work — and
+  // the original's due_date and availability window: deadline and doability
+  // constraints describe the work, not the row. NOT inherited: snooze/block
+  // (deferred_until NULL, blocked 0 — parts start fresh, even when the
+  // original was snoozed/blocked), last_drawn_at, and recurrence — this
+  // INSERT carries no recurrence column (like the batch), so parts under a
+  // sequential parent can never mint the ADR-23 ban.
+  //
+  // created_at is adopted VERBATIM from the original (ADR-18 amendment): the
+  // queue and the child list order by (created_at, id), so the parts sort
+  // into the original's slot — ahead of every later-timestamp sibling, and
+  // in array order among themselves via the new, higher ids. For siblings
+  // sharing the original's exact timestamp (batch groups) exact in-slot
+  // placement is impossible without mutating sibling rows — there is no
+  // (created_at, id) between (T, id5) and (T, id6) for a new higher id — so
+  // parts land at the end of that same-timestamp group (still ahead of
+  // later-timestamp siblings); the explicit position column stays the named
+  // escalation. Adopting created_at also inherits the original's staleness
+  // base (ADR-17) — deliberate: the work has genuinely been lying around
+  // since then.
+  const insert = db.prepare(
+    `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, due_date, window_days, window_start, window_end, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const created = db.transaction(() => {
+    const ids: number[] = [];
+    for (const p of parts) {
+      const r = insert.run(
+        p.title.trim(),
+        p.description ?? null,
+        parent.categoryId,
+        parent.goalId,
+        raw.parent_id,
+        raw.impact,
+        p.effortMinutes,
+        raw.due_date,
+        raw.window_days,
+        raw.window_start,
+        raw.window_end,
+        raw.created_at,
+      );
+      ids.push(Number(r.lastInsertRowid));
+    }
+    db.prepare("UPDATE tasks SET status = 'archived' WHERE id = ?").run(id);
+    // The work session on the original is over — close its running time entry
+    // at split time, mirroring what completion does (ADR-12). Its minutes
+    // stay attributed to the original, whose stats survive archiving.
+    db.prepare("UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL").run(
+      new Date().toISOString(),
+      id,
+    );
+    // The original can normally never BE the current draw (too big = not
+    // drawable), but the endpoint has no size gate, so an API/MCP caller can
+    // split the drawable-sized persisted draw. Archiving fails isRestorable
+    // with no path back short of an explicit reopen, so ADR-13's lazy clear
+    // would suffice — the eager clear is one line and keeps symmetry with
+    // complete/delete.
+    clearCurrentDraw(id);
+    return ids.map((partId) => getTask(partId));
+  })();
+
+  res.status(201).json(created);
+});
+
 tasksRouter.patch("/:id", (req, res) => {
   const id = Number(req.params.id);
   const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
@@ -334,6 +652,105 @@ tasksRouter.patch("/:id", (req, res) => {
   if (!raw) return res.status(404).json({ error: "task not found" });
 
   const body = req.body ?? {};
+
+  // Request-shape 400s (#84) run before every write path — including the
+  // completion/reopen branches below, which ignore extra fields rather than
+  // write them: a malformed field in a mixed payload is a caller bug either
+  // way. recurEveryDays is normalized here so the ADR-23 guards further down
+  // compare the coerced number against the stored one.
+  const shapeError = fieldShapeError(body);
+  if (shapeError) return res.status(400).json({ error: shapeError });
+  const recurError = normalizeRecurInput(body);
+  if (recurError) return res.status(400).json({ error: recurError });
+  if ("categoryId" in body) {
+    const cError = categoryIdError(body.categoryId);
+    if (cError) return res.status(400).json({ error: cError });
+  }
+  if ("goalId" in body && body.goalId != null) {
+    const gError = goalIdError(body.goalId);
+    if (gError) return res.status(400).json({ error: gError });
+  }
+
+  // Reparenting (#100): `parentId: <id>` adopts this task as a subtask of a
+  // root target, `parentId: null` promotes it back to a root task. No-ops —
+  // resending the stored parent id, or null on a task that is already a
+  // root — pass untouched (the ADR-23/ADR-4 resend tolerance again), so the
+  // validation matrix below judges only genuine moves and a pre-ban
+  // recurring-under-sequential row stays editable.
+  //
+  // Queue position under a sequential target (ADR-18): heldBackSql and the
+  // Tasks page child listing order by (created_at, id), and an adopted task
+  // keeps its original created_at — a task older than the existing steps
+  // enters the queue AHEAD of them (it may jump the queue). Deliberate:
+  // adoption orders by creation time like everything else, one predicate and
+  // no stored positions; explicit sibling ordering is a possible follow-up
+  // if queue-jumping feels wrong in practice.
+  let reparenting = false;
+  if ("parentId" in body) {
+    if (
+      body.parentId != null &&
+      (!Number.isInteger(body.parentId) || (body.parentId as number) < 1)
+    ) {
+      return res.status(400).json({
+        error: "parentId must be a positive integer or null (null promotes to a root task)",
+      });
+    }
+    if (body.parentId === id) {
+      return res.status(400).json({ error: "a task cannot be its own parent" });
+    }
+    reparenting = body.parentId !== raw.parent_id;
+  }
+  if (reparenting && body.parentId != null) {
+    const target = db
+      .prepare(
+        `SELECT parent_id AS parentId, subtask_order_mode AS orderMode,
+                goal_id AS goalId, category_id AS categoryId
+         FROM tasks WHERE id = ?`,
+      )
+      .get(body.parentId) as
+      | { parentId: number | null; orderMode: string; goalId: number | null; categoryId: number }
+      | undefined;
+    if (!target) return res.status(400).json({ error: "parent task not found" });
+    // One level deep, checked from BOTH directions (ADR-16): the target must
+    // be a root, and the moved task must be childless — together these also
+    // carry the acyclicity guarantee the v7 migration comment relies on
+    // (ADR-24): a childless mover can never become anyone's ancestor.
+    if (target.parentId != null) return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
+    if (db.prepare("SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1").get(id)) {
+      return res.status(400).json({ error: PARENT_INTO_SUBTASK_ERROR });
+    }
+    // ADR-23 from the reparent direction (#66): adoption is a new transition
+    // path that could CREATE the banned combination. Judged on the EFFECTIVE
+    // recurrence — this PATCH may set or clear recurEveryDays in the same
+    // body it moves the task with (clearing it makes the move legal).
+    const recurAfter = "recurEveryDays" in body ? body.recurEveryDays : raw.recur_every_days;
+    if (recurAfter != null && target.orderMode === "sequential") {
+      return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
+    }
+    // Single-create parity (#84): SENT divergent links are rejected. The
+    // STORED links are overwritten below instead — they were never claimed
+    // against the new parent, so the divergence gate does not apply to them.
+    // goalId: null counts as "not specified" on the adoption path, like at
+    // create — inheritance is unconditional either way.
+    if (body.goalId != null && body.goalId !== target.goalId) {
+      return res.status(400).json({ error: SUBTASK_GOAL_ERROR });
+    }
+    if ("categoryId" in body && body.categoryId !== target.categoryId) {
+      return res.status(400).json({ error: SUBTASK_CATEGORY_ERROR });
+    }
+    // Adoption inheritance rides the ordinary field writes below: goal_id
+    // follows the new parent UNCONDITIONALLY; category_id only while the
+    // task is open — done/archived rows keep the category they were finished
+    // under (#44) — exactly like the parent-edit cascade and the v7
+    // migration's adopt step. Rewriting the body routes a wiped stored goal
+    // (goal-less parent) through the deliberate-unlink machinery below
+    // (ADR-4, #76): impact resets to the neutral 3, because the rating
+    // described leverage toward the goal adoption just removed. Adoption
+    // that SETS a goal keeps the stored rating — it now rates the inherited
+    // goal, and stays re-ratable.
+    body.goalId = target.goalId;
+    if (raw.status === "open") body.categoryId = target.categoryId;
+  }
 
   // Completion goes through the gamification path.
   if (body.status === "done" && raw.status === "open") {
@@ -398,11 +815,16 @@ tasksRouter.patch("/:id", (req, res) => {
   ) {
     return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
   }
+  // When the same PATCH also reparents, the stored parent's mode is moot: the
+  // adoption guard above already judged the TARGET's mode against the
+  // effective recurrence, and a simultaneous promote-to-root frees the task
+  // from any queue a recurrence could deadlock.
   if (
     "recurEveryDays" in body &&
     body.recurEveryDays != null &&
     body.recurEveryDays !== raw.recur_every_days &&
-    raw.parent_id != null
+    raw.parent_id != null &&
+    !reparenting
   ) {
     const parentMode = db
       .prepare("SELECT subtask_order_mode AS mode FROM tasks WHERE id = ?")
@@ -434,10 +856,16 @@ tasksRouter.patch("/:id", (req, res) => {
   if (goalAfter == null) {
     if (unlinking) {
       if ("impact" in body && body.impact !== 3) {
+        // The adoption path words the same ADR-4 rule in its own terms —
+        // there the unlink is a side effect of the move, not a sent goalId.
         return res.status(400).json({
           error:
-            "unlinking the goal resets impact to the neutral default 3 (ADR-4) — omit " +
-            "impact when unlinking, or set it together with a goalId to rate it",
+            reparenting && body.parentId != null
+              ? "moving a task under a goal-less parent unlinks its goal and resets impact to " +
+                "the neutral default 3 (ADR-4) — omit impact when reparenting into a goal-less " +
+                "breakdown"
+              : "unlinking the goal resets impact to the neutral default 3 (ADR-4) — omit " +
+                "impact when unlinking, or set it together with a goalId to rate it",
         });
       }
       body.impact = 3; // the server owns the unlink reset
@@ -461,6 +889,7 @@ tasksRouter.patch("/:id", (req, res) => {
     description: "description",
     categoryId: "category_id",
     goalId: "goal_id",
+    parentId: "parent_id",
     impact: "impact",
     effortMinutes: "effort_minutes",
     dueDate: "due_date",
@@ -518,14 +947,23 @@ tasksRouter.patch("/:id", (req, res) => {
 
   const task = getTask(id)!;
   // Snoozing/blocking the current draw dismisses the card, so the persisted
-  // pointer is cleared eagerly here, mirroring completeTask() — this is the
-  // one sideways mutation that must not wait for GET /api/draw/current's
+  // pointer is cleared eagerly here, mirroring completeTask() — this is a
+  // sideways mutation that must not wait for GET /api/draw/current's
   // lazy validation (ADR-13): a snooze wears off (and a block can be woken
   // from the Tasks page) without any GET in between, and the once-again
   // restorable pointer would resurrect a card the user explicitly sent away
-  // (ADR-17).
+  // (ADR-17). Reparenting the drawn card (#100) has the same wear-off shape:
+  // moved into a held-back sequential position, the card would become
+  // restorable again the moment the step in front completes — with no GET in
+  // between — so the pointer is cleared eagerly too. The other reparent case
+  // (a task adopted UNDER the drawn card, turning it into a container)
+  // cannot be seen here — that PATCH runs on the child's id — and stays with
+  // the lazy validation the subtask-creation path already relies on:
+  // isRestorable rejects hasOpenChildren on the next GET /api/draw/current,
+  // which the client fires right after every task mutation (the tasks hooks
+  // invalidate the current-draw query).
   if (
-    ("deferredUntil" in body || "blocked" in body) &&
+    ("deferredUntil" in body || "blocked" in body || "parentId" in body) &&
     getCurrentDrawTaskId() === id &&
     !isRestorable(task as unknown as RestorableTask, getSetting("max_draw_effort", 30), new Date())
   ) {

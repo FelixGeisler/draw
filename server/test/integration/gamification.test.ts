@@ -81,6 +81,29 @@ describe("gamification", () => {
     expect(g.todayCompletions.length).toBeGreaterThanOrEqual(4);
   });
 
+  it("exposes the rarity facts (impact, wasDrawn) on todayCompletions", async () => {
+    // Contract guard for issue #62: the client derives foil/silver rarity at
+    // render time from exactly these two fields — nothing is stored. A drawn
+    // impact-5 completion must surface impact 5 and a truthy wasDrawn.
+    const goal = (await request(app).post("/api/goals").send({ title: "rarity goal" })).body;
+    const task = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "foil", categoryId: 1, goalId: goal.id, impact: 5, effortMinutes: 10 })
+    ).body;
+    // Backdate last_drawn_at within 6h — the was_drawn heuristic path, same
+    // as the bonus test above (a real POST /api/draw could land elsewhere).
+    db.prepare("UPDATE tasks SET last_drawn_at = ? WHERE id = ?").run(
+      new Date().toISOString(),
+      task.id,
+    );
+    await request(app).patch(`/api/tasks/${task.id}`).send({ status: "done" });
+
+    const g = (await request(app).get("/api/gamification")).body;
+    const entry = g.todayCompletions.find((c: { taskId: number }) => c.taskId === task.id);
+    expect(entry).toMatchObject({ impact: 5, wasDrawn: 1 });
+  });
+
   it("keeps XP consistent with the completions log", async () => {
     const g = (await request(app).get("/api/gamification")).body;
     const sum = db
