@@ -379,9 +379,14 @@ export function gamificationState() {
   const streakInfo = streakState();
   const dailyGoal = getSetting("daily_goal_completions", 1);
 
+  // Surfaced drawn-ness derives as was_drawn AND NOT was_warmup (ADR-30): a
+  // warm-up deal was handed out, not gambled, so it must not mint the drawn
+  // trophy rarity (#62) or the "(drawn)" label — the same distinction
+  // completeTask() draws for the ×1.5. The row keeps both raw facts.
   const todayCompletions = db
     .prepare(
-      `SELECT co.id, co.completed_at AS completedAt, co.was_drawn AS wasDrawn, co.xp_awarded AS xpAwarded,
+      `SELECT co.id, co.completed_at AS completedAt,
+              (co.was_drawn AND NOT co.was_warmup) AS wasDrawn, co.xp_awarded AS xpAwarded,
               t.id AS taskId, t.title, t.category_id AS categoryId, t.impact
        FROM completions co JOIN tasks t ON t.id = co.task_id
        WHERE date(co.completed_at, 'localtime') = date('now', 'localtime')

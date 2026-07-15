@@ -889,7 +889,13 @@ momentum ×1.25, combining with the drawn bonus but capped at ×1.5 total.
 Momentum never applies to a warm-up completion itself. Momentum is derived
 from `completions.was_warmup` rows at completion time, never stored —
 reopening the warm-up deletes its completion and disarms momentum
-automatically (ADR-2/ADR-5).
+automatically (ADR-2/ADR-5). (f) Display derivations agree with the XP:
+everywhere a completion is surfaced as "drawn" — the trophy pile's rarity
+and "(drawn)" label (#62), the History skyline — drawn-ness reads
+`was_drawn AND NOT was_warmup` at query time. The completion row keeps both
+raw facts (the card WAS the persisted current draw, and it got there by
+deal), so a warm-up impact-5 completion mints no foil, exactly as it earns
+no ×1.5.
 *Rationale:* The invariant the multipliers encode: no completion ever
 exceeds ×1.5, and a warm-up caps at ×1.25 — strictly below the gamble — so
 the escape hatch can never out-earn playing the deck. Exclusion-not-

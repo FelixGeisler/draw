@@ -633,9 +633,11 @@ export function warmupDraw(filters: DrawFilters): DrawResult {
     JSON.stringify({ taskId: chosen.id, dealtAt: now.toISOString() }),
   );
 
+  // No poolSize: a deal has no odds (the client's odds line keys off
+  // `probability`), and candidates.length would overcount anyway — pickWarmup
+  // skips cooldown-excluded cards the count would still include.
   return {
     task: toTaskPayload(dealtTaskRow(chosen.id)),
-    poolSize: candidates.length,
     warmup: marker,
   };
 }

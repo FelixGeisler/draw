@@ -54,6 +54,12 @@ function disarmMomentum() {
   );
 }
 
+/** Local calendar day, matching the server's local-day bucketing. */
+function localDay(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 describe("POST /api/draw/warmup — the deterministic deal", () => {
   it("deals the minimum-effort card, persists it as the current draw, and marks it a warm-up", async () => {
     const goalId = await seedGoal("warmup happy path");
@@ -62,9 +68,10 @@ describe("POST /api/draw/warmup — the deterministic deal", () => {
 
     const res = await warmup({ goalId });
     expect(res.task.id).toBe(tiny.id);
-    expect(res.poolSize).toBe(2);
-    // A deal has no odds — nothing was gambled.
+    // A deal has no odds — nothing was gambled: neither probability nor
+    // poolSize (whose pre-exclusion count would misstate the pick anyway).
     expect(res.probability).toBeUndefined();
+    expect(res.poolSize).toBeUndefined();
     // Window floor: max(5, 15) = 15 minutes.
     expect(res.warmup).toMatchObject({ taskId: tiny.id, windowMinutes: 15 });
     // Dealing IS a draw for achievements.
@@ -141,7 +148,6 @@ describe("POST /api/draw/warmup — the deterministic deal", () => {
     // "tiny" (5 min) from the first goal is smaller but filtered out.
     const res = await warmup({ goalId: otherGoal });
     expect(res.task.id).toBe(scoped.id);
-    expect(res.poolSize).toBe(1);
   });
 
   it("cooldown applies as exclusion: a just-dealt single-card pool answers cooling_down", async () => {
@@ -354,6 +360,47 @@ describe("warm-up XP rules (#57): never ×1.5, window ×1.25, momentum ×1.25, c
     const current = (await request(app).get("/api/draw/current").expect(200)).body;
     expect(current.task.id).toBe(bigger.id);
     expect(current.warmup).toBeUndefined(); // marker died with the old pointer
+  });
+
+  it("surfaces a warm-up completion as NOT drawn — an impact-5 deal mints no foil and no '(drawn)' label", async () => {
+    resetWarmupState();
+    disarmMomentum();
+    const goalId = await seedGoal("warmup trophy plain");
+    const five = await seedTask("warmup five star", goalId, 20, { impact: 5 });
+    await warmup({ goalId });
+    await request(app).patch(`/api/tasks/${five.id}`).send({ status: "done" }).expect(200);
+
+    // The row keeps both raw facts — the card WAS the current draw, and it
+    // got there by deal, not gamble…
+    const row = db
+      .prepare(
+        "SELECT was_drawn AS wasDrawn, was_warmup AS wasWarmup FROM completions WHERE task_id = ?",
+      )
+      .get(five.id) as { wasDrawn: number; wasWarmup: number };
+    expect(row).toEqual({ wasDrawn: 1, wasWarmup: 1 });
+
+    // …but the trophy pile derives drawn-ness as was_drawn AND NOT was_warmup
+    // (ADR-30): despite impact 5, trophyRarity mints no foil and the
+    // "(drawn)" label stays off — display agrees with the denied ×1.5.
+    const gam = (await request(app).get("/api/gamification").expect(200)).body;
+    const trophy = gam.todayCompletions.find((c: any) => c.taskId === five.id);
+    expect(trophy).toMatchObject({ impact: 5, wasDrawn: 0 });
+
+    // The history skyline (GET /api/activity) reads the same derivation.
+    const today = localDay(new Date());
+    const days = (
+      await request(app).get(`/api/activity?from=${today}&to=${today}`).expect(200)
+    ).body.days as { cards: { taskId: number; wasDrawn: boolean }[] }[];
+    const card = days.flatMap((d) => d.cards).find((c) => c.taskId === five.id);
+    expect(card?.wasDrawn).toBe(false);
+
+    // Contrast: a genuinely GAMBLED impact-5 completion still reads drawn.
+    const soloGoal = await seedGoal("warmup trophy foil contrast");
+    const gambled = await seedTask("gambled five star", soloGoal, 20, { impact: 5 });
+    await request(app).post("/api/draw").send({ goalId: soloGoal }).expect(200);
+    await request(app).patch(`/api/tasks/${gambled.id}`).send({ status: "done" }).expect(200);
+    const gam2 = (await request(app).get("/api/gamification").expect(200)).body;
+    expect(gam2.todayCompletions.find((c: any) => c.taskId === gambled.id).wasDrawn).toBe(1);
   });
 });
 
