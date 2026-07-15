@@ -181,6 +181,9 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
             <AiBreakdownPanel
               taskId={task.id}
               goalId={task.goalId}
+              // A re-breakdown seeds from the persisted mode (#67); only a
+              // fresh parent lets the model's orderMatters pre-set the toggle.
+              initialOrderMode={hasSubtasks ? task.subtaskOrderMode : undefined}
               onClose={() => setAiPanel(false)}
               onAccept={async (subtasks, orderMode) => {
                 await createSubtasks.mutateAsync({ parentId: task.id, subtasks, orderMode });

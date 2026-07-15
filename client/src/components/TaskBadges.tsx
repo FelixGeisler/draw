@@ -57,8 +57,9 @@ export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolea
         </span>
       )}
       {/* Sequential hold-back (#23): derived queue position, hidden while the
-          task is snoozed (classifyTask precedence — snoozed wins). */}
-      {Boolean(task.heldBack) && !isSnoozed(task) && (
+          task is snoozed (classifyTask precedence — snoozed wins) and on done
+          rows — a step completed out of order is not "in line" (#67). */}
+      {task.status === "open" && Boolean(task.heldBack) && !isSnoozed(task) && (
         <span className="chip" title="In line — this breakdown is done in order; finish the steps in front first">
           ⏳ queued
         </span>

@@ -230,6 +230,29 @@ describe("draw pool: sequential parents expose only the first open subtask", () 
     expect(res.reason).toBe("no_ready_tasks");
   });
 
+  it("a blocked first subtask still holds its siblings back — snooze covers block too", async () => {
+    const { goalId, parent } = await seedGoalParent("blocked-gate");
+    const [first, second] = await addSubtasks(
+      parent.id,
+      [
+        { title: "blocked gate first", effortMinutes: 5 },
+        { title: "blocked gate second", effortMinutes: 5 },
+      ],
+      "sequential",
+    );
+
+    await request(app).patch(`/api/tasks/${first.id}`).send({ blocked: true }).expect(200);
+
+    // blocked keeps status = 'open', so heldBackSql still gates the sibling…
+    expect((await listedTask(second.id)).heldBack).toBe(1);
+    // …and the pool is honestly empty, same as the deferred variant above:
+    // ADR-18's "a snoozed first subtask still gates its siblings" covers both
+    // halves of snooze — deferred OR blocked (ADR-17).
+    const res = await draw(goalId);
+    expect(res.task).toBeNull();
+    expect(res.reason).toBe("no_ready_tasks");
+  });
+
   it("keeps all_too_big when the exposed first subtask is oversized", async () => {
     const { goalId, parent } = await seedGoalParent("oversized-gate");
     await addSubtasks(

@@ -37,3 +37,20 @@ describe("MCP layer hygiene", () => {
     }
   });
 });
+
+// The SDK-free catalog contract (#31, ADR-19): the tool catalog and its HTTP
+// binding stay importable without the MCP or Anthropic SDKs, so the in-app
+// assistant can bind the same catalog to staged executors. mcp.ts and
+// mcpServer.ts legitimately import the MCP SDK; the tools/ files never may.
+const SDK_FREE_FILES = [path.join("tools", "catalog.ts"), path.join("tools", "httpApi.ts")];
+
+describe("tool catalog stays SDK-free (one catalog, two bindings)", () => {
+  for (const file of SDK_FREE_FILES) {
+    const content = fs.readFileSync(path.join(srcDir, file), "utf-8");
+
+    it(`${file} never imports @modelcontextprotocol or @anthropic-ai`, () => {
+      expect(content).not.toContain("@modelcontextprotocol");
+      expect(content).not.toContain("@anthropic-ai");
+    });
+  }
+});
