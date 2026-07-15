@@ -96,6 +96,46 @@ export function flattenOpen(tasks: Task[]): Task[] {
   return out;
 }
 
+export interface SiblingCluster {
+  parent: Task;
+  items: Task[];
+}
+
+/**
+ * Capture-list ergonomics (#30): split a section's tasks into flat top-level
+ * rows and per-parent sibling clusters, so a 40-leaf import (#29) renders as
+ * one collapsible header instead of 40 flat rows. Trees are two levels deep
+ * everywhere (ADR-16/24), so the parent lookup is over roots only. Singleton
+ * clusters stay clustered: a leaf title like "Ex 40 (part 2)" is meaningless
+ * without its umbrella's name, and the group's location must not jump when
+ * the second-to-last sibling completes. A leaf whose parent is missing from
+ * the roots list falls back to a flat row rather than vanishing.
+ */
+export function groupSiblings(
+  items: Task[],
+  roots: Task[],
+): { flat: Task[]; clusters: SiblingCluster[] } {
+  const rootById = new Map(roots.map((r) => [r.id, r]));
+  const flat: Task[] = [];
+  const clusters: SiblingCluster[] = [];
+  const byParent = new Map<number, SiblingCluster>();
+  for (const t of items) {
+    const parent = t.parentId != null ? rootById.get(t.parentId) : undefined;
+    if (!parent) {
+      flat.push(t);
+      continue;
+    }
+    let cluster = byParent.get(parent.id);
+    if (!cluster) {
+      cluster = { parent, items: [] };
+      byParent.set(parent.id, cluster);
+      clusters.push(cluster);
+    }
+    cluster.items.push(t);
+  }
+  return { flat, clusters };
+}
+
 export function isDueSoon(dueDate: string | null): "overdue" | "today" | "soon" | null {
   if (!dueDate) return null;
   const today = new Date().toISOString().slice(0, 10);

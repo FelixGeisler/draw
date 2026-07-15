@@ -52,11 +52,18 @@ test("breakdown: subtasks make the parent drawable ready work", async ({ page })
   // subtasks (15 + 25), not the stale stored 90-minute estimate.
   await expect(parentRow.locator(".chip", { hasText: "min" })).toHaveText("40 min");
 
-  // Subtasks are now in the deck; the container parent is not.
+  // Subtasks are now in the deck, folded under a collapsible parent header
+  // with a count (#30); the container parent is not a flat row of its own.
   await page.goto("/capture");
   const ready = section(page, "Ready to draw");
-  await expect(ready.getByText("Open past paper, list topics")).toBeVisible();
-  await expect(ready.getByText("Prepare exam statistics")).not.toBeVisible();
+  const group = ready.locator("details").filter({ hasText: "Prepare exam statistics" });
+  await expect(group.locator("summary")).toContainText("Prepare exam statistics");
+  await expect(group.locator("summary")).toContainText("(2)");
+  // Collapsed by default; the sibling rows expand on demand.
+  await expect(group.getByText("Open past paper, list topics")).not.toBeVisible();
+  await group.locator("summary").click();
+  await expect(group.getByText("Open past paper, list topics")).toBeVisible();
+  await expect(group.getByText("Solve first two exercises")).toBeVisible();
 });
 
 test("draw and complete: card flips, XP and trophy deck react", async ({ page }) => {

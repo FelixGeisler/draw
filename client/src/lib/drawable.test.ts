@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { classifyTask, flattenOpen, formatWindow, isSnoozed, isWithinWindow } from "./drawable";
+import {
+  classifyTask,
+  flattenOpen,
+  formatWindow,
+  groupSiblings,
+  isSnoozed,
+  isWithinWindow,
+} from "./drawable";
 import {
   DRAWABLE_VECTORS,
   VECTOR_NOW,
@@ -130,5 +137,57 @@ describe("flattenOpen", () => {
       task({ id: 4, status: "done", subtasks: [task({ id: 5 })] }),
     ];
     expect(flattenOpen(tree).map((t) => t.id)).toEqual([1, 2, 5]);
+  });
+});
+
+// #30 Capture ergonomics: sibling leaves collapse under their parent so a
+// 40-leaf import (#29) is one header row, not 40 flat rows.
+describe("groupSiblings", () => {
+  const roots = [
+    task({ id: 10, title: "Probeklausur 2023" }),
+    task({ id: 20, title: "Groceries run" }),
+    task({ id: 30, title: "Lecture notes" }),
+  ];
+
+  it("keeps parentless tasks flat and clusters subtasks under their parent, preserving order", () => {
+    const items = [
+      task({ id: 1, title: "Water plants" }),
+      task({ id: 11, parentId: 10, title: "Ex 1" }),
+      task({ id: 2, title: "Call the bank" }),
+      task({ id: 12, parentId: 10, title: "Ex 2" }),
+      task({ id: 31, parentId: 30, title: "Chapter 1" }),
+    ];
+    const { flat, clusters } = groupSiblings(items, roots);
+    expect(flat.map((t) => t.id)).toEqual([1, 2]);
+    expect(clusters.map((c) => c.parent.title)).toEqual(["Probeklausur 2023", "Lecture notes"]);
+    expect(clusters[0].items.map((t) => t.id)).toEqual([11, 12]);
+    expect(clusters[1].items.map((t) => t.id)).toEqual([31]);
+  });
+
+  it("keeps a singleton cluster clustered — leaf titles need their umbrella's name", () => {
+    const { flat, clusters } = groupSiblings([task({ id: 21, parentId: 20, title: "Milk" })], roots);
+    expect(flat).toEqual([]);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].parent.id).toBe(20);
+  });
+
+  it("falls back to a flat row when the parent is missing from the roots", () => {
+    const orphan = task({ id: 99, parentId: 777, title: "Orphan leaf" });
+    const { flat, clusters } = groupSiblings([orphan], roots);
+    expect(flat).toEqual([orphan]);
+    expect(clusters).toEqual([]);
+  });
+
+  it("clusters independently per parent within the same section", () => {
+    const items = [
+      task({ id: 11, parentId: 10 }),
+      task({ id: 21, parentId: 20 }),
+      task({ id: 13, parentId: 10 }),
+    ];
+    const { clusters } = groupSiblings(items, roots);
+    expect(clusters.map((c) => [c.parent.id, c.items.length])).toEqual([
+      [10, 2],
+      [20, 1],
+    ]);
   });
 });
