@@ -64,6 +64,33 @@ const NESTED_BREAKDOWN_ERROR =
   "breakdowns are one level deep (ADR-16): this task is itself a subtask and cannot be " +
   "broken down further — add the steps as additional subtasks of its root parent instead";
 
+// Recurring × sequential ban (#66, ADR-23): a recurring step never closes —
+// completing it advances its due date instead (ADR-6) — so under a
+// 'sequential' parent it would hold every later sibling back forever
+// (heldBackSql only frees a step when the one in front stops being open).
+// The combination is rejected on every path that could CREATE it: subtask
+// creation, recurrence edits, and mode flips. Pre-existing rows stay
+// operable — a no-op resend of the stored value passes, mirroring the ADR-4
+// impact gate below.
+const RECURRING_SEQUENTIAL_ERROR =
+  "recurring subtasks cannot be part of a sequential breakdown (ADR-23): a recurring step " +
+  "never closes — completing it advances its due date (ADR-6) — so it would hold every " +
+  "later step back forever. Drop the recurrence, or keep the parent's subtasks parallel";
+
+/**
+ * Any-status check on purpose: done and archived subtasks can be revived by a
+ * plain status write (reopen / un-archive), so a recurring row in any state
+ * blocks the flip to 'sequential' — otherwise the ban would be one reopen away
+ * from moot.
+ */
+function hasRecurringSubtask(parentId: number): boolean {
+  return Boolean(
+    db
+      .prepare("SELECT 1 FROM tasks WHERE parent_id = ? AND recur_every_days IS NOT NULL LIMIT 1")
+      .get(parentId),
+  );
+}
+
 /**
  * Availability window (#33, ADR-20) — shared POST/PATCH validation. The
  * window is all-or-none: windowDays (weekday integers 0–6, JS getDay
@@ -178,12 +205,18 @@ tasksRouter.post("/", (req, res) => {
   }
   if (parentId != null) {
     const parentRow = db
-      .prepare("SELECT parent_id AS grandparentId FROM tasks WHERE id = ?")
-      .get(parentId) as { grandparentId: number | null } | undefined;
+      .prepare("SELECT parent_id AS grandparentId, subtask_order_mode AS orderMode FROM tasks WHERE id = ?")
+      .get(parentId) as { grandparentId: number | null; orderMode: string } | undefined;
     // A clear 400 instead of the FK violation's opaque 500.
     if (!parentRow) return res.status(400).json({ error: "parent task not found" });
     if (parentRow.grandparentId != null) {
       return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
+    }
+    // #66 (ADR-23): a NEW subtask may not bring a recurrence into a
+    // sequential breakdown. (The batch endpoint needs no twin check — its
+    // INSERT has no recurrence column at all.)
+    if (recurEveryDays != null && parentRow.orderMode === "sequential") {
+      return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
     }
   }
   const win = parseWindowInput(req.body ?? {});
@@ -234,6 +267,19 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
   if (orderMode !== undefined && orderMode !== "parallel" && orderMode !== "sequential") {
     return res.status(400).json({ error: "orderMode must be 'parallel' or 'sequential'" });
   }
+  // Transition guard (#66, ADR-23): switching the parent to 'sequential' while
+  // a recurring subtask already sits underneath would create the forbidden
+  // combination in the same write. Re-sending 'sequential' on an already-
+  // sequential parent is a no-op and stays accepted (legacy tolerance). The
+  // batch rows themselves cannot smuggle a recurrence — the INSERT below has
+  // no recurrence column.
+  if (
+    orderMode === "sequential" &&
+    parent.subtaskOrderMode !== "sequential" &&
+    hasRecurringSubtask(parent.id as number)
+  ) {
+    return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
+  }
 
   const insert = db.prepare(
     `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, created_at)
@@ -267,7 +313,7 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
 tasksRouter.patch("/:id", (req, res) => {
   const id = Number(req.params.id);
   const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
-    | (TaskRow & { goal_id: number | null })
+    | (TaskRow & { goal_id: number | null; parent_id: number | null; subtask_order_mode: string })
     | undefined;
   if (!raw) return res.status(404).json({ error: "task not found" });
 
@@ -323,6 +369,31 @@ tasksRouter.patch("/:id", (req, res) => {
   // no bookkeeping beyond this validation.
   if ("subtaskOrderMode" in body && body.subtaskOrderMode !== "parallel" && body.subtaskOrderMode !== "sequential") {
     return res.status(400).json({ error: "subtaskOrderMode must be 'parallel' or 'sequential'" });
+  }
+  // Recurring × sequential transition guards (#66, ADR-23). Both directions
+  // are checked against the STORED counterpart, so the combination can never
+  // be newly created, while no-op resends of a stored value keep legacy rows
+  // (a pre-ban database) editable — the same tolerance the ADR-4 gate below
+  // extends to grandfathered impact values.
+  if (
+    body.subtaskOrderMode === "sequential" &&
+    raw.subtask_order_mode !== "sequential" &&
+    hasRecurringSubtask(id)
+  ) {
+    return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
+  }
+  if (
+    "recurEveryDays" in body &&
+    body.recurEveryDays != null &&
+    body.recurEveryDays !== raw.recur_every_days &&
+    raw.parent_id != null
+  ) {
+    const parentMode = db
+      .prepare("SELECT subtask_order_mode AS mode FROM tasks WHERE id = ?")
+      .get(raw.parent_id) as { mode: string } | undefined;
+    if (parentMode?.mode === "sequential") {
+      return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
+    }
   }
   // ADR-4 gate (#65): impact rates leverage toward a goal, so on a task that
   // is (or stays) goal-less only the neutral default 3 — or a no-op resend of

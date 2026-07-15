@@ -3,6 +3,7 @@ import type { Category, Goal, NewTask, Task } from "../api/types";
 import { useCreateSubtasks, useDeleteTask, useUpdateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
 import { isSnoozed } from "../lib/drawable";
+import { sequentialLockedByRecurrence } from "../lib/orderMode";
 import { TaskBadges } from "./TaskBadges";
 import { SnoozeMenu } from "./SnoozeMenu";
 import { TaskForm } from "./TaskForm";
@@ -15,9 +16,15 @@ interface Props {
   goals?: Goal[];
   maxEffort: number;
   depth?: number;
+  /**
+   * The parent's subtaskOrderMode when this row is a subtask (#66, ADR-23):
+   * under a 'sequential' parent the edit form hides the recurrence field —
+   * a recurring step would gate its siblings forever, and the API rejects it.
+   */
+  parentOrderMode?: Task["subtaskOrderMode"];
 }
 
-export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props) {
+export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentOrderMode }: Props) {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const createSubtasks = useCreateSubtasks();
@@ -27,11 +34,15 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
   const [expanded, setExpanded] = useState(true);
   const [snoozing, setSnoozing] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [orderModeError, setOrderModeError] = useState<string | null>(null);
 
   const category = categories.find((c) => c.id === task.categoryId);
   const hasSubtasks = (task.subtasks?.length ?? 0) > 0;
   const done = task.status === "done";
   const snoozed = !done && isSnoozed(task);
+  // Recurring × sequential guard (#66, ADR-23): a recurring subtask locks the
+  // switch to 'do in order' — on the flip button and in both breakdown editors.
+  const sequentialLocked = sequentialLockedByRecurrence(task.subtasks, task.subtaskOrderMode);
 
   function snooze(patch: { deferredUntil?: string; blocked?: boolean }) {
     updateTask.mutate({ id: task.id, ...patch });
@@ -55,6 +66,8 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
             initial={task}
             autoFocus
             submitLabel="Save"
+            // No recurrence on steps of an in-order breakdown (#66, ADR-23).
+            hideRecur={parentOrderMode === "sequential"}
             onSubmit={saveEdit}
             onCancel={() => setEditing(false)}
           />
@@ -110,19 +123,31 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
           )
         )}
         {/* Sequential subtask mode (#23): flip "do in order" after the fact.
-            Held-back siblings wear the ⏳ queued chip via TaskBadges. */}
+            Held-back siblings wear the ⏳ queued chip via TaskBadges. A
+            recurring subtask locks the switch to sequential (#66, ADR-23);
+            the server 400 is still surfaced below as a backstop (e.g. an
+            archived recurring subtask is not in this list but blocks too). */}
         {!done && hasSubtasks && (
           <button
-            onClick={() =>
-              updateTask.mutate({
-                id: task.id,
-                subtaskOrderMode: task.subtaskOrderMode === "sequential" ? "parallel" : "sequential",
-              })
-            }
+            disabled={sequentialLocked}
+            onClick={async () => {
+              setOrderModeError(null);
+              try {
+                await updateTask.mutateAsync({
+                  id: task.id,
+                  subtaskOrderMode:
+                    task.subtaskOrderMode === "sequential" ? "parallel" : "sequential",
+                });
+              } catch (e) {
+                setOrderModeError((e as Error).message);
+              }
+            }}
             title={
-              task.subtaskOrderMode === "sequential"
-                ? "Subtasks are drawn in order — click to allow any order"
-                : "Subtasks are drawn in any order — click to draw them in the listed order"
+              sequentialLocked
+                ? "Cannot draw in order: a recurring subtask never closes and would gate the steps behind it forever — remove its ↻ recurrence first"
+                : task.subtaskOrderMode === "sequential"
+                  ? "Subtasks are drawn in order — click to allow any order"
+                  : "Subtasks are drawn in any order — click to draw them in the listed order"
             }
           >
             {task.subtaskOrderMode === "sequential" ? "→ in order" : "⇄ any order"}
@@ -159,6 +184,11 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
         </button>
       </div>
       )}
+      {orderModeError && (
+        <div role="alert" style={{ padding: "4px 10px", color: "var(--danger)", fontSize: 13 }}>
+          {orderModeError}
+        </div>
+      )}
       {snoozing && !snoozed && (
         <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
           <SnoozeMenu
@@ -184,6 +214,7 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
               // A re-breakdown seeds from the persisted mode (#67); only a
               // fresh parent lets the model's orderMatters pre-set the toggle.
               initialOrderMode={hasSubtasks ? task.subtaskOrderMode : undefined}
+              sequentialLocked={sequentialLocked}
               onClose={() => setAiPanel(false)}
               onAccept={async (subtasks, orderMode) => {
                 await createSubtasks.mutateAsync({ parentId: task.id, subtasks, orderMode });
@@ -194,6 +225,7 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
           <SubtaskEditor
             maxEffort={maxEffort}
             initialOrderMode={task.subtaskOrderMode}
+            sequentialLocked={sequentialLocked}
             onCancel={() => setBreakingDown(false)}
             onAccept={async (subtasks, orderMode) => {
               await createSubtasks.mutateAsync({ parentId: task.id, subtasks, orderMode });
@@ -211,6 +243,7 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
             goals={goals}
             maxEffort={maxEffort}
             depth={depth + 1}
+            parentOrderMode={task.subtaskOrderMode}
           />
         ))}
     </div>

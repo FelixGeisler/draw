@@ -9,6 +9,12 @@ interface Props {
   maxEffort: number;
   /** Pre-set from the parent so re-opening the editor keeps the choice (#23). */
   initialOrderMode?: Task["subtaskOrderMode"];
+  /**
+   * Recurring × sequential guard (#66, ADR-23): the parent already has a
+   * recurring subtask, so the API would reject a switch to 'do in order' —
+   * the toggle is disabled with the reason instead of failing on accept.
+   */
+  sequentialLocked?: boolean;
   onAccept: (
     subtasks: NewSubtask[],
     orderMode: Task["subtaskOrderMode"],
@@ -19,7 +25,7 @@ interface Props {
 let nextKey = 1;
 const emptyRow = (): Row => ({ key: nextKey++, title: "", effortMinutes: null });
 
-export function SubtaskEditor({ maxEffort, initialOrderMode, onAccept, onCancel }: Props) {
+export function SubtaskEditor({ maxEffort, initialOrderMode, sequentialLocked, onAccept, onCancel }: Props) {
   const [rows, setRows] = useState<Row[]>([emptyRow(), emptyRow()]);
   const [inOrder, setInOrder] = useState(initialOrderMode === "sequential");
 
@@ -56,9 +62,18 @@ export function SubtaskEditor({ maxEffort, initialOrderMode, onAccept, onCancel 
       ))}
       <label
         style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--text-dim)", fontSize: 13 }}
-        title="Sequential mode: only the first open step enters the deck; the rest queue up behind it"
+        title={
+          sequentialLocked
+            ? "Unavailable: a recurring subtask never closes and would gate the steps behind it forever — remove its ↻ recurrence first"
+            : "Sequential mode: only the first open step enters the deck; the rest queue up behind it"
+        }
       >
-        <input type="checkbox" checked={inOrder} onChange={(e) => setInOrder(e.target.checked)} />
+        <input
+          type="checkbox"
+          checked={inOrder}
+          disabled={sequentialLocked}
+          onChange={(e) => setInOrder(e.target.checked)}
+        />
         Do in order — draw only the next open step
       </label>
       <div style={{ display: "flex", gap: 8 }}>

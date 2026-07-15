@@ -15,3 +15,20 @@ export function seedInOrder(
 ): boolean {
   return existingOrderMode != null ? existingOrderMode === "sequential" : orderMatters;
 }
+
+/**
+ * Recurring × sequential guard (#66, ADR-23): a recurring step never closes
+ * (completing it advances its due date, ADR-6), so it would hold every later
+ * sibling of a sequential breakdown back forever — the API rejects the
+ * transition. True when switching this parent to 'sequential' would be such
+ * a transition: it is not sequential yet AND a listed subtask carries a
+ * recurrence. An already-sequential parent is never locked — resending its
+ * mode is a no-op the API accepts, and flipping AWAY from sequential is the
+ * repair path for a pre-ban database.
+ */
+export function sequentialLockedByRecurrence(
+  subtasks: Pick<Task, "recurEveryDays">[] | undefined,
+  orderMode: Task["subtaskOrderMode"],
+): boolean {
+  return orderMode !== "sequential" && (subtasks ?? []).some((s) => s.recurEveryDays != null);
+}
