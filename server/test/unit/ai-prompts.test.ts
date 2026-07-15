@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AiError,
+  CARD_ART_SYSTEM_PROMPT,
   estimateMode,
   PLANNING_SYSTEM_PROMPT,
   TRANSCRIPTION_SYSTEM_PROMPT,
@@ -31,6 +32,31 @@ describe("per-mode system prompts", () => {
       expect(prompt).toContain("concrete physical action verb");
       expect(prompt).toContain("Impact ratings (1-5) measure leverage");
     }
+  });
+});
+
+// Card art (#27) cannot be exercised live in tests either — what CAN be
+// pinned is the prompt constraints the sanitizer and deck aesthetic rely on.
+describe("card art system prompt (#27)", () => {
+  it("pins the card geometry and the no-text rule", () => {
+    expect(CARD_ART_SYSTEM_PROMPT).toContain('viewBox="0 0 300 420"');
+    expect(CARD_ART_SYSTEM_PROMPT).toMatch(/NO text/);
+  });
+
+  it("anchors the dark deck palette with the category color as accent", () => {
+    expect(CARD_ART_SYSTEM_PROMPT).toContain("#1b1e27");
+    expect(CARD_ART_SYSTEM_PROMPT).toContain("#232735");
+    expect(CARD_ART_SYSTEM_PROMPT).toMatch(/category color as the single accent/);
+  });
+
+  it("bans the constructs the sanitizer strips, so good output survives it", () => {
+    for (const banned of ["<script>", "<foreignObject>", "<image>", "no external references"]) {
+      expect(CARD_ART_SYSTEM_PROMPT).toContain(banned);
+    }
+  });
+
+  it("does not inherit the planning or transcription directives", () => {
+    expect(CARD_ART_SYSTEM_PROMPT).not.toMatch(/30 minutes|activation energy|VERBATIM/i);
   });
 });
 

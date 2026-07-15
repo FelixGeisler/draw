@@ -64,3 +64,12 @@ export const generateTasksSchema = z.object({
 });
 
 export type GenerateTasksResult = z.infer<typeof generateTasksSchema>;
+
+// Card art (#27): the Claude API generates text, so the artwork is SVG markup
+// written by the model through the same structured-output pipeline. The raw
+// string is UNTRUSTED — svgSanitizer.ts allowlist-filters it before storage.
+export const cardArtSchema = z.object({
+  svg: z.string(),
+});
+
+export type CardArtResult = z.infer<typeof cardArtSchema>;

@@ -64,6 +64,25 @@ export interface GenerateTasksResult {
   oversizedParts: boolean;
 }
 
+/**
+ * Card-back artwork for a drawn task (#27). Fetches only once the card is
+ * revealed, and never blocks the reveal — the card renders instantly with the
+ * default gradient and the art fades in if/when it arrives. Every failure,
+ * including the 503 ai_not_configured degraded mode, resolves to "no art":
+ * no retry storm, no toast, no error UI (callers read only `data`).
+ */
+export function useCardArt(taskId: number | undefined, revealed: boolean) {
+  return useQuery({
+    queryKey: ["card-art", taskId],
+    queryFn: () => api.get<{ svg: string }>(`/api/tasks/${taskId}/card-art`),
+    enabled: revealed && taskId != null,
+    // The server caches at most one artwork per task — it cannot go stale.
+    staleTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function useAiStatus() {
   return useQuery({
     queryKey: ["ai-status"],

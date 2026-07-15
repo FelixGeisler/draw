@@ -60,6 +60,9 @@ prompt, not plan-goal's (`estimateMode` in `aiService.ts`). No `temperature`,
 - Localhost only, enforced: the API server binds explicitly to `127.0.0.1`
   (`server/src/server.ts`), so it is not reachable from the local network.
   No auth by design (single local user).
+- Model-written SVG (card art, ADR-21) is treated as untrusted input:
+  allowlist-re-serialized by `svgSanitizer.ts` before storage, and rendered
+  only as an `<img>` data URI — never `dangerouslySetInnerHTML`.
 
 == 8.6 Time handling
 

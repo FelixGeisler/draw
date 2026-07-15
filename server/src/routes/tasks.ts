@@ -15,6 +15,8 @@ import {
   wasRecentlyDrawn,
   type TaskRow,
 } from "../services/gamificationService.js";
+import { AiError } from "../services/aiService.js";
+import { getOrCreateCardArt } from "../services/cardArtService.js";
 import { startTimer } from "./timer.js";
 
 export const tasksRouter = Router();
@@ -342,6 +344,19 @@ tasksRouter.patch("/:id", (req, res) => {
     clearCurrentDraw(id);
   }
   res.json({ task });
+});
+
+// AI card art (#27, ADR-21): serves the cached SVG or generates it exactly
+// once per task (sanitized before storage). Degraded mode answers 503
+// ai_not_configured, matching routes/ai.ts — the client swallows every
+// failure into "no art", so this endpoint never blocks or breaks the reveal.
+tasksRouter.get("/:id/card-art", async (req, res) => {
+  try {
+    res.json(await getOrCreateCardArt(Number(req.params.id)));
+  } catch (e) {
+    if (e instanceof AiError) return res.status(e.status).json({ error: e.message });
+    res.status(500).json({ error: e instanceof Error ? e.message : "unknown error" });
+  }
 });
 
 tasksRouter.post("/:id/timer/start", (req, res) => {
