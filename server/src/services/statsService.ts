@@ -11,7 +11,11 @@ export interface Stats {
   weeklyGrade: string | null;
 }
 
-/** One task completed in range, as fetched from SQL (estimate may be missing). */
+/**
+ * One task completed in range. `estimatedMinutes` is what the tracked minutes
+ * are compared against — the per-cycle estimate times the number of tracked
+ * in-range cycles (null when the task was never estimated).
+ */
 export interface EstimationInputRow {
   taskId: number;
   title: string;
@@ -67,7 +71,7 @@ function tendencyFor(ratio: number): Tendency {
  * Pure estimated-vs-tracked aggregation (no DB). Tasks without a positive
  * effort estimate are excluded here rather than treated as 0 — a zero
  * estimate would fake a broken ratio (and divide by zero). Tasks without
- * tracked time in the attributed cycle never reach this function
+ * tracked time in any attributed cycle never reach this function
  * (computeStats drops them before calling).
  */
 export function buildEstimation(rows: EstimationInputRow[]): Estimation {
@@ -129,29 +133,42 @@ export function buildEstimation(rows: EstimationInputRow[]): Estimation {
 }
 
 /**
- * Tracked minutes attributable to the latest cycle a task completed in range:
- * entries started after the previous completion (if any) and at or before the
- * cycle's own completion. Recurring tasks (recur_every_days) complete over and
- * over, so a lifetime sum would count every earlier cycle's entries against a
- * single per-cycle estimate and inflate the ratio each cycle (#39). One-shot
- * tasks have no previous completion, so all their work counts even when it
- * started before the range. ISO-8601 strings compare lexicographically —
+ * Per-completion attribution of tracked time: each completion owns the
+ * entries started after the previous completion (if any) and at or before its
+ * own timestamp, and every in-range completion's window counts. Recurring
+ * tasks (recur_every_days) complete over and over, so a lifetime sum would
+ * count every earlier cycle's entries against a single per-cycle estimate and
+ * inflate the ratio each cycle (#39). One-shot tasks have no previous
+ * completion, so all their work counts even when it started before the range.
+ * Cycles without tracked minutes contribute nothing — not even to `cycles` —
+ * because a checkbox-only completion says nothing about estimation accuracy;
+ * counting it would fake an over-estimate. Attributing every tracked in-range
+ * cycle (not just the latest) keeps a task visible when only an earlier
+ * in-range cycle was timed (#48). ISO-8601 strings compare lexicographically —
  * `from`/`to` may be date-only prefixes, as in the SQL range filters.
  */
-export function latestCycleTrackedMinutes(
+export function trackedCyclesInRange(
   completions: string[],
   entries: { startedAt: string; minutes: number }[],
   from: string,
   to: string,
-): number {
-  const inRange = completions.filter((c) => c >= from && c < to);
-  if (inRange.length === 0) return 0;
-  const cycleEnd = inRange.reduce((a, b) => (a > b ? a : b));
-  // "" sorts before every timestamp: no previous completion = no lower bound.
-  const prev = completions.filter((c) => c < cycleEnd).reduce((a, b) => (a > b ? a : b), "");
-  return entries
-    .filter((e) => e.startedAt > prev && e.startedAt <= cycleEnd)
-    .reduce((sum, e) => sum + e.minutes, 0);
+): { minutes: number; cycles: number } {
+  const sorted = [...completions].sort();
+  let minutes = 0;
+  let cycles = 0;
+  sorted.forEach((completedAt, i) => {
+    if (completedAt < from || completedAt >= to) return;
+    // "" sorts before every timestamp: no previous completion = no lower bound.
+    const prev = i > 0 ? sorted[i - 1] : "";
+    const cycleMinutes = entries
+      .filter((e) => e.startedAt > prev && e.startedAt <= completedAt)
+      .reduce((sum, e) => sum + e.minutes, 0);
+    if (cycleMinutes > 0) {
+      minutes += cycleMinutes;
+      cycles += 1;
+    }
+  });
+  return { minutes, cycles };
 }
 
 /** Minutes per time entry (alias `e`), running entries counted up to now. */
@@ -204,10 +221,10 @@ export function computeStats(from: string, to: string): Stats {
     .get(...range) as Stats["completed"];
 
   // Tasks completed in range, with tracked time attributed per cycle in
-  // latestCycleTrackedMinutes (#39): SQL only fetches the raw completions and
+  // trackedCyclesInRange (#39, #48): SQL only fetches the raw completions and
   // entries per task — the deliberately unfiltered entry list lets one-shot
   // tasks count work started before the range, while recurring tasks count
-  // only their latest completed cycle.
+  // only cycles completed in range.
   const completedInRange = db
     .prepare(
       `SELECT t.id AS taskId, t.title, t.effort_minutes AS estimatedMinutes,
@@ -234,10 +251,16 @@ export function computeStats(from: string, to: string): Stats {
       (r) => r.completedAt,
     );
     const entries = entriesStmt.all(task.taskId) as { startedAt: string; minutes: number }[];
-    const trackedMinutes = latestCycleTrackedMinutes(completions, entries, from, to);
-    // No tracked time in the attributed cycle — nothing to compare, same as
-    // a never-tracked task.
-    if (trackedMinutes > 0) estimationRows.push({ ...task, trackedMinutes });
+    const { minutes, cycles } = trackedCyclesInRange(completions, entries, from, to);
+    // No tracked time in any attributed cycle — nothing to compare, same as
+    // a never-tracked task. Several tracked cycles compare against one
+    // per-cycle estimate each.
+    if (cycles > 0)
+      estimationRows.push({
+        ...task,
+        estimatedMinutes: task.estimatedMinutes === null ? null : task.estimatedMinutes * cycles,
+        trackedMinutes: minutes,
+      });
   }
 
   const totalMinutes = Math.round(total.minutes);

@@ -246,3 +246,76 @@ describe("estimation with recurring tasks (#39)", () => {
     expect(stats.totalMinutes).toBe(70);
   });
 });
+
+describe("estimation with recurring tasks completed twice in range (#48)", () => {
+  // Own fixed past range — no overlap with the seeds above.
+  const RANGE = "from=2024-08-01&to=2024-08-07";
+
+  const seedEntry = (taskId: number, startedAt: string, endedAt: string) =>
+    db
+      .prepare("INSERT INTO time_entries (task_id, started_at, ended_at) VALUES (?, ?, ?)")
+      .run(taskId, startedAt, endedAt);
+  const seedCompletion = (taskId: number, completedAt: string) =>
+    db
+      .prepare("INSERT INTO completions (task_id, completed_at, xp_awarded) VALUES (?, ?, 10)")
+      .run(taskId, completedAt);
+
+  let stretch: { id: number };
+  let review: { id: number };
+
+  beforeAll(async () => {
+    const make = async (title: string, effortMinutes: number) =>
+      (
+        await request(app)
+          .post("/api/tasks")
+          .send({ title, categoryId: 2, effortMinutes, recurEveryDays: 2 })
+      ).body as { id: number };
+
+    // Tracked only in the FIRST in-range cycle; second completion is
+    // checkbox-only. Latest-cycle-only attribution dropped this task.
+    stretch = await make("stretch", 20);
+    seedEntry(stretch.id, "2024-08-01T08:00:00.000Z", "2024-08-01T08:30:00.000Z"); // 30 min
+    seedCompletion(stretch.id, "2024-08-02T09:00:00.000Z");
+    seedCompletion(stretch.id, "2024-08-05T09:00:00.000Z");
+
+    // Tracked in BOTH in-range cycles: 40 + 20 min against 2 × 30 estimated.
+    review = await make("review notes", 30);
+    seedEntry(review.id, "2024-08-01T10:00:00.000Z", "2024-08-01T10:40:00.000Z"); // 40 min
+    seedCompletion(review.id, "2024-08-02T11:00:00.000Z");
+    seedEntry(review.id, "2024-08-04T10:00:00.000Z", "2024-08-04T10:20:00.000Z"); // 20 min
+    seedCompletion(review.id, "2024-08-05T11:00:00.000Z");
+  });
+
+  it("keeps a task whose tracked entries all belong to the earlier in-range cycle", async () => {
+    const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
+
+    // One tracked cycle → one 20-min estimate; the untracked second
+    // completion neither hides the task nor scales its estimate.
+    expect(stats.estimation.tasks).toContainEqual({
+      taskId: stretch.id,
+      title: "stretch",
+      estimatedMinutes: 20,
+      trackedMinutes: 30,
+      ratio: 1.5,
+    });
+  });
+
+  it("scores two tracked cycles against two per-cycle estimates", async () => {
+    const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
+
+    expect(stats.estimation.tasks).toContainEqual({
+      taskId: review.id,
+      title: "review notes",
+      estimatedMinutes: 60, // 2 tracked cycles × 30 min
+      trackedMinutes: 60, // 40 + 20
+      ratio: 1,
+    });
+    expect(stats.estimation.summary).toEqual({
+      taskCount: 2,
+      totalEstimatedMinutes: 80, // 20 + 60
+      totalTrackedMinutes: 90, // 30 + 60
+      accuracyRatio: 1.13, // 90/80 rounded
+      tendency: "under",
+    });
+  });
+});
