@@ -159,7 +159,7 @@ function restWeekdays(): Set<number> {
   return new Set();
 }
 
-/** Milestone days of earned tokens, oldest first (consumption order). */
+/** Milestone days of earned tokens, chronological (the fold replays by day). */
 function earnedFreezeDays(): string[] {
   const rows = db
     .prepare("SELECT milestone_day AS day FROM streak_freezes ORDER BY milestone_day")

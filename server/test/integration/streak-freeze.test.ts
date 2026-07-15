@@ -173,7 +173,8 @@ describe("freeze consumption is derived at read time", () => {
   it("a token earned later cannot cover an earlier missed day", async () => {
     // Clearing the rest days turns offsets 6/5 into missed non-rest days.
     // The only banked token was earned TODAY — after the gap — so it must
-    // not cover it: the streak breaks and the bank is untouched.
+    // not cover it: the streak breaks, and the token survives only because
+    // it was earned after the break (tokens from before a break expire).
     await request(app).patch("/api/settings").send({ streak_rest_weekdays: [] }).expect(200);
     const g = await gamification();
     expect(g.streak).toBe(5); // today + offsets 1..4
@@ -181,26 +182,29 @@ describe("freeze consumption is derived at read time", () => {
     expect(g.frozenDays).toEqual([]);
   });
 
-  it("a gap wider than the bank breaks the streak without consuming", async () => {
-    // One old token, two-day gap: still 5, still nothing consumed.
+  it("a gap wider than the bank breaks the streak and the break expires the bank", async () => {
+    // One token earned before the two-day gap: it covers the first missed
+    // day, the second miss breaks the run, and the break expires everything
+    // the dead run had banked (PR #98 review) — only today's token remains.
     db.prepare(
       "INSERT INTO streak_freezes (milestone_day, created_at) VALUES (?, ?)",
-    ).run(localDay(30), localNoon(30));
+    ).run(localDay(8), localNoon(8));
     const g = await gamification();
     expect(g.streak).toBe(5);
-    expect(g.freezesBanked).toBe(2);
+    expect(g.freezesBanked).toBe(1);
     expect(g.frozenDays).toEqual([]);
   });
 
-  it("banked tokens auto-cover the gap, oldest first, without extending the count", async () => {
+  it("banked tokens auto-cover the gap without extending the count", async () => {
     db.prepare(
       "INSERT INTO streak_freezes (milestone_day, created_at) VALUES (?, ?)",
-    ).run(localDay(29), localNoon(29));
+    ).run(localDay(7), localNoon(7));
     const g = await gamification();
-    // Two old tokens bridge offsets 5+6: the full run counts again.
+    // Two tokens earned before the gap bridge offsets 5+6: the full run
+    // counts again.
     expect(g.streak).toBe(7);
     expect(g.frozenDays).toEqual([localDay(5), localDay(6)]);
-    // 3 earned (today, -30, -29) minus 2 consumed — today's survives because
+    // 3 earned (today, -8, -7) minus 2 consumed — today's survives because
     // it could never cover days before it was earned.
     expect(g.freezesBanked).toBe(1);
   });
@@ -222,7 +226,7 @@ describe("freeze consumption is derived at read time", () => {
     expect(() =>
       db
         .prepare("INSERT INTO streak_freezes (milestone_day, created_at) VALUES (?, ?)")
-        .run(localDay(30), localNoon(30)),
+        .run(localDay(8), localNoon(8)),
     ).toThrow(/UNIQUE/);
   });
 });

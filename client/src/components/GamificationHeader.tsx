@@ -1,14 +1,5 @@
 import { useGamification } from "../hooks/useGamification";
-
-/** Whole local days since a server-provided local "YYYY-MM-DD" day. */
-function daysAgo(day: string): number {
-  const [y, m, d] = day.split("-").map(Number);
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  return Math.round((todayStart.getTime() - new Date(y, m - 1, d).getTime()) / 86_400_000);
-}
-
-type FlameState = "lit" | "pending" | "rest" | "frozen";
+import { deriveFlame } from "../lib/flameState";
 
 export function GamificationHeader() {
   const { data } = useGamification();
@@ -17,16 +8,9 @@ export function GamificationHeader() {
   const pct = Math.min(100, (data.levelProgress.intoLevel / data.levelProgress.needed) * 100);
 
   // Four honest flame states (#58): rest and frozen days are never presented
-  // as completed. A freeze that covered a day within the last week gets its
-  // own state so a silently spent token stays visible.
-  const recentFreeze = data.frozenDays.find((day) => daysAgo(day) <= 7);
-  const flame: FlameState = data.dailyGoalMet
-    ? "lit"
-    : data.todayKind === "rest"
-      ? "rest"
-      : recentFreeze
-        ? "frozen"
-        : "pending";
+  // as completed. Derivation and precedence live (unit-tested) in
+  // lib/flameState.ts.
+  const { state: flame, recentFreeze } = deriveFlame(data);
 
   const flameTitle = {
     lit: "Daily goal met — streak safe!",

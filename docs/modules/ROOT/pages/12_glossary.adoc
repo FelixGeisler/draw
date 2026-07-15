@@ -65,7 +65,7 @@
 |A weekday configured in `streak_rest_weekdays`; without a completion it neither breaks nor extends the streak — with one it counts like any other day
 
 |*Freeze token*
-|Earned every 7th real streak day (append-only `streak_freezes` log, max 2 banked); auto-covers a missed non-rest day inside a run — consumption is derived at read time, never stored
+|Earned every 7th real streak day (append-only `streak_freezes` log, max 2 banked); auto-covers a missed non-rest day inside a run — consumption is derived at read time, never stored, and a gap the bank cannot cover breaks the run and expires the bank (ADR-26)
 
 |*Weekly grade*
 |A–F rating of the week: share of tracked minutes on 4–5★ tasks (≥60% = A)
