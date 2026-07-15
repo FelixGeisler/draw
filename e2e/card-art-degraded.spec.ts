@@ -35,6 +35,10 @@ test("degraded draw: card renders instantly with default styling, art 503 is swa
   await expect(page.locator(".draw-art")).toHaveCount(0);
   await expect(page.locator(".draw-art-scrim")).toHaveCount(0);
 
+  // #113: the regenerate control exists only when there is art to replace —
+  // degraded mode hides it entirely (silent contract, no inert stub either).
+  await expect(page.getByRole("button", { name: "Regenerate artwork" })).toHaveCount(0);
+
   // No error surfaced anywhere: the card stays fully actionable.
   await expect(page.getByText(/error|failed|not configured/i)).toHaveCount(0);
   for (const name of ["▶ Start now", "✓ Done", "💤 Not now", "✎ Edit"]) {

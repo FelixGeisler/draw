@@ -11,7 +11,7 @@ import {
   useWarmupStatus,
   type DrawResponse,
 } from "../hooks/useDraw";
-import { useCardArt } from "../hooks/useAi";
+import { useCardArt, useRegenerateCardArt } from "../hooks/useAi";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
 import { FocusOverlay } from "../components/FocusOverlay";
 import { SnoozeMenu } from "../components/SnoozeMenu";
@@ -205,6 +205,16 @@ export function DrawPage() {
   // AI card art (#27): kicked off by the reveal, never awaited by it. The
   // hook swallows every failure (incl. 503 degraded mode) into "no art".
   const cardArt = useCardArt(task?.id, phase === "revealed");
+  // Regenerate (#113): replaces the art server-side, keeps the old one on
+  // failure — as silent as the art itself. Rendered only when art exists, so
+  // degraded mode never shows the button at all. The task id travels as the
+  // mutation variable (pinned at mutate() time), so a regenerate that
+  // resolves after the drawn task changed still lands in the RIGHT cache
+  // entry — and the same variable scopes the pending state to this card: a
+  // card drawn while the previous card's regenerate is still in flight gets
+  // a live ↻, not the leftover spinner of a mutation that was never its own.
+  const regenArt = useRegenerateCardArt();
+  const regenPending = regenArt.isPending && regenArt.variables === task?.id;
   // An edit can push the drawn card out of the deck (effort too big/cleared,
   // status no longer open) — computed client-side, mirroring drawService.
   const nonDrawable =
@@ -269,6 +279,9 @@ export function DrawPage() {
             {task && cardArt.data?.svg && (
               <>
                 <img
+                  // dataUpdatedAt changes when a regenerate swaps the cache
+                  // entry — remounting replays the fade-in for the new art.
+                  key={cardArt.dataUpdatedAt}
                   className="draw-art"
                   alt=""
                   aria-hidden="true"
@@ -319,6 +332,22 @@ export function DrawPage() {
             )}
           </div>
         </div>
+        {/* Regenerate (#113) overlays the scene INSTEAD of living inside the
+            flipped face: elements in the backface-hidden 3D flip context are
+            not reliably hit-testable (Chromium), so the one interactive
+            control on the card sits in plain 2D above it. Rendered only when
+            there is art to replace — degraded mode never shows it. */}
+        {phase === "revealed" && task && cardArt.data?.svg && (
+          <button
+            className={`draw-art-regen ${regenPending ? "pending" : ""}`}
+            title="Regenerate artwork"
+            aria-label="Regenerate artwork"
+            disabled={regenPending}
+            onClick={() => regenArt.mutate(task.id)}
+          >
+            ↻
+          </button>
+        )}
       </div>
 
       {/* Warm-up (#57): the "I can't start" escape hatch, offered on the IDLE

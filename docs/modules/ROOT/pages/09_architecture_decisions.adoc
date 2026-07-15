@@ -545,6 +545,40 @@ img-data-URI render makes the browser enforce the same guarantee a second
 time. The once-per-task cache bounds cost (one generation per card, ever) and
 keeps a card's identity stable — the same task always reveals the same art.
 
+*Amendment (#113 — variety and regenerate):* One fixed recipe in the system
+prompt ("the single accent", one open-ended abstract-themes list) made every
+generation converge on the same image — user verdict: "All look the same …
+not really adding any benefit". The look now arrives per request as
+deterministic style directives (`cardArtStyle.ts`, pure): a named archetype
+(layered geometric, organic curves, constellation, gradient mesh, brush
+strokes, prismatic shards, contour lines), a palette *harmony* built from the
+category color (analogous/complementary/split-complementary) replacing the
+single-accent rule, and density + focal-placement composition directives —
+each selected by a salted FNV-1a hash of the task id, so the same task always
+gets the same style (cache coherence; a regenerate re-rolls the execution, not
+the identity) while different tasks spread across genuinely different
+recipes. The pinned id→style mapping is append-only: reordering existing
+entries would silently change existing cards' character. Focal placements all
+bias upward because the TCG frame (#115) will present the art through a
+portrait window; the system prompt keeps only the hard rules (no text, no
+external references, `viewBox="0 0 300 420"`, dark base, scrim legibility) and
+now states the portrait bias. `CARD_ART_MAX_TOKENS` rose 6K→8K for the dense
+archetypes; the sanitizer's 64 KB input guard was reviewed in the same change
+and stays (still ~2× a maximal generation). The regenerate action deferred in
+#27 exists now: `POST /api/tasks/:id/card-art/regenerate` is the ONLY path
+that replaces a `card_art` row, strictly generate-then-replace — any
+generation or sanitization failure throws before the write, so the old art
+always survives. At most one generation is in flight per task across both
+endpoints (`cardArtService` coalesces concurrent callers onto one promise);
+the GET keeps its at-most-once semantics — a cache hit never regenerates.
+Client-side the ↻ button overlays the drawn card's corner — deliberately on
+the 2D `.draw-scene`, NOT inside the 3D flip faces, whose
+`backface-visibility` context Chromium does not hit-test reliably (caught in
+live verification: a button inside the face was visually present but
+unclickable). It renders only when art exists (degraded mode shows nothing,
+keeping the silent-failure contract) and swaps the query cache from the
+mutation response.
+
 == ADR-23: Recurring subtasks are banned under sequential parents
 
 *Context:* A recurring task never closes on completion — `completeTask`

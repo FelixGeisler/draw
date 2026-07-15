@@ -125,3 +125,186 @@ describe("generation, sanitization and the once-per-task cache", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM card_art WHERE task_id = ?").get(taskId)).toEqual({ n: 0 });
   });
 });
+
+// Regenerate (#113): POST /api/tasks/:id/card-art/regenerate — the ONLY path
+// that replaces a cached row. Generate-then-replace: any failure keeps the
+// old art; concurrent requests coalesce onto a single generation.
+describe("regenerate (#113)", () => {
+  const ART_A =
+    `<svg viewBox="0 0 300 420"><rect width="300" height="420" fill="#1b1e27"/>` +
+    `<circle cx="150" cy="140" r="60" fill="#4f8cff"/></svg>`;
+  const ART_B =
+    `<svg viewBox="0 0 300 420"><rect width="300" height="420" fill="#232735"/>` +
+    `<polygon points="0,60 300,10 300,180 0,240" fill="#8bc34a" fill-opacity="0.2"/></svg>`;
+  const ART_C =
+    `<svg viewBox="0 0 300 420"><rect width="300" height="420" fill="#1b1e27"/>` +
+    `<line x1="0" y1="400" x2="300" y2="40" stroke="#e0b34f"/></svg>`;
+
+  let artTaskId: number;
+  const storedSvg = async (id: number) => {
+    const db = await testDb();
+    const row = db.prepare("SELECT svg FROM card_art WHERE task_id = ?").get(id) as
+      | { svg: string }
+      | undefined;
+    return row?.svg ?? null;
+  };
+
+  beforeAll(async () => {
+    // The earlier describes left the dummy key set — start from that state.
+    const task = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Regenerate me", categoryId: 1, effortMinutes: 10 })
+        .expect(201)
+    ).body;
+    artTaskId = task.id;
+    mocks.generateCardArt.mockClear();
+  });
+
+  it("answers 404 for an unknown task", async () => {
+    const res = await request(app).post("/api/tasks/999999/card-art/regenerate").expect(404);
+    expect(res.body.error).toMatch(/task not found/);
+    expect(mocks.generateCardArt).not.toHaveBeenCalled();
+  });
+
+  it("creates the row when none exists yet (a regenerate needs no prior art)", async () => {
+    mocks.generateCardArt.mockResolvedValueOnce(ART_A);
+    const res = await request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`).expect(200);
+    expect(res.body.svg).toContain('cx="150"');
+    expect(await storedSvg(artTaskId)).toBe(res.body.svg);
+  });
+
+  it("degrades to 503 without a key: no generation, old row untouched", async () => {
+    const before = await storedSvg(artTaskId);
+    await request(app).delete("/api/ai/key").expect(200);
+    mocks.generateCardArt.mockClear();
+
+    const res = await request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`).expect(503);
+    expect(res.body.error).toBe("ai_not_configured");
+    expect(mocks.generateCardArt).not.toHaveBeenCalled();
+    expect(await storedSvg(artTaskId)).toBe(before);
+
+    await request(app).put("/api/ai/key").send({ key: "sk-ant-test-dummy" }).expect(200);
+  });
+
+  it("replaces the cached row; the next GET serves the new art as a cache hit", async () => {
+    mocks.generateCardArt.mockClear();
+    mocks.generateCardArt.mockResolvedValueOnce(ART_B);
+
+    const res = await request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`).expect(200);
+    expect(res.body.svg).toContain("<polygon");
+    expect(res.body.svg).not.toContain('cx="150"'); // genuinely replaced, not appended
+    expect(await storedSvg(artTaskId)).toBe(res.body.svg);
+
+    const got = await request(app).get(`/api/tasks/${artTaskId}/card-art`).expect(200);
+    expect(got.body.svg).toBe(res.body.svg);
+    // exactly the one regenerate call — the GET stayed at-most-once (cache hit)
+    expect(mocks.generateCardArt).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the old row when the new generation fails sanitization (502)", async () => {
+    const before = await storedSvg(artTaskId);
+    mocks.generateCardArt.mockResolvedValueOnce("total garbage, not svg at all");
+
+    const res = await request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`).expect(502);
+    expect(res.body.error).toMatch(/unusable/i);
+    expect(await storedSvg(artTaskId)).toBe(before);
+  });
+
+  it("keeps the old row when the generation itself fails (error passes through)", async () => {
+    const { AiError } = await import("../../src/services/aiService.js");
+    const before = await storedSvg(artTaskId);
+    mocks.generateCardArt.mockRejectedValueOnce(new AiError(429, "rate limited"));
+
+    const res = await request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`).expect(429);
+    expect(res.body.error).toMatch(/rate limited/);
+    expect(await storedSvg(artTaskId)).toBe(before);
+  });
+
+  it("coalesces concurrent regenerates into a single generation", async () => {
+    mocks.generateCardArt.mockClear();
+    let release!: (svg: string) => void;
+    mocks.generateCardArt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => (release = resolve)),
+    );
+
+    // Both requests must be in flight BEFORE the generation resolves: start
+    // them (supertest sends on .then), wait until the first reaches the mock,
+    // then release. The second must ride the same promise — one API call.
+    const both = Promise.all([
+      request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`),
+      request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`),
+    ]);
+    await vi.waitFor(() => expect(mocks.generateCardArt).toHaveBeenCalledTimes(1));
+    release(ART_C);
+
+    const [r1, r2] = await both;
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect(r1.body.svg).toBe(r2.body.svg);
+    expect(r1.body.svg).toContain("<line");
+    expect(mocks.generateCardArt).toHaveBeenCalledTimes(1);
+    expect(await storedSvg(artTaskId)).toBe(r1.body.svg);
+  });
+
+  it("coalesces a cache-miss GET racing a regenerate onto that same single generation", async () => {
+    // The cross-endpoint half of the in-flight contract: GET and POST are the
+    // one racing pair whose writers use DIFFERENT SQL (DO NOTHING vs
+    // DO UPDATE) — benign only while both ride one generation and therefore
+    // write identical bytes. A refactor that splits the coalescing per
+    // endpoint must fail here.
+    const db = await testDb();
+    db.prepare("DELETE FROM card_art WHERE task_id = ?").run(artTaskId); // force the GET miss
+
+    mocks.generateCardArt.mockClear();
+    let release!: (svg: string) => void;
+    mocks.generateCardArt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => (release = resolve)),
+    );
+
+    const both = Promise.all([
+      request(app).get(`/api/tasks/${artTaskId}/card-art`),
+      request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`),
+    ]);
+    await vi.waitFor(() => expect(mocks.generateCardArt).toHaveBeenCalledTimes(1));
+    release(ART_A);
+
+    const [got, regen] = await both;
+    expect(got.status).toBe(200);
+    expect(regen.status).toBe(200);
+    expect(got.body.svg).toBe(regen.body.svg);
+    expect(got.body.svg).toContain('cx="150"');
+    expect(mocks.generateCardArt).toHaveBeenCalledTimes(1);
+    expect(await storedSvg(artTaskId)).toBe(regen.body.svg);
+  });
+
+  it("404s — not an FK-violation 500 — when the task is deleted mid-generation", async () => {
+    // Delete the drawn card in a second tab while ↻ paints: the post-await
+    // existence re-check must turn the doomed write into the same 404 the
+    // up-front check gives, and no orphaned row may appear.
+    const doomed = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Deleted mid-paint", categoryId: 1, effortMinutes: 5 })
+        .expect(201)
+    ).body;
+
+    mocks.generateCardArt.mockClear();
+    let release!: (svg: string) => void;
+    mocks.generateCardArt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => (release = resolve)),
+    );
+
+    const pending = request(app)
+      .post(`/api/tasks/${doomed.id}/card-art/regenerate`)
+      .then((r) => r); // .then() actually dispatches the supertest request
+    await vi.waitFor(() => expect(mocks.generateCardArt).toHaveBeenCalledTimes(1));
+    await request(app).delete(`/api/tasks/${doomed.id}`).expect(200);
+    release(ART_A);
+
+    const res = await pending;
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/task not found/);
+    expect(await storedSvg(doomed.id)).toBeNull();
+  });
+});

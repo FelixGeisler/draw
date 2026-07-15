@@ -12,10 +12,45 @@ import { sanitizeSvg } from "./svgSanitizer.js";
  * Only SANITIZED markup is ever written to card_art; a generation whose
  * output does not survive sanitization is not cached, so the next view
  * retries instead of pinning a broken background forever.
+ *
+ * #113 adds the second entry point, regenerateCardArt — the ONLY path that
+ * replaces an existing row — and tightens the concurrency rule: at most one
+ * Claude generation in flight per task across BOTH entry points. Concurrent
+ * requests coalesce onto the same promise instead of firing parallel calls.
  */
-export async function getOrCreateCardArt(taskId: number): Promise<{ svg: string }> {
+
+// Keyed by task id; the entry removes itself when the generation settles, so
+// a failure never wedges a task (the next request simply starts a fresh one).
+const inFlight = new Map<number, Promise<string>>();
+
+// Both entry points check this twice: once up front (the pinned 404-first
+// contract) and once more AFTER the generation await — the task can be
+// deleted in a second tab while Claude paints, and writing the row then would
+// trip the card_art→tasks FK and surface as a 500 instead of a 404.
+// better-sqlite3 is synchronous, so nothing can delete the task between the
+// re-check and the write that follows it.
+function ensureTaskExists(taskId: number): void {
   const task = db.prepare("SELECT id FROM tasks WHERE id = ?").get(taskId);
   if (!task) throw new AiError(404, "task not found");
+}
+
+function generateSanitized(taskId: number): Promise<string> {
+  const existing = inFlight.get(taskId);
+  if (existing) return existing;
+  const p = (async () => {
+    const raw = await generateCardArt(taskId);
+    const svg = sanitizeSvg(raw);
+    if (!svg) {
+      throw new AiError(502, "Claude returned unusable SVG artwork — viewing the card again retries");
+    }
+    return svg;
+  })().finally(() => inFlight.delete(taskId));
+  inFlight.set(taskId, p);
+  return p;
+}
+
+export async function getOrCreateCardArt(taskId: number): Promise<{ svg: string }> {
+  ensureTaskExists(taskId);
 
   const cached = db.prepare("SELECT svg FROM card_art WHERE task_id = ?").get(taskId) as
     | { svg: string }
@@ -24,14 +59,12 @@ export async function getOrCreateCardArt(taskId: number): Promise<{ svg: string 
 
   if (!isConfigured()) throw new AiError(503, "ai_not_configured");
 
-  const raw = await generateCardArt(taskId);
-  const svg = sanitizeSvg(raw);
-  if (!svg) {
-    throw new AiError(502, "Claude returned unusable SVG artwork — viewing the card again retries");
-  }
+  const svg = await generateSanitized(taskId);
+  ensureTaskExists(taskId); // deleted mid-generation → 404, not an FK 500
 
-  // Concurrent first views can both pass the cache miss while awaiting the
-  // API; first writer wins so a task's artwork stays stable (at most once).
+  // Concurrent first views coalesce above; a view racing a REGENERATE can
+  // still land here after the regenerate already wrote. First writer wins so
+  // this path keeps its at-most-once semantics — it never replaces a row.
   db.prepare(
     "INSERT INTO card_art (task_id, svg, created_at) VALUES (?, ?, ?) ON CONFLICT(task_id) DO NOTHING",
   ).run(taskId, svg, new Date().toISOString());
@@ -39,4 +72,26 @@ export async function getOrCreateCardArt(taskId: number): Promise<{ svg: string 
     svg: string;
   };
   return { svg: row.svg };
+}
+
+/**
+ * Regenerate (#113): generate-then-replace. The existing row is touched only
+ * AFTER a new generation fully survived sanitization — a failed generation or
+ * sanitization throws before the write, so the old art always survives
+ * (never delete-first). Same 404/503 contract as getOrCreateCardArt, minus
+ * the cache short-circuit: replacing the cache is the whole point.
+ */
+export async function regenerateCardArt(taskId: number): Promise<{ svg: string }> {
+  ensureTaskExists(taskId);
+
+  if (!isConfigured()) throw new AiError(503, "ai_not_configured");
+
+  const svg = await generateSanitized(taskId);
+  ensureTaskExists(taskId); // deleted mid-generation → 404, not an FK 500
+
+  db.prepare(
+    "INSERT INTO card_art (task_id, svg, created_at) VALUES (?, ?, ?) " +
+      "ON CONFLICT(task_id) DO UPDATE SET svg = excluded.svg, created_at = excluded.created_at",
+  ).run(taskId, svg, new Date().toISOString());
+  return { svg };
 }

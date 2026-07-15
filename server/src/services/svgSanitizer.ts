@@ -199,9 +199,10 @@ const ATTR_RE = /([^\s=/><]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/<]*)))?/g
 // decoded here, and the value would not start with '#'.
 const FRAGMENT_HREF_RE = /^#[A-Za-z_][A-Za-z0-9_.-]*$/;
 
-// Card art is generated with a 6K max_tokens cap (~24 KB of text), so 64 KB
-// is already generous. The guard exists to bound CPU before the scan starts —
-// it must stay within the same order of magnitude as a real generation.
+// Card art is generated with an 8K max_tokens cap (#113; ~32 KB of text), so
+// 64 KB is still generous. The guard exists to bound CPU before the scan
+// starts — it must stay within the same order of magnitude as a real
+// generation, and gets reviewed whenever CARD_ART_MAX_TOKENS moves.
 const MAX_INPUT_LENGTH = 64_000;
 
 function escapeAttr(value: string): string {

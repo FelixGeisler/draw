@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 
 export interface AiStatus {
@@ -81,6 +81,38 @@ export function useCardArt(taskId: number | undefined, revealed: boolean) {
     retry: false,
     refetchOnWindowFocus: false,
   });
+}
+
+/**
+ * Regenerate the card art (#113): the server generates -> sanitizes ->
+ * REPLACES the cached row; a failure keeps the old art. Same silent contract
+ * as useCardArt — callers read only isPending, never error state, so a 503
+ * (degraded) or 502 (bad generation) shows nothing. On success the response
+ * is written straight into the card-art cache (staleTime: Infinity means the
+ * query itself never refetches), which swaps the art in without a second GET.
+ *
+ * The task id is a mutation VARIABLE (`mutate(taskId)`), never a hook
+ * argument: React Query v5 re-binds a pending mutation's options — and with
+ * them any id captured in the onSuccess closure — on every re-render, so a
+ * regenerate resolving after the drawn task changed would write task A's art
+ * under task B's cache key (pinned for the session by staleTime: Infinity).
+ * Variables are captured at mutate() time and handed back to onSuccess, so
+ * the write stays keyed to the task that was actually regenerated. Exported
+ * separately from the hook so the contract is testable without a DOM.
+ */
+export function regenerateCardArtMutation(qc: QueryClient) {
+  return {
+    mutationFn: (taskId: number) =>
+      api.post<{ svg: string }>(`/api/tasks/${taskId}/card-art/regenerate`),
+    onSuccess: (data: { svg: string }, taskId: number) => {
+      qc.setQueryData(["card-art", taskId], data);
+    },
+  };
+}
+
+export function useRegenerateCardArt() {
+  const qc = useQueryClient();
+  return useMutation(regenerateCardArtMutation(qc));
 }
 
 export function useAiStatus() {

@@ -16,7 +16,7 @@ import {
   type TaskRow,
 } from "../services/gamificationService.js";
 import { AiError } from "../services/aiService.js";
-import { getOrCreateCardArt } from "../services/cardArtService.js";
+import { getOrCreateCardArt, regenerateCardArt } from "../services/cardArtService.js";
 import { startTimer } from "./timer.js";
 
 export const tasksRouter = Router();
@@ -979,6 +979,19 @@ tasksRouter.patch("/:id", (req, res) => {
 tasksRouter.get("/:id/card-art", async (req, res) => {
   try {
     res.json(await getOrCreateCardArt(Number(req.params.id)));
+  } catch (e) {
+    if (e instanceof AiError) return res.status(e.status).json({ error: e.message });
+    res.status(500).json({ error: e instanceof Error ? e.message : "unknown error" });
+  }
+});
+
+// Regenerate (#113): the ONLY path that replaces a cached artwork. Generate-
+// then-replace — a failed generation keeps the old row; concurrent requests
+// coalesce onto one in-flight generation (cardArtService). Same degraded
+// contract as the GET: 503 ai_not_configured, swallowed silently client-side.
+tasksRouter.post("/:id/card-art/regenerate", async (req, res) => {
+  try {
+    res.json(await regenerateCardArt(Number(req.params.id)));
   } catch (e) {
     if (e instanceof AiError) return res.status(e.status).json({ error: e.message });
     res.status(500).json({ error: e instanceof Error ? e.message : "unknown error" });
