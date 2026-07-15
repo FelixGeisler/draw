@@ -18,6 +18,10 @@ test("rename: click-to-edit updates the row and the TaskForm select", async ({ p
   await edit.press("Enter");
 
   await expect(categoriesSection(page).getByText("Uni Study", { exact: true })).toBeVisible();
+  // The row shows the new name while the PATCH is still in flight, so anchor
+  // on the color input's title — it only changes once the refreshed categories
+  // land — before navigating away.
+  await expect(page.getByTitle("Change color of Uni Study")).toBeVisible();
 
   // Client-side navigation (no reload): the select only shows the new name
   // because the mutation invalidated the ["categories"] query.
@@ -59,6 +63,41 @@ test("create and delete a category", async ({ page }) => {
 
   await page.getByTitle("Delete Temp").click();
   await expect(categoriesSection(page).getByText("Temp", { exact: true })).not.toBeVisible();
+});
+
+test("a slow rename PATCH shows the new name immediately, not a silently lost edit", async ({ page }) => {
+  // Regression for a load-dependent flake: with the rename PATCH + refetch
+  // round-trip slower than the assertion window, the row used to fall back to
+  // the stale name with no pending indicator — indistinguishable from a lost
+  // keystroke. The row must show the committed name while the PATCH is in
+  // flight. Uses its own category so the stall can't disturb the others.
+  await page.goto("/settings");
+  await page.getByPlaceholder("New category").fill("Slowpoke");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(categoriesSection(page).getByText("Slowpoke", { exact: true })).toBeVisible();
+
+  await page.route("**/api/categories/*", async (route) => {
+    if (route.request().method() === "PATCH") {
+      await new Promise((r) => setTimeout(r, 6500)); // > expect()'s 5s default
+    }
+    await route.fallback();
+  });
+
+  await categoriesSection(page).getByText("Slowpoke", { exact: true }).click();
+  const edit = page.getByLabel("Rename category");
+  await edit.fill("Slowpoke Jr");
+  await edit.press("Enter");
+
+  // Mid-stall: the editor is closed and the row already reads Slowpoke Jr.
+  await expect(edit).not.toBeVisible();
+  await expect(categoriesSection(page).getByText("Slowpoke Jr", { exact: true })).toBeVisible({
+    timeout: 3000,
+  });
+
+  // Once the round-trip completes the rename is persisted; clean up.
+  await expect(page.getByTitle("Delete Slowpoke Jr")).toBeVisible({ timeout: 15_000 });
+  await page.getByTitle("Delete Slowpoke Jr").click();
+  await expect(categoriesSection(page).getByText("Slowpoke Jr", { exact: true })).not.toBeVisible();
 });
 
 test("default categories can be deleted when task-free", async ({ page }) => {

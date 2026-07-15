@@ -83,6 +83,13 @@ export interface Task {
 export interface CompletionResponse {
   task: Task;
   xpAwarded?: number;
+  /**
+   * Why the XP is higher than plain (#57): "warmup" — the dealt warm-up card
+   * finished inside its bonus window (×1.25); "momentum" — a non-drawn task
+   * completed within 30 min of a warm-up completion (×1.25). Null when no
+   * bonus beyond the ordinary drawn ×1.5 applied.
+   */
+  bonus?: "warmup" | "momentum" | null;
   newAchievements?: string[];
   recurring?: boolean;
 }

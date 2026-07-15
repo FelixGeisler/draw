@@ -46,7 +46,10 @@ function useInvalidateTasks() {
     qc.invalidateQueries({ queryKey: ["activity"] });
     // Task mutations can clear or invalidate the server-persisted current
     // draw (complete/delete clear it, edits can push it out of the deck).
-    qc.invalidateQueries({ queryKey: ["draw", "current"] });
+    // refetchType "all": the DrawPage derives its standing card from this
+    // query (#110), so the dismissal must reach the cache even while the
+    // page is unmounted — remounting must not flash the stale card.
+    qc.invalidateQueries({ queryKey: ["draw", "current"], refetchType: "all" });
     // Goal cards derive taskCount/doneCount from tasks — keep them in sync.
     qc.invalidateQueries({ queryKey: ["goals"] });
   };

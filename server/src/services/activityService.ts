@@ -197,10 +197,13 @@ export function computeActivity(from: string, to: string): ActivityDay[] {
     )
     .all(lo, hi) as ActivityEntryRow[];
 
+  // Drawn-ness reads was_drawn AND NOT was_warmup, matching the gamification
+  // surface (ADR-30): a warm-up deal earns no skyline rarity or 🃏 either.
   const completions = db
     .prepare(
       `SELECT co.task_id AS taskId, co.completed_at AS completedAt,
-              co.xp_awarded AS xpAwarded, co.was_drawn AS wasDrawn
+              co.xp_awarded AS xpAwarded,
+              (co.was_drawn AND NOT co.was_warmup) AS wasDrawn
        FROM completions co WHERE co.completed_at >= ? AND co.completed_at < ?`,
     )
     .all(lo, hi) as ActivityCompletionRow[];

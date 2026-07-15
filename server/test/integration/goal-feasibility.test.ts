@@ -124,6 +124,9 @@ describe("edges and invariants", () => {
   });
 
   it("is a pure derivation: user_version is unchanged", async () => {
-    expect(db.pragma("user_version", { simple: true })).toBe(8);
+    // CURRENT_VERSION, not a literal: this asserts "reads don't migrate",
+    // and must not fail every time an unrelated migration lands.
+    const { CURRENT_VERSION } = await import("../../src/db.js");
+    expect(db.pragma("user_version", { simple: true })).toBe(CURRENT_VERSION);
   });
 });
