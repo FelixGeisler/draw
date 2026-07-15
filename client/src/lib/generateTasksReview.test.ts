@@ -106,6 +106,27 @@ describe("group-check coupling", () => {
     const all = setAllIncluded(none, true);
     expect(all.every((i) => i.included && i.parts.every((p) => p.included))).toBe(true);
   });
+
+  it("select all / none holds at the acceptance criterion's 40-exercise scale", () => {
+    // A realistic exam import: 40 exercises, every third one split into parts.
+    const exam = toReviewItems(
+      Array.from({ length: 40 }, (_, i) =>
+        generated(
+          i % 3 === 0
+            ? { parts: [{ title: `${i} part a`, minutes: 20 }, { title: `${i} part b`, minutes: 20 }] }
+            : {},
+        ),
+      ),
+    );
+    expect(exam).toHaveLength(40);
+    const none = setAllIncluded(exam, false);
+    expect(none.every((i) => !i.included && i.parts.every((p) => !p.included))).toBe(true);
+    expect(commitLeaves(none, null)).toEqual([]);
+    const all = setAllIncluded(none, true);
+    expect(all.every((i) => i.included && i.parts.every((p) => p.included))).toBe(true);
+    // 14 split exercises commit as 2 parts each, 26 as single leaves.
+    expect(commitLeaves(all, null)).toHaveLength(14 * 2 + 26);
+  });
 });
 
 describe("summarize", () => {

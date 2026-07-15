@@ -154,8 +154,10 @@ export interface CommitLeaf {
 /**
  * The accepted leaves in review order: a partless exercise commits as one
  * leaf, a split exercise as its included parts (flat — the tree stays two
- * levels, umbrella parent + leaves). Edited titles/minutes land verbatim;
- * blank titles are dropped like the other panels do.
+ * levels, umbrella parent + leaves). Edited titles/minutes land as typed,
+ * except minutes clamp to >= 1 — a cleared number field reads as 0 and must
+ * not create a 0-minute drawable leaf; blank titles are dropped like the
+ * other panels do.
  */
 export function commitLeaves(items: ReviewItem[], sourceName: string | null): CommitLeaf[] {
   const leaves: CommitLeaf[] = [];
@@ -167,7 +169,7 @@ export function commitLeaves(items: ReviewItem[], sourceName: string | null): Co
       leaves.push({
         title: item.title.trim(),
         description,
-        effortMinutes: item.minutes,
+        effortMinutes: Math.max(1, item.minutes),
         impact: item.impact,
       });
     } else {
@@ -176,7 +178,7 @@ export function commitLeaves(items: ReviewItem[], sourceName: string | null): Co
         leaves.push({
           title: p.title.trim(),
           description,
-          effortMinutes: p.minutes,
+          effortMinutes: Math.max(1, p.minutes),
           impact: item.impact,
         });
       }

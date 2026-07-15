@@ -471,8 +471,17 @@ export function AiGenerateTasksPanel({
         // One transactional batch; leaves inherit category/goal from the parent.
         await createSubtasks.mutateAsync({ parentId: parent.id, subtasks: leaves });
       } catch (e) {
-        // No half-imported state: cascade-delete the just-created parent.
-        await deleteTask.mutateAsync(parent.id).catch(() => undefined);
+        // No half-imported state: cascade-delete the just-created parent. If
+        // the cleanup fails too (server/network down), say so — a leftover
+        // parent would otherwise sit on the Tasks page unexplained.
+        try {
+          await deleteTask.mutateAsync(parent.id);
+        } catch {
+          setError(
+            `${aiErrorMessage(e)} — cleanup also failed, so the empty parent "${parentTitle.trim()}" may remain on the Tasks page; delete it there.`,
+          );
+          return;
+        }
         throw e;
       }
       onClose();
