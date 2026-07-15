@@ -5,18 +5,30 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
-const dataDir = process.env.DATA_DIR
+export const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.resolve(here, "../data");
 export const filesDir = path.join(dataDir, "files");
+export const dbPath = path.join(dataDir, "app.db");
 
 fs.mkdirSync(filesDir, { recursive: true });
 
-export const db = new Database(path.join(dataDir, "app.db"));
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+function openDatabase(): Database.Database {
+  const handle = new Database(dbPath);
+  handle.pragma("journal_mode = WAL");
+  handle.pragma("foreign_keys = ON");
+  return handle;
+}
 
-const CURRENT_VERSION = 7;
+// `let`, not `const`: backup import (#61, ADR-26) swaps the database file on
+// disk and reopens the handle. ESM live bindings mean every module that
+// imports { db } sees the new handle on its next access — no code in this
+// repo caches prepared statements or transactions across requests, so a
+// reopen is safe between requests (better-sqlite3 is synchronous, and the
+// whole swap runs in one synchronous block: no request can interleave).
+export let db = openDatabase();
+
+export const CURRENT_VERSION = 7;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -132,6 +144,18 @@ function migrate() {
 }
 
 migrate();
+
+/**
+ * Close the current handle (if still open) and reopen the database file at
+ * dbPath, running migrations forward. Used by backup import (#61, ADR-26)
+ * after it has swapped a restored snapshot into place — the snapshot may come
+ * from an older schema version, so migrate() must run exactly like on boot.
+ */
+export function reopenDatabase() {
+  if (db.open) db.close();
+  db = openDatabase();
+  migrate();
+}
 
 // Settings key for the Claude API key. Stored plaintext in the local
 // single-user SQLite DB (ADR-11) and excluded from every API response.
