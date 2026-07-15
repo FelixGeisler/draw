@@ -20,6 +20,22 @@ function localToday(): string {
 /** Default fetch window: the last 8 weeks — the client extends via `from`. */
 const DEFAULT_WINDOW_DAYS = 56;
 
+/**
+ * Cap on the requested range (~10 years). computeActivity materializes one
+ * ActivityDay per calendar day in [from, to], so the response scales with the
+ * range, not with the data — without a cap, a single validation-passing
+ * request (?from=0001-01-01&to=9999-12-31, ~3.65M days) blocks the event loop
+ * for over a minute and then kills the process with a V8 heap OOM. The client
+ * only grows its window 56 days per "Load earlier" click, so a decade is far
+ * beyond anything it can reasonably ask for.
+ */
+const MAX_RANGE_DAYS = 3653;
+
+/** Inclusive day count of [from, to] — both already validated as YYYY-MM-DD. */
+function rangeDays(from: string, to: string): number {
+  return (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000 + 1;
+}
+
 // GET /api/activity?from=YYYY-MM-DD&to=YYYY-MM-DD — local dates, inclusive.
 activityRouter.get("/", (req, res) => {
   const to = (req.query.to as string | undefined) ?? localToday();
@@ -32,6 +48,9 @@ activityRouter.get("/", (req, res) => {
   }
   if (from > to) {
     return res.status(400).json({ error: "from must not be after to" });
+  }
+  if (rangeDays(from, to) > MAX_RANGE_DAYS) {
+    return res.status(400).json({ error: `range must not exceed ${MAX_RANGE_DAYS} days` });
   }
   res.json({ days: computeActivity(from, to) });
 });

@@ -50,8 +50,11 @@ function asLocalDate(dateStr: string): Date {
 }
 
 function formatDay(dateStr: string): string {
+  // Always include the year: this is a permanent multi-year record, and
+  // without it a 2025 card and a 2026 card read identically (PR #68 review).
   return asLocalDate(dateStr).toLocaleDateString([], {
     weekday: "short",
+    year: "numeric",
     month: "short",
     day: "numeric",
   });
@@ -145,7 +148,14 @@ function SkylineCard({
 function axisLabel(dateStr: string, today: string): string | null {
   if (dateStr === today) return "today";
   const d = asLocalDate(dateStr);
-  if (d.getDate() === 1) return d.toLocaleDateString([], { month: "short" });
+  if (d.getDate() === 1) {
+    // January's tick carries the year — the one orientation point that says
+    // which year you have scrolled into.
+    return d.toLocaleDateString(
+      [],
+      d.getMonth() === 0 ? { month: "short", year: "numeric" } : { month: "short" },
+    );
+  }
   if (d.getDay() === 1) return d.toLocaleDateString([], { month: "short", day: "numeric" });
   return null;
 }
@@ -218,7 +228,11 @@ export function HistoryPage() {
     return () => document.removeEventListener("pointerdown", lower);
   }, [liftedKey]);
 
-  // The skyline opens at its right end — the most recent towers.
+  // The skyline opens at its right end — the most recent towers. Keyed on
+  // totalCards too: while the empty-state panel shows, the scroll container
+  // isn't mounted, and a refetch can turn empty into non-empty without
+  // changing days.length (it stays one window) — the totals transition is
+  // what re-runs the effect once the skyline exists (PR #68 review).
   const initialised = useRef(false);
   useLayoutEffect(() => {
     const el = scrollRef.current;
@@ -226,7 +240,7 @@ export function HistoryPage() {
     el.scrollLeft = el.scrollWidth;
     initialised.current = true;
     setViewport({ left: el.scrollLeft, width: el.clientWidth });
-  }, [days.length]);
+  }, [days.length, totalCards]);
 
   // "Load earlier" prepends towers: shift scrollLeft so the view keeps
   // showing the same days instead of jumping to the new range start.

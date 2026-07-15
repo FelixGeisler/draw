@@ -160,4 +160,20 @@ describe("params and defaults", () => {
   it("rejects from after to", async () => {
     await request(app).get("/api/activity?from=2026-01-05&to=2026-01-04").expect(400);
   });
+
+  // The response materializes one day per calendar day in the range, so an
+  // uncapped range is an OOM crash, not just a slow request (PR #68 review).
+  it("rejects ranges longer than the ~10-year cap", async () => {
+    // One day over the cap (3654 days)...
+    await request(app).get("/api/activity?from=2016-01-01&to=2026-01-01").expect(400);
+    // ...and the extreme that used to kill the process (~3.65M days).
+    await request(app).get("/api/activity?from=0001-01-01&to=9999-12-31").expect(400);
+  });
+
+  it("accepts a range exactly at the cap", async () => {
+    const res = await request(app)
+      .get("/api/activity?from=2016-01-02&to=2026-01-01")
+      .expect(200);
+    expect(res.body.days).toHaveLength(3653);
+  });
 });
