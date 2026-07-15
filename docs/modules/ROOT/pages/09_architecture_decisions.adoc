@@ -956,6 +956,17 @@ rate limit, not a second draw system.
 
 == ADR-31: TCG card frame — one client-side frame language, derived stats, cache-only pile art
 
+*Status:* SUPERSEDED by ADR-33 (#123). The user rejected the TCG frame
+furniture after seeing it live — the literal ATK/DEF stat box, the monster
+type line, the level-star row and the name-bar layout are gone. The art is
+now the full-bleed background of the whole card face, the info returned to
+the app's subtle chips, and the celebratory language became the holo
+shimmer on drawn 5★ cards. The infrastructure decisions below survive
+unchanged and are re-anchored in ADR-33: the computed WCAG pill ink (b),
+the derived trackedMinutes payload halves (c — payload only, no longer
+rendered), the cache-only batch pile art (d), degraded grace (e) and the
+pile wrap (f).
+
 *Context:* Card surfaces had grown ad-hoc: the drawn card was a gradient
 panel with loose chips, the trophy pile a text stack with a dot and a bare
 "done HH:MM" line (#114). The user set an explicit visual direction (#115):
@@ -1087,4 +1098,54 @@ the leaves too, and no stored counter or flag is introduced anywhere
 and over any estimate-derived award (double-earning is the exact bug being
 fixed). No migration: legacy all-done-open parents are not retro-completed —
 they resolve on their next subtask status change or via manual completion.
+
+== ADR-33: Full-bleed card art with chip presentation; holo shimmer for drawn 5★ — supersedes ADR-31
+
+*Context:* The user rejected the shipped TCG frame (#123, reversing #115):
+"Don't write literally ATK DEF on the card… Just make the background over
+the whole card. I was thinking about having some holo effect… maybe on 5★
+cards?" A design correction, not a git revert — the #120 infrastructure
+under the frame is sound and stays.
+*Decision:* (a) Card surfaces return to the app's ONE info language, the
+subtle chips: the drawn card face carries the category pill, the h2 title,
+the dim description and the `TaskBadges` row (effort chip, due/recur/
+snooze/window/queued badges, impact stars for goal-linked tasks per ADR-4);
+the trophy-pile cards keep glyph, title, always-collapsed-readable time+XP
+footer (#114) and show the same category pill on lift. The `CardFrame`
+component, its CSS and the ATK/DEF/type-line/star-row furniture are
+deleted; the pill (renamed `CategoryPill`, class `.category-pill`, in
+`TaskBadges.tsx`/`index.css`) keeps ADR-31's computed WCAG ink
+(`lib/cardVisuals.pillInk`) — legibility stays computed, never eyeballed.
+(b) The generated art is the FULL-BLEED background of the whole card face —
+drawn card and pile — under a legibility gradient scrim (denser toward the
+text-heavy top/bottom edges, chips get a solid backing, title/description a
+text-shadow); the degraded no-art state keeps the previous gradient face
+and hides the #113 regenerate control exactly as before (#27).
+(c) Holo: drawn 5★ goal-linked cards shimmer — an iridescent overlay
+(`.draw-holo` on the standing card, rarity tier `holo` in the pile and the
+history skyline), oversized rainbow gradient at low opacities, slow drift
+gated behind `prefers-reduced-motion: no-preference` (reduced motion keeps
+the STATIC sheen). Holo REPLACES the #107 foil tier one-to-one — same
+predicate (`wasDrawn AND impact 5`; warm-up deals stay excluded, so display
+and the ×1.5 XP bonus keep agreeing on what counts as drawn), richer
+gradient — because two competing iridescent tiers would be noise. The 4★
+silver tier is KEPT: the user rejected the frame furniture, not the #62/#107
+reward ladder, silver is monochrome and quiet next to holo, and dropping it
+would silently strip an earned reward. On the standing drawn card the drift
+runs slowly and always; in the pile the sweep remains lift-gated (a shelf
+of 20 shimmering cards would be a casino, one celebrated card is not).
+(d) Kept from ADR-31, verbatim: the cache-only batch pile art endpoint
+(`GET /api/card-art?taskIds=…`), the pile flex-wrap overflow behavior, the
+degraded-grace contract, and the derived payload fields (`trackedMinutes`
+on draw payloads, `goalId` on todayCompletions) — now unused by the UI but
+part of the API surface for MCP and future consumers.
+*Rationale:* The draw-a-card metaphor needs the card to feel like a reward,
+not a character sheet: the art carries the reward, the chips carry the
+information, and the shimmer marks exactly the behavior the app pays the XP
+bonus for (drawn high-leverage work). Deriving holo from the same facts as
+the old foil keeps rarity a pure render-time function (ADR-2/ADR-5 spirit)
+— nothing stored, nothing to migrate; the rename is a class name and a
+gradient. Deleting the frame component instead of hiding it keeps one card
+language in the codebase, and the surviving pieces live where they are used
+(pill in TaskBadges, ink+art helpers in `lib/cardVisuals`).
 
