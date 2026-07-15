@@ -3,7 +3,7 @@ import { MINUTES_EXPR } from "./statsService.js";
 
 // House-of-cards skyline (#53): a browsable per-day history of started and
 // completed tasks, derived entirely from time_entries and completions — no
-// new write path, no stored history (ADR-19).
+// new write path, no stored history (ADR-21).
 
 export interface ActivityEntryRow {
   taskId: number;

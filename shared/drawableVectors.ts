@@ -15,6 +15,44 @@
 /** The fixed instant "now" that every vector's deferredUntil relates to. */
 export const VECTOR_NOW = "2026-07-14T12:00:00.000Z";
 
+/**
+ * Availability-window spec relative to "now" (#33, ADR-20). Windows are
+ * evaluated on the LOCAL wall clock, but the vectors must be deterministic in
+ * every timezone the suites run in — so instead of fixed weekdays and times,
+ * a vector carries offsets that both suites materialize against the same
+ * instant with `materializeWindow()`.
+ */
+export interface WindowSpec {
+  /** Day offsets from now's local weekday (0 = same day, 1 = tomorrow, …). */
+  dayOffsets: number[];
+  /** Start/end as minute offsets from now's local time-of-day, clamped to [0, 1440]. */
+  startOffsetMinutes: number;
+  endOffsetMinutes: number;
+}
+
+/** A window that contains `now` on any machine (today, ±60 minutes, clamped). */
+export const IN_WINDOW: WindowSpec = { dayOffsets: [0], startOffsetMinutes: -60, endOffsetMinutes: 60 };
+/** A window on a different weekday — always excludes `now`, and always valid (end > start). */
+export const OUT_OF_WINDOW: WindowSpec = { dayOffsets: [1], startOffsetMinutes: -60, endOffsetMinutes: 60 };
+
+export function materializeWindow(
+  spec: WindowSpec,
+  now: Date,
+): { windowDays: number[]; windowStart: string; windowEnd: string } {
+  const windowDays = [...new Set(spec.dayOffsets.map((o) => (now.getDay() + o + 7) % 7))].sort(
+    (a, b) => a - b,
+  );
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  const clamp = (m: number) => Math.max(0, Math.min(1440, m));
+  const fmt = (m: number) =>
+    `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`; // 1440 → "24:00"
+  return {
+    windowDays,
+    windowStart: fmt(clamp(minutes + spec.startOffsetMinutes)),
+    windowEnd: fmt(clamp(minutes + spec.endOffsetMinutes)),
+  };
+}
+
 export interface DrawableVector {
   name: string;
   hasOpenChildren: 0 | 1;
@@ -26,10 +64,12 @@ export interface DrawableVector {
    * delivered to the client as the 0/1 `heldBack` task field.
    */
   heldBack: 0 | 1;
+  /** Availability window (#33, ADR-20); absent = no window. */
+  window?: WindowSpec;
   effortMinutes: number | null;
   maxEffort: number;
   /** classifyTask group; the task is in the deck iff this is "ready". */
-  expected: "ready" | "needs-estimate" | "too-big" | "container" | "snoozed" | "queued";
+  expected: "ready" | "needs-estimate" | "too-big" | "container" | "snoozed" | "queued" | "scheduled";
 }
 
 export const DRAWABLE_VECTORS: DrawableVector[] = [
@@ -254,5 +294,210 @@ export const DRAWABLE_VECTORS: DrawableVector[] = [
     effortMinutes: 10,
     maxEffort: 30,
     expected: "queued",
+  },
+  // --- Availability windows (#33, ADR-20). Precedence:
+  // container → snoozed → queued → scheduled → needs-estimate → too-big → ready.
+  {
+    name: "a task inside its availability window stays ready",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    window: IN_WINDOW,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "ready",
+  },
+  {
+    name: "a task outside its window is scheduled, not ready",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    window: OUT_OF_WINDOW,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "scheduled",
+  },
+  {
+    name: "scheduled wins over a missing estimate — estimating can wait for the window",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    window: OUT_OF_WINDOW,
+    effortMinutes: null,
+    maxEffort: 30,
+    expected: "scheduled",
+  },
+  {
+    name: "scheduled wins over an oversized estimate (precedence)",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    window: OUT_OF_WINDOW,
+    effortMinutes: 99,
+    maxEffort: 30,
+    expected: "scheduled",
+  },
+  {
+    name: "an in-window task over the limit is still too big — the window shields nothing",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    window: IN_WINDOW,
+    effortMinutes: 99,
+    maxEffort: 30,
+    expected: "too-big",
+  },
+  {
+    name: "blocked wins over scheduled — an explicit snooze outranks the schedule",
+    hasOpenChildren: 0,
+    blocked: true,
+    deferredUntil: null,
+    heldBack: 0,
+    window: OUT_OF_WINDOW,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "snoozed",
+  },
+  {
+    name: "a future snooze on an out-of-window card shows snoozed (precedence)",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: "2026-07-14T13:00:00.000Z",
+    heldBack: 0,
+    window: OUT_OF_WINDOW,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "snoozed",
+  },
+  {
+    name: "queued wins over scheduled — a queued sibling outranks its schedule",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 1,
+    window: OUT_OF_WINDOW,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "queued",
+  },
+  {
+    name: "container wins over scheduled (precedence)",
+    hasOpenChildren: 1,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    window: OUT_OF_WINDOW,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "container",
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Availability-window predicate vectors (#33, ADR-20). The pure predicate
+// exists twice by design, like the eligibility predicate above:
+//   - server: `isWithinWindow()` in drawService.ts
+//   - client: `isWithinWindow()` in client/src/lib/drawable.ts
+// Windows are LOCAL wall-clock, so these vectors pin `now` as local date
+// components (year, month 1–12, day, hour, minute) — deterministic in every
+// timezone, unlike an ISO instant. 2026-07-12/13/14 are Sun/Mon/Tue.
+
+export interface WindowPredicateVector {
+  name: string;
+  /** Local components for `new Date(y, m - 1, d, hh, mm)`. */
+  now: [y: number, m: number, d: number, hh: number, mm: number];
+  days: number[];
+  start: string;
+  end: string;
+  expected: boolean;
+}
+
+export const WINDOW_VECTORS: WindowPredicateVector[] = [
+  {
+    name: "weekday in the set, time inside the range",
+    now: [2026, 7, 13, 10, 0], // Mon 10:00
+    days: [1, 2, 3, 4, 5],
+    start: "08:00",
+    end: "12:00",
+    expected: true,
+  },
+  {
+    name: "weekday outside the set keeps the task out even at a matching time",
+    now: [2026, 7, 12, 10, 0], // Sun 10:00
+    days: [1, 2, 3, 4, 5],
+    start: "08:00",
+    end: "12:00",
+    expected: false,
+  },
+  {
+    name: "start is inclusive",
+    now: [2026, 7, 13, 8, 0],
+    days: [1],
+    start: "08:00",
+    end: "12:00",
+    expected: true,
+  },
+  {
+    name: "one minute before start is outside",
+    now: [2026, 7, 13, 7, 59],
+    days: [1],
+    start: "08:00",
+    end: "12:00",
+    expected: false,
+  },
+  {
+    name: "end is exclusive",
+    now: [2026, 7, 13, 12, 0],
+    days: [1],
+    start: "08:00",
+    end: "12:00",
+    expected: false,
+  },
+  {
+    name: "the last minute before end is inside",
+    now: [2026, 7, 13, 11, 59],
+    days: [1],
+    start: "08:00",
+    end: "12:00",
+    expected: true,
+  },
+  {
+    name: "00:00–24:00 covers the first minute of the day",
+    now: [2026, 7, 13, 0, 0],
+    days: [1],
+    start: "00:00",
+    end: "24:00",
+    expected: true,
+  },
+  {
+    name: "00:00–24:00 covers the last minute of the day",
+    now: [2026, 7, 13, 23, 59],
+    days: [1],
+    start: "00:00",
+    end: "24:00",
+    expected: true,
+  },
+  {
+    // Weekday and time must be read off the SAME local instant: a Monday
+    // 22:00–24:00 window does not leak into the small hours of Tuesday.
+    name: "near midnight: local Tue 00:10 is outside a Mon 22:00–24:00 window",
+    now: [2026, 7, 14, 0, 10], // Tue 00:10
+    days: [1],
+    start: "22:00",
+    end: "24:00",
+    expected: false,
+  },
+  {
+    name: "near midnight: the same local Tue 00:10 is inside a Tue 00:00–01:00 window",
+    now: [2026, 7, 14, 0, 10],
+    days: [2],
+    start: "00:00",
+    end: "01:00",
+    expected: true,
   },
 ];

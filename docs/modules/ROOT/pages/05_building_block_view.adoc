@@ -26,7 +26,7 @@ server/src/
 │   ├── timer.ts             current/stop; start lives on tasks route
 │   ├── draw.ts              POST /api/draw, GET /api/draw/current (restore)
 │   ├── stats.ts             GET /api/stats (UTC date-range handling)
-│   ├── activity.ts          GET /api/activity (per-local-day history, ADR-19)
+│   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
 │   ├── gamification.ts      GET /api/gamification
 │   ├── settings.ts          key-value settings
 │   └── ai.ts                status, estimate, breakdown, plan-goal, generate-tasks

@@ -36,7 +36,14 @@ CREATE TABLE tasks (
   -- Sequential subtask mode (#23, ADR-18): only meaningful on parents. A
   -- 'sequential' parent exposes only its first open subtask in creation order
   -- to the draw pool; "held back" stays a derived predicate (ADR-2).
-  subtask_order_mode TEXT NOT NULL CHECK (subtask_order_mode IN ('parallel', 'sequential')) DEFAULT 'parallel'
+  subtask_order_mode TEXT NOT NULL CHECK (subtask_order_mode IN ('parallel', 'sequential')) DEFAULT 'parallel',
+  -- Availability window (#33, ADR-20): weekdays (JSON array of 0–6, JS getDay
+  -- convention) plus a daily [start, end) range as "HH:MM" ("24:00" allowed as
+  -- end). All three set or all three NULL. Evaluated on the LOCAL wall clock
+  -- in TypeScript — never in SQL, where strftime/time run in UTC.
+  window_days TEXT,
+  window_start TEXT,
+  window_end TEXT
 );
 
 CREATE INDEX idx_tasks_parent ON tasks(parent_id);

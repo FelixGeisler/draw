@@ -255,7 +255,12 @@ export function DrawPage() {
 
       {phase === "idle" && result && !result.task && (
         <div className="panel" style={{ maxWidth: 420, margin: "0 auto" }}>
-          {result.reason === "all_too_big" ? (
+          {result.reason === "all_outside_window" ? (
+            <p>
+              Everything left is scheduled for later — those cards come back on their own when
+              their <Link to="/capture" style={{ color: "var(--accent)" }}>availability window</Link> opens.
+            </p>
+          ) : result.reason === "all_too_big" ? (
             <p>
               Everything left is too big or unestimated. <Link to="/capture" style={{ color: "var(--accent)" }}>Break something down</Link> to refill the deck.
             </p>

@@ -38,6 +38,16 @@ export interface Task {
    * to the draw pool.
    */
   subtaskOrderMode: "parallel" | "sequential";
+  /**
+   * Availability window (#33, ADR-20): weekdays (JS getDay convention,
+   * 0 = Sunday) plus a daily [windowStart, windowEnd) range as "HH:MM"
+   * ("24:00" allowed as end). All three set or all three null. Evaluated on
+   * the LOCAL wall clock — outside the window the task classifies as
+   * "scheduled" and leaves the draw pool; it returns on its own.
+   */
+  windowDays: number[] | null;
+  windowStart: string | null;
+  windowEnd: string | null;
   hasOpenChildren: number;
   /**
    * Derived at query time like hasOpenChildren (0/1): an older open sibling
@@ -75,6 +85,10 @@ export interface NewTask {
   effortMinutes?: number | null;
   dueDate?: string | null;
   recurEveryDays?: number | null;
+  /** Availability window (#33): all three together, or all null/absent. */
+  windowDays?: number[] | null;
+  windowStart?: string | null;
+  windowEnd?: string | null;
 }
 
 export interface NewSubtask {

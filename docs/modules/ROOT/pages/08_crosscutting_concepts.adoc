@@ -6,7 +6,9 @@ Anything that can drift is computed at read time: drawability (SQL predicate),
 "snoozed" (`blocked` or `deferred_until` still ahead — an expired snooze
 re-enters the deck with no write, ADR-17), "held back" (an older open sibling
 under a `sequential` parent — completing the step in front frees the next one
-with no write, ADR-18), "in progress" (running time entry
+with no write, ADR-18), "scheduled" (outside the task's availability window on
+the local wall clock — the window opening re-admits the card with no write,
+ADR-20), "in progress" (running time entry
 exists), XP/level/streak (aggregates over `completions`), weekly grade
 (aggregation over `time_entries`), and the displayed effort of a broken-down
 task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at query
@@ -67,7 +69,7 @@ compared as strings. Date-range arithmetic happens in UTC (`addDays` in
 (see xref:11_risks_and_technical_debt.adoc[section 11]). Streak days use SQLite
 `date(..., 'localtime')` because a "day" is a user-local concept; the history
 skyline's day buckets follow the same rule (`localDayOf` in `activityService`,
-ADR-19), with the UTC offset injectable so unit tests can pin midnight-boundary
+ADR-21), with the UTC offset injectable so unit tests can pin midnight-boundary
 behavior on any machine.
 
 == 8.7 Testing strategy
