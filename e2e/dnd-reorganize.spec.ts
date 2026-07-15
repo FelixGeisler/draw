@@ -102,9 +102,15 @@ test("an invalid target names its rule mid-drag and the drop leaves the tree unc
   await expect(row(page, NEST_TARGET)).toHaveClass(/dnd-blocked/);
   await expect(row(page, NEST_TARGET)).not.toHaveClass(/dnd-eligible/);
   // The reason comes from the shared eligibility helper (#100), not a copy.
-  await expect(
-    page.getByText(/a task with subtasks cannot become a subtask itself/),
-  ).toBeVisible();
+  const reason = page.locator(".dnd-reason");
+  await expect(reason).toContainText("a task with subtasks cannot become a subtask itself");
+
+  // Drifting onto the strip itself must not flicker it away: it carries the
+  // row's data-dnd-row, so the pointer sitting on it keeps the row hovered.
+  const r = (await reason.boundingBox())!;
+  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2, { steps: 4 });
+  await expect(reason).toBeVisible();
+  await expect(row(page, NEST_TARGET)).toHaveClass(/dnd-blocked/);
   await page.mouse.up();
 
   // Dropping on a blocked target is a cancel: tree unchanged on the server.
@@ -141,6 +147,56 @@ test("drag a subtask to the root drop zone to promote it — under reduced motio
   await expect(
     row(page, CHILD).getByTitle("Move under another task (it becomes a subtask)"),
   ).toBeVisible();
+  const tasks = await tasksByTitle(page);
+  expect(tasks.find((t) => t.title === CHILD)?.parentId).toBeNull();
+  expect(tasks.find((t) => t.title === PARENT_WITH_CHILD)?.subtasks).toEqual([]);
+});
+
+test("the session ignores foreign pointers and retires itself when its release was lost", async ({
+  page,
+}) => {
+  // The two accidental-drop vectors from review: (a) a second touch must
+  // neither steer nor commit someone else's drag; (b) a session whose
+  // release was never delivered (mouse let go outside the window) must not
+  // survive to turn the next in-page click into a drop. Playwright cannot
+  // move a real pointer out of the window, so after a REAL drag is live the
+  // stray pointers are injected as synthetic events on window — exactly
+  // where the session's listeners live.
+  await page.goto("/tasks");
+  await page.evaluate(() => {
+    window.addEventListener(
+      "pointerdown",
+      (e) => ((window as unknown as { __pid: number }).__pid = e.pointerId),
+      { once: true, capture: true },
+    );
+  });
+
+  // After the promote test, CHILD is a childless root again: dropping it on
+  // the (now childless) PARENT_WITH_CHILD would be a perfectly eligible nest
+  // — which is what makes a phantom commit detectable below.
+  await dragWithoutRelease(page, handle(page, CHILD), row(page, PARENT_WITH_CHILD));
+  await expect(row(page, PARENT_WITH_CHILD)).toHaveClass(/dnd-over/);
+  const pid = await page.evaluate(() => (window as unknown as { __pid: number }).__pid);
+
+  // (a) A different pointerId lifting (the second finger) is not our
+  // release: the drag survives it, uncommitted.
+  await page.evaluate((foreign) => {
+    window.dispatchEvent(new PointerEvent("pointerup", { pointerId: foreign }));
+  }, pid + 1);
+  await expect(page.locator(".dnd-ghost")).toBeVisible();
+
+  // (b) Our own pointer moving with no button held means the release
+  // happened where it could not be delivered — the session retires on the
+  // spot instead of waiting to hijack the next click…
+  await page.evaluate((own) => {
+    window.dispatchEvent(new PointerEvent("pointermove", { pointerId: own, buttons: 0 }));
+  }, pid);
+  await expect(page.locator(".dnd-ghost")).not.toBeVisible();
+
+  // …so this release over an ELIGIBLE row commits nothing.
+  await page.mouse.up();
+  // Give a wrongly-issued PATCH time to land before asserting it did not.
+  await page.waitForTimeout(300);
   const tasks = await tasksByTitle(page);
   expect(tasks.find((t) => t.title === CHILD)?.parentId).toBeNull();
   expect(tasks.find((t) => t.title === PARENT_WITH_CHILD)?.subtasks).toEqual([]);

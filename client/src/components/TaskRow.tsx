@@ -4,7 +4,7 @@ import { useCreateSubtasks, useDeleteTask, useUpdateTask } from "../hooks/useTas
 import { useAiStatus } from "../hooks/useAi";
 import { isSnoozed } from "../lib/drawable";
 import { sequentialLockedByRecurrence } from "../lib/orderMode";
-import { reparentTargets } from "../lib/reparent";
+import { offersMoveUnder, reparentTargets } from "../lib/reparent";
 import { classifyDrop } from "../lib/taskDnd";
 import { TaskDndContext } from "./TaskDnd";
 import { TaskBadges } from "./TaskBadges";
@@ -63,11 +63,12 @@ export function TaskRow({
   // Recurring × sequential guard (#66, ADR-23): a recurring subtask locks the
   // switch to 'do in order' — on the flip button and in both breakdown editors.
   const sequentialLocked = sequentialLockedByRecurrence(task.subtasks, task.subtaskOrderMode);
-  // Reparent targets (#100): shared rule source with the drag-and-drop
-  // follow-up (#101). Only root leaf rows offer "Move under…" — a task with
-  // subtasks cannot become a subtask itself (ADR-16).
+  // Reparent targets (#100): shared rule source with the drag-and-drop (#101)
+  // — offersMoveUnder is the same root-only gate classifyDrop routes on.
+  // Only leaf rows offer it: a task with subtasks cannot become a subtask
+  // itself (ADR-16).
   const moveTargets =
-    !done && task.parentId == null && !hasSubtasks && rootTasks
+    !done && offersMoveUnder(task) && !hasSubtasks && rootTasks
       ? reparentTargets(task, rootTasks)
       : [];
 
@@ -284,7 +285,11 @@ export function TaskRow({
       </div>
       )}
       {dropBlockReason && (
-        <div className="dnd-reason" role="status">
+        /* data-dnd-row makes the strip part of this row's hit target: it
+           mounts right under the pointer, so drifting onto it must keep
+           overKey on this row — without it the strip unmounts, the rows
+           shift back up, and the feedback flickers under the cursor. */
+        <div className="dnd-reason" data-dnd-row={task.id} role="status">
           Cannot drop here — {dropBlockReason}
         </div>
       )}

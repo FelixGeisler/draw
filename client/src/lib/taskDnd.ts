@@ -1,5 +1,7 @@
 import {
+  isOfferableTarget,
   moveUnderBlockReason,
+  offersMoveUnder,
   promoteBlockReason,
   type ReparentSource,
   type ReparentTargetTask,
@@ -40,13 +42,14 @@ export function classifyDrop(dragged: ReparentSource, spot: DropSpot | null): Dr
     // philosophy as the picker's disabled options.
     return { kind: "promote", blockReason: promoteBlockReason(dragged) };
   }
-  // Done/archived rows are never offered by the menu (reparentTargets skips
-  // them) — inert here too, not "blocked with a reason".
-  if (spot.task.status !== "open") return { kind: "inert" };
+  // Done/archived rows are never offered by the menu — inert here too, not
+  // "blocked with a reason". The predicate is reparentTargets' own filter,
+  // so the two inputs cannot diverge on what is offered.
+  if (!isOfferableTarget(spot.task)) return { kind: "inert" };
   // A dragged subtask has exactly one gesture: promote via the root zone.
-  // The menu gives subtask rows no "Move under…" either — rows stay inert
+  // Same predicate as TaskRow's "Move under…" button gate — rows stay inert
   // rather than DnD growing a move-to-another-parent path the menu lacks.
-  if (dragged.parentId != null) return { kind: "inert" };
+  if (!offersMoveUnder(dragged)) return { kind: "inert" };
   return {
     kind: "nest",
     targetId: spot.task.id,

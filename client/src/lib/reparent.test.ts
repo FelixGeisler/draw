@@ -6,7 +6,9 @@ import {
   OWN_PARENT_REASON,
   RECURRING_SEQUENTIAL_REASON,
   TARGET_IS_SUBTASK_REASON,
+  isOfferableTarget,
   moveUnderBlockReason,
+  offersMoveUnder,
   promoteBlockReason,
   reparentTargets,
   type ReparentSource,
@@ -78,6 +80,22 @@ describe("promoteBlockReason", () => {
   it("lets any subtask promote and names why a root cannot", () => {
     expect(promoteBlockReason({ parentId: 4 })).toBeNull();
     expect(promoteBlockReason({ parentId: null })).toBe(ALREADY_ROOT_REASON);
+  });
+});
+
+// The offering predicates are single-sourced here (#101): reparentTargets'
+// candidate filter, TaskRow's "Move under…" gate and classifyDrop's routing
+// all derive from these two — offered vs inert can never silently diverge.
+describe("offering predicates", () => {
+  it("offers only open tasks as destinations", () => {
+    expect(isOfferableTarget({ status: "open" })).toBe(true);
+    expect(isOfferableTarget({ status: "done" })).toBe(false);
+    expect(isOfferableTarget({ status: "archived" })).toBe(false);
+  });
+
+  it("gives only root tasks the move-under gesture", () => {
+    expect(offersMoveUnder({ parentId: null })).toBe(true);
+    expect(offersMoveUnder({ parentId: 3 })).toBe(false);
   });
 });
 

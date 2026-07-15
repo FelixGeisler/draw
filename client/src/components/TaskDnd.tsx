@@ -1,4 +1,4 @@
-import { createContext, useCallback, useRef, useState } from "react";
+import { createContext, useCallback, useEffect, useRef, useState } from "react";
 import type { Task } from "../api/types";
 import { classifyDrop, passesDragThreshold, type DropSpot } from "../lib/taskDnd";
 import "./TaskDnd.css";
@@ -8,9 +8,13 @@ import "./TaskDnd.css";
  * the #100 reparent controls, not a new concern: the drop handler issues the
  * same PATCH parentId the menu does, and every verdict comes from
  * lib/taskDnd.ts → lib/reparent.ts. Hand-rolled on pointer events (no
- * dependency): pointerdown on a row's handle arms a drag, a 5px threshold
- * separates drags from clicks, elementFromPoint hit-tests the row/zone under
- * the cursor, Escape or pointercancel abandons it.
+ * dependency): pointerdown on a row's handle arms a drag and captures the
+ * pointer, a 5px threshold separates drags from clicks, elementFromPoint
+ * hit-tests the row/zone under the cursor, Escape or pointercancel abandons
+ * it. The session is bound to its starting pointerId — a second touch can
+ * neither steer nor commit it — and a move without a held button (the
+ * release happened outside the window, uncaptured) retires the session
+ * before any later pointerup could commit an accidental drop.
  *
  * The ghost follows the pointer via a ref (a position, not an animation — no
  * re-render per move, nothing for prefers-reduced-motion to object to); the
@@ -37,6 +41,8 @@ export const TaskDndContext = createContext<TaskDndController | null>(null);
 
 interface Session {
   task: Task;
+  /** The pointer that started the drag — move/up/cancel ignore all others. */
+  pointerId: number;
   x0: number;
   y0: number;
   x: number;
@@ -61,6 +67,11 @@ export function useTaskDnd(opts: {
   optsRef.current = opts;
   const ghostEl = useRef<HTMLDivElement | null>(null);
   const session = useRef<Session | null>(null);
+  // Unmount cleanup: navigating away mid-drag must tear down the session and
+  // its window listeners. end() is session-scoped (defined inside startDrag),
+  // so each session parks its own teardown here while it runs.
+  const endRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => endRef.current?.(), []);
 
   const ghostRef = useCallback((el: HTMLDivElement | null) => {
     ghostEl.current = el;
@@ -76,6 +87,17 @@ export function useTaskDnd(opts: {
     // Keep the press from starting a text selection; with touch-action: none
     // on the handle, touch pointers stay ours instead of scrolling.
     e.preventDefault();
+    // Capture the pointer so a release OUTSIDE the window still delivers its
+    // pointerup — without capture the session would survive that release and
+    // the next in-page click's pointerup would commit an accidental drop.
+    // Capture only retargets events (they still bubble to window) and does
+    // not affect elementFromPoint, so the hit-testing below is untouched.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Stale pointer or no capture support — the buttons check in move()
+      // still retires an uncaptured session before it can drop.
+    }
 
     const spotFromKey = (key: string): DropSpot | null => {
       if (key === "zone") return { type: "root-zone" };
@@ -85,7 +107,17 @@ export function useTaskDnd(opts: {
 
     const move = (ev: PointerEvent) => {
       const s = session.current;
-      if (!s) return;
+      // Only the starting pointer steers the drag — on touch, a second
+      // finger must neither move the ghost nor (via its lift) commit it.
+      if (!s || ev.pointerId !== s.pointerId) return;
+      // Our pointer moving with no button held means its release was never
+      // delivered (it happened outside the window, uncaptured): retire the
+      // zombie session before any pointerup can land a drop. Live mouse,
+      // touch and pen contacts always report a pressed button here.
+      if (ev.buttons === 0) {
+        end(false);
+        return;
+      }
       s.x = ev.clientX;
       s.y = ev.clientY;
       if (!s.active) {
@@ -120,6 +152,7 @@ export function useTaskDnd(opts: {
       window.removeEventListener("pointercancel", cancel);
       window.removeEventListener("keydown", esc);
       session.current = null;
+      endRef.current = null;
       setDragging(null);
       setOverKey(null);
       if (!drop || !s.active || s.overKey == null) return;
@@ -134,8 +167,14 @@ export function useTaskDnd(opts: {
         setDropError((err as Error).message);
       });
     };
-    const up = () => end(true);
-    const cancel = () => end(false);
+    // Same identity discipline as move: only the session's own pointer can
+    // commit or cancel — a second finger lifting is not our release.
+    const up = (ev: PointerEvent) => {
+      if (ev.pointerId === session.current?.pointerId) end(true);
+    };
+    const cancel = (ev: PointerEvent) => {
+      if (ev.pointerId === session.current?.pointerId) end(false);
+    };
     const esc = (ev: KeyboardEvent) => {
       if (ev.key === "Escape") end(false);
     };
@@ -146,6 +185,7 @@ export function useTaskDnd(opts: {
     window.addEventListener("keydown", esc);
     session.current = {
       task,
+      pointerId: e.pointerId,
       x0: e.clientX,
       y0: e.clientY,
       x: e.clientX,
@@ -153,6 +193,7 @@ export function useTaskDnd(opts: {
       active: false,
       overKey: null,
     };
+    endRef.current = () => end(false);
   }, []);
 
   return { dragging, overKey, dropError, startDrag, ghostRef };
