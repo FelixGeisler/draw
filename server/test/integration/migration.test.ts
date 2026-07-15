@@ -7,11 +7,12 @@ import { fileURLToPath } from "node:url";
 import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
 
-// Migration chain on EXISTING databases via ALTER TABLE (fresh ones get the
-// current schema.sql — every other integration file covers that path):
+// Migration chain on EXISTING databases (fresh ones get the current
+// schema.sql — every other integration file covers that path):
 //   v2 → v3 adds deferred_until and blocked            (issue #19)
 //   v3 → v4 adds subtask_order_mode                    (issue #23)
 //   v4 → v5 adds window_days/window_start/window_end   (issue #33)
+//   v5 → v6 creates the card_art cache table           (issue #27)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence.
@@ -20,18 +21,22 @@ let app: express.Express;
 let legacyTaskId: number;
 
 beforeAll(async () => {
-  // Reconstruct the v2 schema: today's schema.sql minus the v3/v4/v5 columns.
+  // Reconstruct the v2 schema: today's schema.sql minus the v3/v4/v5 columns
+  // and the v6 card_art table.
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
-  const v2Schema = current.replace(
-    // \r?\n: checkouts may be CRLF (git autocrlf) or LF.
-    /last_drawn_at TEXT,[\s\S]*?window_end TEXT\r?\n/,
-    "last_drawn_at TEXT\n",
-  );
+  const v2Schema = current
+    .replace(
+      // \r?\n: checkouts may be CRLF (git autocrlf) or LF.
+      /last_drawn_at TEXT,[\s\S]*?window_end TEXT\r?\n/,
+      "last_drawn_at TEXT\n",
+    )
+    .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "");
   expect(v2Schema).not.toBe(current); // the strip actually removed the columns
   expect(v2Schema).not.toContain("deferred_until");
   expect(v2Schema).not.toContain("subtask_order_mode");
   expect(v2Schema).not.toContain("window_days");
+  expect(v2Schema).not.toContain("card_art");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v2Schema);
@@ -44,10 +49,32 @@ beforeAll(async () => {
   app = await freshApp(); // importing db.ts runs migrate() on the v2 file
 });
 
-describe("migration v2 → v5 (deferred_until, blocked, subtask_order_mode, window_*)", () => {
-  it("bumps user_version to 5", async () => {
+describe("migration v2 → v6 (deferred_until, blocked, subtask_order_mode, window_*, card_art)", () => {
+  it("bumps user_version to 6", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(5);
+    expect(db.pragma("user_version", { simple: true })).toBe(6);
+  });
+
+  it("creates the card_art cache table with its cascade wired to tasks (#27)", async () => {
+    const db = await testDb();
+    const table = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'card_art'")
+      .get();
+    expect(table).toBeTruthy();
+
+    // Cascade sanity directly on the migrated file: art dies with its task.
+    const task = db
+      .prepare("INSERT INTO tasks (title, category_id, created_at) VALUES (?, ?, ?)")
+      .run("cascade probe", 1, new Date().toISOString());
+    db.prepare("INSERT INTO card_art (task_id, svg, created_at) VALUES (?, ?, ?)").run(
+      task.lastInsertRowid,
+      "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect/></svg>",
+      new Date().toISOString(),
+    );
+    db.prepare("DELETE FROM tasks WHERE id = ?").run(task.lastInsertRowid);
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM card_art WHERE task_id = ?").get(task.lastInsertRowid),
+    ).toEqual({ n: 0 });
   });
 
   it("existing rows get the defaults: not blocked, no snooze, parallel subtasks, no window", async () => {

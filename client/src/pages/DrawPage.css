@@ -76,6 +76,44 @@
   line-height: 1.3;
 }
 
+/* AI card art (#27): layered behind the card-back content as a data-URI <img>
+   (never injected as markup), fading in whenever it arrives — the flip never
+   waits for it. In degraded mode neither layer renders and the gradient above
+   stands alone, exactly as before. */
+.draw-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: art-fade 0.8s ease both;
+}
+
+.draw-art-scrim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  /* echoes the default gradient so text stays legible over any artwork */
+  background: linear-gradient(160deg, rgba(35, 39, 53, 0.72), rgba(27, 30, 39, 0.82));
+}
+
+@keyframes art-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Card-back content paints above the absolutely positioned art layers. */
+.draw-face.back > :not(.draw-art, .draw-art-scrim) {
+  position: relative;
+}
+
 .draw-chance {
   color: var(--text-dim);
   font-size: 12px;

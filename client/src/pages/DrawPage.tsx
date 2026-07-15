@@ -4,6 +4,7 @@ import confetti from "canvas-confetti";
 import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
 import { useCurrentDraw, useDraw, type DrawResponse } from "../hooks/useDraw";
+import { useCardArt } from "../hooks/useAi";
 import { useStartTimer } from "../hooks/useTimer";
 import { SnoozeMenu } from "../components/SnoozeMenu";
 import { TaskBadges } from "../components/TaskBadges";
@@ -104,6 +105,9 @@ export function DrawPage() {
 
   const task = result?.task ?? null;
   const category = task ? categories.data?.find((c) => c.id === task.categoryId) : null;
+  // AI card art (#27): kicked off by the reveal, never awaited by it. The
+  // hook swallows every failure (incl. 503 degraded mode) into "no art".
+  const cardArt = useCardArt(task?.id, phase === "revealed");
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
   // An edit can push the drawn card out of the deck (effort too big/cleared,
   // status no longer open) — computed client-side, mirroring drawService.
@@ -163,6 +167,20 @@ export function DrawPage() {
             </div>
           </div>
           <div className="draw-face back">
+            {/* Model-generated SVG is rendered exclusively as an <img> data
+                URI (server-sanitized, too) — never dangerouslySetInnerHTML.
+                The scrim keeps title, badges and odds legible over any art. */}
+            {task && cardArt.data?.svg && (
+              <>
+                <img
+                  className="draw-art"
+                  alt=""
+                  aria-hidden="true"
+                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(cardArt.data.svg)}`}
+                />
+                <div className="draw-art-scrim" />
+              </>
+            )}
             {task && (
               <>
                 {category && (

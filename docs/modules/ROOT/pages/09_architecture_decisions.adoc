@@ -413,3 +413,43 @@ with them its history — we do not add write-path tracking to preserve it.
 (no counters to drift, reopen/undo just works), and local-day bucketing puts a
 23:30 task on that evening's tower — the emotional ledger the feature exists
 for.
+
+== ADR-22: Card art as sanitized, model-written SVG — cached once per task
+
+*Context:* The drawn card is the app's emotional centerpiece, but its back
+face was a static CSS gradient. Unique, subtly themed artwork per card makes
+drawing feel like a real card game and rewards the reveal. Two constraints
+shape the design: the Claude API generates text, not raster images, and model
+output must never reach the user's DOM as live markup.
+*Decision:* The artwork is SVG markup written by Claude through the existing
+structured-output pipeline (`cardArtSchema`, its own `CARD_ART_SYSTEM_PROMPT`
+— neither planning nor transcription directives apply to art — 6K
+`max_tokens`, same `MODEL`), themed from task title + category name and color
+(+ goal title when linked) on the dark app palette so all cards read as one
+deck. Security is two *independent* layers. First, allowlist sanitization
+server-side (`svgSanitizer.ts`, pure module) **before storage**: the untrusted
+string is tokenized and a new document is re-serialized from scratch — only
+allowlisted elements (shapes, gradients, filter primitives) and allowlisted,
+value-validated attributes are emitted; `<script>`/`<foreignObject>`/`<image>`
+subtrees, `on*` handlers, non-fragment `href`/`xlink:href` (`javascript:`,
+`data:`, external URLs), non-`url(#id)` CSS references, text nodes, comments,
+CDATA and DOCTYPE/entity declarations are all dropped, so nothing that was not
+deliberately emitted can survive. Second, the client renders the stored SVG
+exclusively as `<img src="data:image/svg+xml,...">` — an image context never
+executes scripts — and `dangerouslySetInnerHTML` of model output stays banned
+repo-wide. Generation happens at most once per task: `card_art (task_id
+PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, svg, created_at)` caches
+the *sanitized* markup (schema v6); concurrent first views race benignly —
+first writer wins. Failed sanitization is a 502 and is *not* cached, so a
+later view retries instead of pinning a broken background. The reveal never
+waits: the card flips instantly with the default gradient, `useCardArt` fires
+only once revealed, and the art fades in over the gradient behind a legibility
+scrim whenever it arrives. Every failure — including 503 `ai_not_configured`
+without a key — resolves silently to "no art".
+*Rationale:* SVG-as-text keeps the feature inside the one approved AI channel
+(`aiService.ts`, ADR on structured outputs) with no new provider, dependency
+or raster pipeline. Sanitize-before-store means the database only ever holds
+markup that is safe to serve forever, independent of future render paths; the
+img-data-URI render makes the browser enforce the same guarantee a second
+time. The once-per-task cache bounds cost (one generation per card, ever) and
+keeps a card's identity stable — the same task always reveals the same art.

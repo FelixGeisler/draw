@@ -16,7 +16,7 @@ export const db = new Database(path.join(dataDir, "app.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-const CURRENT_VERSION = 5;
+const CURRENT_VERSION = 6;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -44,6 +44,14 @@ function migrate() {
       db.exec("ALTER TABLE tasks ADD COLUMN window_days TEXT");
       db.exec("ALTER TABLE tasks ADD COLUMN window_start TEXT");
       db.exec("ALTER TABLE tasks ADD COLUMN window_end TEXT");
+    }
+    if (version < 6) {
+      // AI card art cache (issue #27, ADR-22): sanitized SVG, once per task.
+      db.exec(`CREATE TABLE card_art (
+        task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+        svg TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`);
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);

@@ -6,6 +6,7 @@ import path from "node:path";
 import { API_KEY_SETTING, db, filesDir, getSetting, getSettingString } from "../db.js";
 import {
   breakdownSchema,
+  cardArtSchema,
   generateTasksSchema,
   planGoalSchema,
   type BreakdownResult,
@@ -26,6 +27,10 @@ const INPUT_USD_PER_MTOK = 5;
 // with a raised cap; existing callers keep the default.
 const DEFAULT_MAX_TOKENS = 16_000;
 const GENERATE_TASKS_MAX_TOKENS = 32_000;
+// Card art (#27): an SVG background is ~2-4K output tokens, but adaptive
+// thinking shares this cap — 6K leaves headroom so light thinking cannot
+// truncate the markup mid-tag.
+const CARD_ART_MAX_TOKENS = 6_000;
 
 // Resolved per request (not at module load) so a key set through the
 // Settings UI takes effect immediately, without a server restart.
@@ -67,6 +72,20 @@ Principles you always apply:
 - Task titles start with a concrete physical action verb ("Open...", "Write...", "Solve...", "Sort..."), never vague ones ("Research...", "Look into...", "Prepare...").
 - Impact ratings (1-5) measure leverage toward the goal's measured outcome, not effort or difficulty. Practicing what is graded beats consuming what is comfortable: past papers, exercises, and producing output rate high; passively re-reading intros rates low.
 - Be concrete and specific to the provided materials. Reference actual topics, chapters, or exercises from them.`;
+
+// Card art (#27) is neither planning nor transcription — its own prompt keeps
+// the task directives out and pins the constraints the sanitizer and the deck
+// aesthetic rely on: abstract, strictly no text, dark palette anchored on the
+// app background with the category color as the single accent, 5:7 viewBox.
+export const CARD_ART_SYSTEM_PROMPT = `You are the card artist of "Draw", an anti-procrastination app that presents tasks as playing cards. You create ABSTRACT, decorative SVG artwork for the back of a drawn card.
+
+Hard rules for every artwork:
+- Output one single self-contained <svg> element with viewBox="0 0 300 420" (the card's 5:7 ratio), filling the whole area.
+- Strictly NO text of any kind: no <text> or <tspan> elements, and no letters, digits or words drawn as paths.
+- No <script>, no <foreignObject>, no <image>, no <style>, no event-handler attributes, and no external references of any kind (no http(s):, data: or file URLs) — reference only your own <defs> via url(#id) or href="#id". A server-side sanitizer strips everything else.
+- Dark, calm palette anchored on the app background: base tones between #1b1e27 and #232735, with the task's category color as the single accent so every card reads as part of one deck. Keep contrast subtle — the artwork sits BEHIND light card text that must stay legible.
+- Make it abstract and quietly evocative of the task's theme: geometry, layered gradients, flowing paths, constellations, subtle patterns. Never literal illustrations, icons, mascots or clip-art.
+- Keep it compact: at most ~60 elements; filters no heavier than a gentle blur or turbulence.`;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -276,6 +295,39 @@ function generateTasksContext(goalId: number, instruction: string): ContentBlock
   return [{ type: "text", text: lines.join("\n") }];
 }
 
+// Theming inputs for the card art (#27): task title, category name + color,
+// and the goal title when the task is linked to one. Deliberately no
+// materials — the artwork keys off what the card says, not what it cites.
+function cardArtContext(taskId: number): ContentBlock[] {
+  const task = db
+    .prepare(
+      `SELECT t.title, t.goal_id AS goalId, c.name AS category, c.color
+       FROM tasks t JOIN categories c ON c.id = t.category_id WHERE t.id = ?`,
+    )
+    .get(taskId) as
+    | { title: string; goalId: number | null; category: string; color: string }
+    | undefined;
+  if (!task) throw new AiError(404, "task not found");
+
+  const goal = task.goalId
+    ? (db.prepare("SELECT title FROM goals WHERE id = ?").get(task.goalId) as
+        | { title: string }
+        | undefined)
+    : undefined;
+
+  const lines = [
+    `Create the card-back artwork for this drawn task.`,
+    ``,
+    `Task: ${task.title}`,
+    `Category: ${task.category} (accent color: ${task.color})`,
+    goal ? `Part of goal: ${goal.title}` : "",
+    ``,
+    `Return the complete SVG markup in the svg field.`,
+  ].filter(Boolean);
+
+  return [{ type: "text", text: lines.join("\n") }];
+}
+
 // ---------------------------------------------------------------------------
 // API calls
 
@@ -431,4 +483,17 @@ export async function generateTasks(
   // split-don't-clamp for oversized items. The Math.min clamp above would
   // corrupt the material's own time data here.
   return postprocessGenerateTasks(result, getSetting("max_draw_effort", 30));
+}
+
+/**
+ * Card art (#27): returns the RAW model SVG. Callers must run it through
+ * svgSanitizer before storing or serving it — cardArtService owns that step
+ * (plus the once-per-task cache); nothing else should call this directly.
+ */
+export async function generateCardArt(taskId: number): Promise<string> {
+  const result = await runStructured(cardArtContext(taskId), cardArtSchema, {
+    maxTokens: CARD_ART_MAX_TOKENS,
+    system: CARD_ART_SYSTEM_PROMPT,
+  });
+  return result.svg;
 }
