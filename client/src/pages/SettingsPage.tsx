@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useCategories, useSettings } from "../hooks/useTasks";
 import { useAiStatus, useRemoveApiKey, useSetApiKey } from "../hooks/useAi";
+import { useGamification } from "../hooks/useGamification";
 import type { Category } from "../api/types";
 
 function SettingInput({
@@ -36,6 +37,97 @@ function SettingInput({
       />
       {hint && <span style={{ color: "var(--text-dim)", fontSize: 13 }}>{hint}</span>}
     </label>
+  );
+}
+
+// Mon-first display order, JS getDay values (0=Sun..6=Sat) — the same
+// convention as the stored setting and tasks.window_days.
+const WEEKDAYS: { day: number; label: string }[] = [
+  { day: 1, label: "Mon" },
+  { day: 2, label: "Tue" },
+  { day: 3, label: "Wed" },
+  { day: 4, label: "Thu" },
+  { day: 5, label: "Fri" },
+  { day: 6, label: "Sat" },
+  { day: 0, label: "Sun" },
+];
+
+function parseRestWeekdays(raw: string | undefined): number[] {
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function StreakSection() {
+  const settings = useSettings();
+  const gamification = useGamification();
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (days: number[]) => api.patch("/api/settings", { streak_rest_weekdays: days }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      // Rest days change todayKind/streak immediately — keep the flame honest.
+      qc.invalidateQueries({ queryKey: ["gamification"] });
+    },
+  });
+  const current = parseRestWeekdays(settings.data?.streak_rest_weekdays);
+
+  function toggle(day: number) {
+    const next = current.includes(day)
+      ? current.filter((d) => d !== day)
+      : [...current, day].sort((a, b) => a - b);
+    save.mutate(next);
+  }
+
+  const g = gamification.data;
+  return (
+    <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
+      <h3 style={{ margin: 0 }}>Streak</h3>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 280 }}>Rest weekdays</span>
+        <div role="group" aria-label="Rest weekdays" style={{ display: "flex", gap: 4 }}>
+          {WEEKDAYS.map(({ day, label }) => {
+            const active = current.includes(day);
+            return (
+              <button
+                key={day}
+                aria-pressed={active}
+                disabled={settings.isPending || save.isPending}
+                onClick={() => toggle(day)}
+                style={{
+                  padding: "4px 10px",
+                  background: active ? "var(--accent)" : undefined,
+                  color: active ? "#fff" : undefined,
+                }}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
+          days that never break the streak — completing on one still counts
+        </span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 280 }}>Freezes banked</span>
+        <span style={{ fontWeight: 700 }}>
+          🧊 {g ? `${g.freezesBanked}/${g.freezeBankCap}` : "…"}
+        </span>
+        <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
+          earned every 7 completed streak days; one auto-covers a missed day
+        </span>
+      </div>
+      {save.error && (
+        <div style={{ color: "var(--danger)", fontSize: 13 }}>{save.error.message}</div>
+      )}
+    </section>
   );
 }
 
@@ -243,6 +335,8 @@ export function SettingsPage() {
           </>
         )}
       </section>
+
+      <StreakSection />
 
       <section className="panel" style={{ display: "grid", gap: 8, marginTop: 16 }}>
         <h3 style={{ margin: 0 }}>Categories</h3>

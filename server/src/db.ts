@@ -16,7 +16,7 @@ export const db = new Database(path.join(dataDir, "app.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-const CURRENT_VERSION = 7;
+const CURRENT_VERSION = 8;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -126,6 +126,15 @@ function migrate() {
         );
         for (const id of reparented) adopt.run(id);
       })();
+    }
+    if (version < 8) {
+      // Streak freeze tokens (issue #58, ADR-26): append-only earn log;
+      // consumption stays derived at read time.
+      db.exec(`CREATE TABLE streak_freezes (
+        id INTEGER PRIMARY KEY,
+        milestone_day TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+      )`);
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);

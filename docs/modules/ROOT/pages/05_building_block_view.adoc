@@ -52,7 +52,7 @@ server/src/
 
 |`gamificationService`
 |Completion side-effects
-|XP/level/streak always derived from `completions`
+|XP/level/streak always derived from `completions`; freeze tokens are an append-only earn log, consumption derived at read time (ADR-26)
 
 |`statsService`
 |Time aggregation, estimated-vs-tracked accuracy

@@ -44,15 +44,19 @@ let bareMiddleId: number;
 let bareGrandchildId: number;
 
 beforeAll(async () => {
-  // A v6 file has the CURRENT schema — v7 repairs data, it changes no DDL —
-  // so seed today's schema.sql verbatim and stamp user_version = 6.
+  // A v6 file has today's TASK schema — v7 repairs data, it changes no DDL —
+  // but not the v8 streak_freezes table (#58), so strip that block before
+  // seeding and stamp user_version = 6.
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-  const schema = fs.readFileSync(schemaPath, "utf-8");
+  const schema = fs
+    .readFileSync(schemaPath, "utf-8")
+    .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "");
   // Sanity: unlike migration.test.ts's v2 file, this file CAN express the
   // collision — sequential mode and recurrence both exist at v6.
   expect(schema).toContain("subtask_order_mode");
   expect(schema).toContain("recur_every_days");
   expect(schema).toContain("card_art");
+  expect(schema).not.toContain("streak_freezes"); // the strip really ran
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(schema);
@@ -117,7 +121,7 @@ async function listedRoot(rootId: number) {
 describe("v7 hoist under a sequential root mints the ADR-23 combination — tolerated, repairable (#80, ADR-24)", () => {
   it("the migration completes and the recurrence survives the hoist intact", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(7);
+    expect(db.pragma("user_version", { simple: true })).toBe(8);
     // The #66 guard did NOT run during hoisting: no failure, tree flattened.
     const nested = db
       .prepare(

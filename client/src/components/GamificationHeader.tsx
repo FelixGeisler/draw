@@ -1,10 +1,46 @@
 import { useGamification } from "../hooks/useGamification";
 
+/** Whole local days since a server-provided local "YYYY-MM-DD" day. */
+function daysAgo(day: string): number {
+  const [y, m, d] = day.split("-").map(Number);
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((todayStart.getTime() - new Date(y, m - 1, d).getTime()) / 86_400_000);
+}
+
+type FlameState = "lit" | "pending" | "rest" | "frozen";
+
 export function GamificationHeader() {
   const { data } = useGamification();
   if (!data) return null;
 
   const pct = Math.min(100, (data.levelProgress.intoLevel / data.levelProgress.needed) * 100);
+
+  // Four honest flame states (#58): rest and frozen days are never presented
+  // as completed. A freeze that covered a day within the last week gets its
+  // own state so a silently spent token stays visible.
+  const recentFreeze = data.frozenDays.find((day) => daysAgo(day) <= 7);
+  const flame: FlameState = data.dailyGoalMet
+    ? "lit"
+    : data.todayKind === "rest"
+      ? "rest"
+      : recentFreeze
+        ? "frozen"
+        : "pending";
+
+  const flameTitle = {
+    lit: "Daily goal met — streak safe!",
+    pending: `Complete ${data.dailyGoal} task${data.dailyGoal === 1 ? "" : "s"} to keep the streak`,
+    rest: "Rest day — streak safe",
+    frozen: `A freeze covered ${recentFreeze} — ${data.freezesBanked}/${data.freezeBankCap} still banked`,
+  }[flame];
+
+  const flameFilter = {
+    lit: "none",
+    pending: "grayscale(1) opacity(0.6)",
+    rest: "grayscale(0.6) opacity(0.8)",
+    frozen: "grayscale(1) opacity(0.75)",
+  }[flame];
 
   return (
     <div
@@ -34,18 +70,10 @@ export function GamificationHeader() {
       </div>
       <span style={{ color: "var(--text-dim)" }}>{data.xp} XP</span>
       <span style={{ flex: 1 }} />
-      <span
-        title={
-          data.dailyGoalMet
-            ? "Daily goal met — streak safe!"
-            : `Complete ${data.dailyGoal} task${data.dailyGoal === 1 ? "" : "s"} to keep the streak`
-        }
-        style={{
-          fontSize: 16,
-          filter: data.dailyGoalMet ? "none" : "grayscale(1) opacity(0.6)",
-        }}
-      >
-        🔥 {data.streak}
+      <span data-flame={flame} title={flameTitle} style={{ fontSize: 16 }}>
+        {flame === "rest" && <span style={{ marginRight: 2 }}>🌙</span>}
+        {flame === "frozen" && <span style={{ marginRight: 2 }}>🧊</span>}
+        <span style={{ filter: flameFilter }}>🔥 {data.streak}</span>
       </span>
     </div>
   );

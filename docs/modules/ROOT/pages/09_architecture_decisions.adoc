@@ -635,3 +635,44 @@ distinct organic cards seen in a 10-draw session recover from 3.6 to 6.3 of
 12, and a mid-weight organic card's chance to surface within 5 draws from
 7% to ~13% (pre-import: 16%). Per-goal quotas and changes to the
 urgency/staleness/cooldown factors were explicitly out of scope (#30).
+
+== ADR-26: Streak rest days and freeze tokens — the streak stays derived, only earned freezes are state
+
+*Context:* The streak broke on any local day without a completion, including
+days off the user planned on purpose (#58). Punishing a deliberate Saturday
+teaches users to stop trusting the flame — but the fix must not violate
+ADR-2/ADR-5: no stored streak counter, ever, and `GET /api/gamification`
+must stay side-effect free.
+*Decision:* Three parts. (a) *Rest weekdays* are a plain setting
+(`streak_rest_weekdays`, JSON array in JS `getDay` convention, same as
+`tasks.window_days`; `PATCH /api/settings` rejects all 7 — at least one
+weekday must stay required). A rest weekday without a completion neither
+breaks nor extends the run; one *with* a completion counts +1 like any other
+day, so resting is never better than completing. (b) *Freeze tokens* are
+genuine state, but only the EARN side: `streak_freezes` is an append-only
+log of earned events (v8 migration), one row per 7-real-day milestone with
+the milestone's local day under a UNIQUE constraint — earning is idempotent
+per milestone, so complete → reopen (`undoLatestCompletion`) → complete
+again cannot farm tokens; the bank caps at 2 unconsumed. *Consumption is
+never stored:* every read re-runs a deterministic fold (the pure
+`computeStreak()` in `streak.ts`) that walks back from today and lets each
+missed non-rest day claim the oldest unconsumed token earned strictly
+BEFORE that day. Claims stay tentative until an older real completion day
+anchors them: a gap that exceeds the bank breaks the streak and consumes
+nothing, and a token earned after a missed day can never retroactively
+cover it. Today-in-progress still neither breaks nor consumes. The walk is
+bounded by the earliest completion day, so even 6 configured rest weekdays
+terminate. (c) The streak number counts REAL completion days only — rest
+and frozen days keep the run alive but never increment it — and the API
+exposes `todayKind`/`frozenDays`/`restDays`/`freezesBanked` so the client
+renders four honest flame states instead of presenting covered days as
+completed. `streak_7`/`streak_30` keep testing `currentStreak() >= N`,
+which now means N completed days possibly spanning more calendar days;
+their copy says so, and already-unlocked rows stay (append-only table).
+*Rationale:* The earn events are facts (like `completions` rows) — they
+happened and survive an undo; a stored "banked" counter or consumed-rows
+would be writable from a GET path or need provably idempotent writes, the
+exact drift ADR-5 exists to prevent. Deriving consumption keeps reads pure,
+re-aggregatable, and auditable, and the append-only log plus UNIQUE
+milestone day is the entire anti-farming story — no trigger, no counter,
+no reconciliation job.

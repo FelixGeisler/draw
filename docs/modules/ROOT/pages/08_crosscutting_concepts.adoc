@@ -9,7 +9,9 @@ under a `sequential` parent — completing the step in front frees the next one
 with no write, ADR-18), "scheduled" (outside the task's availability window on
 the local wall clock — the window opening re-admits the card with no write,
 ADR-20), "in progress" (running time entry
-exists), XP/level/streak (aggregates over `completions`), weekly grade
+exists), XP/level/streak (aggregates over `completions`; the streak's rest
+days and freeze consumption are re-derived on every read from the rest-weekday
+setting and the append-only `streak_freezes` earn log — ADR-26), weekly grade
 (aggregation over `time_entries`), and the displayed effort of a broken-down
 task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at query
 time; the stored estimate stays what the user typed and keeps feeding XP and
