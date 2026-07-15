@@ -1,7 +1,9 @@
 /**
- * Pure helpers for the TCG card frame (#115) and the trophy mini-frames
- * (#114). Everything here is render-time derivation — no state, no DOM — so
- * the legibility and mapping decisions are unit-testable in isolation.
+ * Pure helpers for card surfaces (#123, formerly lib/cardFrame): the computed
+ * contrast ink for the category pill (kept from #120) and the card-art
+ * data/batch contracts (#27/#114). Everything here is render-time derivation
+ * — no state, no DOM — so the legibility and mapping decisions are
+ * unit-testable in isolation.
  */
 
 /** Parse "#rgb" / "#rrggbb" to [0..255] channels; null for anything else. */
@@ -37,42 +39,24 @@ export function contrastRatio(a: string, b: string): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-/** The two inks the type-line pill chooses between — near the app's darkest
+/** The two inks the category pill chooses between — near the app's darkest
  *  surface and its primary text, so the pill still reads as "this UI". */
 export const DARK_INK = "#12141a";
 export const LIGHT_INK = "#f5f7fb";
 
 /**
  * Deterministic light/dark ink for text on a category-colored background
- * (#114): compute both WCAG contrast ratios and take the winner — never
- * eyeballed, so pale category colors (e.g. #ffb64f) get dark ink and dark
- * ones get light ink, with a stable answer for every hex in between.
- * Malformed colors (hand-edited DB) fall back to light ink on the assumption
- * of the app's dark surfaces.
+ * (#114, kept through the #123 redesign): compute both WCAG contrast ratios
+ * and take the winner — never eyeballed, so pale category colors (e.g.
+ * #ffb64f) get dark ink and dark ones get light ink, with a stable answer for
+ * every hex in between. Malformed colors (hand-edited DB) fall back to light
+ * ink on the assumption of the app's dark surfaces.
  */
-export function typeLineInk(background: string): string {
+export function pillInk(background: string): string {
   if (relativeLuminance(background) == null) return LIGHT_INK;
   return contrastRatio(background, DARK_INK) >= contrastRatio(background, LIGHT_INK)
     ? DARK_INK
     : LIGHT_INK;
-}
-
-/**
- * DEF = tracked minutes (#115), live: the server payload carries the CLOSED
- * entries' sum (drawService.TRACKED_MINUTES_SQL); while the timer runs on the
- * drawn card the client adds the running entry's elapsed whole minutes on
- * top. No double count by construction — the server sum excludes the open
- * entry. A clock skew that puts startedAt in the future clamps to 0.
- */
-export function liveTrackedMinutes(
-  baseMinutes: number,
-  runningStartedAt: string | null,
-  nowMs: number,
-): number {
-  if (runningStartedAt == null) return baseMinutes;
-  const elapsedMs = nowMs - new Date(runningStartedAt).getTime();
-  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return baseMinutes;
-  return baseMinutes + Math.floor(elapsedMs / 60_000);
 }
 
 /** Sanitized model SVG -> the one sanctioned rendering contract (#27):
@@ -90,7 +74,7 @@ export function batchArtKey(taskIds: number[]): string {
   return [...new Set(taskIds)].sort((a, b) => a - b).join(",");
 }
 
-/** Batch response -> per-card lookup for the pile's mini-frames (#114). */
+/** Batch response -> per-card lookup for the pile's card faces (#114). */
 export function artByTask(
   rows: { taskId: number; svg: string }[] | undefined,
 ): Map<number, string> {

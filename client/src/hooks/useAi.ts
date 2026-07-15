@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { batchArtKey } from "../lib/cardFrame";
+import { batchArtKey } from "../lib/cardVisuals";
 
 export interface AiStatus {
   configured: boolean;

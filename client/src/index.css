@@ -147,3 +147,22 @@ textarea:focus {
   border-radius: 50%;
   display: inline-block;
 }
+
+/* The category pill (#123, keeping #120's computed ink): background is the
+   raw category color, the text ink the higher-WCAG-contrast choice of a
+   dark/light pair (lib/cardVisuals.pillInk) — legible on any category color,
+   never eyeballed. Shared by the drawn card, the trophy pile's lifted
+   details and the focus overlay. */
+.category-pill {
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -2,10 +2,9 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { useCardArtBatch } from "../hooks/useAi";
 import { useGamification } from "../hooks/useGamification";
 import { useCategories } from "../hooks/useTasks";
-import { artByTask, svgDataUri } from "../lib/cardFrame";
+import { artByTask, svgDataUri } from "../lib/cardVisuals";
 import { trophyRarity } from "../lib/trophyRarity";
-import { ImpactStars } from "./TaskBadges";
-import { TypeLine } from "./CardFrame";
+import { CategoryPill } from "./TaskBadges";
 import "./TrophyDeck.css";
 
 export function TrophyDeck() {
@@ -16,8 +15,8 @@ export function TrophyDeck() {
   const [liftedId, setLiftedId] = useState<number | null>(null);
   const completions = data?.todayCompletions ?? [];
 
-  // Mini-frame art (#114/#115): ONE cache-only batch read for the whole pile
-  // — never the per-task GET, which generates on a miss. Completions without
+  // Card-face art (#114): ONE cache-only batch read for the whole pile —
+  // never the per-task GET, which generates on a miss. Completions without
   // cached art keep the gradient face silently.
   const batchArt = useCardArtBatch(completions.map((c) => c.taskId));
   const art = artByTask(batchArt.data?.arts);
@@ -80,7 +79,7 @@ export function TrophyDeck() {
               style={
                 {
                   "--trophy-rot": `${(i % 5) * 2 - 4}deg`,
-                  "--cf-cat": category?.color,
+                  "--cat-color": category?.color,
                 } as CSSProperties
               }
               onClick={toggle}
@@ -95,8 +94,8 @@ export function TrophyDeck() {
               }}
             >
               <div className="trophy-card-inner">
-                {/* The mini-frame face (#115): cached art (or the gradient)
-                    UNDER the scrim and text, all under the #107 rarity sheen
+                {/* Full-bleed face (#123): cached art (or the gradient)
+                    UNDER the scrim and text, all under the rarity sheen
                     (the inner's ::after). Absolutely positioned layers only —
                     the #47 lift invariant (transform + z-index, no box
                     change) holds. Model SVG renders as an <img> data URI,
@@ -112,22 +111,13 @@ export function TrophyDeck() {
                     <div className="trophy-art-scrim" />
                   </>
                 )}
-                <div className="trophy-card-head">
-                  <span className="trophy-card-glyph">{c.wasDrawn ? "🃏" : "✅"}</span>
-                  {/* Level stars = impact, goal-linked completions only
-                      (ADR-4) — same rule as the full frame. */}
-                  {c.goalId != null && (
-                    <span className="trophy-stars">
-                      <ImpactStars value={c.impact} size={9} />
-                    </span>
-                  )}
-                </div>
+                <div className="trophy-card-glyph">{c.wasDrawn ? "🃏" : "✅"}</div>
                 <div className="trophy-card-title">{c.title}</div>
                 <div className="trophy-details">
-                  {category && <TypeLine category={category} />}
+                  {category && <CategoryPill category={category} />}
                 </div>
-                {/* Mini-frame footer: completion time + XP, readable in the
-                    collapsed pile too (#114) — not lift-gated like details. */}
+                {/* Footer: completion time + XP, readable in the collapsed
+                    pile too (#114) — not lift-gated like the details. */}
                 <div className="trophy-footer">
                   <span className="trophy-time">{time}</span>
                   <span className="trophy-card-xp">+{c.xpAwarded}</span>
