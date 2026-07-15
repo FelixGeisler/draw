@@ -1,13 +1,33 @@
 import { Router } from "express";
 import { db } from "../db.js";
+import { MINUTES_EXPR } from "../services/statsService.js";
 
 export const goalsRouter = Router();
 
+// Feasibility inputs (#60), derived at query time like the counts — no new
+// columns, nothing stored (ADR-2/ADR-5):
+// - remainingOpenEffortMinutes sums estimates over the goal's open LEAF tasks
+//   (no open subtasks) only. Subtasks inherit goal_id (#29), so a naive
+//   goal_id sum would count a broken-down parent's estimate on top of its
+//   children's — the same no-double-counting rule as the tasks list's
+//   remainingEffortMinutes (PR #26). NULL when no open leaf is estimated.
+// - trackedMinutes14d reuses the stats MINUTES_EXPR so a running entry counts
+//   up to now (#22); the window filter compares ISO strings lexicographically,
+//   like every stats range filter.
 const GOAL_SELECT = `
   SELECT g.id, g.title, g.outcome, g.target_date AS targetDate, g.status, g.created_at AS createdAt,
          (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status != 'archived') AS taskCount,
          (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status = 'done') AS doneCount,
-         (SELECT COUNT(*) FROM materials m WHERE m.goal_id = g.id) AS materialCount
+         (SELECT COUNT(*) FROM materials m WHERE m.goal_id = g.id) AS materialCount,
+         (SELECT SUM(t.effort_minutes) FROM tasks t
+            WHERE t.goal_id = g.id AND t.status = 'open'
+              AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')
+         ) AS remainingOpenEffortMinutes,
+         (SELECT CAST(ROUND(COALESCE(SUM(${MINUTES_EXPR}), 0)) AS INTEGER)
+            FROM time_entries e JOIN tasks t ON t.id = e.task_id
+            WHERE t.goal_id = g.id
+              AND e.started_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-14 days')
+         ) AS trackedMinutes14d
   FROM goals g`;
 
 function getGoal(id: number) {

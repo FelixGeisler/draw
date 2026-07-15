@@ -123,6 +123,16 @@ export interface Goal {
   taskCount: number;
   doneCount: number;
   materialCount: number;
+  /**
+   * Feasibility inputs (#60), derived at query time (never stored): sum of
+   * estimates over the goal's open leaf tasks (a broken-down parent counts
+   * via its open subtasks, not its own estimate on top — null when no open
+   * leaf is estimated), and minutes tracked on the goal's tasks in the last
+   * 14 days (running entry counted up to now). lib/feasibility.ts turns
+   * these into the on-track/tight/infeasible chip.
+   */
+  remainingOpenEffortMinutes: number | null;
+  trackedMinutes14d: number;
 }
 
 export interface Material {

@@ -17,7 +17,17 @@ task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at quer
 time; the stored estimate stays what the user typed and keeps feeding XP and
 edit forms; the one-level sum is exact for every database because the API
 rejects new nested breakdowns, ADR-16, and the v7 startup migration
-re-parented any pre-guard nesting to the root, ADR-24). Only facts are stored
+re-parented any pre-guard nesting to the root, ADR-24). Goal feasibility
+(#60) is the same rule at goal scope: `GET /api/goals` derives
+`remainingOpenEffortMinutes` (SUM over the goal's open *leaf* tasks — a
+broken-down parent counts through its open subtasks, which inherit the goal
+link, never its own estimate on top) and `trackedMinutes14d` (stats
+`MINUTES_EXPR`, so a running entry counts up to now), and the pure client
+module `lib/feasibility.ts` classifies on-track/tight/infeasible from
+required vs. actual pace; days to the target date count on the LOCAL wall
+clock to the end of the target day — a target date is a human-facing calendar
+day like the ADR-21 activity buckets, not a UTC instant. No feasibility
+snapshot is ever persisted. Only facts are stored
 (tasks, entries, completions, unlocked achievements).
 
 == 8.2 The weight formula

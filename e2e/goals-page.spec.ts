@@ -43,6 +43,8 @@ test("a task can be added from the goal card without an AI key", async ({ page }
   await expect(goalCard.getByText(daysLeftChip(INITIAL_DATE))).toBeVisible();
   await expect(goalCard.getByText(OUTCOME)).toBeVisible();
   await expect(goalCard.getByText("0/0 tasks")).toBeVisible();
+  // Target date but no tasks yet: nothing to burn down, no feasibility chip (#60).
+  await expect(goalCard.getByText(/min\/day/)).not.toBeVisible();
   // No AI configured, yet the card offers manual task creation.
   await expect(goalCard.getByRole("button", { name: "✨ Plan backward" })).not.toBeVisible();
 
@@ -61,6 +63,12 @@ test("a task can be added from the goal card without an AI key", async ({ page }
   // The count updates without reload; the form closes after submit.
   await expect(goalCard.getByText("0/1 tasks")).toBeVisible();
   await expect(goalCard.getByPlaceholder("What needs doing?")).not.toBeVisible();
+
+  // Estimated open task + target date but zero tracked history: the burn-down
+  // chip shows the required pace only — no verdict wording without an actual
+  // pace to compare against (#60).
+  await expect(goalCard.getByText(/Need ~\d+ min\/day/)).toBeVisible();
+  await expect(goalCard.getByText(/On track|Tight|Infeasible/)).not.toBeVisible();
 
   // The task is really linked to the goal with the chosen category/effort.
   const goals: { id: number; title: string }[] = await (
@@ -112,9 +120,11 @@ test("the target date can be cleared", async ({ page }) => {
   await page.getByTitle("Goal target date").fill("");
   await page.getByRole("button", { name: "Save", exact: true }).click();
 
-  // The days-left chip is gone, the rest of the card is intact.
+  // The days-left chip is gone, the rest of the card is intact — and without
+  // a target date the feasibility chip disappears with it (#60).
   await expect(goalCard.getByRole("heading", { name: `🎯 ${EDITED_TITLE}` })).toBeVisible();
   await expect(goalCard.getByText(/\d+d left/)).not.toBeVisible();
+  await expect(goalCard.getByText(/min\/day/)).not.toBeVisible();
 
   const goals: { title: string; targetDate: string | null }[] = await (
     await page.request.get("/api/goals")
