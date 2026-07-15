@@ -17,18 +17,28 @@ const GROUPS: { key: DrawGroup; title: string; hint: string }[] = [
 function EstimateInput({ task }: { task: Task }) {
   const updateTask = useUpdateTask();
   return (
-    <input
-      type="number"
-      min={1}
-      placeholder="min"
-      style={{ width: 70 }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          const v = Number((e.target as HTMLInputElement).value);
-          if (v > 0) updateTask.mutate({ id: task.id, effortMinutes: v });
-        }
-      }}
-    />
+    <>
+      <input
+        type="number"
+        min={1}
+        placeholder="min"
+        style={{ width: 70 }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            // Enter-keydown bypasses the form's `step` validation and the API
+            // wants integer minutes (#84) — round at the send boundary.
+            const v = Math.round(Number((e.target as HTMLInputElement).value));
+            if (v > 0) updateTask.mutate({ id: task.id, effortMinutes: v });
+          }
+        }}
+      />
+      {/* A failed save must not leave the task silently stuck here. */}
+      {updateTask.isError && (
+        <span role="alert" style={{ color: "var(--danger)", fontSize: 12 }}>
+          {(updateTask.error as Error).message}
+        </span>
+      )}
+    </>
   );
 }
 

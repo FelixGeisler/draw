@@ -298,6 +298,13 @@ describe("POST /api/tasks with parentId inherits goal and category (#84)", () =>
       categoryId: 2,
       goalId: goal.id,
     }).expect(201);
+
+    // Omitted impact defaults to the parent's rating — batch parity (the
+    // single-create path used to fall back to the root create's neutral 3).
+    const defaulted = (
+      await post({ title: "Defaulting child", parentId: parent.id }).expect(201)
+    ).body;
+    expect(defaulted.impact).toBe(4);
   });
 
   it("rejects a divergent goalId — the PR #82 divergence can no longer be created", async () => {

@@ -49,8 +49,10 @@ keep theirs as the historical stats record, mirroring the category cascade's
 open-only rule.
 *Single-create parity (#84):* `POST /api/tasks` with a `parentId` inherits the
 parent's goal and category exactly like the batch endpoint — an explicit
-divergent `goalId`/`categoryId` is rejected, and the impact gate judges the
-*inherited* goal. Before, that path ignored the parent's goal entirely, so a
+divergent `goalId`/`categoryId` is rejected, the impact gate judges the
+*inherited* goal, and an omitted impact defaults to the parent's rating (the
+batch's `s.impact ?? parent.impact` fallback, not the root create's neutral
+3). Before, that path ignored the parent's goal entirely, so a
 child could carry its own goal under a goal-less parent; the parent edit
 form's no-op `goalId` resend would then cascade over the child *without* the
 unlink reset — a silent wipe that minted grandfathered ratings a third,

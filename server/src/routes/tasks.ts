@@ -277,7 +277,13 @@ tasksRouter.post("/", (req, res) => {
   const recurEveryDays = body.recurEveryDays as number | null | undefined;
 
   let parent:
-    | { grandparentId: number | null; orderMode: string; goalId: number | null; categoryId: number }
+    | {
+        grandparentId: number | null;
+        orderMode: string;
+        goalId: number | null;
+        categoryId: number;
+        impact: number;
+      }
     | undefined;
   if (parentId != null) {
     // Shape check first: a non-integer parentId used to reach the driver as
@@ -288,7 +294,7 @@ tasksRouter.post("/", (req, res) => {
     parent = db
       .prepare(
         `SELECT parent_id AS grandparentId, subtask_order_mode AS orderMode,
-                goal_id AS goalId, category_id AS categoryId
+                goal_id AS goalId, category_id AS categoryId, impact
          FROM tasks WHERE id = ?`,
       )
       .get(parentId) as typeof parent;
@@ -366,7 +372,9 @@ tasksRouter.post("/", (req, res) => {
       effectiveCategoryId,
       effectiveGoalId,
       parentId ?? null,
-      impact ?? 3,
+      // Omitted impact defaults to the parent's rating on the parentId path —
+      // batch parity with `s.impact ?? parent.impact` below — else neutral 3.
+      impact ?? parent?.impact ?? 3,
       effortMinutes ?? null,
       dueDate ?? null,
       recurEveryDays ?? null,

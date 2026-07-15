@@ -240,7 +240,8 @@ const createTask = defineTool({
         "Create as a subtask of this ROOT task (prefer create_subtasks for batches). " +
           "The subtask inherits the parent's goal and category: pass the parent's own " +
           "categoryId, omit goalId (impact then rates the inherited goal), and note that " +
-          "a divergent goalId or categoryId is rejected. " +
+          "a divergent goalId or categoryId is rejected. Omitted impact defaults to the " +
+          "parent's rating, like create_subtasks. " +
           "Breakdowns are one level deep: nesting under a task that is itself a subtask is rejected",
       ),
   },

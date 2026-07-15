@@ -250,11 +250,22 @@ export function AiBreakdownPanel({
                 .filter((r) => r.included && r.data.title.trim())
                 .map((r) => ({
                   title: r.data.title.trim(),
-                  effortMinutes: r.data.effortMinutes,
+                  // The minutes field is editable to decimals (and reads 0
+                  // when cleared) but the API wants a positive integer (#84).
+                  effortMinutes: Math.max(1, Math.round(r.data.effortMinutes)),
                   impact: r.data.impact,
                 }));
-              if (accepted.length > 0) await onAccept(accepted, inOrder ? "sequential" : "parallel");
-              onClose();
+              setError(null);
+              try {
+                if (accepted.length > 0) {
+                  await onAccept(accepted, inOrder ? "sequential" : "parallel");
+                }
+                onClose();
+              } catch (e) {
+                // Keep the panel (and its rows) up with the message — the
+                // rejection used to vanish into an unhandled promise.
+                setError((e as Error).message);
+              }
             }}
           >
             Add {rows.filter((r) => r.included).length} subtasks
@@ -378,11 +389,17 @@ export function AiPlanPanel({
                 .filter((r) => r.included && r.data.title.trim())
                 .map((r) => ({
                   title: r.data.title.trim(),
-                  effortMinutes: r.data.effortMinutes,
+                  // Same send-boundary rounding as the breakdown panel (#84).
+                  effortMinutes: Math.max(1, Math.round(r.data.effortMinutes)),
                   impact: r.data.impact,
                 }));
-              if (accepted.length > 0) await onAccept(accepted);
-              onClose();
+              setError(null);
+              try {
+                if (accepted.length > 0) await onAccept(accepted);
+                onClose();
+              } catch (e) {
+                setError((e as Error).message);
+              }
             }}
           >
             Add {rows.filter((r) => r.included).length} tasks
