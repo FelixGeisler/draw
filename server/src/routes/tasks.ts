@@ -77,6 +77,89 @@ const RECURRING_SEQUENTIAL_ERROR =
   "never closes — completing it advances its due date (ADR-6) — so it would hold every " +
   "later step back forever. Drop the recurrence, or keep the parent's subtasks parallel";
 
+// Subtasks follow their parent's goal and category. The batch endpoint
+// inherits both by construction; since #84 the single-create path does too —
+// before, POST with parentId ignored the parent's goal entirely, so a child
+// could carry its OWN goal under a goal-less parent (PR #82). In that
+// divergent state the parent edit form's no-op goalId resend would cascade
+// goal_id over the child WITHOUT the ADR-4 unlink reset (`unlinking` is
+// false) — silently wiping the child's link while its non-neutral rating
+// survived: an undocumented third grandfathering path. Divergence is gated
+// explicitly (a conflicting value is rejected, not silently overridden);
+// omitted values inherit.
+const SUBTASK_GOAL_ERROR =
+  "subtasks follow their parent's goal: omit goalId when creating with a parentId (it is " +
+  "inherited), or pass the parent's own goalId";
+const SUBTASK_CATEGORY_ERROR =
+  "subtasks inherit their parent's category: omit categoryId when creating with a parentId, " +
+  "or pass the parent's own categoryId (a subtask's category stays editable afterwards)";
+
+/**
+ * Request-shape validation (#84): malformed field types used to surface as
+ * raw 500s — better-sqlite3 binding TypeErrors or CHECK-constraint
+ * violations — instead of honest 400s. Shared by POST /, POST /:id/subtasks
+ * (per row) and PATCH /:id; only keys present in the body are judged, so
+ * PATCH's sparse bodies pass untouched fields through.
+ */
+function fieldShapeError(body: Record<string, unknown>): string | null {
+  if ("title" in body && (typeof body.title !== "string" || !body.title.trim())) {
+    return "title must be a non-empty string";
+  }
+  if (body.description != null && typeof body.description !== "string") {
+    return "description must be a string";
+  }
+  if (
+    body.effortMinutes != null &&
+    (!Number.isInteger(body.effortMinutes) || (body.effortMinutes as number) < 1)
+  ) {
+    return "effortMinutes must be a positive integer";
+  }
+  if (body.dueDate != null && typeof body.dueDate !== "string") {
+    return "dueDate must be a YYYY-MM-DD string";
+  }
+  if ("status" in body && body.status !== "open" && body.status !== "done" && body.status !== "archived") {
+    return "status must be 'open', 'done' or 'archived'";
+  }
+  return null;
+}
+
+/**
+ * recurEveryDays type normalization (#84, PR #81): the web form and MCP send
+ * numbers, but a raw-HTTP resend of a stored value as a string ("2" for 2)
+ * must keep reading as the no-op the ADR-23 legacy tolerance detects with a
+ * strict !== against the stored number — so numeric strings are coerced
+ * BEFORE the guards compare, and everything else non-null must be a positive
+ * integer (the promise the MCP schema already makes). Mutates body in place;
+ * returns the 400 message or null. categoryId/goalId deliberately get no
+ * such coercion — they carry no resend-tolerance semantics.
+ */
+function normalizeRecurInput(body: Record<string, unknown>): string | null {
+  if (!("recurEveryDays" in body) || body.recurEveryDays == null) return null;
+  const raw = body.recurEveryDays;
+  const value = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (!Number.isInteger(value) || (value as number) < 1) {
+    return "recurEveryDays must be a positive integer (days)";
+  }
+  body.recurEveryDays = value;
+  return null;
+}
+
+// FK targets are validated up front (#84): a null/absent/nonexistent
+// categoryId used to die as the NOT NULL / FK constraint's raw 500 mid-
+// transaction (PR #77) — atomic, but unhelpful — and a nonexistent goalId
+// the same way. The existence checks make the 400 name the real problem.
+function categoryIdError(id: unknown): string | null {
+  if (!Number.isInteger(id) || (id as number) < 1) return "categoryId must be a positive integer";
+  if (!db.prepare("SELECT 1 FROM categories WHERE id = ?").get(id)) return "category not found";
+  return null;
+}
+
+function goalIdError(id: unknown): string | null {
+  if (!Number.isInteger(id) || (id as number) < 1) return "goalId must be a positive integer or null";
+  if (!db.prepare("SELECT 1 FROM goals WHERE id = ?").get(id)) return "goal not found";
+  return null;
+}
+
 /**
  * Any-status check on purpose: done and archived subtasks can be revived by a
  * plain status write (reopen / un-archive), so a recurring row in any state
@@ -182,44 +265,94 @@ tasksRouter.get("/", (req, res) => {
 });
 
 tasksRouter.post("/", (req, res) => {
-  const { title, description, categoryId, goalId, parentId, impact, effortMinutes, dueDate, recurEveryDays } =
-    req.body ?? {};
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const { title, description, categoryId, goalId, parentId, impact, effortMinutes, dueDate } = body;
   if (!title || typeof title !== "string" || !title.trim()) {
     return res.status(400).json({ error: "title is required" });
   }
-  if (!categoryId) {
-    return res.status(400).json({ error: "categoryId is required" });
-  }
-  // ADR-4 gate (#65): impact rates leverage toward a goal, so without a
-  // goalId only the neutral default 3 is accepted (the web form sends exactly
-  // that for goal-less creates). The API is the enforcement point — the MCP
-  // catalog and the web form both lean on this rejection rather than
-  // duplicating it.
-  if (impact != null) {
-    if (!Number.isInteger(impact) || impact < 1 || impact > 5) {
-      return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
-    }
-    if (goalId == null && impact !== 3) {
-      return res.status(400).json({ error: IMPACT_REQUIRES_GOAL });
-    }
-  }
+  const shapeError = fieldShapeError(body);
+  if (shapeError) return res.status(400).json({ error: shapeError });
+  const recurError = normalizeRecurInput(body);
+  if (recurError) return res.status(400).json({ error: recurError });
+  const recurEveryDays = body.recurEveryDays as number | null | undefined;
+
+  let parent:
+    | { grandparentId: number | null; orderMode: string; goalId: number | null; categoryId: number }
+    | undefined;
   if (parentId != null) {
-    const parentRow = db
-      .prepare("SELECT parent_id AS grandparentId, subtask_order_mode AS orderMode FROM tasks WHERE id = ?")
-      .get(parentId) as { grandparentId: number | null; orderMode: string } | undefined;
+    // Shape check first: a non-integer parentId used to reach the driver as
+    // a binding TypeError (raw 500) instead of an honest 400 (#84).
+    if (!Number.isInteger(parentId) || (parentId as number) < 1) {
+      return res.status(400).json({ error: "parentId must be a positive integer" });
+    }
+    parent = db
+      .prepare(
+        `SELECT parent_id AS grandparentId, subtask_order_mode AS orderMode,
+                goal_id AS goalId, category_id AS categoryId
+         FROM tasks WHERE id = ?`,
+      )
+      .get(parentId) as typeof parent;
     // A clear 400 instead of the FK violation's opaque 500.
-    if (!parentRow) return res.status(400).json({ error: "parent task not found" });
-    if (parentRow.grandparentId != null) {
+    if (!parent) return res.status(400).json({ error: "parent task not found" });
+    if (parent.grandparentId != null) {
       return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
     }
     // #66 (ADR-23): a NEW subtask may not bring a recurrence into a
     // sequential breakdown. (The batch endpoint needs no twin check — its
     // INSERT has no recurrence column at all.)
-    if (recurEveryDays != null && parentRow.orderMode === "sequential") {
+    if (recurEveryDays != null && parent.orderMode === "sequential") {
       return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
     }
+    // #84: the single-create path inherits goal and category exactly like
+    // the batch; a conflicting explicit value is divergence and rejected
+    // (see SUBTASK_GOAL_ERROR above). goalId: null counts as "not specified"
+    // — at create it has never meant "unlink", the web form sends it for
+    // every goal-less create.
+    if (goalId != null) {
+      const gError = goalIdError(goalId);
+      if (gError) return res.status(400).json({ error: gError });
+      if (goalId !== parent.goalId) return res.status(400).json({ error: SUBTASK_GOAL_ERROR });
+    }
+    if (categoryId != null) {
+      const cError = categoryIdError(categoryId);
+      if (cError) return res.status(400).json({ error: cError });
+      if (categoryId !== parent.categoryId) {
+        return res.status(400).json({ error: SUBTASK_CATEGORY_ERROR });
+      }
+    }
+  } else {
+    if (categoryId == null) {
+      return res.status(400).json({ error: "categoryId is required" });
+    }
+    const cError = categoryIdError(categoryId);
+    if (cError) return res.status(400).json({ error: cError });
+    if (goalId != null) {
+      const gError = goalIdError(goalId);
+      if (gError) return res.status(400).json({ error: gError });
+    }
   }
-  const win = parseWindowInput(req.body ?? {});
+  // The row's effective links: inherited on the parentId path (whether the
+  // caller omitted them or resent the parent's own values), the caller's on
+  // a root create.
+  const effectiveGoalId = parent ? parent.goalId : ((goalId as number | null | undefined) ?? null);
+  const effectiveCategoryId = parent ? parent.categoryId : (categoryId as number);
+
+  // ADR-4 gate (#65): impact rates leverage toward a goal, so without a goal
+  // only the neutral default 3 is accepted (the web form sends exactly that
+  // for goal-less creates). The API is the enforcement point — the MCP
+  // catalog and the web form both lean on this rejection rather than
+  // duplicating it. Judged against the EFFECTIVE goal (#84): a subtask under
+  // a goal-linked parent rates its inherited goal, while the goal-less
+  // sibling-ranking exception (#76) stays batch-only.
+  if (impact != null) {
+    if (!Number.isInteger(impact) || (impact as number) < 1 || (impact as number) > 5) {
+      return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
+    }
+    if (effectiveGoalId == null && impact !== 3) {
+      return res.status(400).json({ error: IMPACT_REQUIRES_GOAL });
+    }
+  }
+  const win = parseWindowInput(body);
   if (!win.ok) return res.status(400).json({ error: win.error });
   const window = win.present ? win : { days: null, start: null, end: null };
   const result = db
@@ -230,8 +363,8 @@ tasksRouter.post("/", (req, res) => {
     .run(
       title.trim(),
       description ?? null,
-      categoryId,
-      goalId ?? null,
+      effectiveCategoryId,
+      effectiveGoalId,
       parentId ?? null,
       impact ?? 3,
       effortMinutes ?? null,
@@ -264,6 +397,15 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
     // 500. The ADR-4 goal gate is deliberately NOT applied here, see below.
     if (s.impact != null && (!Number.isInteger(s.impact) || s.impact < 1 || s.impact > 5)) {
       return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
+    }
+    // Same shape sweep as POST / (#84): a non-string description or a
+    // non-numeric effortMinutes used to blow up as a better-sqlite3 binding
+    // TypeError mid-transaction — rolled back, but a raw 500.
+    if (s.description != null && typeof s.description !== "string") {
+      return res.status(400).json({ error: "subtask description must be a string" });
+    }
+    if (s.effortMinutes != null && (!Number.isInteger(s.effortMinutes) || s.effortMinutes < 1)) {
+      return res.status(400).json({ error: "subtask effortMinutes must be a positive integer" });
     }
   }
   // "Do in order" travels with the breakdown itself (#23) — persisted on the
@@ -334,6 +476,24 @@ tasksRouter.patch("/:id", (req, res) => {
   if (!raw) return res.status(404).json({ error: "task not found" });
 
   const body = req.body ?? {};
+
+  // Request-shape 400s (#84) run before every write path — including the
+  // completion/reopen branches below, which ignore extra fields rather than
+  // write them: a malformed field in a mixed payload is a caller bug either
+  // way. recurEveryDays is normalized here so the ADR-23 guards further down
+  // compare the coerced number against the stored one.
+  const shapeError = fieldShapeError(body);
+  if (shapeError) return res.status(400).json({ error: shapeError });
+  const recurError = normalizeRecurInput(body);
+  if (recurError) return res.status(400).json({ error: recurError });
+  if ("categoryId" in body) {
+    const cError = categoryIdError(body.categoryId);
+    if (cError) return res.status(400).json({ error: cError });
+  }
+  if ("goalId" in body && body.goalId != null) {
+    const gError = goalIdError(body.goalId);
+    if (gError) return res.status(400).json({ error: gError });
+  }
 
   // Completion goes through the gamification path.
   if (body.status === "done" && raw.status === "open") {

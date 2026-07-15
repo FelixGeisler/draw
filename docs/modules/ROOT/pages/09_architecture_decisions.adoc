@@ -47,6 +47,15 @@ task and cascades the reset to its *open* subtasks — the ratings described
 leverage toward the goal that was just removed — while done/archived subtasks
 keep theirs as the historical stats record, mirroring the category cascade's
 open-only rule.
+*Single-create parity (#84):* `POST /api/tasks` with a `parentId` inherits the
+parent's goal and category exactly like the batch endpoint — an explicit
+divergent `goalId`/`categoryId` is rejected, and the impact gate judges the
+*inherited* goal. Before, that path ignored the parent's goal entirely, so a
+child could carry its own goal under a goal-less parent; the parent edit
+form's no-op `goalId` resend would then cascade over the child *without* the
+unlink reset — a silent wipe that minted grandfathered ratings a third,
+undocumented way. Goal deletion and the goal-less batch stay the only two
+exceptions.
 
 == ADR-5: Gamification derived from the completions log
 

@@ -374,8 +374,9 @@ export function estimateMode(input: {
 }): EstimateMode {
   if (input.taskId != null) return "breakdown";
   if (input.goalId == null) throw new AiError(400, "taskId or goalId required");
-  // typeof guard: request bodies reach this unvalidated (the 400 sweep across
-  // AI routes is a separate issue) — a non-string must not crash the estimate.
+  // typeof guard kept as defense in depth: routes/ai.ts rejects non-string
+  // instructions with a 400 up front (#84), but a direct caller of estimate()
+  // must not crash on one either.
   return typeof input.instruction === "string" && input.instruction.trim()
     ? "generate-tasks"
     : "plan-goal";
