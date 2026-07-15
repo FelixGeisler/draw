@@ -3,6 +3,7 @@ import { CapturePage } from "./pages/CapturePage";
 import { DrawPage } from "./pages/DrawPage";
 import { TasksPage } from "./pages/TasksPage";
 import { StatsPage } from "./pages/StatsPage";
+import { HistoryPage } from "./pages/HistoryPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TimerBar } from "./components/TimerBar";
@@ -24,6 +25,7 @@ const NAV = [
   { to: "/tasks", label: "Tasks" },
   { to: "/goals", label: "Goals" },
   { to: "/stats", label: "Stats" },
+  { to: "/history", label: "History" },
   { to: "/settings", label: "Settings" },
 ];
 
@@ -48,6 +50,7 @@ export default function App() {
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/goals" element={<GoalsPage />} />
           <Route path="/stats" element={<StatsPage />} />
+          <Route path="/history" element={<HistoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </div>

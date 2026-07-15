@@ -27,16 +27,18 @@ server/src/
 │   ├── timer.ts             current/stop; start lives on tasks route
 │   ├── draw.ts              POST /api/draw, GET /api/draw/current (restore)
 │   ├── stats.ts             GET /api/stats (UTC date-range handling)
+│   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
 │   ├── gamification.ts      GET /api/gamification
 │   ├── settings.ts          key-value settings
 │   └── ai.ts                status, estimate, breakdown, plan-goal, generate-tasks
 └── services/                Domain logic
     ├── drawService.ts       drawable predicate + weight formula + roulette selection + current draw
     ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation accuracy
+    ├── activityService.ts   per-day card derivation for the history skyline (pure core + SQL fetch)
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
     ├── aiService.ts         Anthropic client, material blocks, prompts, token guard
     ├── aiPostprocess.ts     deterministic generate-tasks shaping (ADR-14): pure, SDK-/DB-free
-    ├── svgSanitizer.ts      allowlist re-serializer for model-written SVG (ADR-21): pure
+    ├── svgSanitizer.ts      allowlist re-serializer for model-written SVG (ADR-22): pure
     └── cardArtService.ts    card-art cache orchestration (generate → sanitize → store once)
 ....
 
@@ -56,12 +58,16 @@ server/src/
 |Time aggregation, estimated-vs-tracked accuracy
 |Running entries count up to _now_; date math in UTC; tasks without estimate or tracked time are excluded from accuracy, never counted as 0
 
+|`activityService`
+|Per-day history card derivation (skyline)
+|Derived read-side from `time_entries` + `completions`, bucketed by *local* day; a worked-but-uncompleted day stays face-down forever
+
 |`aiService`
 |Claude API access
 |Requests blocked without key (503) or above 180K input tokens (400)
 
 |`svgSanitizer` + `cardArtService`
-|Card art safety and cost (ADR-21)
+|Card art safety and cost (ADR-22)
 |Only allowlist-re-serialized SVG is ever stored or served; at most one generation per task
 |===
 
@@ -71,9 +77,9 @@ server/src/
 client/src/
 ├── api/client.ts + types.ts   typed fetch wrapper, shared DTOs
 ├── hooks/                     TanStack Query wrappers (useTasks, useDraw, useTimer,
-│                              useGamification, useGoals, useAi)
+│                              useGamification, useGoals, useAi, useActivity)
 ├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip), Capture,
-│                              Tasks, Goals, Stats, Settings
+│                              Tasks, Goals, Stats, History (skyline), Settings
 ├── lib/                       pure client logic (drawable classification, effort display,
 │                              generate-tasks review model) — unit-tested without rendering
 └── components/                TaskRow/Form/Badges, SubtaskEditor, TimerBar,
@@ -83,8 +89,10 @@ client/src/
 ....
 
 All server state flows through TanStack Query; task mutations invalidate the
-`tasks`/`gamification`/`stats`/`goals` query keys (goal cards derive their
-task counts from tasks). There is no other state management.
+`tasks`/`gamification`/`stats`/`activity`/`goals` query keys (goal cards derive
+their task counts from tasks; timer start/stop also touches `activity` — a
+started task lays a card into today's skyline tower). There is no other state
+management.
 
 == 5.4 Data Model
 

@@ -80,7 +80,7 @@ CREATE TABLE materials (
   created_at TEXT NOT NULL
 );
 
--- AI card art cache (#27, ADR-21): one sanitized SVG per task, generated at
+-- AI card art cache (#27, ADR-22): one sanitized SVG per task, generated at
 -- most once. svg holds the SANITIZED markup (svgSanitizer.ts runs before any
 -- INSERT); deleting a task takes its art with it.
 CREATE TABLE card_art (

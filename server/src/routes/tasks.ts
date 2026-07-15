@@ -346,7 +346,7 @@ tasksRouter.patch("/:id", (req, res) => {
   res.json({ task });
 });
 
-// AI card art (#27, ADR-21): serves the cached SVG or generates it exactly
+// AI card art (#27, ADR-22): serves the cached SVG or generates it exactly
 // once per task (sanitized before storage). Degraded mode answers 503
 // ai_not_configured, matching routes/ai.ts — the client swallows every
 // failure into "no art", so this endpoint never blocks or breaks the reveal.

@@ -1,5 +1,5 @@
 /**
- * Allowlist-based SVG sanitizer for model-generated card art (#27, ADR-21).
+ * Allowlist-based SVG sanitizer for model-generated card art (#27, ADR-22).
  *
  * Strategy: never emit any slice of the input. The input is tokenized and a
  * NEW document is serialized from scratch — only allowlisted element names,

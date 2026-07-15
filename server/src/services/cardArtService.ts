@@ -3,7 +3,7 @@ import { AiError, generateCardArt, isConfigured } from "./aiService.js";
 import { sanitizeSvg } from "./svgSanitizer.js";
 
 /**
- * Card art cache (#27, ADR-21): at most one generation per task. The check
+ * Card art cache (#27, ADR-22): at most one generation per task. The check
  * order is a contract the route tests pin down:
  *   1. unknown task        → 404 (even in degraded mode)
  *   2. cached row          → serve, no API call ever again for this task

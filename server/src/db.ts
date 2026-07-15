@@ -46,7 +46,7 @@ function migrate() {
       db.exec("ALTER TABLE tasks ADD COLUMN window_end TEXT");
     }
     if (version < 6) {
-      // AI card art cache (issue #27, ADR-21): sanitized SVG, once per task.
+      // AI card art cache (issue #27, ADR-22): sanitized SVG, once per task.
       db.exec(`CREATE TABLE card_art (
         task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
         svg TEXT NOT NULL,
