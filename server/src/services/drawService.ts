@@ -325,9 +325,13 @@ function emptyPoolReason(
  * CLOSED entries only, on purpose: the client already polls the running
  * timer, so it adds the in-flight entry's elapsed time itself — a live tick
  * without refetching this payload every minute, and no double count.
+ * Floored, not rounded: the client live tick floors (liveTrackedMinutes), so
+ * rounding here would let DEF jump one higher the moment a timer stops (live
+ * 10 + 1.9 showed DEF/11; ROUND(11.9) folded to 12). CAST truncates toward
+ * zero, which equals floor for these non-negative durations.
  */
-const TRACKED_MINUTES_SQL = `(SELECT CAST(ROUND(COALESCE(SUM(
-         (julianday(e.ended_at) - julianday(e.started_at)) * 1440.0), 0)) AS INTEGER)
+const TRACKED_MINUTES_SQL = `(SELECT CAST(COALESCE(SUM(
+         (julianday(e.ended_at) - julianday(e.started_at)) * 1440.0), 0) AS INTEGER)
        FROM time_entries e WHERE e.task_id = t.id AND e.ended_at IS NOT NULL)`;
 
 /** Full payload row for a freshly dealt card — a pool candidate is an open

@@ -101,8 +101,9 @@ export function useCardArtBatch(taskIds: number[]) {
     queryFn: () =>
       api.get<{ arts: { taskId: number; svg: string }[] }>(`/api/card-art?taskIds=${key}`),
     enabled: key !== "",
-    // Cached art only changes through a regenerate on the DRAWN card — a
-    // completed card's art is settled, so this id set cannot go stale.
+    // Cached art only changes through a regenerate on the DRAWN card — but a
+    // recurring task completed earlier today can be redrawn the same day, so
+    // the regenerate mutation invalidates this key; nothing else can stale it.
     staleTime: Infinity,
     retry: false,
     refetchOnWindowFocus: false,
@@ -132,6 +133,12 @@ export function regenerateCardArtMutation(qc: QueryClient) {
       api.post<{ svg: string }>(`/api/tasks/${taskId}/card-art/regenerate`),
     onSuccess: (data: { svg: string }, taskId: number) => {
       qc.setQueryData(["card-art", taskId], data);
+      // A recurring task completed earlier today sits in the trophy pile AND
+      // re-enters the pool — regenerating its art on a same-day redraw must
+      // refresh the pile's batch cache too (staleTime: Infinity means nothing
+      // else ever will). Cheap: the batch endpoint is cache-only server-side,
+      // so the refetch is a plain SELECT, never a Claude call.
+      void qc.invalidateQueries({ queryKey: ["card-art-batch"] });
     },
   };
 }
