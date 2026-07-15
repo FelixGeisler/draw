@@ -5,7 +5,7 @@ import { announceAchievements } from "./useGamification";
 
 export interface DrawResponse {
   task: Task | null;
-  reason?: "no_ready_tasks" | "all_too_big";
+  reason?: "no_ready_tasks" | "all_too_big" | "all_outside_window";
   poolSize?: number;
   probability?: number;
   newAchievements?: string[];

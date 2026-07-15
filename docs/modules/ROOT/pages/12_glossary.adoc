@@ -8,7 +8,13 @@
 |The set of currently drawable tasks
 
 |*Drawable*
-|Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks, not snoozed/blocked and not held back — a derived predicate, never stored
+|Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks, not snoozed/blocked, not held back, and inside its availability window if it has one — a derived predicate, never stored
+
+|*Availability window*
+|Optional per-task weekdays (`window_days`, JS `getDay()` numbers) plus a daily `[window_start, window_end)` range, local wall clock; outside it the card leaves the deck and returns on its own (ADR-20)
+
+|*Scheduled*
+|An open task currently outside its availability window — out of the deck until the window opens again; derived at query time, shown as the 🕒 chip
 
 |*Sequential breakdown*
 |A parent with `subtask_order_mode = 'sequential'`: only its first open subtask in creation order enters the deck (ADR-18)

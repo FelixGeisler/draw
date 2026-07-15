@@ -12,6 +12,17 @@ interface Props {
   onCancel?: () => void;
 }
 
+// Availability editor (#33): rendered Mon-first, stored as getDay() numbers.
+const WEEKDAYS: { day: number; label: string }[] = [
+  { day: 1, label: "Mon" },
+  { day: 2, label: "Tue" },
+  { day: 3, label: "Wed" },
+  { day: 4, label: "Thu" },
+  { day: 5, label: "Fri" },
+  { day: 6, label: "Sat" },
+  { day: 0, label: "Sun" },
+];
+
 function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
     <span title="Impact toward the goal (1–5)" style={{ fontSize: 18, cursor: "pointer" }}>
@@ -36,6 +47,17 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
   const [effort, setEffort] = useState<string>(initial?.effortMinutes?.toString() ?? "");
   const [dueDate, setDueDate] = useState<string>(initial?.dueDate ?? "");
   const [recur, setRecur] = useState<string>(initial?.recurEveryDays?.toString() ?? "");
+  // Availability window (#33) — tucked behind a toggle so quick capture stays
+  // lean. Enabling seeds a sensible Mon–Fri office window to edit from.
+  const [windowOpen, setWindowOpen] = useState(initial?.windowDays != null);
+  const [windowDays, setWindowDays] = useState<number[]>(initial?.windowDays ?? [1, 2, 3, 4, 5]);
+  const [windowStart, setWindowStart] = useState(initial?.windowStart ?? "09:00");
+  const [windowEnd, setWindowEnd] = useState(initial?.windowEnd ?? "17:00");
+
+  // All-or-none (server-validated): an editor left incomplete submits no
+  // window at all — identical to toggling it off.
+  const windowSet =
+    windowOpen && windowDays.length > 0 && windowStart !== "" && windowEnd !== "";
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,13 +70,26 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
       effortMinutes: effort ? Number(effort) : null,
       dueDate: dueDate || null,
       recurEveryDays: recur ? Number(recur) : null,
+      windowDays: windowSet ? windowDays : null,
+      windowStart: windowSet ? windowStart : null,
+      windowEnd: windowSet ? windowEnd : null,
     });
     if (!initial) {
       setTitle("");
       setEffort("");
       setDueDate("");
       setRecur("");
+      setWindowOpen(false);
+      setWindowDays([1, 2, 3, 4, 5]);
+      setWindowStart("09:00");
+      setWindowEnd("17:00");
     }
+  }
+
+  function toggleDay(day: number) {
+    setWindowDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
+    );
   }
 
   return (
@@ -113,6 +148,15 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
         onChange={(e) => setRecur(e.target.value)}
         style={{ width: 84 }}
       />
+      <button
+        type="button"
+        title="Availability window — only draw this task on certain weekdays and times"
+        aria-pressed={windowOpen}
+        onClick={() => setWindowOpen((o) => !o)}
+        style={windowOpen ? undefined : { opacity: 0.7 }}
+      >
+        🕒 availability
+      </button>
       <button type="submit" className="primary">
         {submitLabel ?? "Add"}
       </button>
@@ -120,6 +164,46 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
+      )}
+      {windowOpen && (
+        <div
+          style={{
+            flexBasis: "100%",
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          {WEEKDAYS.map(({ day, label }) => (
+            <span
+              key={day}
+              className={`chip ${windowDays.includes(day) ? "active" : ""}`}
+              role="checkbox"
+              aria-checked={windowDays.includes(day)}
+              aria-label={label}
+              onClick={() => toggleDay(day)}
+              style={{ cursor: "pointer", opacity: windowDays.includes(day) ? 1 : 0.5 }}
+            >
+              {label}
+            </span>
+          ))}
+          <input
+            type="time"
+            title="Window opens (inclusive)"
+            aria-label="Window start"
+            value={windowStart}
+            onChange={(e) => setWindowStart(e.target.value)}
+          />
+          –
+          <input
+            type="time"
+            title="Window closes (exclusive)"
+            aria-label="Window end"
+            value={windowEnd}
+            onChange={(e) => setWindowEnd(e.target.value)}
+          />
+        </div>
       )}
     </form>
   );

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { classifyTask, flattenOpen, isSnoozed } from "./drawable";
-import { DRAWABLE_VECTORS, VECTOR_NOW } from "../../../shared/drawableVectors";
+import { classifyTask, flattenOpen, formatWindow, isSnoozed, isWithinWindow } from "./drawable";
+import {
+  DRAWABLE_VECTORS,
+  VECTOR_NOW,
+  WINDOW_VECTORS,
+  materializeWindow,
+} from "../../../shared/drawableVectors";
 import type { Task } from "../api/types";
 
 function task(overrides: Partial<Task> = {}): Task {
@@ -22,6 +27,9 @@ function task(overrides: Partial<Task> = {}): Task {
     deferredUntil: null,
     blocked: false,
     subtaskOrderMode: "parallel",
+    windowDays: null,
+    windowStart: null,
+    windowEnd: null,
     hasOpenChildren: 0,
     heldBack: 0,
     ...overrides,
@@ -55,10 +63,49 @@ describe("classifyTask", () => {
           deferredUntil: v.deferredUntil,
           heldBack: v.heldBack,
           effortMinutes: v.effortMinutes,
+          // Windows are local wall-clock (#33): materialized from offsets
+          // relative to `now`, deterministic in every timezone.
+          ...(v.window ? materializeWindow(v.window, now) : {}),
         });
         expect(classifyTask(t, v.maxEffort, now)).toBe(v.expected);
       });
     }
+  });
+});
+
+// The same vectors pin the server's isWithinWindow — see
+// shared/drawableVectors.ts and server/test/unit/window-predicate.test.ts.
+describe("isWithinWindow (shared window vectors, parity with drawService)", () => {
+  for (const v of WINDOW_VECTORS) {
+    it(v.name, () => {
+      const [y, m, d, hh, mm] = v.now;
+      expect(isWithinWindow(v.days, v.start, v.end, new Date(y, m - 1, d, hh, mm))).toBe(
+        v.expected,
+      );
+    });
+  }
+
+  it("a task without a window is always within it", () => {
+    expect(isWithinWindow(null, null, null, new Date())).toBe(true);
+  });
+});
+
+describe("formatWindow", () => {
+  it("collapses consecutive weekdays Mon-first", () => {
+    expect(formatWindow([1, 2, 3, 4, 5], "08:00", "12:00")).toBe("Mon–Fri 08:00–12:00");
+    expect(formatWindow([0, 6], "10:00", "14:00")).toBe("Sat, Sun 10:00–14:00");
+  });
+
+  it("lists non-consecutive days individually", () => {
+    expect(formatWindow([1, 3, 5], "08:00", "12:00")).toBe("Mon, Wed, Fri 08:00–12:00");
+  });
+
+  it("labels a seven-day window daily", () => {
+    expect(formatWindow([0, 1, 2, 3, 4, 5, 6], "06:00", "09:00")).toBe("daily 06:00–09:00");
+  });
+
+  it("wraps the Mon-first week: Fri–Sun is one range", () => {
+    expect(formatWindow([5, 6, 0], "18:00", "24:00")).toBe("Fri–Sun 18:00–24:00");
   });
 });
 

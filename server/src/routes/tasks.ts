@@ -6,7 +6,7 @@ import {
   getCurrentDrawTaskId,
   heldBackSql,
   isRestorable,
-  withBooleanBlocked,
+  toTaskPayload,
   type RestorableTask,
 } from "../services/drawService.js";
 import {
@@ -27,6 +27,7 @@ const TASK_SELECT = `
          created_at AS createdAt, completed_at AS completedAt,
          last_drawn_at AS lastDrawnAt, deferred_until AS deferredUntil, blocked,
          subtask_order_mode AS subtaskOrderMode,
+         window_days AS windowDays, window_start AS windowStart, window_end AS windowEnd,
          EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open') AS hasOpenChildren,
          ${heldBackSql("tasks")} AS heldBack,
          CASE
@@ -40,7 +41,65 @@ function getTask(id: number) {
   const task = db.prepare(`${TASK_SELECT} WHERE id = ?`).get(id) as
     | Record<string, unknown>
     | undefined;
-  return task && withBooleanBlocked(task);
+  return task && toTaskPayload(task);
+}
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Availability window (#33, ADR-20) — shared POST/PATCH validation. The
+ * window is all-or-none: windowDays (weekday integers 0–6, JS getDay
+ * convention), windowStart and windowEnd ("HH:MM", end may be "24:00" for
+ * end-of-day) are set together, or cleared together via `windowDays: null`.
+ * [start, end) with end <= start rejected: overnight windows are ambiguous
+ * with a weekday set and stay a follow-up (approximate with 22:00–24:00).
+ * Days are normalized (deduplicated, sorted) before storage as JSON text.
+ */
+function parseWindowInput(
+  body: Record<string, unknown>,
+):
+  | { ok: false; error: string }
+  | { ok: true; present: false }
+  | { ok: true; present: true; days: string | null; start: string | null; end: string | null } {
+  if (!["windowDays", "windowStart", "windowEnd"].some((k) => k in body)) {
+    return { ok: true, present: false };
+  }
+  const days = body.windowDays ?? null;
+  const start = body.windowStart ?? null;
+  const end = body.windowEnd ?? null;
+  if (days === null && start === null && end === null) {
+    return { ok: true, present: true, days: null, start: null, end: null };
+  }
+  if (days === null || start === null || end === null) {
+    return {
+      ok: false,
+      error:
+        "availability window is all-or-none: set windowDays, windowStart and windowEnd together, or windowDays: null to clear",
+    };
+  }
+  if (
+    !Array.isArray(days) ||
+    days.length === 0 ||
+    days.some((d) => !Number.isInteger(d) || (d as number) < 0 || (d as number) > 6)
+  ) {
+    return { ok: false, error: "windowDays must be a non-empty array of weekday integers 0-6 (0 = Sunday)" };
+  }
+  if (typeof start !== "string" || !TIME_RE.test(start)) {
+    return { ok: false, error: "windowStart must be HH:MM (00:00-23:59)" };
+  }
+  if (typeof end !== "string" || !(TIME_RE.test(end) || end === "24:00")) {
+    return { ok: false, error: "windowEnd must be HH:MM (up to 24:00 for end-of-day)" };
+  }
+  // Zero-padded HH:MM compares correctly as a string ("24:00" sorts last).
+  if (end <= start) {
+    return {
+      ok: false,
+      error:
+        "windowEnd must be after windowStart — overnight windows are not supported yet, approximate with e.g. 22:00-24:00",
+    };
+  }
+  const normalized = [...new Set(days as number[])].sort((a, b) => a - b);
+  return { ok: true, present: true, days: JSON.stringify(normalized), start, end };
 }
 
 tasksRouter.get("/", (req, res) => {
@@ -71,8 +130,8 @@ tasksRouter.get("/", (req, res) => {
     `${TASK_SELECT} WHERE parent_id = ? AND status != 'archived' ORDER BY created_at ASC, id ASC`,
   );
   for (const root of roots) {
-    withBooleanBlocked(root);
-    root.subtasks = (childStmt.all(root.id) as Record<string, unknown>[]).map(withBooleanBlocked);
+    toTaskPayload(root);
+    root.subtasks = (childStmt.all(root.id) as Record<string, unknown>[]).map(toTaskPayload);
   }
   res.json(roots);
 });
@@ -86,10 +145,13 @@ tasksRouter.post("/", (req, res) => {
   if (!categoryId) {
     return res.status(400).json({ error: "categoryId is required" });
   }
+  const win = parseWindowInput(req.body ?? {});
+  if (!win.ok) return res.status(400).json({ error: win.error });
+  const window = win.present ? win : { days: null, start: null, end: null };
   const result = db
     .prepare(
-      `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, due_date, recur_every_days, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, due_date, recur_every_days, window_days, window_start, window_end, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       title.trim(),
@@ -101,6 +163,9 @@ tasksRouter.post("/", (req, res) => {
       effortMinutes ?? null,
       dueDate ?? null,
       recurEveryDays ?? null,
+      window.days,
+      window.start,
+      window.end,
       new Date().toISOString(),
     );
   res.status(201).json(getTask(Number(result.lastInsertRowid)));
@@ -213,6 +278,16 @@ tasksRouter.patch("/:id", (req, res) => {
   if ("subtaskOrderMode" in body && body.subtaskOrderMode !== "parallel" && body.subtaskOrderMode !== "sequential") {
     return res.status(400).json({ error: "subtaskOrderMode must be 'parallel' or 'sequential'" });
   }
+  // Availability window (#33): validated and normalized as a trio — the
+  // three body keys are rewritten so the generic field map below always
+  // writes all three columns together (all-or-none by construction).
+  const win = parseWindowInput(body);
+  if (!win.ok) return res.status(400).json({ error: win.error });
+  if (win.present) {
+    body.windowDays = win.days;
+    body.windowStart = win.start;
+    body.windowEnd = win.end;
+  }
 
   const fields: Record<string, string> = {
     title: "title",
@@ -227,6 +302,9 @@ tasksRouter.patch("/:id", (req, res) => {
     deferredUntil: "deferred_until",
     blocked: "blocked",
     subtaskOrderMode: "subtask_order_mode",
+    windowDays: "window_days",
+    windowStart: "window_start",
+    windowEnd: "window_end",
   };
   const sets: string[] = [];
   const params: unknown[] = [];

@@ -16,7 +16,7 @@ export const db = new Database(path.join(dataDir, "app.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-const CURRENT_VERSION = 4;
+const CURRENT_VERSION = 5;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -38,6 +38,12 @@ function migrate() {
       db.exec(
         "ALTER TABLE tasks ADD COLUMN subtask_order_mode TEXT NOT NULL CHECK (subtask_order_mode IN ('parallel', 'sequential')) DEFAULT 'parallel'",
       );
+    }
+    if (version < 5) {
+      // Availability window (issue #33, ADR-20): all three set or all NULL.
+      db.exec("ALTER TABLE tasks ADD COLUMN window_days TEXT");
+      db.exec("ALTER TABLE tasks ADD COLUMN window_start TEXT");
+      db.exec("ALTER TABLE tasks ADD COLUMN window_end TEXT");
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);
