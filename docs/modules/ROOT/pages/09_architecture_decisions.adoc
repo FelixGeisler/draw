@@ -231,7 +231,12 @@ parent created, batch failed — is closed with a compensating delete, which is
 simpler than a new atomic endpoint and impossible to observe as a task list
 (a bare parent with zero children exists only between the two calls). Deeper
 nesting is banned because every list renders roots plus one child level:
-level-3 leaves would be draw-eligible yet invisible everywhere.
+level-3 leaves would be draw-eligible yet invisible everywhere. Since #35 the
+API enforces the ban on both subtask-creation paths —
+`POST /api/tasks/:id/subtasks` and `POST /api/tasks` with a `parentId` — by
+rejecting a parent that is itself a subtask with 400, so API/MCP callers
+cannot create the nesting the UI already forbids (the one-level
+remaining-effort rollup and the one-level goal/category cascades rely on it).
 
 == ADR-17: Snooze/block as retained timestamps, drawability stays derived
 

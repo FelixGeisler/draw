@@ -101,6 +101,71 @@ describe("task CRUD and breakdown rule", () => {
     expect(listed.subtasks).toEqual([]);
   });
 
+  it("rejects breaking down a task that is itself a subtask (one level deep, ADR-16)", async () => {
+    // Issue #35: the derived remainingEffortMinutes rollup, the goal/category
+    // cascades, and every list view are one level deep — nesting is rejected
+    // at the API instead of made recursive.
+    const root = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Nesting root", categoryId: 1, effortMinutes: 90 })
+    ).body;
+    const [middle] = (
+      await request(app)
+        .post(`/api/tasks/${root.id}/subtasks`)
+        .send({ subtasks: [{ title: "Middle step", effortMinutes: 45 }] })
+        .expect(201)
+    ).body;
+
+    const res = await request(app)
+      .post(`/api/tasks/${middle.id}/subtasks`)
+      .send({ subtasks: [{ title: "Grandchild", effortMinutes: 15 }] })
+      .expect(400);
+    expect(res.body.error).toContain("one level deep");
+
+    // Nothing was created, and the parent's rollup keeps reporting the
+    // middle task's own estimate — no hidden grandchild sum to get wrong.
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === root.id);
+    expect(listed.subtasks).toHaveLength(1);
+    expect(listed.subtasks[0].remainingEffortMinutes).toBe(45);
+    expect(listed.remainingEffortMinutes).toBe(45);
+  });
+
+  it("applies the same one-level guard to POST /api/tasks with parentId", async () => {
+    const root = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Direct-create root", categoryId: 1 })
+    ).body;
+    const [child] = (
+      await request(app)
+        .post(`/api/tasks/${root.id}/subtasks`)
+        .send({ subtasks: [{ title: "Direct-create child", effortMinutes: 10 }] })
+    ).body;
+
+    // Under a root parent the single-create path still works (MCP create_task).
+    const sibling = await request(app)
+      .post("/api/tasks")
+      .send({ title: "Added sibling", categoryId: 1, parentId: root.id, effortMinutes: 5 })
+      .expect(201);
+    expect(sibling.body.parentId).toBe(root.id);
+
+    // Under a subtask it is rejected with the same message as the batch path.
+    const nested = await request(app)
+      .post("/api/tasks")
+      .send({ title: "Grandchild", categoryId: 1, parentId: child.id })
+      .expect(400);
+    expect(nested.body.error).toContain("one level deep");
+
+    // A dangling parentId is a clear 400, not an FK-violation 500.
+    const dangling = await request(app)
+      .post("/api/tasks")
+      .send({ title: "Orphan", categoryId: 1, parentId: 99999 })
+      .expect(400);
+    expect(dangling.body.error).toContain("parent task not found");
+  });
+
   it("blocks completing a parent while subtasks are open (409)", async () => {
     const parent = (
       await request(app)
