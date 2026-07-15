@@ -4,6 +4,7 @@ import { useCreateSubtasks, useDeleteTask, useUpdateTask } from "../hooks/useTas
 import { useAiStatus } from "../hooks/useAi";
 import { isSnoozed } from "../lib/drawable";
 import { sequentialLockedByRecurrence } from "../lib/orderMode";
+import { reparentTargets } from "../lib/reparent";
 import { TaskBadges } from "./TaskBadges";
 import { SnoozeMenu } from "./SnoozeMenu";
 import { TaskForm } from "./TaskForm";
@@ -22,9 +23,23 @@ interface Props {
    * a recurring step would gate its siblings forever, and the API rejects it.
    */
   parentOrderMode?: Task["subtaskOrderMode"];
+  /**
+   * Every root task on the page (#100) — the "Move under…" picker's candidate
+   * pool. Only passed to root rows; subtask rows get "Promote to top-level"
+   * instead and need no targets.
+   */
+  rootTasks?: Task[];
 }
 
-export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentOrderMode }: Props) {
+export function TaskRow({
+  task,
+  categories,
+  goals,
+  maxEffort,
+  depth = 0,
+  parentOrderMode,
+  rootTasks,
+}: Props) {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const createSubtasks = useCreateSubtasks();
@@ -35,6 +50,9 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
   const [snoozing, setSnoozing] = useState(false);
   const [editing, setEditing] = useState(false);
   const [orderModeError, setOrderModeError] = useState<string | null>(null);
+  const [movingUnder, setMovingUnder] = useState(false);
+  const [moveTargetId, setMoveTargetId] = useState("");
+  const [reparentError, setReparentError] = useState<string | null>(null);
 
   const category = categories.find((c) => c.id === task.categoryId);
   const hasSubtasks = (task.subtasks?.length ?? 0) > 0;
@@ -43,6 +61,13 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
   // Recurring × sequential guard (#66, ADR-23): a recurring subtask locks the
   // switch to 'do in order' — on the flip button and in both breakdown editors.
   const sequentialLocked = sequentialLockedByRecurrence(task.subtasks, task.subtaskOrderMode);
+  // Reparent targets (#100): shared rule source with the drag-and-drop
+  // follow-up (#101). Only root leaf rows offer "Move under…" — a task with
+  // subtasks cannot become a subtask itself (ADR-16).
+  const moveTargets =
+    !done && task.parentId == null && !hasSubtasks && rootTasks
+      ? reparentTargets(task, rootTasks)
+      : [];
 
   function snooze(patch: { deferredUntil?: string; blocked?: boolean }) {
     updateTask.mutate({ id: task.id, ...patch });
@@ -52,6 +77,19 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
   async function saveEdit(patch: NewTask) {
     await updateTask.mutateAsync({ id: task.id, ...patch });
     setEditing(false);
+  }
+
+  async function reparent(parentId: number | null) {
+    setReparentError(null);
+    try {
+      await updateTask.mutateAsync({ id: task.id, parentId });
+      setMovingUnder(false);
+      setMoveTargetId("");
+    } catch (e) {
+      // Server 400s (validation matrix) surface inline as the backstop, like
+      // the order-mode flip does.
+      setReparentError((e as Error).message);
+    }
   }
 
   return (
@@ -160,6 +198,28 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
             Break down
           </button>
         )}
+        {/* Reparent (#100): this menu is THE reparent control — drag-and-drop
+            arrives as an alternative input in #101, reusing lib/reparent.ts.
+            Plain buttons and a native select keep both actions keyboard-
+            operable by construction. */}
+        {moveTargets.length > 0 && (
+          <button
+            onClick={() => {
+              setBreakingDown(false);
+              setSnoozing(false);
+              setReparentError(null);
+              setMovingUnder((m) => !m);
+            }}
+            title="Move under another task (it becomes a subtask)"
+          >
+            Move under…
+          </button>
+        )}
+        {!done && task.parentId != null && (
+          <button onClick={() => reparent(null)} title="Promote to top-level">
+            ⤴
+          </button>
+        )}
         {/* Done rows are not editable — reopen first (matches the checkbox flow). */}
         {!done && (
           <button
@@ -167,6 +227,7 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
               setBreakingDown(false);
               setAiPanel(false);
               setSnoozing(false);
+              setMovingUnder(false);
               setEditing(true);
             }}
             title="Edit"
@@ -189,6 +250,53 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0, parentO
       {orderModeError && (
         <div role="alert" style={{ padding: "4px 10px", color: "var(--danger)", fontSize: 13 }}>
           {orderModeError}
+        </div>
+      )}
+      {movingUnder && !editing && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 10px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <label htmlFor={`move-under-${task.id}`} style={{ color: "var(--text-dim)", fontSize: 13 }}>
+            Move under
+          </label>
+          <select
+            id={`move-under-${task.id}`}
+            value={moveTargetId}
+            onChange={(e) => setMoveTargetId(e.target.value)}
+          >
+            <option value="">choose a task…</option>
+            {/* Blocked targets stay listed but disabled WITH their reason —
+                the rule is visible instead of the option silently missing. */}
+            {moveTargets.map(({ target, blockReason }) => (
+              <option key={target.id} value={target.id} disabled={blockReason != null}>
+                {target.title}
+                {blockReason ? ` — ${blockReason}` : ""}
+              </option>
+            ))}
+          </select>
+          <button disabled={moveTargetId === ""} onClick={() => reparent(Number(moveTargetId))}>
+            Move
+          </button>
+          <button
+            onClick={() => {
+              setMovingUnder(false);
+              setMoveTargetId("");
+              setReparentError(null);
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      {reparentError && (
+        <div role="alert" style={{ padding: "4px 10px", color: "var(--danger)", fontSize: 13 }}>
+          {reparentError}
         </div>
       )}
       {snoozing && !snoozed && (

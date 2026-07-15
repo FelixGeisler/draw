@@ -48,6 +48,9 @@ export function TasksPage() {
                   categories={categories.data!}
                   goals={goals.data}
                   maxEffort={maxEffort}
+                  // Reparent targets (#100) span ALL categories — adoption
+                  // moves the task into the target's category anyway.
+                  rootTasks={tasks.data}
                 />
               ))}
             </div>
@@ -67,6 +70,7 @@ export function TasksPage() {
                 categories={categories.data ?? []}
                 goals={goals.data}
                 maxEffort={maxEffort}
+                rootTasks={tasks.data}
               />
             ))}
           </div>
