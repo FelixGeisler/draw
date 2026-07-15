@@ -375,6 +375,18 @@ tasksRouter.patch("/:id", (req, res) => {
     if ("goalId" in body) {
       db.prepare("UPDATE tasks SET goal_id = ? WHERE parent_id = ?").run(body.goalId ?? null, id);
     }
+    // Category cascades the same way (#44) — but only to OPEN subtasks:
+    // done/archived rows are historical records, and completion stats and the
+    // activity feed should keep attributing them to the category they were
+    // actually finished under. The draw pool only ever contains open tasks,
+    // so open rows are all consistency requires; a reopened subtask that now
+    // mismatches its parent stays manually repairable via subtask edit (#38).
+    if ("categoryId" in body) {
+      db.prepare("UPDATE tasks SET category_id = ? WHERE parent_id = ? AND status = 'open'").run(
+        body.categoryId,
+        id,
+      );
+    }
   })();
 
   const task = getTask(id)!;

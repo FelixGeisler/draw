@@ -254,7 +254,9 @@ const updateTask = defineTool({
     id: idSchema,
     title: z.string().min(1).optional(),
     description: z.string().nullable().optional(),
-    categoryId: idSchema.optional(),
+    categoryId: idSchema
+      .optional()
+      .describe("Open subtasks follow their parent's category; done/archived ones keep theirs"),
     goalId: idSchema
       .nullable()
       .optional()
