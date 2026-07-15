@@ -218,7 +218,16 @@ const createTask = defineTool({
     impact: impactSchema.optional(),
     effortMinutes: z.number().int().positive().optional(),
     dueDate: dateSchema.optional(),
-    recurEveryDays: z.number().int().positive().optional(),
+    recurEveryDays: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Repeat every N days. Not accepted together with a parentId whose breakdown is " +
+          "'do in order' — a recurring step never closes and would gate the steps behind it " +
+          "forever (the API rejects the combination, ADR-23)",
+      ),
     windowDays: windowDaysSchema.optional(),
     windowStart: windowStartSchema.optional(),
     windowEnd: windowEndSchema.optional(),
@@ -267,7 +276,17 @@ const updateTask = defineTool({
     impact: impactSchema.optional(),
     effortMinutes: z.number().int().positive().nullable().optional(),
     dueDate: dateSchema.nullable().optional(),
-    recurEveryDays: z.number().int().positive().nullable().optional(),
+    recurEveryDays: z
+      .number()
+      .int()
+      .positive()
+      .nullable()
+      .optional()
+      .describe(
+        "Repeat every N days; null clears. Rejected on a subtask of a 'do in order' " +
+          "breakdown — a recurring step never closes and would gate its siblings forever " +
+          "(ADR-23)",
+      ),
     windowDays: windowDaysSchema
       .nullable()
       .optional()

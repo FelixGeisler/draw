@@ -8,6 +8,13 @@ interface Props {
   initial?: Partial<Task>;
   autoFocus?: boolean;
   submitLabel?: string;
+  /**
+   * Hide the "↻ days" recurrence field (#66, ADR-23) — for subtasks of a
+   * sequential parent, where the API rejects a new recurrence. The stored
+   * value is still resent unchanged on save (a no-op the API accepts), so a
+   * pre-ban row stays editable.
+   */
+  hideRecur?: boolean;
   onSubmit: (task: NewTask) => void | Promise<unknown>;
   onCancel?: () => void;
 }
@@ -39,7 +46,7 @@ function StarPicker({ value, onChange }: { value: number; onChange: (v: number) 
   );
 }
 
-export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, onSubmit, onCancel }: Props) {
+export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, hideRecur, onSubmit, onCancel }: Props) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [categoryId, setCategoryId] = useState<number>(initial?.categoryId ?? categories[0]?.id ?? 1);
   const [goalId, setGoalId] = useState<number | "">(initial?.goalId ?? "");
@@ -149,15 +156,17 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
         onChange={(e) => setDueDate(e.target.value)}
         style={{ width: 148 }}
       />
-      <input
-        type="number"
-        min={1}
-        placeholder="↻ days"
-        title="Repeat every N days (optional)"
-        value={recur}
-        onChange={(e) => setRecur(e.target.value)}
-        style={{ width: 84 }}
-      />
+      {!hideRecur && (
+        <input
+          type="number"
+          min={1}
+          placeholder="↻ days"
+          title="Repeat every N days (optional)"
+          value={recur}
+          onChange={(e) => setRecur(e.target.value)}
+          style={{ width: 84 }}
+        />
+      )}
       <button
         type="button"
         title="Availability window — only draw this task on certain weekdays and times"

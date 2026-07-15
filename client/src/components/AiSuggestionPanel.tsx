@@ -135,6 +135,7 @@ export function AiBreakdownPanel({
   taskId,
   goalId,
   initialOrderMode,
+  sequentialLocked,
   onAccept,
   onClose,
 }: {
@@ -146,6 +147,12 @@ export function AiBreakdownPanel({
    * the model's orderMatters judgment cannot silently flip a persisted choice.
    */
   initialOrderMode?: Task["subtaskOrderMode"];
+  /**
+   * Recurring × sequential guard (#66, ADR-23): the parent already has a
+   * recurring subtask, so 'do in order' would be rejected by the API — the
+   * toggle stays off and disabled, whatever the model's orderMatters says.
+   */
+  sequentialLocked?: boolean;
   onAccept: (
     subtasks: { title: string; effortMinutes: number; impact: number }[],
     orderMode: Task["subtaskOrderMode"],
@@ -181,7 +188,7 @@ export function AiBreakdownPanel({
       const result = await run.mutateAsync({ taskId, materialIds: [...selected] });
       setRows(result.subtasks.map((data) => ({ data, included: true })));
       setNote(result.approachNote);
-      setInOrder(seedInOrder(result.orderMatters, initialOrderMode));
+      setInOrder(!sequentialLocked && seedInOrder(result.orderMatters, initialOrderMode));
     } catch (e) {
       setError((e as Error).message);
     }
@@ -217,9 +224,18 @@ export function AiBreakdownPanel({
       {rows && (
         <label
           style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--text-dim)", fontSize: 13 }}
-          title="Sequential mode: only the first open step enters the deck; the rest queue up behind it"
+          title={
+            sequentialLocked
+              ? "Unavailable: a recurring subtask never closes and would gate the steps behind it forever — remove its ↻ recurrence first"
+              : "Sequential mode: only the first open step enters the deck; the rest queue up behind it"
+          }
         >
-          <input type="checkbox" checked={inOrder} onChange={(e) => setInOrder(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={inOrder}
+            disabled={sequentialLocked}
+            onChange={(e) => setInOrder(e.target.checked)}
+          />
           Do in order — draw only the next open step
         </label>
       )}

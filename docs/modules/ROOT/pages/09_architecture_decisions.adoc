@@ -465,3 +465,53 @@ markup that is safe to serve forever, independent of future render paths; the
 img-data-URI render makes the browser enforce the same guarantee a second
 time. The once-per-task cache bounds cost (one generation per card, ever) and
 keeps a card's identity stable — the same task always reveals the same art.
+
+== ADR-23: Recurring subtasks are banned under sequential parents
+
+*Context:* A recurring task never closes on completion — `completeTask`
+advances its due date and keeps it open (ADR-6). ADR-18's hold-back predicate
+frees a sequential sibling only when every older sibling stops being open. In
+combination (issue #66, flagged in PR #63): a recurring step inside a
+sequential breakdown gates every later sibling *forever* — as the first step
+it deadlocks the whole queue from day one, and in any later position the same
+trap merely waits until the steps in front close. Conceptually the
+combination is confused: a sequential breakdown is a one-shot pipeline
+(outline → draft → proofread) that finishes, while a recurring chore never
+does — "position in the pipeline" has no meaning across recurrence cycles.
+The alternatives were considered and rejected. (a) "a completed-this-cycle
+recurring step counts as done for queue purposes" breaks the queue's own
+promise: pool eligibility has never depended on due dates (they only weight
+urgency), so the recurring step itself would stay drawable *next to* the
+sibling it just released, and the derived predicate would need completion
+history — which the client mirror (`classifyTask`) does not have, breaking
+the ADR-2 parity pinned by `shared/drawableVectors.ts`. (c) "cycle completion
+releases the queue until the next due date" makes hold-back time-dependent:
+when the next cycle comes due mid-pipeline, already-released siblings would
+be re-gated with no user action — cards oscillating in and out of the deck.
+*Decision:* The combination is *rejected with 400* on every path that could
+create it, in the routes where all domain invariants live: creating a subtask
+with `recurEveryDays` under a `sequential` parent (`POST /api/tasks` with
+`parentId`; the batch endpoint's INSERT carries no recurrence at all), adding
+a recurrence to an existing subtask of a sequential parent (`PATCH`), and
+flipping a parent to `sequential` — via `PATCH subtaskOrderMode` or the
+breakdown batch's `orderMode` — while *any* subtask carries a recurrence
+(any status: done and archived rows can be revived by a plain status write).
+Only *transitions* are rejected: a pre-ban database keeps working — no-op
+resends of a stored value pass (the edit form emits them, mirroring the
+ADR-4 grandfathering), an already-sequential parent accepts its own mode
+again, and the repair paths (clear the recurrence, flip to parallel) stay
+open. No migration rewrites user data. The UI guards the same transitions:
+the edit form hides the ↻ recurrence field on steps of a sequential parent,
+and the order-mode flip button plus both breakdown editors' "Do in order"
+toggles disable with the reason when a recurring subtask exists (server 400
+surfaced inline as backstop). Recurring subtasks under *parallel* parents
+stay legal — a never-completing routine container ("morning routine") is a
+coherent use. Classification is untouched: `heldBack` stays purely
+structural, so `shared/drawableVectors.ts` and both classify mirrors need no
+change.
+*Rationale:* A validation invariant names the modeling error instead of
+bending the queue semantics around it — the same shape as ADR-16's
+one-level-breakdown ban. Every alternative would have complicated the one
+derived predicate ADR-2/ADR-18 keep deliberately simple, split server and
+client eligibility semantics, and still left "what does order mean next
+cycle?" unanswered.

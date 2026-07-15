@@ -12,6 +12,8 @@ const GOAL_TITLE = "E2E sequential goal";
 const PARENT_TITLE = "Assemble the flatpack wardrobe";
 const STEP_ONE = "Unpack and sort the panels";
 const STEP_TWO = "Attach the wardrobe doors";
+const RECUR_PARENT_TITLE = "Keep the e2e aquarium alive";
+const RECUR_STEP_TITLE = "Feed the e2e fish";
 
 async function seed(request: APIRequestContext) {
   const goal = await (
@@ -121,4 +123,40 @@ test("a step completed out of order never wears the queued chip", async ({ page 
   await expect(rail.getByRole("checkbox")).toBeChecked();
   // The done row must drop the derived queue chip (#67: heldBack status guard).
   await expect(rail.locator(".chip", { hasText: "⏳ queued" })).not.toBeVisible();
+});
+
+test("recurring steps cannot join an in-order breakdown (#66)", async ({ page }) => {
+  // Editing a step of the (again in-order) wardrobe parent offers no
+  // recurrence field — a recurring step would gate its siblings forever.
+  await page.goto("/tasks");
+  await taskRow(page, STEP_TWO).getByTitle("Edit").click();
+  await expect(page.getByPlaceholder("What needs doing?")).toHaveValue(STEP_TWO);
+  await expect(page.getByTitle("Repeat every N days (optional)")).not.toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+
+  // A parallel parent's step CAN recur — but then the parent locks against
+  // "do in order": the flip button and the breakdown editor's toggle disable
+  // with the reason instead of failing on the server's 400.
+  const categories: { id: number }[] = await (await page.request.get("/api/categories")).json();
+  const parent = await (
+    await page.request.post("/api/tasks", {
+      data: { title: RECUR_PARENT_TITLE, categoryId: categories[0].id, effortMinutes: 30 },
+    })
+  ).json();
+  await page.request.post(`/api/tasks/${parent.id}/subtasks`, {
+    data: { subtasks: [{ title: RECUR_STEP_TITLE, effortMinutes: 10 }] },
+  });
+
+  await page.goto("/tasks");
+  await taskRow(page, RECUR_STEP_TITLE).getByTitle("Edit").click();
+  await page.getByTitle("Repeat every N days (optional)").fill("3");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(taskRow(page, RECUR_STEP_TITLE).locator(".chip", { hasText: "↻ 3d" })).toBeVisible();
+
+  const flip = taskRow(page, RECUR_PARENT_TITLE).getByRole("button", { name: "⇄ any order" });
+  await expect(flip).toBeDisabled();
+  await expect(flip).toHaveAttribute("title", /recurring/);
+
+  await taskRow(page, RECUR_PARENT_TITLE).getByRole("button", { name: "Break down" }).click();
+  await expect(page.getByLabel(/Do in order/)).toBeDisabled();
 });

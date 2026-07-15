@@ -271,6 +271,163 @@ describe("draw pool: sequential parents expose only the first open subtask", () 
   });
 });
 
+// Issue #66 (ADR-23): a recurring step never closes on completion (ADR-6
+// advances its due date), so under a sequential parent it would gate every
+// later sibling forever. The combination is banned on every path that could
+// create it; pre-ban rows stay operable (no-op resends pass) and the trap
+// they carry is pinned below as the ban's motivation.
+describe("recurring subtasks are banned under sequential parents (#66, ADR-23)", () => {
+  const BAN = /sequential breakdown \(ADR-23\)/;
+
+  it("rejects creating a recurring subtask under a sequential parent (POST /api/tasks)", async () => {
+    const { parent } = await seedGoalParent("ban-create");
+    await addSubtasks(parent.id, [{ title: "ban-create step", effortMinutes: 5 }], "sequential");
+
+    const res = await request(app)
+      .post("/api/tasks")
+      .send({ title: "daily interloper", categoryId: 1, parentId: parent.id, recurEveryDays: 1 })
+      .expect(400);
+    expect(res.body.error).toMatch(BAN);
+
+    // Without the recurrence the same create is fine.
+    await request(app)
+      .post("/api/tasks")
+      .send({ title: "one-shot step", categoryId: 1, parentId: parent.id })
+      .expect(201);
+  });
+
+  it("allows recurring subtasks under a parallel parent — a routine container is legitimate", async () => {
+    const { parent } = await seedGoalParent("parallel-recur");
+    await addSubtasks(parent.id, [{ title: "parallel-recur step", effortMinutes: 5 }]);
+
+    await request(app)
+      .post("/api/tasks")
+      .send({ title: "daily chore", categoryId: 1, parentId: parent.id, recurEveryDays: 2 })
+      .expect(201);
+  });
+
+  it("rejects adding a recurrence to an existing step of a sequential parent (PATCH)", async () => {
+    const { parent } = await seedGoalParent("ban-patch");
+    const [step] = await addSubtasks(
+      parent.id,
+      [{ title: "ban-patch step", effortMinutes: 5 }],
+      "sequential",
+    );
+
+    const res = await request(app)
+      .patch(`/api/tasks/${step.id}`)
+      .send({ recurEveryDays: 7 })
+      .expect(400);
+    expect(res.body.error).toMatch(BAN);
+
+    // Clearing (null) and unrelated edits stay allowed.
+    await request(app).patch(`/api/tasks/${step.id}`).send({ recurEveryDays: null }).expect(200);
+    await request(app).patch(`/api/tasks/${step.id}`).send({ title: "renamed step" }).expect(200);
+  });
+
+  it("rejects flipping a parent to sequential while a subtask is recurring; clearing the recurrence unlocks it", async () => {
+    const { parent } = await seedGoalParent("ban-flip");
+    const [step] = await addSubtasks(parent.id, [{ title: "ban-flip step", effortMinutes: 5 }]);
+    await request(app).patch(`/api/tasks/${step.id}`).send({ recurEveryDays: 3 }).expect(200);
+
+    const res = await request(app)
+      .patch(`/api/tasks/${parent.id}`)
+      .send({ subtaskOrderMode: "sequential" })
+      .expect(400);
+    expect(res.body.error).toMatch(BAN);
+    expect((await listedTask(parent.id)).subtaskOrderMode).toBe("parallel");
+
+    await request(app).patch(`/api/tasks/${step.id}`).send({ recurEveryDays: null }).expect(200);
+    await request(app)
+      .patch(`/api/tasks/${parent.id}`)
+      .send({ subtaskOrderMode: "sequential" })
+      .expect(200);
+  });
+
+  it("the flip guard sees done subtasks too — a reopen would otherwise revive the trap", async () => {
+    const { parent } = await seedGoalParent("ban-flip-done");
+    const [a] = await addSubtasks(parent.id, [
+      { title: "ban-flip-done a", effortMinutes: 5 },
+      { title: "ban-flip-done b", effortMinutes: 5 },
+    ]);
+    // A done non-recurring step may gain a recurrence under a parallel parent…
+    await request(app).patch(`/api/tasks/${a.id}`).send({ status: "done" }).expect(200);
+    await request(app).patch(`/api/tasks/${a.id}`).send({ recurEveryDays: 5 }).expect(200);
+
+    // …but then the parent may not go sequential: reopening `a` is a plain
+    // status write with no recurrence check of its own.
+    await request(app)
+      .patch(`/api/tasks/${parent.id}`)
+      .send({ subtaskOrderMode: "sequential" })
+      .expect(400);
+  });
+
+  it("the breakdown batch refuses the sequential transition next to a recurring sibling — atomically", async () => {
+    const { parent } = await seedGoalParent("ban-batch");
+    const [step] = await addSubtasks(parent.id, [{ title: "ban-batch step", effortMinutes: 5 }]);
+    await request(app).patch(`/api/tasks/${step.id}`).send({ recurEveryDays: 2 }).expect(200);
+
+    const res = await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({ subtasks: [{ title: "never created" }], orderMode: "sequential" })
+      .expect(400);
+    expect(res.body.error).toMatch(BAN);
+    // Nothing written: no new subtask, mode untouched.
+    const listed = await listedTask(parent.id);
+    expect(listed.subtasks.map((s: { title: string }) => s.title)).toEqual(["ban-batch step"]);
+    expect(listed.subtaskOrderMode).toBe("parallel");
+
+    // The same batch without the mode switch is fine.
+    await addSubtasks(parent.id, [{ title: "created fine" }]);
+  });
+
+  it("the batch INSERT cannot smuggle a recurrence — recurEveryDays on batch rows is ignored", async () => {
+    const { parent } = await seedGoalParent("no-smuggle");
+    const [created] = await addSubtasks(
+      parent.id,
+      [{ title: "no-smuggle step", effortMinutes: 5, recurEveryDays: 4 }],
+      "sequential",
+    );
+    expect(created.recurEveryDays).toBeNull();
+  });
+
+  it("a pre-ban database stays operable, and its recurring first step pins the trap the ban prevents", async () => {
+    const { goalId, parent } = await seedGoalParent("legacy-combo");
+    const [first, second] = await addSubtasks(
+      parent.id,
+      [
+        { title: "legacy recurring first", effortMinutes: 5 },
+        { title: "legacy second", effortMinutes: 5 },
+      ],
+      "sequential",
+    );
+    // The ban makes this state unreachable via the API — seed it directly,
+    // as a database written before the ban would contain it.
+    db.prepare("UPDATE tasks SET recur_every_days = 2 WHERE id = ?").run(first.id);
+
+    // No-op resend of the stored recurrence (the edit form does this) passes…
+    await request(app)
+      .patch(`/api/tasks/${first.id}`)
+      .send({ title: "legacy renamed", recurEveryDays: 2 })
+      .expect(200);
+    // …and so does adding steps while KEEPING the already-sequential mode.
+    await addSubtasks(parent.id, [{ title: "legacy third", effortMinutes: 5 }], "sequential");
+
+    // The trap itself (#66): completing the recurring first step does not
+    // close it (ADR-6), so the sibling stays held back — forever, absent a
+    // user repair (drop the recurrence, or flip the parent to parallel).
+    expect((await draw(goalId)).task.id).toBe(first.id);
+    const completion = await request(app)
+      .patch(`/api/tasks/${first.id}`)
+      .send({ status: "done" })
+      .expect(200);
+    expect(completion.body.recurring).toBe(true);
+    expect((await listedTask(first.id)).status).toBe("open");
+    expect((await listedTask(second.id)).heldBack).toBe(1);
+    expect((await draw(goalId)).task.id).toBe(first.id);
+  });
+});
+
 describe("interaction with the persisted current draw (ADR-13)", () => {
   it("a drawn subtask that falls behind a sequential sibling is not restored", async () => {
     const { goalId, parent } = await seedGoalParent("restore-heldback");
