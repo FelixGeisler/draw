@@ -26,14 +26,16 @@ server/src/
 │   ├── materials.ts         multer upload, download, delete (disk + row)
 │   ├── timer.ts             current/stop; start lives on tasks route
 │   ├── draw.ts              POST /api/draw, GET /api/draw/current (restore)
-│   ├── stats.ts             GET /api/stats (UTC date-range handling)
+│   ├── stats.ts             GET /api/stats (UTC date-range handling),
+│   │                        GET /api/stats/estimation-bias (all-history, ADR-27)
 │   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
 │   ├── gamification.ts      GET /api/gamification
 │   ├── settings.ts          key-value settings
 │   └── ai.ts                status, estimate, breakdown, plan-goal, generate-tasks
 └── services/                Domain logic
     ├── drawService.ts       drawable predicate + weight formula + roulette selection + current draw
-    ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation accuracy
+    ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation
+    │                        accuracy + per-category bias (coaching input, ADR-27)
     ├── activityService.ts   per-day card derivation for the history skyline (pure core + SQL fetch)
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
     ├── aiService.ts         Anthropic client, material blocks, prompts, token guard
@@ -77,13 +79,15 @@ server/src/
 client/src/
 ├── api/client.ts + types.ts   typed fetch wrapper, shared DTOs
 ├── hooks/                     TanStack Query wrappers (useTasks, useDraw, useTimer,
-│                              useGamification, useGoals, useAi, useActivity)
+│                              useGamification, useGoals, useAi, useActivity,
+│                              useEstimationBias)
 ├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip), Capture,
 │                              Tasks, Goals, Stats (incl. activity heatmap), History
 │                              (skyline), Settings
 ├── lib/                       pure client logic (drawable classification, effort display,
 │                              generate-tasks review model, heatmap grid/quantization,
-│                              shared local-day math) — unit-tested without rendering
+│                              shared local-day math, estimation coaching decisions)
+│                              — unit-tested without rendering
 └── components/                TaskRow/Form/Badges, SubtaskEditor, TimerBar,
                                GamificationHeader, TrophyDeck, ActivityHeatmap,
                                AchievementToast, MaterialsSection, AiSuggestionPanel

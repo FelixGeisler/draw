@@ -671,3 +671,40 @@ ordering the swap around a final atomic rename means a crash at any step
 boots either the complete old state or the complete new state. `adm-zip`
 handles both zip directions synchronously, fitting the no-framework
 guardrails; `multer` (already a dependency) receives the upload.
+
+== ADR-27: Estimation coaching is read-only advice — hints never mutate, weights stay on stated estimates
+
+*Context:* The estimation block (ADR-15) measures per-category
+estimated-vs-tracked bias but stops short of coaching: nothing said *which
+kind* of work the user habitually misjudges, and nothing helped at the moment
+that matters most — while typing a new estimate (#55). The obvious stronger
+designs — pre-filling the corrected value, or letting the draw weigh tasks by
+bias-adjusted "effective effort" — both make the system silently disagree
+with the user's stated plan.
+*Decision:* Coaching is strictly read-only, in two surfaces. The Stats page
+renders a plain-language per-category statement ("Uni: tracked 1.4× estimated
+over 6 tasks — pad your Uni estimates") and TaskForm shows a dim, passive
+hint under the effort field ("history suggests ~45 min") once the entered
+estimate diverges more than 25% from the category's all-history ratio. Both
+gate on a minimum sample of 3 qualifying tasks; below it nothing renders, not
+even a placeholder. The hint never rewrites the field, never blocks submit,
+and the submitted `effortMinutes` is exactly what the user typed. Draw
+weights keep using stated estimates — an explicit non-goal fence. The
+all-history numbers come from a dedicated lightweight endpoint
+(`GET /api/stats/estimation-bias`) that reuses the estimation block's
+qualifying rules and per-cycle attribution (ADR-15, #48) with open-ended
+bounds, rather than stretching the range-scoped `/api/stats` payload;
+thresholds and wording live client-side in the pure
+`client/src/lib/estimationCoach.ts`. The server returns every category with
+its `taskCount` — showing or hiding is a display decision.
+*Rationale:* Passive advice over auto-correction because the estimate is the
+user's commitment, the same principle that keeps the draw un-rerollable
+(#88): tooling may inform the plan, never quietly rewrite it — and a
+pre-filled "corrected" estimate would poison the very tracked-vs-estimated
+feedback loop it learns from. Weights stay on stated estimates because
+bias-adjusting them would move cards between the ready/too-big piles based on
+invisible arithmetic, contradicting ADR-2's promise that drawability is
+explainable from what the user can see. A dedicated endpoint over reusing the
+stats query because TaskForm mounts on four surfaces and needs one small,
+stably-cacheable all-history array — not a week-scoped Stats object whose
+range semantics the hint would have to fight.
