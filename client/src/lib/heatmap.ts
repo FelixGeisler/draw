@@ -1,8 +1,11 @@
 // Contribution-style activity heatmap (#54): quantization and week-grid
 // layout as pure functions, unit-tested without rendering. All date math is
-// date-only arithmetic on YYYY-MM-DD strings via the UTC trick (no DST
-// holes); the strings themselves are LOCAL calendar days straight from
-// GET /api/activity (ADR-21) — this module never converts timezones.
+// date-only arithmetic on YYYY-MM-DD strings via the shared localDay helpers
+// (UTC trick, no DST holes); the strings themselves are LOCAL calendar days
+// straight from GET /api/activity (ADR-21) — this module never converts
+// timezones.
+
+import { addDays } from "./localDay";
 
 /** Default range: the current week plus 25 before it — fits the Stats page. */
 export const HEATMAP_WEEKS = 26;
@@ -32,11 +35,17 @@ export function minutesLevel(minutes: number): HeatLevel {
   return 4;
 }
 
-/** Date-only arithmetic on YYYY-MM-DD strings (UTC trick avoids DST holes). */
-export function addDays(dateStr: string, n: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
+/**
+ * Day totals → intensity level: minutes drive the shade (issue #54's metric
+ * decision), but any card laid that day floors the level at 1. `started`
+ * counts cards laid including completion-only ones — the server rounds
+ * `minutes` to 0 for a timer-less completion (plain PATCH status done, the
+ * flow ADR-21's union clause keeps visible) and for a sub-30-second dab, and
+ * a day the skyline shows with an upright card must never render as an empty
+ * cell here (PR #72 review). Level 0 stays reserved for truly empty days.
+ */
+export function activityLevel(totals: { minutes: number; started: number }): HeatLevel {
+  return totals.started > 0 ? (Math.max(1, minutesLevel(totals.minutes)) as HeatLevel) : minutesLevel(totals.minutes);
 }
 
 /**

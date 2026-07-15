@@ -51,6 +51,10 @@ test("a day seeded through the real API renders a cell whose accessible label ca
     "aria-label",
     new RegExp(`^${escaped}: \\d+ min tracked, [1-9]\\d* completed, \\+[1-9]\\d* XP$`),
   );
+  // A day with a card laid must never shade as level-0 "no activity" — the
+  // seed above can be exactly the timer-less-completion case (0 min tracked,
+  // 1 completed) that the level floor exists for (PR #72 blocker).
+  await expect(cell).toHaveClass(/level-[1-4]/);
   // Hover reveal rides the native title — same text, so never hover-only.
   const label = await cell.getAttribute("aria-label");
   await expect(cell).toHaveAttribute("title", label!);
@@ -87,4 +91,29 @@ test("the grid spans 26 Monday-first week columns with a 5-step legend", async (
   await someCell.hover();
   const hovered = await someCell.getAttribute("aria-label");
   await expect(page.locator(".hm-readout")).toHaveText(hovered!);
+});
+
+test("the grid is one tab stop with arrow-key day navigation (roving tabindex)", async ({
+  page,
+}) => {
+  await page.goto("/stats");
+  await expect(page.locator(".hm-week")).toHaveCount(26);
+
+  // Exactly one cell is in the tab order — 182 tab stops would make the
+  // grid a keyboard wall (PR #72 review).
+  const tabStop = page.locator('.hm-week .hm-cell[tabindex="0"]');
+  await expect(tabStop).toHaveCount(1);
+
+  // ArrowLeft moves focus one week back (columns are weeks); the readout and
+  // the tab stop both follow, so tabbing away and back resumes there.
+  await tabStop.focus();
+  const before = await tabStop.getAttribute("aria-label");
+  await page.keyboard.press("ArrowLeft");
+  const focused = page.locator(".hm-week .hm-cell:focus");
+  await expect(focused).toHaveCount(1);
+  const after = await focused.getAttribute("aria-label");
+  expect(after).not.toBe(before);
+  await expect(page.locator(".hm-readout")).toHaveText(after!);
+  await expect(focused).toHaveAttribute("tabindex", "0");
+  await expect(page.locator('.hm-week .hm-cell[tabindex="0"]')).toHaveCount(1);
 });

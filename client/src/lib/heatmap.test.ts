@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   HEATMAP_WEEKS,
   LEVEL_THRESHOLDS,
+  activityLevel,
   heatmapRange,
   heatmapWeeks,
   minutesLevel,
@@ -36,6 +37,30 @@ describe("minutesLevel quantization", () => {
 
   it("caps at level 4 for marathon days", () => {
     expect(minutesLevel(600)).toBe(4);
+  });
+});
+
+describe("activityLevel — the level the heatmap actually shades by", () => {
+  it("a timer-less completion is not an empty day (server rounds its minutes to 0)", () => {
+    // Plain PATCH status done, no timer that day — ADR-21's union clause
+    // gives it an upright skyline card; the heatmap must agree (PR #72).
+    expect(activityLevel({ minutes: 0, started: 1 })).toBe(1);
+  });
+
+  it("a sub-30-second dab (minutes rounded to 0) still earns level 1", () => {
+    expect(activityLevel({ minutes: 0, started: 1 })).toBe(1);
+    expect(activityLevel({ minutes: 1, started: 1 })).toBe(1);
+  });
+
+  it("reserves level 0 for days with no cards laid at all", () => {
+    expect(activityLevel({ minutes: 0, started: 0 })).toBe(0);
+  });
+
+  it("defers to the minutes quantization whenever minutes are non-zero", () => {
+    expect(activityLevel({ minutes: 14, started: 3 })).toBe(1);
+    expect(activityLevel({ minutes: 15, started: 1 })).toBe(2);
+    expect(activityLevel({ minutes: 45, started: 1 })).toBe(3);
+    expect(activityLevel({ minutes: 120, started: 5 })).toBe(4);
   });
 });
 

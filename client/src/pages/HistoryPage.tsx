@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useActivity, type ActivityCard, type ActivityDay } from "../hooks/useActivity";
 import { useCategories } from "../hooks/useTasks";
+import { addDays, asLocalDate, diffDays, formatDay, localToday } from "../lib/localDay";
 import "./HistoryPage.css";
 
 // House-of-cards skyline (#53): one tower per local day, upright cards for
@@ -29,43 +30,6 @@ const WINDOW_DAYS = 56;
  * (PR #68 review).
  */
 const MAX_RANGE_DAYS = 3653;
-
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-/** Today as a LOCAL date string — skyline days are local calendar days. */
-function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-/** Date-only arithmetic on YYYY-MM-DD strings (UTC trick avoids DST holes). */
-function addDays(dateStr: string, n: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
-
-function diffDays(a: string, b: string): number {
-  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
-}
-
-/** "2026-07-15" → local Date (date-only strings without Z parse as local). */
-function asLocalDate(dateStr: string): Date {
-  return new Date(`${dateStr}T00:00:00`);
-}
-
-function formatDay(dateStr: string): string {
-  // Always include the year: this is a permanent multi-year record, and
-  // without it a 2025 card and a 2026 card read identically (PR #68 review).
-  return asLocalDate(dateStr).toLocaleDateString([], {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 /**
  * Card size scales with tracked minutes (fallback: effort estimate for
