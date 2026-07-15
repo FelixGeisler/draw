@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import confetti from "canvas-confetti";
 import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
@@ -13,11 +13,13 @@ import {
 } from "../hooks/useDraw";
 import { useCardArt, useRegenerateCardArt } from "../hooks/useAi";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
+import { CardFrame } from "../components/CardFrame";
 import { FocusOverlay } from "../components/FocusOverlay";
 import { SnoozeMenu } from "../components/SnoozeMenu";
 import { TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
+import { liveTrackedMinutes } from "../lib/cardFrame";
 import { classifyTask } from "../lib/drawable";
 import { resolveDrawnCard } from "../lib/drawnCard";
 import { resolveDrawView } from "../lib/focusView";
@@ -125,14 +127,17 @@ export function DrawPage() {
     // The PATCH response settles the card's fate ahead of the confirming
     // refetch: still drawable → it IS the current draw (pointer intact
     // server-side); edited out of the deck → the pointer is forfeit and the
-    // sticky flag holds the session's card (#88, see above).
-    setResult({ task: response.task });
+    // sticky flag holds the session's card (#88, see above). The PATCH task
+    // shape has no trackedMinutes (draw payloads only) — carry the standing
+    // card's over so the DEF stat (#115) never blinks out across an edit.
+    const patched = { ...response.task, trackedMinutes: task.trackedMinutes };
+    setResult({ task: patched });
     if (response.task.status !== "open" || classifyTask(response.task, maxEffort) !== "ready") {
       setEditedOutOfDeck(true);
     } else if (!editedOutOfDeck) {
       // Keep the warm-up marker (#57) riding the cache: an in-deck edit
       // leaves the pointer — and thus the marker — intact server-side.
-      setCurrentDraw({ task: response.task, warmup: warmupInfo });
+      setCurrentDraw({ task: patched, warmup: warmupInfo });
     }
     setEdited(true);
     setEditing(false);
@@ -220,6 +225,26 @@ export function DrawPage() {
   const nonDrawable =
     task != null && (task.status !== "open" || classifyTask(task, maxEffort) !== "ready");
 
+  // DEF = tracked minutes (#115), live: the draw payload carries the CLOSED
+  // entries' sum; while the timer runs on THIS card the running entry's
+  // elapsed minutes are added client-side, re-read every 15s so the stat
+  // grows as you fight the card without refetching anything. Stopping the
+  // timer folds the entry into the server sum (useStopTimer invalidates the
+  // current draw).
+  const runningStartedAt =
+    task != null && timer.data?.task.id === task.id ? timer.data.entry.startedAt : null;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (runningStartedAt == null) return;
+    setNowMs(Date.now());
+    const interval = setInterval(() => setNowMs(Date.now()), 15_000);
+    return () => clearInterval(interval);
+  }, [runningStartedAt]);
+  const defMinutes =
+    task?.trackedMinutes != null
+      ? liveTrackedMinutes(task.trackedMinutes, runningStartedAt, nowMs)
+      : null;
+
   return (
     <div className="content" style={{ textAlign: "center" }}>
       <h1>Draw a card</h1>
@@ -273,36 +298,27 @@ export function DrawPage() {
             </div>
           </div>
           <div className="draw-face back">
-            {/* Model-generated SVG is rendered exclusively as an <img> data
-                URI (server-sanitized, too) — never dangerouslySetInnerHTML.
-                The scrim keeps title, badges and odds legible over any art. */}
-            {task && cardArt.data?.svg && (
-              <>
-                <img
-                  // dataUpdatedAt changes when a regenerate swaps the cache
-                  // entry — remounting replays the fade-in for the new art.
-                  key={cardArt.dataUpdatedAt}
-                  className="draw-art"
-                  alt=""
-                  aria-hidden="true"
-                  src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(cardArt.data.svg)}`}
-                />
-                <div className="draw-art-scrim" />
-              </>
-            )}
+            {/* TCG frame (#115): level stars = impact (goal-linked only,
+                ADR-4), type line = category, ATK = estimated minutes, DEF =
+                tracked minutes (live), flavor = description; the #113 art
+                fades into the portrait window, gradient placeholder without
+                it. The category chip and effort/star badges the face used to
+                carry are absorbed by the frame — no duplicated data. */}
             {task && (
-              <>
-                {category && (
-                  <span className="chip">
-                    <span className="dot" style={{ background: category.color }} />
-                    {category.name}
-                  </span>
-                )}
-                <h2>{task.title}</h2>
-                {task.description && (
-                  <p style={{ color: "var(--text-dim)", margin: 0 }}>{task.description}</p>
-                )}
-                <TaskBadges task={task} />
+              <CardFrame
+                title={task.title}
+                category={category ?? null}
+                impact={task.impact}
+                goalLinked={task.goalId != null}
+                artSvg={cardArt.data?.svg}
+                // dataUpdatedAt changes when a regenerate swaps the cache
+                // entry — remounting replays the fade-in for the new art.
+                artKey={cardArt.dataUpdatedAt}
+                atk={task.effortMinutes}
+                def={defMinutes}
+                flavor={task.description}
+              >
+                <TaskBadges task={task} showStars={false} showEffort={false} />
                 {/* Warm-up deal (#57): badge + bonus-window hint. No odds
                     line renders — a deal has no probability by construction. */}
                 {warmupInfo && (
@@ -328,7 +344,7 @@ export function DrawPage() {
                     {result.poolSize === 1 ? "" : "s"} in the deck
                   </div>
                 )}
-              </>
+              </CardFrame>
             )}
           </div>
         </div>

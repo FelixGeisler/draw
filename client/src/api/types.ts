@@ -77,6 +77,13 @@ export interface Task {
    * endpoints, which only ever carry drawable leaves.
    */
   remainingEffortMinutes?: number | null;
+  /**
+   * DEF stat for the TCG frame (#115), derived at query time: whole minutes
+   * over the task's CLOSED time entries. Present only on the draw payloads
+   * (POST /api/draw, GET /api/draw/current) — the client adds the running
+   * entry's elapsed minutes itself (lib/cardFrame.liveTrackedMinutes).
+   */
+  trackedMinutes?: number;
   subtasks?: Task[];
 }
 

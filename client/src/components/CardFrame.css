@@ -1,0 +1,177 @@
+/* TCG card frame (#115): one visual language for card surfaces — name bar,
+   level-star row, portrait art window, category type line, flavor text and
+   the ATK/DEF stat line. The frame tint derives from the category color via
+   --cf-cat and color-mix; without a category it falls back to the accent, so
+   a frame is never uncolored.
+
+   Legibility is non-negotiable: every text zone sits on its own solid or
+   scrimmed band (name bar, star chip, type-line pill, the frame's dark body)
+   rather than directly on the art — WCAG-contrast inks on the pill are
+   computed in lib/cardFrame.ts, never eyeballed. */
+
+.card-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: inherit;
+  text-align: center;
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--cf-cat, var(--accent)) 16%, #232735),
+    color-mix(in srgb, var(--cf-cat, var(--accent)) 7%, #1b1e27) 55%,
+    color-mix(in srgb, var(--cf-cat, var(--accent)) 13%, #1b1e27)
+  );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--cf-cat, var(--accent)) 28%, var(--border));
+}
+
+/* Name bar: a solid dark band — the title never fights the art for contrast.
+   Right padding clears the ↻ regenerate overlay (#113), which must live on
+   .draw-scene (2D) because the 3D flip context is not reliably hit-testable. */
+.cf-name-bar {
+  flex: 0 0 auto;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--cf-cat, var(--accent)) 38%, var(--border));
+  background: rgba(18, 20, 26, 0.68);
+  padding: 7px 36px 7px 12px;
+  text-align: left;
+}
+
+.cf-title {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Portrait art window — the upper ~55% of the card. The placeholder gradient
+   (degraded mode / art not yet generated) echoes the frame tint so a bare
+   frame still looks intentional, not broken. */
+.cf-art {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 190px;
+  border-radius: 8px;
+  border: 1px solid rgba(18, 20, 26, 0.85);
+  overflow: hidden;
+  background:
+    radial-gradient(
+      circle at 30% 25%,
+      color-mix(in srgb, var(--cf-cat, var(--accent)) 26%, transparent),
+      transparent 65%
+    ),
+    linear-gradient(160deg, #232735, #1b1e27);
+}
+
+/* AI card art (#27/#113): a data-URI <img> (never injected markup) fading in
+   whenever it arrives — the flip never waits for it. Scoped to the window;
+   in degraded mode neither layer renders and the placeholder stands alone. */
+.cf-art .draw-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  animation: art-fade 0.8s ease both;
+}
+
+/* A light vignette only — nothing but the star chip sits on the art now, so
+   the artwork stays vivid while the window's edges blend into the frame. */
+.cf-art .draw-art-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(rgba(18, 20, 26, 0.05), rgba(18, 20, 26, 0.3));
+}
+
+@keyframes art-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Yu-Gi-Oh-style level stars = impact, goal-linked cards only (ADR-4).
+   Overlaid on the art window's top-right with its own scrim chip, so the row
+   is legible over any artwork and its absence never shifts the layout. */
+.cf-stars {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(18, 20, 26, 0.72);
+  line-height: 1;
+}
+
+/* Monster Type = category: the category-colored pill (absorbs #114's pill —
+   background is the raw category color, ink is the computed WCAG choice). */
+.cf-type-line {
+  align-self: center;
+  display: inline-block;
+  max-width: 100%;
+  padding: 3px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Text box: flavor text (description) plus the page's own extras (badges,
+   warm-up note, hints, odds). Long content scrolls inside the card instead
+   of blowing the 300x420 frame. */
+.cf-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.cf-flavor {
+  margin: 0;
+  font-style: italic;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+/* Stat line: ATK = estimated minutes, DEF = tracked minutes. Rendered only
+   when at least one stat exists (no estimate -> no ATK), right-aligned above
+   the frame's bottom edge like the genre demands. */
+.cf-stats {
+  flex: 0 0 auto;
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+  gap: 14px;
+  padding: 6px 4px 0;
+  border-top: 1px solid color-mix(in srgb, var(--cf-cat, var(--accent)) 30%, var(--border));
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+/* Reduced motion: the art still appears, just without the fade. */
+@media (prefers-reduced-motion: reduce) {
+  .cf-art .draw-art {
+    animation: none;
+  }
+}

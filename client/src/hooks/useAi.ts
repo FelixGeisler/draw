@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { batchArtKey } from "../lib/cardFrame";
 
 export interface AiStatus {
   configured: boolean;
@@ -77,6 +78,31 @@ export function useCardArt(taskId: number | undefined, revealed: boolean) {
     queryFn: () => api.get<{ svg: string }>(`/api/tasks/${taskId}/card-art`),
     enabled: revealed && taskId != null,
     // The server caches at most one artwork per task — it cannot go stale.
+    staleTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
+ * Batch card art for the trophy pile (#114): ONE cache-only round trip for
+ * all of today's completions — the endpoint never generates, so rendering
+ * the pile can never trigger a Claude call (with or without a key). Absent
+ * rows simply keep the gradient face. The key is deduped + sorted
+ * (batchArtKey), so completion order can't mint duplicate cache entries, and
+ * a new completion changes the id set and refetches naturally. Same silent
+ * contract as useCardArt: failures resolve to "no art", callers read only
+ * `data`.
+ */
+export function useCardArtBatch(taskIds: number[]) {
+  const key = batchArtKey(taskIds);
+  return useQuery({
+    queryKey: ["card-art-batch", key],
+    queryFn: () =>
+      api.get<{ arts: { taskId: number; svg: string }[] }>(`/api/card-art?taskIds=${key}`),
+    enabled: key !== "",
+    // Cached art only changes through a regenerate on the DRAWN card — a
+    // completed card's art is settled, so this id set cannot go stale.
     staleTime: Infinity,
     retry: false,
     refetchOnWindowFocus: false,
