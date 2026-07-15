@@ -105,6 +105,65 @@ describe("GET /api/draw/pool", () => {
     expect(after.body.candidates.map((c: { title: string }) => c.title)).toEqual(["Step 2"]);
   });
 
+  it("damps parallel siblings by sqrt(pool sibling count) (#30, ADR-25)", async () => {
+    // Same impact/effort/age everywhere: a solo task, and a breakdown whose
+    // 4 leaves flood the pool together — each leaf must weigh half (sqrt(4))
+    // of the solo card, with the response shape (weight/probability) intact.
+    const goal = (
+      await request(app).post("/api/goals").send({ title: "damping" }).expect(201)
+    ).body;
+    await seed({ title: "Solo card", categoryId: 1, goalId: goal.id, effortMinutes: 10 });
+    const parent = await seed({ title: "Flood parent", categoryId: 1, goalId: goal.id });
+    await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({
+        subtasks: [1, 2, 3, 4].map((n) => ({ title: `Leaf ${n}`, effortMinutes: 10 })),
+      })
+      .expect(201);
+
+    const res = await request(app).get(`/api/draw/pool?goalId=${goal.id}`).expect(200);
+    expect(res.body.poolSize).toBe(5);
+    const byTitle = new Map(
+      res.body.candidates.map((c: { title: string; weight: number; probability: number }) => [
+        c.title,
+        c,
+      ]),
+    );
+    const soloCard = byTitle.get("Solo card") as { weight: number; probability: number };
+    const leaf = byTitle.get("Leaf 1") as { weight: number; probability: number };
+    expect(soloCard.weight / leaf.weight).toBeCloseTo(2, 5);
+    const sum = res.body.candidates.reduce(
+      (a: number, c: { probability: number }) => a + c.probability,
+      0,
+    );
+    expect(sum).toBeCloseTo(1, 6);
+  });
+
+  it("does not damp a sequential parent's lone exposed card (#30 x #23)", async () => {
+    // Held-back siblings are not in the pool, so they must not dampen the
+    // one card that represents the breakdown — sequential mode already
+    // reduces the flood to a single fairly-weighted candidate.
+    const goal = (
+      await request(app).post("/api/goals").send({ title: "seq-damping" }).expect(201)
+    ).body;
+    await seed({ title: "Seq solo", categoryId: 1, goalId: goal.id, effortMinutes: 10 });
+    const parent = await seed({ title: "Seq parent", categoryId: 1, goalId: goal.id });
+    await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({
+        subtasks: [1, 2, 3, 4].map((n) => ({ title: `Seq step ${n}`, effortMinutes: 10 })),
+        orderMode: "sequential",
+      })
+      .expect(201);
+
+    const res = await request(app).get(`/api/draw/pool?goalId=${goal.id}`).expect(200);
+    expect(res.body.poolSize).toBe(2);
+    const weights = new Map(
+      res.body.candidates.map((c: { title: string; weight: number }) => [c.title, c.weight]),
+    );
+    expect(weights.get("Seq step 1")).toBeCloseTo(weights.get("Seq solo") as number, 5);
+  });
+
   it("applies category and goal filters like the draw", async () => {
     await seed({ title: "Household card", categoryId: 3, effortMinutes: 5 });
     const filtered = await request(app).get("/api/draw/pool?categoryId=3").expect(200);

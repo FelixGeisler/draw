@@ -582,3 +582,38 @@ user would have gotten had the guard existed all along. A read-side
 tolerance (recursive rollups, deep cascades, recursive hold-back) would have
 rebuilt the complexity ADR-16 banned to serve rows that should never have
 existed.
+
+== ADR-25: Draw weights are damped by the square root of the pool-sibling count
+
+*Context:* A #29 import commits ~40 comparable fresh leaves under one
+umbrella, each a full-weight pool candidate. Issue #30 mandated measuring
+before touching the formula. The deterministic simulation
+(`server/scripts/sim-issue30.ts`; deck pinned in `scripts/deckFixtures.ts`,
+guarded by `test/unit/draw-weights.test.ts`) put such an import at 58% of
+the probability mass on day 0 against a healthy 12-task organic deck — and
+rising (63% after a week, 74% after a month), because the fresh leaves climb
+the staleness ramp while the older organic tasks already sit at its ×2 cap.
+Leaner-but-normal decks fared worse (67% without the deck's overdue chore,
+72% against 6 organic tasks, 70% with a second 25-leaf import running in
+parallel). Waiting doesn't heal it, and the existing escape hatches don't
+either: the Draw page chips filter *into* the exam, not out of it, and
+sequential mode (#23) fixes the flood outright (0.6% share) but #29 commits
+default-parallel — deliberately, since exam exercises are independent.
+*Decision:* `drawService.poolWeights()` — the single home both `drawTask()`
+and `drawPool()` use — multiplies each candidate's weight by `1/sqrt(k)`,
+where k is the number of same-parent siblings *in the candidate pool*, not
+open siblings: held-back sequential steps (ADR-18), snoozed (ADR-17) and
+out-of-window (ADR-20) siblings don't flood the deck, so they must not
+dampen the one card representing them. k = 1 — every parentless task, only
+child, or sequential front card — is exactly ×1, and `weight()` itself is
+untouched. A 40-leaf import competes like √40 ≈ 6 cards (measured 18%
+share), and the damping decays smoothly as leaves complete (20 left → 13%,
+5 left → 6%) instead of the cliff a per-parent quota would create.
+*Rationale:* sqrt is the mildest standard damping that keeps aggregate group
+mass monotone in group size — a bigger breakdown still surfaces more often
+in total (the exam *is* important; its best leaf still draws at ~1% per
+draw), but sublinearly, so it can no longer starve chores and other goals:
+distinct organic cards seen in a 10-draw session recover from 3.6 to 6.3 of
+12, and a mid-weight organic card's chance to surface within 5 draws from
+7% to ~13% (pre-import: 16%). Per-goal quotas and changes to the
+urgency/staleness/cooldown factors were explicitly out of scope (#30).
