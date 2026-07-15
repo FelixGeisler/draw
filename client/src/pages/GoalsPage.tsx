@@ -18,7 +18,7 @@ const VERDICT_STYLE = {
 /**
  * Burn-down chip (#60) next to the days-left chip. "unknown" shows the
  * required pace without a verdict (no history to compare against); the
- * infeasible chip carries the ✨ Re-plan shortcut — it only toggles the same
+ * infeasible chip carries the ✨ Re-plan shortcut — it only opens the same
  * Plan-backward panel as the button below, no second AI path.
  */
 function FeasibilityChip({ f, onReplan }: { f: Feasibility; onReplan?: () => void }) {

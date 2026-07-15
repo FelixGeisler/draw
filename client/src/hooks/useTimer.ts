@@ -23,6 +23,9 @@ export function useStartTimer() {
       qc.invalidateQueries({ queryKey: ["timer"] });
       // Starting a timer lays a (face-down) card into today's skyline tower.
       qc.invalidateQueries({ queryKey: ["activity"] });
+      // Goal cards derive trackedMinutes14d from time_entries (#60), and a
+      // running entry already counts toward the window via MINUTES_EXPR.
+      qc.invalidateQueries({ queryKey: ["goals"] });
     },
   });
 }
@@ -35,6 +38,9 @@ export function useStopTimer() {
       qc.invalidateQueries({ queryKey: ["timer"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["activity"] });
+      // The TimerBar is global: stopping while the Goals page is mounted must
+      // refresh the feasibility chip's trackedMinutes14d pace (#60).
+      qc.invalidateQueries({ queryKey: ["goals"] });
     },
   });
 }

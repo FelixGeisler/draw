@@ -63,6 +63,11 @@ describe("remainingOpenEffortMinutes (leaf-only sum)", () => {
     // 60 + 20 + 30 + 15; the leaf rule gives 20 + 30 + 15.
     expect((await goalRow(goal.id)).remainingOpenEffortMinutes).toBe(65);
 
+    // Tracked minutes attribute through subtasks too: an entry on a subtask
+    // counts for the goal because subtasks inherit goal_id (#29).
+    insertEntry(subtasks[0].id, iso(60 * 60_000), iso(35 * 60_000));
+    expect((await goalRow(goal.id)).trackedMinutes14d).toBe(25);
+
     // Closing one step shrinks the sum to the still-open leaves.
     await request(app).patch(`/api/tasks/${subtasks[0].id}`).send({ status: "done" }).expect(200);
     expect((await goalRow(goal.id)).remainingOpenEffortMinutes).toBe(45);
