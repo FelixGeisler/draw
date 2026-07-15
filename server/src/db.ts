@@ -66,8 +66,23 @@ function migrate() {
       // exactly one step up its original chain — the loop terminates because
       // parent_id is only ever written at INSERT referencing an existing
       // row, making the ancestor graph acyclic, and each pass strictly
-      // shrinks the maximum depth. Transactional: a crash between hoist and
-      // cascade must not leave rows the re-run can no longer tell apart.
+      // shrinks the maximum depth. Defensively the pass count is bounded
+      // anyway (a chain of depth d holds d-2 nested rows, so acyclic data
+      // needs at most one pass per initially nested row): a parent_id cycle
+      // — impossible via the API, but this migration exists precisely for
+      // rows no current code path writes — aborts the boot with a
+      // diagnosable error instead of hanging it forever. Transactional: a
+      // crash between hoist and cascade must not leave rows the re-run can
+      // no longer tell apart.
+      //
+      // Hoisting can PLACE a recurring row directly under a 'sequential'
+      // root — the combination the #66 guard rejects on every write path
+      // (ADR-23). Deliberate, recorded in ADR-24: the row is tolerated-but-
+      // repairable exactly like a pre-ban row (no-op resends pass; the user
+      // drops the recurrence or flips the root to parallel, and the
+      // transition guards prevent re-creating it). The guard must NOT run
+      // here — it would fail the migration on the very legacy data it
+      // exists to repair. Pinned by migration-v6-recurring.test.ts.
       db.transaction(() => {
         const findNested = db.prepare(
           `SELECT t.id AS id, p.parent_id AS grandparentId
@@ -76,9 +91,15 @@ function migrate() {
         );
         const hoist = db.prepare("UPDATE tasks SET parent_id = ? WHERE id = ?");
         const reparented = new Set<number>();
-        for (;;) {
+        const maxPasses = (findNested.all() as unknown[]).length + 1;
+        for (let pass = 0; ; pass++) {
           const nested = findNested.all() as { id: number; grandparentId: number }[];
           if (nested.length === 0) break;
+          if (pass >= maxPasses) {
+            throw new Error(
+              "v7 migration: tasks.parent_id contains a cycle — repair the database by hand (issue #80, ADR-24)",
+            );
+          }
           for (const { id, grandparentId } of nested) {
             hoist.run(grandparentId, id);
             reparented.add(id);
@@ -88,7 +109,11 @@ function migrate() {
         // cascade rules a parent edit applies (routes/tasks.ts): goal_id
         // follows the parent unconditionally, category_id only while open —
         // done/archived rows are historical records and keep the category
-        // they were actually finished under (#44).
+        // they were actually finished under (#44). impact is deliberately
+        // left as-is, even where the adopted goal_id is NULL: a parent goal
+        // unlink cascades NULL without resetting children's impact either,
+        // and the ADR-4 no-op tolerance keeps such rows editable —
+        // grandfathered, not an oversight.
         const adopt = db.prepare(
           `UPDATE tasks
            SET goal_id = (SELECT r.goal_id FROM tasks r WHERE r.id = tasks.parent_id),
