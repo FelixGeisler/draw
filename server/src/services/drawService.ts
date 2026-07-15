@@ -124,9 +124,19 @@ export function isWithinWindow(
   return minutes >= toMinutes(start) && minutes < toMinutes(end);
 }
 
-/** window_days column (validated JSON) → number[] | null. */
+/**
+ * window_days column (validated JSON) → number[] | null. Writes are validated,
+ * so corrupt JSON only exists in a hand-edited DB — but this runs on every
+ * task payload, so contain it as null (= unwindowed, the pool-safe reading)
+ * rather than letting one bad row take down whole endpoints.
+ */
 export function parseWindowDays(raw: unknown): number[] | null {
-  return typeof raw === "string" ? (JSON.parse(raw) as number[]) : null;
+  if (typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw) as number[];
+  } catch {
+    return null;
+  }
 }
 
 function filterConditions(filters: DrawFilters): { conditions: string[]; params: unknown[] } {

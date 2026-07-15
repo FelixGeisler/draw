@@ -53,6 +53,7 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
   const [windowDays, setWindowDays] = useState<number[]>(initial?.windowDays ?? [1, 2, 3, 4, 5]);
   const [windowStart, setWindowStart] = useState(initial?.windowStart ?? "09:00");
   const [windowEnd, setWindowEnd] = useState(initial?.windowEnd ?? "17:00");
+  const [error, setError] = useState<string | null>(null);
 
   // All-or-none (server-validated): an editor left incomplete submits no
   // window at all — identical to toggling it off.
@@ -62,18 +63,27 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!title.trim()) return;
-    await onSubmit({
-      title: title.trim(),
-      categoryId,
-      goalId: goalId === "" ? null : goalId,
-      impact: resolveSubmittedImpact(goalId, impact, initial),
-      effortMinutes: effort ? Number(effort) : null,
-      dueDate: dueDate || null,
-      recurEveryDays: recur ? Number(recur) : null,
-      windowDays: windowSet ? windowDays : null,
-      windowStart: windowSet ? windowStart : null,
-      windowEnd: windowSet ? windowEnd : null,
-    });
+    setError(null);
+    try {
+      await onSubmit({
+        title: title.trim(),
+        categoryId,
+        goalId: goalId === "" ? null : goalId,
+        impact: resolveSubmittedImpact(goalId, impact, initial),
+        effortMinutes: effort ? Number(effort) : null,
+        dueDate: dueDate || null,
+        recurEveryDays: recur ? Number(recur) : null,
+        windowDays: windowSet ? windowDays : null,
+        windowStart: windowSet ? windowStart : null,
+        windowEnd: windowSet ? windowEnd : null,
+      });
+    } catch (err) {
+      // Surface the server's message (an ApiError from api.post/patch) —
+      // e.g. a rejected overnight window would otherwise fail silently,
+      // with the fields kept for the user to correct.
+      setError((err as Error).message);
+      return;
+    }
     if (!initial) {
       setTitle("");
       setEffort("");
@@ -203,6 +213,11 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, o
             value={windowEnd}
             onChange={(e) => setWindowEnd(e.target.value)}
           />
+        </div>
+      )}
+      {error && (
+        <div role="alert" style={{ flexBasis: "100%", color: "var(--danger)", fontSize: 13 }}>
+          {error}
         </div>
       )}
     </form>

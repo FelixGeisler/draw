@@ -67,3 +67,30 @@ test("drawing from an all-outside-window pool says scheduled for later", async (
   // Never the break-something-down hint — these cards return on their own.
   await expect(page.getByText(/Break something down/)).toHaveCount(0);
 });
+
+test("a rejected night window surfaces the server's message instead of failing silently", async ({
+  page,
+}) => {
+  // Overnight windows (end <= start) are rejected by design — the exact
+  // attempt the issue predicts. The 400 must reach the user: before the fix
+  // the form swallowed it and Add just did nothing.
+  const NIGHT_TITLE = "Read before bed";
+  await page.goto("/capture");
+  await page.getByPlaceholder("What needs doing?").fill(NIGHT_TITLE);
+  await page.getByRole("button", { name: "🕒 availability" }).click();
+  await page.getByLabel("Window start").fill("20:00");
+  await page.getByLabel("Window end").fill("08:00");
+  await page.getByRole("button", { name: "Add" }).click();
+
+  // The server's message is shown, the task is NOT created, and the form
+  // keeps its fields for correction instead of resetting.
+  await expect(page.getByRole("alert")).toContainText("overnight windows are not supported");
+  await expect(page.locator("section").getByText(NIGHT_TITLE)).toHaveCount(0);
+  await expect(page.getByPlaceholder("What needs doing?")).toHaveValue(NIGHT_TITLE);
+
+  // Correcting the window clears the error and the capture goes through.
+  await page.getByLabel("Window end").fill("22:00");
+  await page.getByRole("button", { name: "Add" }).click();
+  await expect(page.locator("section").getByText(NIGHT_TITLE)).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+});

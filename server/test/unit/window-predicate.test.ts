@@ -31,4 +31,11 @@ describe("parseWindowDays", () => {
     expect(parseWindowDays("[1,2,3]")).toEqual([1, 2, 3]);
     expect(parseWindowDays(null)).toBeNull();
   });
+
+  it("contains a corrupt row (hand-edited DB) as unwindowed instead of throwing", () => {
+    // Runs on every task payload — one bad row must not break whole endpoints.
+    expect(parseWindowDays("[1,2,")).toBeNull();
+    // null days = no window: the predicate keeps the task drawable.
+    expect(isWithinWindow(parseWindowDays("[1,2,"), "09:00", "17:00", new Date())).toBe(true);
+  });
 });
