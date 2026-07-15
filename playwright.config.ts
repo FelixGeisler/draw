@@ -25,17 +25,37 @@ export default defineConfig({
     baseURL: `http://localhost:${VITE_PORT}`,
     trace: "retain-on-failure",
   },
-  webServer: {
-    command: "npm run dev",
-    // Health-check through the Vite proxy so both processes must be up.
-    url: `http://localhost:${VITE_PORT}/api/health`,
-    reuseExistingServer: false,
-    timeout: 60_000,
-    env: {
-      DATA_DIR: E2E_DATA_DIR,
-      API_PORT,
-      VITE_PORT,
-      ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
+  // API and client are separate webServer entries (not one `npm run dev`) so
+  // that EACH port gets Playwright's pre-flight availability check. A single
+  // entry only checked the Vite URL: with a foreign checkout's API server on
+  // E2E_API_PORT our server died on EADDRINUSE, Vite still came up and proxied
+  // /api to the foreign process, and the suite silently ran against the wrong
+  // build (#70). reuseExistingServer stays false on both — every run needs its
+  // own throwaway DATA_DIR, so an already-listening server is never ours; with
+  // false, Playwright fails fast with "... is already used" instead.
+  webServer: [
+    {
+      command: "npm run dev -w server",
+      url: `http://127.0.0.1:${API_PORT}/api/health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: {
+        DATA_DIR: E2E_DATA_DIR,
+        API_PORT,
+        ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
+      },
     },
-  },
+    {
+      command: "npm run dev -w client",
+      // Health-check through the Vite proxy so the proxy wiring to the API
+      // must work too, not just the static dev server.
+      url: `http://localhost:${VITE_PORT}/api/health`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      env: {
+        VITE_PORT,
+        API_PORT, // proxy target (client/vite.config.ts)
+      },
+    },
+  ],
 });
