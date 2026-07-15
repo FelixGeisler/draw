@@ -270,4 +270,22 @@ describe("rejection of unusable input", () => {
     const huge = `<svg>${"<rect/>".repeat(100_000)}</svg>`;
     expect(sanitizeSvg(huge)).toBeNull();
   });
+
+  it("stays fast on a pathological unclosed-tag run under the length limit", () => {
+    // "<a <a <a …" once made TAG_OPEN_RE swallow everything to end-of-input
+    // per '<' position — O(n²), multiple seconds of synchronous CPU at this
+    // size, freezing the whole event loop. The scan must stay linear: this
+    // completes in single-digit milliseconds; the bound below only has to
+    // separate that from the seconds the quadratic scan would take.
+    const garbage = "<a ".repeat(20_000); // 60 KB, under MAX_INPUT_LENGTH
+    const input = `<svg viewBox="0 0 300 420">${garbage}${BASE_RECT}</svg>`;
+    const started = performance.now();
+    const out = sanitizeSvg(input);
+    const elapsed = performance.now() - started;
+    expect(elapsed).toBeLessThan(500);
+    // The malformed run is dropped as stray text; the real art survives.
+    expect(out).toBeTruthy();
+    expect(out).toContain("<rect");
+    expect(out).not.toContain("<a");
+  });
 });

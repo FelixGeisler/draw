@@ -183,18 +183,26 @@ const ALLOWED_ATTRS = new Set([
 
 // Values in quotes may contain '>' — the quoted alternatives keep the tag
 // regex from ending early. Unquoted values exclude '/' so a trailing
-// self-closing slash is never swallowed into a value.
+// self-closing slash is never swallowed into a value. Attribute names and
+// unquoted values also exclude '<': otherwise a malformed unclosed-tag run
+// ("<a <a <a …") is greedily swallowed to end-of-input before the match
+// fails, and rescanning from each '<' turns the main loop quadratic —
+// seconds of synchronous CPU on kilobytes of input. Stopping a match at the
+// next '<' keeps every attempt short and the whole scan linear.
 const TAG_OPEN_RE =
-  /^<([A-Za-z][A-Za-z0-9:_-]*)((?:\s+[^\s=/>]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>/]*))?)*)\s*(\/)?>/;
+  /^<([A-Za-z][A-Za-z0-9:_-]*)((?:\s+[^\s=/><]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>/<]*))?)*)\s*(\/)?>/;
 const TAG_CLOSE_RE = /^<\/\s*([A-Za-z][A-Za-z0-9:_-]*)\s*>/;
-const ATTR_RE = /([^\s=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/]*)))?/g;
+const ATTR_RE = /([^\s=/><]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>/<]*)))?/g;
 
 // Same-document reference only: "#id". Entity-obfuscated schemes
 // ("&#106;avascript:...") fail this by construction — entities are never
 // decoded here, and the value would not start with '#'.
 const FRAGMENT_HREF_RE = /^#[A-Za-z_][A-Za-z0-9_.-]*$/;
 
-const MAX_INPUT_LENGTH = 500_000;
+// Card art is generated with a 6K max_tokens cap (~24 KB of text), so 64 KB
+// is already generous. The guard exists to bound CPU before the scan starts —
+// it must stay within the same order of magnitude as a real generation.
+const MAX_INPUT_LENGTH = 64_000;
 
 function escapeAttr(value: string): string {
   return value
