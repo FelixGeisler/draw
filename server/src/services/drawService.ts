@@ -19,6 +19,17 @@ export interface Candidate {
   deferredUntil: string | null;
 }
 
+export interface PoolCandidate extends Candidate {
+  title: string;
+  categoryId: number;
+  goalId: number | null;
+}
+
+export interface DrawFilters {
+  categoryId?: number;
+  goalId?: number;
+}
+
 export interface DrawResult {
   task: Record<string, unknown> | null;
   reason?: "no_ready_tasks" | "all_too_big";
@@ -62,22 +73,13 @@ export function weight(c: Candidate, now: Date, cooldownMinutes: number, poolSiz
   return w;
 }
 
-export function drawTask(filters: { categoryId?: number; goalId?: number }): DrawResult {
-  const maxEffort = getSetting("max_draw_effort", 30);
-  const cooldown = getSetting("draw_cooldown_minutes", 60);
-  const now = new Date();
+// Snooze/block (ADR-17): kept as a derived predicate alongside the rest —
+// an expired deferred_until re-enters the pool with no write.
+const SNOOZE_CONDITION = "t.blocked = 0 AND (t.deferred_until IS NULL OR t.deferred_until <= ?)";
 
-  // Snooze/block (ADR-17): kept as a derived predicate alongside the rest —
-  // an expired deferred_until re-enters the pool with no write.
-  const SNOOZE_CONDITION = "t.blocked = 0 AND (t.deferred_until IS NULL OR t.deferred_until <= ?)";
-  const conditions = [
-    "t.status = 'open'",
-    "t.effort_minutes IS NOT NULL",
-    "t.effort_minutes <= ?",
-    SNOOZE_CONDITION,
-    "NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')",
-  ];
-  const params: unknown[] = [maxEffort, now.toISOString()];
+function filterConditions(filters: DrawFilters): { conditions: string[]; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
   if (filters.categoryId) {
     conditions.push("t.category_id = ?");
     params.push(filters.categoryId);
@@ -86,16 +88,76 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
     conditions.push("t.goal_id = ?");
     params.push(filters.goalId);
   }
+  return { conditions, params };
+}
 
-  const candidates = db
+/**
+ * The drawable-candidate query — the single home of the drawability
+ * predicate (ADR-2). Reused by drawTask() and the side-effect-free
+ * drawPool() below so the two can never drift.
+ */
+function queryCandidates(filters: DrawFilters, maxEffort: number, now: Date): PoolCandidate[] {
+  const filter = filterConditions(filters);
+  const conditions = [
+    "t.status = 'open'",
+    "t.effort_minutes IS NOT NULL",
+    "t.effort_minutes <= ?",
+    SNOOZE_CONDITION,
+    "NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')",
+    ...filter.conditions,
+  ];
+  return db
     .prepare(
-      `SELECT t.id, t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
+      `SELECT t.id, t.title, t.category_id AS categoryId, t.goal_id AS goalId,
+              t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
               t.created_at AS createdAt, t.recur_every_days AS recurEveryDays,
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil,
               (SELECT MAX(completed_at) FROM completions WHERE task_id = t.id) AS lastCompletedAt
        FROM tasks t WHERE ${conditions.join(" AND ")}`,
     )
-    .all(...params) as Candidate[];
+    .all(maxEffort, now.toISOString(), ...filter.params) as PoolCandidate[];
+}
+
+/**
+ * Side-effect-free deck snapshot for GET /api/draw/pool (backs the MCP
+ * draw://deck resource): the same candidates and weights a draw would use,
+ * but no `last_drawn_at` stamp, no persisted current draw, no achievement
+ * check.
+ */
+export function drawPool(filters: DrawFilters): {
+  poolSize: number;
+  maxDrawEffort: number;
+  candidates: Array<Record<string, unknown>>;
+} {
+  const maxEffort = getSetting("max_draw_effort", 30);
+  const cooldown = getSetting("draw_cooldown_minutes", 60);
+  const now = new Date();
+  const candidates = queryCandidates(filters, maxEffort, now);
+  const weights = candidates.map((c) => weight(c, now, cooldown, candidates.length));
+  const total = weights.reduce((a, b) => a + b, 0);
+  return {
+    poolSize: candidates.length,
+    maxDrawEffort: maxEffort,
+    candidates: candidates.map((c, i) => ({
+      id: c.id,
+      title: c.title,
+      categoryId: c.categoryId,
+      goalId: c.goalId,
+      impact: c.impact,
+      effortMinutes: c.effortMinutes,
+      dueDate: c.dueDate,
+      weight: weights[i],
+      probability: total > 0 ? weights[i] / total : 0,
+    })),
+  };
+}
+
+export function drawTask(filters: DrawFilters): DrawResult {
+  const maxEffort = getSetting("max_draw_effort", 30);
+  const cooldown = getSetting("draw_cooldown_minutes", 60);
+  const now = new Date();
+
+  const candidates = queryCandidates(filters, maxEffort, now);
 
   if (candidates.length === 0) {
     // The draw replaced whatever card was showing — even an empty draw, so a
@@ -104,16 +166,16 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
     // Distinguish "nothing at all" from "only oversized/unestimated tasks".
     // Snoozed/blocked cards are not "too big" — they come back on their own
     // (or on wake), so they must not trigger the break-something-down hint.
+    const filter = filterConditions(filters);
     const anyOpen = db
       .prepare(
         `SELECT COUNT(*) AS n FROM tasks t
          WHERE t.status = 'open'
            AND ${SNOOZE_CONDITION}
            AND NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')
-           ${filters.categoryId ? "AND t.category_id = ?" : ""}
-           ${filters.goalId ? "AND t.goal_id = ?" : ""}`,
+           ${filter.conditions.map((c) => `AND ${c}`).join(" ")}`,
       )
-      .get(...params.slice(1)) as { n: number };
+      .get(now.toISOString(), ...filter.params) as { n: number };
     return { task: null, reason: anyOpen.n > 0 ? "all_too_big" : "no_ready_tasks" };
   }
 
