@@ -375,7 +375,7 @@ management is never exposed); read tools carry `readOnlyHint: true`,
 achievements), and nothing is marked destructive. Read-heavy state ships as
 resources: `draw://deck` (backed by the new side-effect-free
 `GET /api/draw/pool`, reusing the ADR-2 candidate query), `draw://gamification`,
-and `draw://materials/{id}`. No `ANTHROPIC_API_KEY` is needed anywhere — the
+and `draw://materials/\{id}`. No `ANTHROPIC_API_KEY` is needed anywhere — the
 intelligence is the MCP client's.
 *Rationale:* Trade-off accepted: the dev server must be running —
 `ECONNREFUSED` maps to an actionable tool error naming `npm run dev`. In
