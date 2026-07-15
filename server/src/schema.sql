@@ -32,7 +32,11 @@ CREATE TABLE tasks (
   -- Snooze/block (ADR-17): deferred_until is retained after expiry as the wake
   -- timestamp for staleness; drawability stays a derived predicate (ADR-2).
   deferred_until TEXT,
-  blocked INTEGER NOT NULL DEFAULT 0
+  blocked INTEGER NOT NULL DEFAULT 0,
+  -- Sequential subtask mode (#23, ADR-18): only meaningful on parents. A
+  -- 'sequential' parent exposes only its first open subtask in creation order
+  -- to the draw pool; "held back" stays a derived predicate (ADR-2).
+  subtask_order_mode TEXT NOT NULL CHECK (subtask_order_mode IN ('parallel', 'sequential')) DEFAULT 'parallel'
 );
 
 CREATE INDEX idx_tasks_parent ON tasks(parent_id);

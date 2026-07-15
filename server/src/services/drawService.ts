@@ -62,6 +62,23 @@ export function weight(c: Candidate, now: Date, cooldownMinutes: number, poolSiz
   return w;
 }
 
+/**
+ * Derived hold-back predicate (#23, ADR-18): the task sits behind an older
+ * open sibling under a 'sequential' parent. Creation order is
+ * (created_at, id) — the order the Tasks page renders and the AI breakdown
+ * emits; the id tie-break keeps batch-inserted siblings (identical
+ * created_at) deterministic. Like snoozing, this is never a stored flag:
+ * completing the older sibling frees the next one with no write.
+ */
+export function heldBackSql(alias: string): string {
+  return `EXISTS(
+    SELECT 1 FROM tasks p JOIN tasks s ON s.parent_id = p.id
+    WHERE p.id = ${alias}.parent_id AND p.subtask_order_mode = 'sequential'
+      AND s.status = 'open'
+      AND (s.created_at < ${alias}.created_at OR (s.created_at = ${alias}.created_at AND s.id < ${alias}.id))
+  )`;
+}
+
 export function drawTask(filters: { categoryId?: number; goalId?: number }): DrawResult {
   const maxEffort = getSetting("max_draw_effort", 30);
   const cooldown = getSetting("draw_cooldown_minutes", 60);
@@ -76,6 +93,7 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
     "t.effort_minutes <= ?",
     SNOOZE_CONDITION,
     "NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')",
+    `NOT ${heldBackSql("t")}`,
   ];
   const params: unknown[] = [maxEffort, now.toISOString()];
   if (filters.categoryId) {
@@ -104,12 +122,15 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
     // Distinguish "nothing at all" from "only oversized/unestimated tasks".
     // Snoozed/blocked cards are not "too big" — they come back on their own
     // (or on wake), so they must not trigger the break-something-down hint.
+    // Held-back sequential siblings are excluded the same way: they surface
+    // by completing the step in front, never by being broken down (#23).
     const anyOpen = db
       .prepare(
         `SELECT COUNT(*) AS n FROM tasks t
          WHERE t.status = 'open'
            AND ${SNOOZE_CONDITION}
            AND NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')
+           AND NOT ${heldBackSql("t")}
            ${filters.categoryId ? "AND t.category_id = ?" : ""}
            ${filters.goalId ? "AND t.goal_id = ?" : ""}`,
       )
@@ -143,7 +164,8 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
               t.recur_every_days AS recurEveryDays, t.status,
               t.created_at AS createdAt, t.completed_at AS completedAt,
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
-              0 AS hasOpenChildren
+              t.subtask_order_mode AS subtaskOrderMode,
+              0 AS hasOpenChildren, 0 AS heldBack
        FROM tasks t WHERE t.id = ?`,
     )
     .get(chosen.id) as Record<string, unknown>;
@@ -171,14 +193,16 @@ export interface RestorableTask {
   hasOpenChildren: number;
   blocked: number | boolean;
   deferredUntil: string | null;
+  heldBack: number | boolean;
 }
 
 /**
  * Restore-validation for a persisted draw. Mirrors the client's
  * `classifyTask` and the candidate WHERE clause above: only an open leaf
  * task with an estimate within the draw limit, neither blocked nor snoozed
- * into the future, is still in the deck. Pinned against the same vectors as
- * the client (`shared/drawableVectors.ts`) so the two cannot drift.
+ * into the future nor held back behind a sequential sibling (#23), is still
+ * in the deck. Pinned against the same vectors as the client
+ * (`shared/drawableVectors.ts`) so the two cannot drift.
  */
 export function isRestorable(task: RestorableTask, maxEffort: number, now: Date): boolean {
   return (
@@ -186,6 +210,7 @@ export function isRestorable(task: RestorableTask, maxEffort: number, now: Date)
     !task.hasOpenChildren &&
     !task.blocked &&
     (task.deferredUntil == null || new Date(task.deferredUntil) <= now) &&
+    !task.heldBack &&
     task.effortMinutes != null &&
     task.effortMinutes <= maxEffort
   );
@@ -235,7 +260,9 @@ export function currentDraw(): { task: Record<string, unknown> } | null {
               t.recur_every_days AS recurEveryDays, t.status,
               t.created_at AS createdAt, t.completed_at AS completedAt,
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
-              EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open') AS hasOpenChildren
+              t.subtask_order_mode AS subtaskOrderMode,
+              EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open') AS hasOpenChildren,
+              ${heldBackSql("t")} AS heldBack
        FROM tasks t WHERE t.id = ?`,
     )
     .get(id) as (Record<string, unknown> & RestorableTask) | undefined;

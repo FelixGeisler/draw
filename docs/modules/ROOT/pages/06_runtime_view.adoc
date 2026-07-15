@@ -21,7 +21,8 @@ the UI turns this into a "break something down" call to action.
 The pick is persisted as the *current draw* (ADR-13). On mount the DrawPage
 restores it from `GET /api/draw/current` — revealed, no shuffle — the same
 pattern as the TimerBar (6.4). The endpoint validates the task is still
-drawable (open leaf, estimated, within `max_draw_effort`) and lazily clears a
+drawable (open leaf, estimated, within `max_draw_effort`, not snoozed/blocked,
+not held back behind a sequential sibling) and lazily clears a
 pointer that went stale, e.g. because the card was edited out of the deck.
 
 == 6.2 Completing a task (single transaction)

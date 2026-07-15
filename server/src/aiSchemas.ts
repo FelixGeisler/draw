@@ -19,6 +19,10 @@ export const breakdownSchema = z.object({
     }),
   ),
   approachNote: z.string(),
+  // #23: the model already orders subtasks by execution sequence — this one
+  // boolean says whether that sequence is binding. It only pre-sets the
+  // "Do in order" toggle in the review panel; the user has the last word.
+  orderMatters: z.boolean(),
 });
 
 export type BreakdownResult = z.infer<typeof breakdownSchema>;

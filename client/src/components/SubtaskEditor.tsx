@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { NewSubtask } from "../api/types";
+import type { NewSubtask, Task } from "../api/types";
 
 interface Row extends NewSubtask {
   key: number;
@@ -7,15 +7,21 @@ interface Row extends NewSubtask {
 
 interface Props {
   maxEffort: number;
-  onAccept: (subtasks: NewSubtask[]) => void | Promise<unknown>;
+  /** Pre-set from the parent so re-opening the editor keeps the choice (#23). */
+  initialOrderMode?: Task["subtaskOrderMode"];
+  onAccept: (
+    subtasks: NewSubtask[],
+    orderMode: Task["subtaskOrderMode"],
+  ) => void | Promise<unknown>;
   onCancel: () => void;
 }
 
 let nextKey = 1;
 const emptyRow = (): Row => ({ key: nextKey++, title: "", effortMinutes: null });
 
-export function SubtaskEditor({ maxEffort, onAccept, onCancel }: Props) {
+export function SubtaskEditor({ maxEffort, initialOrderMode, onAccept, onCancel }: Props) {
   const [rows, setRows] = useState<Row[]>([emptyRow(), emptyRow()]);
+  const [inOrder, setInOrder] = useState(initialOrderMode === "sequential");
 
   function update(key: number, patch: Partial<Row>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -48,6 +54,13 @@ export function SubtaskEditor({ maxEffort, onAccept, onCancel }: Props) {
           <button onClick={() => setRows((rs) => rs.filter((r) => r.key !== row.key))}>✕</button>
         </div>
       ))}
+      <label
+        style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--text-dim)", fontSize: 13 }}
+        title="Sequential mode: only the first open step enters the deck; the rest queue up behind it"
+      >
+        <input type="checkbox" checked={inOrder} onChange={(e) => setInOrder(e.target.checked)} />
+        Do in order — draw only the next open step
+      </label>
       <div style={{ display: "flex", gap: 8 }}>
         <button onClick={() => setRows((rs) => [...rs, emptyRow()])}>+ Step</button>
         <span style={{ flex: 1 }} />
@@ -56,7 +69,10 @@ export function SubtaskEditor({ maxEffort, onAccept, onCancel }: Props) {
           className="primary"
           disabled={valid.length === 0}
           onClick={() =>
-            onAccept(valid.map(({ title, effortMinutes }) => ({ title: title.trim(), effortMinutes })))
+            onAccept(
+              valid.map(({ title, effortMinutes }) => ({ title: title.trim(), effortMinutes })),
+              inOrder ? "sequential" : "parallel",
+            )
           }
         >
           Add {valid.length} subtask{valid.length === 1 ? "" : "s"}
