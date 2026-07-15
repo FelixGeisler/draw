@@ -83,6 +83,23 @@ export function useDeleteTask() {
   });
 }
 
+export function useSplitTask() {
+  const invalidate = useInvalidateTasks();
+  return useMutation({
+    // Split-in-place (#108): replaces a too-big subtask with >= 2 parts as
+    // siblings; the original ends archived, so the row disappears from the
+    // child list and the parts render in its queue slot (ADR-18).
+    mutationFn: ({
+      id,
+      parts,
+    }: {
+      id: number;
+      parts: { title: string; effortMinutes: number; description?: string }[];
+    }) => api.post<Task[]>(`/api/tasks/${id}/split`, { parts }),
+    onSuccess: invalidate,
+  });
+}
+
 export function useCreateSubtasks() {
   const invalidate = useInvalidateTasks();
   return useMutation({

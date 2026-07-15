@@ -27,7 +27,12 @@ module `lib/feasibility.ts` classifies on-track/tight/infeasible from
 required vs. actual pace; days to the target date count on the LOCAL wall
 clock to the end of the target day — a target date is a human-facing calendar
 day like the ADR-21 activity buckets, not a UTC instant. No feasibility
-snapshot is ever persisted. Only facts are stored
+snapshot is ever persisted. Split-in-place (#108) introduces no new derived
+state either: the archived original of a split falls out of every predicate
+above — the draw pool, the Tasks page child list, the effort rollups, the
+sequential hold-back and the parent-completion gate — through the existing
+`status` conditions alone, with no write beyond the one status flip.
+Only facts are stored
 (tasks, entries, completions, unlocked achievements).
 
 == 8.2 The weight formula

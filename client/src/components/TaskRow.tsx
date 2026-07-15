@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { Category, Goal, NewTask, Task } from "../api/types";
-import { useCreateSubtasks, useDeleteTask, useUpdateTask } from "../hooks/useTasks";
+import { useCreateSubtasks, useDeleteTask, useSplitTask, useUpdateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
-import { isSnoozed } from "../lib/drawable";
+import { classifyTask, isSnoozed } from "../lib/drawable";
 import { sequentialLockedByRecurrence } from "../lib/orderMode";
 import { reparentTargets } from "../lib/reparent";
+import { evenSplitPlan } from "../lib/splitPlan";
 import { TaskBadges } from "./TaskBadges";
 import { SnoozeMenu } from "./SnoozeMenu";
 import { TaskForm } from "./TaskForm";
@@ -43,8 +44,10 @@ export function TaskRow({
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const createSubtasks = useCreateSubtasks();
+  const splitTask = useSplitTask();
   const aiStatus = useAiStatus();
   const [breakingDown, setBreakingDown] = useState(false);
+  const [splitting, setSplitting] = useState(false);
   const [aiPanel, setAiPanel] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [snoozing, setSnoozing] = useState(false);
@@ -68,6 +71,10 @@ export function TaskRow({
     !done && task.parentId == null && !hasSubtasks && rootTasks
       ? reparentTargets(task, rootTasks)
       : [];
+  // Split-in-place (#108): where root rows show Break down, an open subtask
+  // row that classifies too-big offers Split — a subtask cannot be broken
+  // down further (ADR-16), so it is replaced by its parts as siblings.
+  const splittable = !done && task.parentId != null && classifyTask(task, maxEffort) === "too-big";
 
   function snooze(patch: { deferredUntil?: string; blocked?: boolean }) {
     updateTask.mutate({ id: task.id, ...patch });
@@ -198,6 +205,18 @@ export function TaskRow({
             Break down
           </button>
         )}
+        {splittable && (
+          <button
+            onClick={() => {
+              setSnoozing(false);
+              setMovingUnder(false);
+              setSplitting((s) => !s);
+            }}
+            title="Too big to draw — replace this step with smaller parts at the same level"
+          >
+            Split
+          </button>
+        )}
         {/* Reparent (#100): this menu is THE reparent control — drag-and-drop
             arrives as an alternative input in #101, reusing lib/reparent.ts.
             Plain buttons and a native select keep both actions keyboard-
@@ -225,6 +244,7 @@ export function TaskRow({
           <button
             onClick={() => {
               setBreakingDown(false);
+              setSplitting(false);
               setAiPanel(false);
               setSnoozing(false);
               setMovingUnder(false);
@@ -306,6 +326,64 @@ export function TaskRow({
             onBlock={() => snooze({ blocked: true })}
           />
         </div>
+      )}
+      {/* Split-in-place (#108): the SubtaskEditor pattern reused — retitled,
+          without the "Do in order" toggle (parts join the parent's existing
+          mode), pre-filled with the deterministic even split, min 2 parts.
+          The AI suggest reuses the breakdown endpoint (taskContext works for
+          any task id); only the ACCEPT differs — it calls the split endpoint,
+          replacing this row with its parts as siblings. */}
+      {splitting && (
+        <>
+          {aiStatus.data?.configured && !aiPanel && (
+            <button
+              style={{ margin: "8px 0 0", borderColor: "var(--accent)" }}
+              onClick={() => setAiPanel(true)}
+            >
+              ✨ Suggest with AI
+            </button>
+          )}
+          {aiPanel && (
+            <AiBreakdownPanel
+              taskId={task.id}
+              goalId={task.goalId}
+              hideOrderToggle
+              acceptLabel={(n) => `Split into ${n} part${n === 1 ? "" : "s"}`}
+              onClose={() => setAiPanel(false)}
+              onAccept={async (parts) => {
+                // Sibling-replacement semantics on accept: the split endpoint,
+                // never createSubtasks (per-part impact stays out of scope —
+                // parts inherit the original's rating).
+                await splitTask.mutateAsync({
+                  id: task.id,
+                  parts: parts.map(({ title, effortMinutes }) => ({ title, effortMinutes })),
+                });
+                setSplitting(false);
+              }}
+            />
+          )}
+          <SubtaskEditor
+            maxEffort={maxEffort}
+            heading={`Split into parts — they replace this step at the same level (drawable ≤ ${maxEffort} min, bigger parts can be split again)`}
+            initialRows={evenSplitPlan(task.title, task.effortMinutes ?? 0, maxEffort)}
+            minRows={2}
+            requireMinutes
+            hideOrderToggle
+            acceptLabel={(n) => `Split into ${n} part${n === 1 ? "" : "s"}`}
+            onCancel={() => setSplitting(false)}
+            onAccept={async (parts) => {
+              await splitTask.mutateAsync({
+                id: task.id,
+                // requireMinutes gates accept, so effortMinutes is present.
+                parts: parts.map(({ title, effortMinutes }) => ({
+                  title,
+                  effortMinutes: effortMinutes!,
+                })),
+              });
+              setSplitting(false);
+            }}
+          />
+        </>
       )}
       {breakingDown && (
         <>
