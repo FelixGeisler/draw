@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "draw": {
+      "command": "npm",
+      "args": ["run", "-s", "mcp", "-w", "server"],
+      "env": {}
+    }
+  }
+}
