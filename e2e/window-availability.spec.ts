@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
+import { resolveCurrentDraw } from "./helpers.js";
 
 // Issue #33: availability windows. One cheap journey, built RELATIVE to the
 // real current time (no clock-faking infrastructure exists in e2e/): a task
@@ -53,15 +54,12 @@ test("a task windowed to another weekday is scheduled, not drawable", async ({ p
 test("drawing from an all-outside-window pool says scheduled for later", async ({ page }) => {
   // Goal-filtered draw over a pool of exactly one out-of-window card. Earlier
   // serial specs can leave a persisted current draw behind (issue #25) — the
-  // revealed card blocks the idle front face, so replace it via "Draw again".
-  const current = await (await page.request.get("/api/draw/current")).json();
+  // revealed card blocks the idle front face, and since #88 there is no
+  // "Draw again", so the leftover card is resolved before drawing.
+  await resolveCurrentDraw(page);
   await page.goto("/");
   await page.locator(".draw-filters select").selectOption({ label: `🎯 ${GOAL_TITLE}` });
-  if (current?.task) {
-    await page.getByRole("button", { name: "Draw again" }).click();
-  } else {
-    await page.locator(".draw-face.front").click();
-  }
+  await page.locator(".draw-face.front").click();
 
   await expect(page.getByText(/scheduled for later/)).toBeVisible();
   // Never the break-something-down hint — these cards return on their own.

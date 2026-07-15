@@ -196,7 +196,8 @@ export function DrawPage() {
                 <TaskBadges task={task} />
                 {nonDrawable && (
                   <div className="draw-hint">
-                    This card is now out of the deck — draw again for a playable one.
+                    This card is now out of the deck — complete, snooze, or delete it to draw a
+                    fresh card.
                   </div>
                 )}
                 {/* The odds reflect the original draw; hide them once the
@@ -222,7 +223,13 @@ export function DrawPage() {
             ▶ Start now
           </button>
           <button onClick={completeDrawn}>✓ Done</button>
-          <button onClick={() => setSnoozing((s) => !s)} title="Take this card out of the deck">
+          {/* When an edit pushed the card out of the deck, "Not now" takes
+              over as the suggested action — the legitimate escape hatch. */}
+          <button
+            className={nonDrawable ? "primary" : undefined}
+            onClick={() => setSnoozing((s) => !s)}
+            title="Take this card out of the deck"
+          >
             💤 Not now
           </button>
           <button
@@ -236,9 +243,11 @@ export function DrawPage() {
           <button onClick={deleteDrawn} title="Delete task">
             🗑 Delete
           </button>
-          <button className={nonDrawable ? "primary" : undefined} onClick={doDraw}>
-            Draw again
-          </button>
+          {/* Deliberately no "Draw again" (#88): the draw is a commitment —
+              re-rolling would mean fishing for a comfortable card. The card
+              leaves the screen only by being resolved: completed, snoozed or
+              blocked ("Not now"), or deleted. Filter changes while a card is
+              revealed apply to the NEXT draw. */}
         </div>
       )}
 
@@ -259,7 +268,11 @@ export function DrawPage() {
           <TaskForm
             key={task.id}
             categories={categories.data ?? []}
-            goals={goals.data}
+            // No goal select mid-draw (#88): the page's goal filter sits right
+            // above the card, so the form's select read as duplication. Goal
+            // (re)linking lives on the Tasks page rows (#17). Omitting `goals`
+            // hides the select — the subtask-variant mechanism — while the
+            // stored goalId is resent unchanged on save.
             initial={task}
             autoFocus
             submitLabel="Save"

@@ -178,6 +178,13 @@ before any restore validation runs — deletes therefore clear the pointer
 eagerly whenever its row is gone, not only on an exact id match. Deriving the
 bonus server-side removes a client-trust quirk and makes the bonus
 reload-proof.
+*Amendment (#88):* the DrawPage no longer offers "Draw again" — the draw is a
+commitment, and the persisted pointer makes it reload-proof. A revealed card
+is resolved (completed, snoozed/blocked, deleted), never re-rolled; only the
+next draw after resolution overwrites the pointer. Editing the card out of
+the deck also counts as resolution: the lazy restore validation clears the
+stale pointer, so a reload after an edit-out lands on the idle deck — the
+sanctioned "this card was a mistake" escape hatch, not a re-roll.
 
 == ADR-14: AI proposes full task lists; checkbox review remains the sole write path
 

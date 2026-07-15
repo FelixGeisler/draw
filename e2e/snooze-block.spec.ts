@@ -84,7 +84,8 @@ test("snooze from the drawn card: dismissed, parked under Snoozed, woken again",
 });
 
 test("block from the drawn card: out of the draw until woken", async ({ page }) => {
-  // The previous test left the card revealed; drawFromGoal redraws it.
+  // The previous test left the card revealed; drawFromGoal resolves the
+  // leftover draw and draws the same one-card pool again.
   await drawFromGoal(page, GOAL_TITLE);
   await expect(page.locator(".draw-face.back h2")).toHaveText(TASK_TITLE);
 

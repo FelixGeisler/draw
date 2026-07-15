@@ -129,7 +129,7 @@ test("recurring steps cannot join an in-order breakdown (#66)", async ({ page })
   // Editing a step of the (again in-order) wardrobe parent offers no
   // recurrence field — a recurring step would gate its siblings forever.
   await page.goto("/tasks");
-  await taskRow(page, STEP_TWO).getByTitle("Edit").click();
+  await taskRow(page, STEP_TWO).getByTitle("Edit", { exact: true }).click();
   await expect(page.getByPlaceholder("What needs doing?")).toHaveValue(STEP_TWO);
   await expect(page.getByTitle("Repeat every N days (optional)")).not.toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
@@ -148,7 +148,7 @@ test("recurring steps cannot join an in-order breakdown (#66)", async ({ page })
   });
 
   await page.goto("/tasks");
-  await taskRow(page, RECUR_STEP_TITLE).getByTitle("Edit").click();
+  await taskRow(page, RECUR_STEP_TITLE).getByTitle("Edit", { exact: true }).click();
   await page.getByTitle("Repeat every N days (optional)").fill("3");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(taskRow(page, RECUR_STEP_TITLE).locator(".chip", { hasText: "↻ 3d" })).toBeVisible();

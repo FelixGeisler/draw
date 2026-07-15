@@ -26,7 +26,7 @@ weight = impact² / max(effort, 5)          leverage per minute
        × staleness(base date)              up to ×2 over 30 days; base = created,
                                            last completion (recurring), or the
                                            snooze wake time (ADR-17)
-       × 0.15 if drawn within cooldown     variety on "draw again"
+       × 0.15 if drawn within cooldown     variety across successive draws
        ÷ sqrt(pool siblings)               sibling damping (ADR-25): a k-leaf
                                            breakdown competes like ~√k cards;
                                            k counts siblings in the pool
