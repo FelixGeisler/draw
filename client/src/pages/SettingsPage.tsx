@@ -120,7 +120,10 @@ function CategoryRow({ category }: { category: Category }) {
       api.patch(`/api/categories/${category.id}`, body),
     onSuccess: () => {
       remove.reset(); // a stale delete error must not outlive a successful edit
-      qc.invalidateQueries({ queryKey: ["categories"] });
+      // Returned so the mutation stays pending until the refetch lands — the
+      // row keeps showing the in-flight name below instead of flashing back
+      // to the stale one while the round-trip completes.
+      return qc.invalidateQueries({ queryKey: ["categories"] });
     },
   });
   const remove = useMutation({
@@ -131,10 +134,15 @@ function CategoryRow({ category }: { category: Category }) {
     },
   });
 
+  // A rename shows immediately; until the server round-trip completes the row
+  // would otherwise silently fall back to the stale name (and reads as a lost
+  // edit — the exact race the E2E flake caught). On error it reverts.
+  const shownName = (patch.isPending ? patch.variables?.name : undefined) ?? category.name;
+
   function commitRename() {
     setEditing(false);
     const trimmed = name.trim();
-    if (cancelled.current || !trimmed || trimmed === category.name) {
+    if (cancelled.current || !trimmed || trimmed === shownName) {
       cancelled.current = false;
       setName(category.name);
       return;
@@ -174,11 +182,11 @@ function CategoryRow({ category }: { category: Category }) {
           style={{ flex: 1, cursor: "pointer" }}
           title="Click to rename"
           onClick={() => {
-            setName(category.name);
+            setName(shownName);
             setEditing(true);
           }}
         >
-          {category.name}
+          {shownName}
         </span>
       )}
       <button
