@@ -6,8 +6,8 @@
 
 |R1
 |*AI live path never verified* — no API key was available during initial development
-|Breakdown/plan-goal could fail on first real use
-|Degraded mode fully tested; code follows current SDK docs; verify on first key setup (see Q4/Q10 scenarios)
+|Breakdown/plan-goal/generate-tasks could fail on first real use
+|Degraded mode fully tested (client panels run against mocked AI responses in E2E); code follows current SDK docs; verify on first key setup (see Q4/Q10 scenarios)
 
 |R2
 |[.line-through]#No automated tests# *Resolved:* unit (Vitest), integration (Supertest + temp SQLite), and E2E (Playwright) suites exist and run in CI on every PR

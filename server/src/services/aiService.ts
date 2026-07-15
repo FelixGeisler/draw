@@ -304,6 +304,30 @@ async function guardTokens(blocks: ContentBlock[], system: string): Promise<numb
   }
 }
 
+export type EstimateMode = "breakdown" | "plan-goal" | "generate-tasks";
+
+/**
+ * Which paid call an estimate must mirror. The token count is only honest when
+ * it covers the same context assembly and system prompt the paid call will
+ * send (PR #42 nit): a goal estimate WITH an instruction is a generate-tasks
+ * estimate, so it counts `generateTasksContext` (which embeds the instruction
+ * and the per-item rules) under the transcription prompt — not the plan-goal
+ * shape plus a loose instruction block.
+ */
+export function estimateMode(input: {
+  taskId?: number;
+  goalId?: number;
+  instruction?: string;
+}): EstimateMode {
+  if (input.taskId != null) return "breakdown";
+  if (input.goalId == null) throw new AiError(400, "taskId or goalId required");
+  // typeof guard: request bodies reach this unvalidated (the 400 sweep across
+  // AI routes is a separate issue) — a non-string must not crash the estimate.
+  return typeof input.instruction === "string" && input.instruction.trim()
+    ? "generate-tasks"
+    : "plan-goal";
+}
+
 export async function estimate(input: {
   taskId?: number;
   goalId?: number;
@@ -311,18 +335,22 @@ export async function estimate(input: {
   instruction?: string;
 }): Promise<{ inputTokens: number; estimatedUsd: number }> {
   const materialIds = input.materialIds ?? [];
+  const mode = estimateMode(input);
   let blocks: ContentBlock[];
-  if (input.taskId != null) {
-    const ctx = taskContext(input.taskId);
+  let system = PLANNING_SYSTEM_PROMPT;
+  if (mode === "breakdown") {
+    const ctx = taskContext(input.taskId!);
     blocks = [...materialBlocks(materialIds, ctx.goalId), ...ctx.blocks];
-  } else if (input.goalId != null) {
-    blocks = [...materialBlocks(materialIds, input.goalId), ...goalContext(input.goalId)];
+  } else if (mode === "plan-goal") {
+    blocks = [...materialBlocks(materialIds, input.goalId!), ...goalContext(input.goalId!)];
   } else {
-    throw new AiError(400, "taskId or goalId required");
+    blocks = [
+      ...materialBlocks(materialIds, input.goalId!),
+      ...generateTasksContext(input.goalId!, input.instruction!.trim()),
+    ];
+    system = TRANSCRIPTION_SYSTEM_PROMPT;
   }
-  // A generate-tasks instruction is part of the prompt, so it counts too.
-  if (input.instruction) blocks.push({ type: "text", text: input.instruction });
-  const inputTokens = await guardTokens(blocks, PLANNING_SYSTEM_PROMPT).catch((e: AiError) => {
+  const inputTokens = await guardTokens(blocks, system).catch((e: AiError) => {
     // Even over-limit estimates should report the number, not fail.
     const match = /\(([\d,.]+) tokens/.exec(e.message);
     if (e.status === 400 && match) return Number(match[1].replace(/[,.]/g, ""));
