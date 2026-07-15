@@ -1,48 +1,93 @@
+import { useEffect, useState, type CSSProperties } from "react";
 import { useGamification } from "../hooks/useGamification";
+import { useCategories } from "../hooks/useTasks";
+import "./TrophyDeck.css";
 
 export function TrophyDeck() {
   const { data } = useGamification();
+  const categories = useCategories();
+  // Tap/click lift (hover and keyboard focus are pure CSS): the id of the
+  // card toggled up on touch devices, where hover does not exist.
+  const [liftedId, setLiftedId] = useState<number | null>(null);
   const completions = data?.todayCompletions ?? [];
+
+  // Tapping anywhere outside a card lowers the lifted one. Taps ON a card are
+  // excluded here — the card's own onClick handles toggle/switch, and clearing
+  // on pointerdown first would turn a toggle-off click back into a lift.
+  useEffect(() => {
+    if (liftedId === null) return;
+    const lower = (e: PointerEvent) => {
+      if (e.target instanceof Element && e.target.closest(".trophy-card")) return;
+      setLiftedId(null);
+    };
+    document.addEventListener("pointerdown", lower);
+    return () => document.removeEventListener("pointerdown", lower);
+  }, [liftedId]);
+
   if (completions.length === 0) return null;
 
   return (
-    <div style={{ marginTop: 32 }}>
-      <h3 style={{ color: "var(--text-dim)", fontWeight: 500, fontSize: 14 }}>
-        Today's pile — {completions.length} done · {completions.reduce((a, c) => a + c.xpAwarded, 0)} XP
+    <div className="trophy-deck">
+      <h3>
+        Today's pile — {completions.length} done ·{" "}
+        {completions.reduce((a, c) => a + c.xpAwarded, 0)} XP
       </h3>
-      <div style={{ display: "flex", justifyContent: "center", gap: 0 }}>
-        {completions.map((c, i) => (
-          <div
-            key={c.id}
-            title={`${c.title} (+${c.xpAwarded} XP${c.wasDrawn ? ", drawn" : ""})`}
-            style={{
-              width: 90,
-              height: 126,
-              borderRadius: 10,
-              border: "1px solid var(--border)",
-              background: "linear-gradient(160deg, #232735, #1b1e27)",
-              padding: 8,
-              fontSize: 11,
-              overflow: "hidden",
-              marginLeft: i === 0 ? 0 : -30,
-              transform: `rotate(${(i % 5) * 2 - 4}deg)`,
-              boxShadow: "0 3px 12px rgba(0,0,0,0.4)",
-            }}
-          >
-            <div style={{ fontSize: 16 }}>{c.wasDrawn ? "🃏" : "✅"}</div>
+      <div className="trophy-pile">
+        {completions.map((c, i) => {
+          const category = categories.data?.find((cat) => cat.id === c.categoryId);
+          const time = new Date(c.completedAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+          const lifted = liftedId === c.id;
+          const toggle = () => setLiftedId((prev) => (prev === c.id ? null : c.id));
+          return (
             <div
-              style={{
-                display: "-webkit-box",
-                WebkitLineClamp: 4,
-                WebkitBoxOrient: "vertical",
-                overflow: "hidden",
+              key={c.id}
+              role="button"
+              tabIndex={0}
+              aria-pressed={lifted}
+              aria-label={[
+                c.title,
+                category?.name,
+                `completed ${time}`,
+                `+${c.xpAwarded} XP${c.wasDrawn ? " (drawn)" : ""}`,
+              ]
+                .filter(Boolean)
+                .join(", ")}
+              className={`trophy-card ${lifted ? "lifted" : ""}`}
+              // The per-card rotation is data-driven, so it flows in as a CSS
+              // custom property — an inline `transform` would out-specificity
+              // the CSS lift states.
+              style={{ "--trophy-rot": `${(i % 5) * 2 - 4}deg` } as CSSProperties}
+              onClick={toggle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  toggle();
+                } else if (e.key === "Escape") {
+                  setLiftedId(null);
+                  e.currentTarget.blur(); // drops the :focus-visible lift too
+                }
               }}
             >
-              {c.title}
+              <div className="trophy-card-inner">
+                <div className="trophy-card-glyph">{c.wasDrawn ? "🃏" : "✅"}</div>
+                <div className="trophy-card-title">{c.title}</div>
+                <div className="trophy-details">
+                  {category && (
+                    <div>
+                      <span className="dot" style={{ background: category.color }} />{" "}
+                      {category.name}
+                    </div>
+                  )}
+                  <div>done {time}</div>
+                </div>
+                <div className="trophy-card-xp">+{c.xpAwarded}</div>
+              </div>
             </div>
-            <div style={{ color: "var(--ok)", marginTop: 4 }}>+{c.xpAwarded}</div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

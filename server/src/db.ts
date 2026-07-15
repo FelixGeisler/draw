@@ -29,7 +29,7 @@ function migrate() {
       db.exec("ALTER TABLE materials ADD COLUMN stored_name TEXT");
     }
     if (version < 3) {
-      // Snooze/block (issue #19, ADR-16).
+      // Snooze/block (issue #19, ADR-17).
       db.exec("ALTER TABLE tasks ADD COLUMN deferred_until TEXT");
       db.exec("ALTER TABLE tasks ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
     }

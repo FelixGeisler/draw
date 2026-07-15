@@ -42,7 +42,7 @@ export function wakeDateFromInput(dateStr: string): Date {
 /**
  * Earliest meaningful "snooze until" date (local "YYYY-MM-DD"): tomorrow.
  * Today or earlier would wake the task at an already-past local midnight —
- * no actual snooze, but the retained timestamp (ADR-16) would silently
+ * no actual snooze, but the retained timestamp (ADR-17) would silently
  * shave accumulated staleness weight off the card.
  */
 export function minWakeDateInput(now: Date = new Date()): string {

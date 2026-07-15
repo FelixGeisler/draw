@@ -295,6 +295,32 @@ describe("postprocessGenerateTasks (full pipeline)", () => {
     expect(result.tasks[0].parts.reduce((sum, p) => sum + p.minutes, 0)).toBe(600);
   });
 
+  it("flags oversizedParts when the parts cap forces undrawable parts (item > maxEffort × cap)", () => {
+    // 600 min at maxEffort 30 needs 20 parts but the cap allows 10 — the cap
+    // wins (documented trade-off), so parts of 60 min remain and the response
+    // must say so instead of letting the review UI present them as drawable.
+    const result = postprocessGenerateTasks(
+      { sourceOverview: "s", tasks: [task({ statedMinutes: 600, estimatedMinutes: 600 })] },
+      30,
+    );
+    expect(result.oversizedParts).toBe(true);
+    expect(result.tasks[0].parts.some((p) => p.minutes > 30)).toBe(true);
+  });
+
+  it("reports oversizedParts false when every part is drawable", () => {
+    const result = postprocessGenerateTasks(
+      {
+        sourceOverview: "s",
+        tasks: [
+          task({ statedMinutes: 20 }),
+          task({ statedMinutes: 90 }), // splits into 3 × 30 — drawable
+        ],
+      },
+      30,
+    );
+    expect(result.oversizedParts).toBe(false);
+  });
+
   it("never lets the parts cap silently drop material time", () => {
     // Review finding 2 repro: 15 × 10-min parts under statedMinutes 150 were
     // sliced to 10 parts summing 100. Dropping them all lets splitOversized

@@ -94,7 +94,7 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
         </span>
         <TaskBadges task={task} />
         {snoozed ? (
-          // Wake = deferredUntil now, not null (ADR-16): the retained value
+          // Wake = deferredUntil now, not null (ADR-17): the retained value
           // becomes the wake timestamp, so staleness counts from here.
           <button
             onClick={() => snooze({ deferredUntil: new Date().toISOString(), blocked: false })}

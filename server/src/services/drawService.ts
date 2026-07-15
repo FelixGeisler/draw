@@ -44,7 +44,7 @@ export function stalenessFactor(candidate: Candidate, now: Date): number {
       ? new Date(candidate.lastCompletedAt)
       : new Date(candidate.createdAt);
   // Snooze time is not "lying around": deferred_until is retained after expiry
-  // (ADR-16), so a woken card's staleness counts from its wake time.
+  // (ADR-17), so a woken card's staleness counts from its wake time.
   const wake = candidate.deferredUntil ? new Date(candidate.deferredUntil) : null;
   const since = wake && wake > base ? wake : base;
   const days = Math.max(0, (now.getTime() - since.getTime()) / DAY_MS);
@@ -67,7 +67,7 @@ export function drawTask(filters: { categoryId?: number; goalId?: number }): Dra
   const cooldown = getSetting("draw_cooldown_minutes", 60);
   const now = new Date();
 
-  // Snooze/block (ADR-16): kept as a derived predicate alongside the rest —
+  // Snooze/block (ADR-17): kept as a derived predicate alongside the rest —
   // an expired deferred_until re-enters the pool with no write.
   const SNOOZE_CONDITION = "t.blocked = 0 AND (t.deferred_until IS NULL OR t.deferred_until <= ?)";
   const conditions = [

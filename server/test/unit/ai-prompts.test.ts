@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  AiError,
+  estimateMode,
   PLANNING_SYSTEM_PROMPT,
   TRANSCRIPTION_SYSTEM_PROMPT,
 } from "../../src/services/aiService.js";
@@ -28,6 +30,43 @@ describe("per-mode system prompts", () => {
     for (const prompt of [PLANNING_SYSTEM_PROMPT, TRANSCRIPTION_SYSTEM_PROMPT]) {
       expect(prompt).toContain("concrete physical action verb");
       expect(prompt).toContain("Impact ratings (1-5) measure leverage");
+    }
+  });
+});
+
+// PR #42 nit (deferred to #29): an estimate must token-count the prompt shape
+// of the call it gates. A goal estimate carrying an instruction is a
+// generate-tasks estimate — before this mapping existed it counted the
+// plan-goal context and mispriced the paid call.
+describe("estimateMode (estimate mirrors the paid call's prompt shape)", () => {
+  it("routes a goal estimate with an instruction to generate-tasks", () => {
+    expect(estimateMode({ goalId: 1, instruction: "one task per exercise" })).toBe(
+      "generate-tasks",
+    );
+  });
+
+  it("keeps instruction-less goal estimates on plan-goal, task estimates on breakdown", () => {
+    expect(estimateMode({ goalId: 1 })).toBe("plan-goal");
+    expect(estimateMode({ taskId: 7 })).toBe("breakdown");
+  });
+
+  it("treats a whitespace-only or non-string instruction as absent", () => {
+    expect(estimateMode({ goalId: 1, instruction: "   " })).toBe("plan-goal");
+    // Request bodies arrive unvalidated — a non-string must not crash.
+    expect(estimateMode({ goalId: 1, instruction: 42 as unknown as string })).toBe("plan-goal");
+  });
+
+  it("a taskId wins over a stray instruction — breakdown has no instruction field", () => {
+    expect(estimateMode({ taskId: 7, instruction: "ignored" })).toBe("breakdown");
+  });
+
+  it("rejects an estimate with neither taskId nor goalId as a 400", () => {
+    try {
+      estimateMode({});
+      expect.unreachable("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(AiError);
+      expect((e as AiError).status).toBe(400);
     }
   });
 });

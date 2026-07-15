@@ -57,6 +57,26 @@ User reviews/edits/deselects → accepted tasks created via POST /api/tasks
 
 Nothing is written to the database without explicit user confirmation.
 
+=== Variant: generating tasks from materials (transcription mode)
+
+....
+User picks materials,
+writes an instruction → POST /api/ai/estimate {goalId, materialIds, instruction}
+                         └─ counts the generate-tasks prompt shape (transcription
+                            system prompt + generateTasksContext), not plan-goal's
+User confirms         → POST /api/ai/generate-tasks {goalId, materialIds, instruction}
+                         └─ deterministic post-processing (ADR-14):
+                            points→impact quintiles, split-don't-clamp
+                         └─ {sourceOverview, oversizedParts, tasks[..., parts[]]}
+User reviews 40+ rows  → summary header to spot-check against the material;
+(edit/deselect)          part rows coupled to their exercise's checkbox
+User commits           → POST /api/tasks            (one umbrella parent, no estimate)
+                       → POST /api/tasks/:id/subtasks (ONE transactional batch of leaves,
+                         │                            provenance in description)
+                         └─ batch failed? DELETE the parent (cascade) — no
+                            half-imported state (ADR-16)
+....
+
 == 6.4 Timer invariant
 
 `POST /api/tasks/:id/timer/start` closes any running entry and opens a new one in

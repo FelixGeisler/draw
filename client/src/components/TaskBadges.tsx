@@ -44,7 +44,7 @@ export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolea
           ↻ {task.recurEveryDays}d
         </span>
       )}
-      {/* Derived, never a stored flag (ADR-16): 💤 only while the wake time
+      {/* Derived, never a stored flag (ADR-17): 💤 only while the wake time
           is still ahead — an expired snooze simply stops showing. */}
       {task.deferredUntil != null && new Date(task.deferredUntil) > new Date() && (
         <span className="chip" title={`Snoozed until ${formatWake(task.deferredUntil)}`}>

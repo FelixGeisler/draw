@@ -167,7 +167,7 @@ tasksRouter.patch("/:id", (req, res) => {
 
   // Reopening: undo the latest completion so XP stays honest. A reopened
   // task starts fresh in the deck — leftover snooze/block state is cleared
-  // (ADR-16), same as on completion.
+  // (ADR-17), same as on completion.
   if (body.status === "open" && raw.status === "done") {
     db.transaction(() => {
       undoLatestCompletion(id);
@@ -178,7 +178,7 @@ tasksRouter.patch("/:id", (req, res) => {
     return res.json({ task: getTask(id) });
   }
 
-  // Snooze/block fields (ADR-16). deferredUntil is normalized to a UTC ISO
+  // Snooze/block fields (ADR-17). deferredUntil is normalized to a UTC ISO
   // string because the pool predicate compares it lexicographically in SQL.
   if ("deferredUntil" in body && body.deferredUntil !== null) {
     const v = body.deferredUntil;
@@ -234,7 +234,7 @@ tasksRouter.patch("/:id", (req, res) => {
   // lazy validation (ADR-13): a snooze wears off (and a block can be woken
   // from the Tasks page) without any GET in between, and the once-again
   // restorable pointer would resurrect a card the user explicitly sent away
-  // (ADR-16).
+  // (ADR-17).
   if (
     ("deferredUntil" in body || "blocked" in body) &&
     getCurrentDrawTaskId() === id &&
