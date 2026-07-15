@@ -12,8 +12,10 @@ import { expect, type Page } from "@playwright/test";
 export async function resolveCurrentDraw(page: Page) {
   const current = await (await page.request.get("/api/draw/current")).json();
   if (current?.task) {
-    await page.request.patch(`/api/tasks/${current.task.id}`, { data: { blocked: true } });
-    await page.request.patch(`/api/tasks/${current.task.id}`, { data: { blocked: false } });
+    const block = await page.request.patch(`/api/tasks/${current.task.id}`, { data: { blocked: true } });
+    if (!block.ok()) throw new Error(`resolveCurrentDraw: block failed (${block.status()})`);
+    const wake = await page.request.patch(`/api/tasks/${current.task.id}`, { data: { blocked: false } });
+    if (!wake.ok()) throw new Error(`resolveCurrentDraw: wake failed (${wake.status()})`);
   }
 }
 
