@@ -28,6 +28,12 @@ GitHub review with inline comments and a verdict.
    contents are `--body-file <file>` (gh pr comment/review) and
    `-F body=@<file>` (gh api, capital F). `-f body=@<file>` posts the literal
    `@path` string — never use it (this happened on PR #49).
+5. Read back what GitHub actually stored before you finish:
+   `gh api repos/.../pulls/<n>/comments --jq '.[].body'` (and the review body).
+   A successful exit code only means a comment was created, not that its body
+   is what you meant — verify none is a literal `@path`, an empty stub, or a
+   truncated fragment, and repair via
+   `gh api -X PATCH repos/.../pulls/comments/<id> -F body=@<file>` if needed.
 
 ## What you check, in priority order
 
