@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import type express from "express";
-import { freshApp } from "../helpers.js";
+import { freshApp, testDb } from "../helpers.js";
 
 let app: express.Express;
 beforeAll(async () => {
@@ -322,6 +322,76 @@ describe("task CRUD and breakdown rule", () => {
     listed = await listedParent();
     expect(listed.goalId).toBeNull();
     expect(listed.subtasks.map((s: { goalId: number | null }) => s.goalId)).toEqual([null, null]);
+  });
+
+  it("cascades a category change on a broken-down parent to its open subtasks (issue #44)", async () => {
+    // Subtasks copy category_id at creation and the category-filtered draw
+    // keys off each row's own category_id — moving the parent must reach the
+    // open children or they keep drawing under the old category.
+    const catA = (
+      await request(app).post("/api/categories").send({ name: "Cascade cat A" }).expect(201)
+    ).body;
+    const catB = (
+      await request(app).post("/api/categories").send({ name: "Cascade cat B" }).expect(201)
+    ).body;
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Category mover", categoryId: catA.id, effortMinutes: 60 })
+    ).body;
+    const subs = (
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({
+          subtasks: [
+            { title: "Move step open", effortMinutes: 15 },
+            { title: "Move step done", effortMinutes: 10 },
+            { title: "Move step archived", effortMinutes: 10 },
+          ],
+        })
+    ).body;
+    // One finished, one archived BEFORE the move: history keeps the category
+    // the work actually happened under — only open rows follow the parent.
+    await request(app).patch(`/api/tasks/${subs[1].id}`).send({ status: "done" }).expect(200);
+    await request(app).patch(`/api/tasks/${subs[2].id}`).send({ status: "archived" }).expect(200);
+
+    await request(app).patch(`/api/tasks/${parent.id}`).send({ categoryId: catB.id }).expect(200);
+
+    const listed = (await request(app).get("/api/tasks")).body.find(
+      (t: { id: number }) => t.id === parent.id,
+    );
+    expect(listed.categoryId).toBe(catB.id);
+    const bySub = (id: number) => listed.subtasks.find((s: { id: number }) => s.id === id);
+    expect(bySub(subs[0].id).categoryId).toBe(catB.id); // open → follows
+    expect(bySub(subs[1].id).categoryId).toBe(catA.id); // done → historical record
+    // Archived rows are not listed — assert the column directly.
+    const db = await testDb();
+    const archived = db
+      .prepare("SELECT category_id AS categoryId FROM tasks WHERE id = ?")
+      .get(subs[2].id) as { categoryId: number };
+    expect(archived.categoryId).toBe(catA.id);
+
+    // The category-filtered draw only finds the subtask under the NEW
+    // category; the old category's deck is empty, not stale.
+    const oldDraw = (await request(app).post("/api/draw").send({ categoryId: catA.id }).expect(200))
+      .body;
+    expect(oldDraw.task).toBeNull();
+    expect(oldDraw.reason).toBe("no_ready_tasks");
+    const newDraw = (await request(app).post("/api/draw").send({ categoryId: catB.id }).expect(200))
+      .body;
+    expect(newDraw.task).not.toBeNull();
+    expect(newDraw.task.id).toBe(subs[0].id);
+    expect(newDraw.poolSize).toBe(1);
+
+    // A patch that doesn't touch categoryId leaves the children alone.
+    await request(app).patch(`/api/tasks/${parent.id}`).send({ title: "Category mover 2" }).expect(200);
+    const after = (await request(app).get("/api/tasks")).body.find(
+      (t: { id: number }) => t.id === parent.id,
+    );
+    expect(after.subtasks.map((s: { categoryId: number }) => s.categoryId)).toEqual([
+      catB.id,
+      catA.id,
+    ]);
   });
 
   it("enforces the ADR-4 impact gate on create (issue #65)", async () => {
