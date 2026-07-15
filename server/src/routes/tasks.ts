@@ -64,6 +64,15 @@ const NESTED_BREAKDOWN_ERROR =
   "breakdowns are one level deep (ADR-16): this task is itself a subtask and cannot be " +
   "broken down further — add the steps as additional subtasks of its root parent instead";
 
+// The reparent direction of the ADR-16 ban (#100): a task that HAS subtasks
+// cannot itself become one — adopting it would turn its children into
+// invisible grandchildren. Children of ANY status count, matching
+// hasRecurringSubtask's rationale below: a done/archived child is one status
+// write away from being an open grandchild.
+const PARENT_INTO_SUBTASK_ERROR =
+  "a task with subtasks cannot become a subtask itself (ADR-16): its subtasks would nest two " +
+  "levels deep — move the subtasks individually, or promote/delete them first";
+
 // Recurring × sequential ban (#66, ADR-23): a recurring step never closes —
 // completing it advances its due date instead (ADR-6) — so under a
 // 'sequential' parent it would hold every later sibling back forever
@@ -503,6 +512,87 @@ tasksRouter.patch("/:id", (req, res) => {
     if (gError) return res.status(400).json({ error: gError });
   }
 
+  // Reparenting (#100): `parentId: <id>` adopts this task as a subtask of a
+  // root target, `parentId: null` promotes it back to a root task. No-ops —
+  // resending the stored parent id, or null on a task that is already a
+  // root — pass untouched (the ADR-23/ADR-4 resend tolerance again), so the
+  // validation matrix below judges only genuine moves and a pre-ban
+  // recurring-under-sequential row stays editable.
+  //
+  // Queue position under a sequential target (ADR-18): heldBackSql and the
+  // Tasks page child listing order by (created_at, id), and an adopted task
+  // keeps its original created_at — a task older than the existing steps
+  // enters the queue AHEAD of them (it may jump the queue). Deliberate:
+  // adoption orders by creation time like everything else, one predicate and
+  // no stored positions; explicit sibling ordering is a possible follow-up
+  // if queue-jumping feels wrong in practice.
+  let reparenting = false;
+  if ("parentId" in body) {
+    if (
+      body.parentId != null &&
+      (!Number.isInteger(body.parentId) || (body.parentId as number) < 1)
+    ) {
+      return res.status(400).json({
+        error: "parentId must be a positive integer or null (null promotes to a root task)",
+      });
+    }
+    if (body.parentId === id) {
+      return res.status(400).json({ error: "a task cannot be its own parent" });
+    }
+    reparenting = body.parentId !== raw.parent_id;
+  }
+  if (reparenting && body.parentId != null) {
+    const target = db
+      .prepare(
+        `SELECT parent_id AS parentId, subtask_order_mode AS orderMode,
+                goal_id AS goalId, category_id AS categoryId
+         FROM tasks WHERE id = ?`,
+      )
+      .get(body.parentId) as
+      | { parentId: number | null; orderMode: string; goalId: number | null; categoryId: number }
+      | undefined;
+    if (!target) return res.status(400).json({ error: "parent task not found" });
+    // One level deep, checked from BOTH directions (ADR-16): the target must
+    // be a root, and the moved task must be childless — together these also
+    // carry the acyclicity guarantee the v7 migration comment relies on
+    // (ADR-24): a childless mover can never become anyone's ancestor.
+    if (target.parentId != null) return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
+    if (db.prepare("SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1").get(id)) {
+      return res.status(400).json({ error: PARENT_INTO_SUBTASK_ERROR });
+    }
+    // ADR-23 from the reparent direction (#66): adoption is a new transition
+    // path that could CREATE the banned combination. Judged on the EFFECTIVE
+    // recurrence — this PATCH may set or clear recurEveryDays in the same
+    // body it moves the task with (clearing it makes the move legal).
+    const recurAfter = "recurEveryDays" in body ? body.recurEveryDays : raw.recur_every_days;
+    if (recurAfter != null && target.orderMode === "sequential") {
+      return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
+    }
+    // Single-create parity (#84): SENT divergent links are rejected. The
+    // STORED links are overwritten below instead — they were never claimed
+    // against the new parent, so the divergence gate does not apply to them.
+    // goalId: null counts as "not specified" on the adoption path, like at
+    // create — inheritance is unconditional either way.
+    if (body.goalId != null && body.goalId !== target.goalId) {
+      return res.status(400).json({ error: SUBTASK_GOAL_ERROR });
+    }
+    if ("categoryId" in body && body.categoryId !== target.categoryId) {
+      return res.status(400).json({ error: SUBTASK_CATEGORY_ERROR });
+    }
+    // Adoption inheritance rides the ordinary field writes below: goal_id
+    // follows the new parent UNCONDITIONALLY; category_id only while the
+    // task is open — done/archived rows keep the category they were finished
+    // under (#44) — exactly like the parent-edit cascade and the v7
+    // migration's adopt step. Rewriting the body routes a wiped stored goal
+    // (goal-less parent) through the deliberate-unlink machinery below
+    // (ADR-4, #76): impact resets to the neutral 3, because the rating
+    // described leverage toward the goal adoption just removed. Adoption
+    // that SETS a goal keeps the stored rating — it now rates the inherited
+    // goal, and stays re-ratable.
+    body.goalId = target.goalId;
+    if (raw.status === "open") body.categoryId = target.categoryId;
+  }
+
   // Completion goes through the gamification path.
   if (body.status === "done" && raw.status === "open") {
     const openChildren = db
@@ -566,11 +656,16 @@ tasksRouter.patch("/:id", (req, res) => {
   ) {
     return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
   }
+  // When the same PATCH also reparents, the stored parent's mode is moot: the
+  // adoption guard above already judged the TARGET's mode against the
+  // effective recurrence, and a simultaneous promote-to-root frees the task
+  // from any queue a recurrence could deadlock.
   if (
     "recurEveryDays" in body &&
     body.recurEveryDays != null &&
     body.recurEveryDays !== raw.recur_every_days &&
-    raw.parent_id != null
+    raw.parent_id != null &&
+    !reparenting
   ) {
     const parentMode = db
       .prepare("SELECT subtask_order_mode AS mode FROM tasks WHERE id = ?")
@@ -602,10 +697,16 @@ tasksRouter.patch("/:id", (req, res) => {
   if (goalAfter == null) {
     if (unlinking) {
       if ("impact" in body && body.impact !== 3) {
+        // The adoption path words the same ADR-4 rule in its own terms —
+        // there the unlink is a side effect of the move, not a sent goalId.
         return res.status(400).json({
           error:
-            "unlinking the goal resets impact to the neutral default 3 (ADR-4) — omit " +
-            "impact when unlinking, or set it together with a goalId to rate it",
+            reparenting && body.parentId != null
+              ? "moving a task under a goal-less parent unlinks its goal and resets impact to " +
+                "the neutral default 3 (ADR-4) — omit impact when reparenting into a goal-less " +
+                "breakdown"
+              : "unlinking the goal resets impact to the neutral default 3 (ADR-4) — omit " +
+                "impact when unlinking, or set it together with a goalId to rate it",
         });
       }
       body.impact = 3; // the server owns the unlink reset
@@ -629,6 +730,7 @@ tasksRouter.patch("/:id", (req, res) => {
     description: "description",
     categoryId: "category_id",
     goalId: "goal_id",
+    parentId: "parent_id",
     impact: "impact",
     effortMinutes: "effort_minutes",
     dueDate: "due_date",
@@ -686,14 +788,23 @@ tasksRouter.patch("/:id", (req, res) => {
 
   const task = getTask(id)!;
   // Snoozing/blocking the current draw dismisses the card, so the persisted
-  // pointer is cleared eagerly here, mirroring completeTask() — this is the
-  // one sideways mutation that must not wait for GET /api/draw/current's
+  // pointer is cleared eagerly here, mirroring completeTask() — this is a
+  // sideways mutation that must not wait for GET /api/draw/current's
   // lazy validation (ADR-13): a snooze wears off (and a block can be woken
   // from the Tasks page) without any GET in between, and the once-again
   // restorable pointer would resurrect a card the user explicitly sent away
-  // (ADR-17).
+  // (ADR-17). Reparenting the drawn card (#100) has the same wear-off shape:
+  // moved into a held-back sequential position, the card would become
+  // restorable again the moment the step in front completes — with no GET in
+  // between — so the pointer is cleared eagerly too. The other reparent case
+  // (a task adopted UNDER the drawn card, turning it into a container)
+  // cannot be seen here — that PATCH runs on the child's id — and stays with
+  // the lazy validation the subtask-creation path already relies on:
+  // isRestorable rejects hasOpenChildren on the next GET /api/draw/current,
+  // which the client fires right after every task mutation (the tasks hooks
+  // invalidate the current-draw query).
   if (
-    ("deferredUntil" in body || "blocked" in body) &&
+    ("deferredUntil" in body || "blocked" in body || "parentId" in body) &&
     getCurrentDrawTaskId() === id &&
     !isRestorable(task as unknown as RestorableTask, getSetting("max_draw_effort", 30), new Date())
   ) {

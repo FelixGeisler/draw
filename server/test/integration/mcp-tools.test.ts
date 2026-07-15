@@ -62,6 +62,8 @@ interface TaskJson {
   title: string;
   impact: number;
   goalId: number | null;
+  parentId: number | null;
+  categoryId: number;
   dueDate: string | null;
   status: string;
   subtasks?: TaskJson[];
@@ -216,6 +218,47 @@ describe("update_task", () => {
     const task = unlinked.json<{ task: TaskJson }>().task;
     expect(task.goalId).toBeNull();
     expect(task.impact).toBe(3); // the rating pointed at the removed goal
+  });
+
+  it("reparents through parentId — adopt under a root, then promote back (#100)", async () => {
+    const adoptive = (
+      await callTool("create_task", { title: "Adoptive parent", categoryId: 3 })
+    ).json<TaskJson>();
+    const loose = (
+      await callTool("create_task", { title: "Loose step", categoryId: 1, effortMinutes: 10 })
+    ).json<TaskJson>();
+
+    // Adopt: same PATCH semantics as the REST path — inheritance included.
+    const adopted = await callTool("update_task", { id: loose.id, parentId: adoptive.id });
+    expect(adopted.isError).toBe(false);
+    const adoptedTask = adopted.json<{ task: TaskJson }>().task;
+    expect(adoptedTask.parentId).toBe(adoptive.id);
+    expect(adoptedTask.categoryId).toBe(3); // adoption inherits the parent's category
+    const listed = (await callTool("list_tasks")).json<TaskJson[]>();
+    expect(listed.find((t) => t.id === adoptive.id)!.subtasks!.map((s) => s.title)).toContain(
+      "Loose step",
+    );
+
+    // The one-level rule is relayed verbatim: a subtask is no adoption target.
+    const third = (
+      await callTool("create_task", { title: "Third wheel", categoryId: 1 })
+    ).json<TaskJson>();
+    const nested = await callTool("update_task", { id: third.id, parentId: loose.id });
+    expect(nested.isError).toBe(true);
+    expect(nested.text).toContain("one level deep");
+
+    // Promote: null makes it a root again, keeping its links.
+    const promoted = await callTool("update_task", { id: loose.id, parentId: null });
+    expect(promoted.isError).toBe(false);
+    const promotedTask = promoted.json<{ task: TaskJson }>().task;
+    expect(promotedTask.parentId).toBeNull();
+    expect(promotedTask.categoryId).toBe(3); // promote keeps goal/category/impact
+
+    // Archive the trio so the later draw_card expectations (category 3 has
+    // no open tasks at all) keep holding in this shared-journey DB.
+    for (const id of [adoptive.id, loose.id, third.id]) {
+      expect((await callTool("update_task", { id, status: "archived" })).isError).toBe(false);
+    }
   });
 
   it("cascades the unlink impact reset to the subtasks (issue #76)", async () => {
