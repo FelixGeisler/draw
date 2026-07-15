@@ -169,8 +169,8 @@ describe("estimation block (estimated vs. tracked)", () => {
     const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
 
     expect(stats.estimation.byCategory).toEqual([
-      { categoryId: 1, name: "Work", color: "#4f8cff", estimatedMinutes: 30, trackedMinutes: 50, ratio: 1.67 },
-      { categoryId: 2, name: "Study", color: "#a06bff", estimatedMinutes: 20, trackedMinutes: 10, ratio: 0.5 },
+      { categoryId: 1, name: "Work", color: "#4f8cff", taskCount: 1, estimatedMinutes: 30, trackedMinutes: 50, ratio: 1.67 },
+      { categoryId: 2, name: "Study", color: "#a06bff", taskCount: 1, estimatedMinutes: 20, trackedMinutes: 10, ratio: 0.5 },
     ]);
   });
 
@@ -235,7 +235,7 @@ describe("estimation with recurring tasks (#39)", () => {
       tendency: "under",
     });
     expect(stats.estimation.byCategory).toEqual([
-      { categoryId: 2, name: "Study", color: "#a06bff", estimatedMinutes: 20, trackedMinutes: 30, ratio: 1.5 },
+      { categoryId: 2, name: "Study", color: "#a06bff", taskCount: 1, estimatedMinutes: 20, trackedMinutes: 30, ratio: 1.5 },
     ]);
   });
 

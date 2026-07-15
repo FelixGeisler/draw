@@ -47,10 +47,26 @@ export interface Estimation {
     categoryId: number;
     name: string;
     color: string;
+    /** Qualifying tasks aggregated into this row (#55 coaching thresholds). */
+    taskCount: number;
     estimatedMinutes: number;
     trackedMinutes: number;
     ratio: number;
   }[];
+}
+
+/**
+ * Per-category all-history estimation bias (#55): the estimation block's
+ * byCategory aggregation reduced to what coaching needs. Thresholding on
+ * `taskCount` is deliberately NOT applied here — showing or hiding a
+ * category is a display decision that lives in the client.
+ */
+export interface CategoryBias {
+  categoryId: number;
+  name: string;
+  color: string;
+  taskCount: number;
+  ratio: number;
 }
 
 /** Ratios within this band (inclusive, after rounding) count as accurate. */
@@ -97,16 +113,25 @@ export function buildEstimation(rows: EstimationInputRow[]): Estimation {
 
   const catMap = new Map<
     number,
-    { categoryId: number; name: string; color: string; estimatedMinutes: number; trackedMinutes: number }
+    {
+      categoryId: number;
+      name: string;
+      color: string;
+      taskCount: number;
+      estimatedMinutes: number;
+      trackedMinutes: number;
+    }
   >();
   for (const r of qualifying) {
     const cat = catMap.get(r.categoryId) ?? {
       categoryId: r.categoryId,
       name: r.categoryName,
       color: r.categoryColor,
+      taskCount: 0,
       estimatedMinutes: 0,
       trackedMinutes: 0,
     };
+    cat.taskCount += 1;
     cat.estimatedMinutes += r.estimatedMinutes;
     cat.trackedMinutes += r.trackedMinutes;
     catMap.set(r.categoryId, cat);
@@ -174,6 +199,79 @@ export function trackedCyclesInRange(
 /** Minutes per time entry (alias `e`), running entries counted up to now. */
 export const MINUTES_EXPR = `(julianday(COALESCE(e.ended_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))) - julianday(e.started_at)) * 1440.0`;
 
+/**
+ * Tasks completed in [from, to) with tracked time attributed per cycle in
+ * trackedCyclesInRange (#39, #48): SQL only fetches the raw completions and
+ * entries per task — the deliberately unfiltered entry list lets one-shot
+ * tasks count work started before the range, while recurring tasks count
+ * only cycles completed in range. Shared by the range-scoped estimation
+ * block and the all-history bias endpoint (#55) so both apply identical
+ * qualifying rules.
+ */
+function estimationRowsInRange(from: string, to: string): EstimationInputRow[] {
+  const completedInRange = db
+    .prepare(
+      `SELECT t.id AS taskId, t.title, t.effort_minutes AS estimatedMinutes,
+              c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor
+       FROM tasks t
+       JOIN categories c ON c.id = t.category_id
+       WHERE EXISTS (
+         SELECT 1 FROM completions co
+         WHERE co.task_id = t.id AND co.completed_at >= ? AND co.completed_at < ?
+       )`,
+    )
+    .all(from, to) as Omit<EstimationInputRow, "trackedMinutes">[];
+
+  const completionsStmt = db.prepare(
+    "SELECT completed_at AS completedAt FROM completions WHERE task_id = ?",
+  );
+  const entriesStmt = db.prepare(
+    `SELECT e.started_at AS startedAt, ${MINUTES_EXPR} AS minutes FROM time_entries e WHERE e.task_id = ?`,
+  );
+
+  const rows: EstimationInputRow[] = [];
+  for (const task of completedInRange) {
+    const completions = (completionsStmt.all(task.taskId) as { completedAt: string }[]).map(
+      (r) => r.completedAt,
+    );
+    const entries = entriesStmt.all(task.taskId) as { startedAt: string; minutes: number }[];
+    const { minutes, cycles } = trackedCyclesInRange(completions, entries, from, to);
+    // No tracked time in any attributed cycle — nothing to compare, same as
+    // a never-tracked task. Several tracked cycles compare against one
+    // per-cycle estimate each.
+    if (cycles > 0)
+      rows.push({
+        ...task,
+        estimatedMinutes: task.estimatedMinutes === null ? null : task.estimatedMinutes * cycles,
+        trackedMinutes: minutes,
+      });
+  }
+  return rows;
+}
+
+// All-history bounds for the bias endpoint: ISO-8601 strings compare
+// lexicographically (see trackedCyclesInRange and the SQL range filters),
+// so "" sorts before every timestamp and year 9999 after every plausible one.
+const ALL_HISTORY_FROM = "";
+const ALL_HISTORY_TO = "9999-12-31";
+
+/**
+ * Per-category estimation bias over ALL history (#55), reusing the same
+ * qualifying rules (positive estimate, tracked time in an attributed cycle)
+ * and per-cycle attribution (ADR-15, #48) as the range-scoped estimation
+ * block. Read-only coaching input — never feeds the draw weights (ADR-26).
+ */
+export function computeEstimationBias(): CategoryBias[] {
+  const { byCategory } = buildEstimation(estimationRowsInRange(ALL_HISTORY_FROM, ALL_HISTORY_TO));
+  return byCategory.map(({ categoryId, name, color, taskCount, ratio }) => ({
+    categoryId,
+    name,
+    color,
+    taskCount,
+    ratio,
+  }));
+}
+
 export function computeStats(from: string, to: string): Stats {
   // `to` is exclusive end-of-range (ISO date + 1 day handled by caller)
   const range = [from, to];
@@ -220,48 +318,7 @@ export function computeStats(from: string, to: string): Stats {
     )
     .get(...range) as Stats["completed"];
 
-  // Tasks completed in range, with tracked time attributed per cycle in
-  // trackedCyclesInRange (#39, #48): SQL only fetches the raw completions and
-  // entries per task — the deliberately unfiltered entry list lets one-shot
-  // tasks count work started before the range, while recurring tasks count
-  // only cycles completed in range.
-  const completedInRange = db
-    .prepare(
-      `SELECT t.id AS taskId, t.title, t.effort_minutes AS estimatedMinutes,
-              c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor
-       FROM tasks t
-       JOIN categories c ON c.id = t.category_id
-       WHERE EXISTS (
-         SELECT 1 FROM completions co
-         WHERE co.task_id = t.id AND co.completed_at >= ? AND co.completed_at < ?
-       )`,
-    )
-    .all(...range) as Omit<EstimationInputRow, "trackedMinutes">[];
-
-  const completionsStmt = db.prepare(
-    "SELECT completed_at AS completedAt FROM completions WHERE task_id = ?",
-  );
-  const entriesStmt = db.prepare(
-    `SELECT e.started_at AS startedAt, ${MINUTES_EXPR} AS minutes FROM time_entries e WHERE e.task_id = ?`,
-  );
-
-  const estimationRows: EstimationInputRow[] = [];
-  for (const task of completedInRange) {
-    const completions = (completionsStmt.all(task.taskId) as { completedAt: string }[]).map(
-      (r) => r.completedAt,
-    );
-    const entries = entriesStmt.all(task.taskId) as { startedAt: string; minutes: number }[];
-    const { minutes, cycles } = trackedCyclesInRange(completions, entries, from, to);
-    // No tracked time in any attributed cycle — nothing to compare, same as
-    // a never-tracked task. Several tracked cycles compare against one
-    // per-cycle estimate each.
-    if (cycles > 0)
-      estimationRows.push({
-        ...task,
-        estimatedMinutes: task.estimatedMinutes === null ? null : task.estimatedMinutes * cycles,
-        trackedMinutes: minutes,
-      });
-  }
+  const estimationRows = estimationRowsInRange(from, to);
 
   const totalMinutes = Math.round(total.minutes);
   const minutesAt = (pred: (impact: number) => boolean) =>
