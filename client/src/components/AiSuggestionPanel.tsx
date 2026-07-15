@@ -22,6 +22,7 @@ import {
   type ReviewItem,
   type ReviewPart,
 } from "../lib/generateTasksReview";
+import { seedInOrder } from "../lib/orderMode";
 
 // ---------------------------------------------------------------------------
 // Shared pieces
@@ -133,11 +134,18 @@ function EstimateGate({
 export function AiBreakdownPanel({
   taskId,
   goalId,
+  initialOrderMode,
   onAccept,
   onClose,
 }: {
   taskId: number;
   goalId: number | null;
+  /**
+   * The parent's persisted mode when it already has subtasks — undefined for
+   * a first breakdown. A re-breakdown seeds "Do in order" from it (#67), so
+   * the model's orderMatters judgment cannot silently flip a persisted choice.
+   */
+  initialOrderMode?: Task["subtaskOrderMode"];
   onAccept: (
     subtasks: { title: string; effortMinutes: number; impact: number }[],
     orderMode: Task["subtaskOrderMode"],
@@ -150,8 +158,9 @@ export function AiBreakdownPanel({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [rows, setRows] = useState<SuggestionRow<AiSubtask>[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  // "Do in order" (#23): defaulted from the model's orderMatters judgment —
-  // its subtasks already come in execution sequence — flippable before accept.
+  // "Do in order" (#23): seeded on run — from the parent's persisted mode
+  // when one exists, else the model's orderMatters judgment (#67); always
+  // flippable before accept, the user has the last word.
   const [inOrder, setInOrder] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -172,7 +181,7 @@ export function AiBreakdownPanel({
       const result = await run.mutateAsync({ taskId, materialIds: [...selected] });
       setRows(result.subtasks.map((data) => ({ data, included: true })));
       setNote(result.approachNote);
-      setInOrder(result.orderMatters);
+      setInOrder(seedInOrder(result.orderMatters, initialOrderMode));
     } catch (e) {
       setError((e as Error).message);
     }

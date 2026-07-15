@@ -104,3 +104,21 @@ test("flipping the parent back to any order clears the queue", async ({ page }) 
     taskRow(page, "Mount the clothes rail").locator(".chip", { hasText: "⏳ queued" }),
   ).not.toBeVisible();
 });
+
+test("a step completed out of order never wears the queued chip", async ({ page }) => {
+  // Back to in-order: the still-open, older step two holds the rail back again.
+  await page.goto("/tasks");
+  await taskRow(page, PARENT_TITLE).getByRole("button", { name: "⇄ any order" }).click();
+  // Keep done rows on screen — the completed step must stay visible to assert on.
+  await page.getByLabel("show done").check();
+  const rail = taskRow(page, "Mount the clothes rail");
+  await expect(rail.locator(".chip", { hasText: "⏳ queued" })).toBeVisible();
+
+  // Tick the held-back step done directly — allowed out of order. Plain click:
+  // the controlled checkbox only turns checked after the mutation round-trip,
+  // so .check()'s immediate state assertion would fail.
+  await rail.getByRole("checkbox").click();
+  await expect(rail.getByRole("checkbox")).toBeChecked();
+  // The done row must drop the derived queue chip (#67: heldBack status guard).
+  await expect(rail.locator(".chip", { hasText: "⏳ queued" })).not.toBeVisible();
+});
