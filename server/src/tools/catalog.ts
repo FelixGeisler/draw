@@ -224,7 +224,10 @@ const createTask = defineTool({
     windowEnd: windowEndSchema.optional(),
     parentId: idSchema
       .optional()
-      .describe("Create as a subtask of this task (prefer create_subtasks for batches)"),
+      .describe(
+        "Create as a subtask of this ROOT task (prefer create_subtasks for batches). " +
+          "Breakdowns are one level deep: nesting under a task that is itself a subtask is rejected",
+      ),
   },
   annotations: {
     title: "Create task",
@@ -313,11 +316,13 @@ const createSubtasks = defineTool({
   name: "create_subtasks",
   description:
     "Break a task down: create several subtasks under a parent in one atomic batch. Subtasks " +
-    "inherit the parent's category and goal. The breakdown rule: every leaf must have " +
-    "effortMinutes of at most max_draw_effort (see get_settings) to be drawable — split large " +
-    "items into more subtasks, NEVER shrink an estimate to fit. Oversized subtasks are still " +
-    "created but the result carries a warning. Use description for provenance, e.g. " +
-    "'Exercise 7 · 8 pts · ~45 min · exam.pdf'.",
+    "inherit the parent's category and goal. Breakdowns are one level deep: the parent must be " +
+    "a root task — a subtask cannot be broken down further (the API rejects nesting); split it " +
+    "into more sibling subtasks under the same root parent instead. The breakdown rule: every " +
+    "leaf must have effortMinutes of at most max_draw_effort (see get_settings) to be drawable " +
+    "— split large items into more subtasks, NEVER shrink an estimate to fit. Oversized " +
+    "subtasks are still created but the result carries a warning. Use description for " +
+    "provenance, e.g. 'Exercise 7 · 8 pts · ~45 min · exam.pdf'.",
   inputSchema: {
     parentId: idSchema,
     subtasks: z

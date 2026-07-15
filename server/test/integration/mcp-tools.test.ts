@@ -250,6 +250,32 @@ describe("create_subtasks and the breakdown rule", () => {
     });
     expect(res.json<{ warning?: string }>().warning).toBeUndefined();
   });
+
+  it("rejects nesting on both creation paths — breakdowns are one level deep (#35)", async () => {
+    // "Read ch1" is a subtask; breaking IT down would hide the grandchildren
+    // from every list while keeping them draw-eligible (ADR-16).
+    const viaBatch = await callTool("create_subtasks", {
+      parentId: readCh1Id,
+      subtasks: [{ title: "Nested step", effortMinutes: 10 }],
+    });
+    expect(viaBatch.isError).toBe(true);
+    expect(viaBatch.text).toContain("one level deep");
+
+    const viaSingle = await callTool("create_task", {
+      title: "Nested via create_task",
+      categoryId: 1,
+      parentId: readCh1Id,
+    });
+    expect(viaSingle.isError).toBe(true);
+    expect(viaSingle.text).toContain("one level deep");
+
+    // Neither rejected call left a row behind.
+    const db = await testDb();
+    const row = db
+      .prepare("SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ?")
+      .get(readCh1Id) as { n: number };
+    expect(row.n).toBe(0);
+  });
 });
 
 describe("complete_task invariants", () => {

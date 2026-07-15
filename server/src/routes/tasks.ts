@@ -52,6 +52,18 @@ const IMPACT_REQUIRES_GOAL =
   "impact is only meaningful for goal-linked tasks (ADR-4): set a goalId together with " +
   "impact, or omit it — goal-less tasks keep the neutral default 3";
 
+// Breakdowns are one level deep (ADR-16, #35). Nesting is banned, not merely
+// unsupported: every list renders roots plus one child level (a grandchild
+// would be draw-eligible yet invisible everywhere), the goal/category
+// cascades reach direct children only, and the derived remainingEffortMinutes
+// rollup sums direct open children — a middle task's stored estimate inside
+// its parent's sum would be a lie. Enforced on BOTH creation paths (the batch
+// endpoint and POST / with parentId), so the invariant holds no matter which
+// one an API/MCP caller picks.
+const NESTED_BREAKDOWN_ERROR =
+  "breakdowns are one level deep (ADR-16): this task is itself a subtask and cannot be " +
+  "broken down further — add the steps as additional subtasks of its root parent instead";
+
 /**
  * Availability window (#33, ADR-20) — shared POST/PATCH validation. The
  * window is all-or-none: windowDays (weekday integers 0–6, JS getDay
@@ -164,6 +176,16 @@ tasksRouter.post("/", (req, res) => {
       return res.status(400).json({ error: IMPACT_REQUIRES_GOAL });
     }
   }
+  if (parentId != null) {
+    const parentRow = db
+      .prepare("SELECT parent_id AS grandparentId FROM tasks WHERE id = ?")
+      .get(parentId) as { grandparentId: number | null } | undefined;
+    // A clear 400 instead of the FK violation's opaque 500.
+    if (!parentRow) return res.status(400).json({ error: "parent task not found" });
+    if (parentRow.grandparentId != null) {
+      return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
+    }
+  }
   const win = parseWindowInput(req.body ?? {});
   if (!win.ok) return res.status(400).json({ error: win.error });
   const window = win.present ? win : { days: null, start: null, end: null };
@@ -193,6 +215,9 @@ tasksRouter.post("/", (req, res) => {
 tasksRouter.post("/:id/subtasks", (req, res) => {
   const parent = getTask(Number(req.params.id));
   if (!parent) return res.status(404).json({ error: "task not found" });
+  if (parent.parentId != null) {
+    return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
+  }
 
   const subtasks = req.body?.subtasks;
   if (!Array.isArray(subtasks) || subtasks.length === 0) {
