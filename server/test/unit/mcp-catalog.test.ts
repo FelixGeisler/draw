@@ -118,8 +118,18 @@ describe("update_task input schema", () => {
 });
 
 describe("goal-less impact rejection (ADR-4)", () => {
-  it("rejects impact without goalId before any API call", async () => {
-    const { api, calls } = stubApi();
+  // Since issue #65 the API enforces the gate on POST and PATCH alike, so the
+  // catalog no longer duplicates the check — it must surface the API's 400
+  // verbatim instead of swallowing or rephrasing it.
+  it("surfaces the API's ADR-4 rejection as a tool error", async () => {
+    const { api, calls } = stubApi((method, path) =>
+      method === "POST" && path === "/api/tasks"
+        ? {
+            status: 400,
+            body: { error: "impact is only meaningful for goal-linked tasks (ADR-4)" },
+          }
+        : undefined,
+    );
     const outcome = await executeTool("create_task", api, {
       title: "Read chapter",
       categoryId: 1,
@@ -128,7 +138,7 @@ describe("goal-less impact rejection (ADR-4)", () => {
     expect(outcome.isError).toBe(true);
     expect(outcome.text).toMatch(/goal/i);
     expect(outcome.text).toContain("ADR-4");
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(1);
   });
 
   it("passes impact through when goalId is present", async () => {

@@ -191,6 +191,32 @@ describe("update_task", () => {
     const second = await callTool("update_task", { id: parentId, dueDate: "2026-08-01" });
     expect(second.json<{ task: TaskJson }>().task.dueDate).toBe("2026-08-01");
   });
+
+  // Issue #65 regression: the ADR-4 gate used to be bypassable via
+  // update_task — the API now enforces it on PATCH, and the tool surfaces
+  // that rejection instead of silently boosting a goal-less task's weight.
+  it("cannot set impact on a goal-less task", async () => {
+    const res = await callTool("update_task", { id: parentId, impact: 5 });
+    expect(res.isError).toBe(true);
+    expect(res.text).toMatch(/goal/i);
+    expect(res.text).toContain("ADR-4");
+
+    const tasks = (await callTool("list_tasks")).json<TaskJson[]>();
+    expect(tasks.find((t) => t.id === parentId)!.impact).toBe(3);
+  });
+
+  it("resets impact to the neutral default when unlinking the goal", async () => {
+    const created = (
+      await callTool("create_task", { title: "Unlink me", categoryId: 1, goalId, impact: 4 })
+    ).json<TaskJson>();
+    expect(created.impact).toBe(4);
+
+    const unlinked = await callTool("update_task", { id: created.id, goalId: null });
+    expect(unlinked.isError).toBe(false);
+    const task = unlinked.json<{ task: TaskJson }>().task;
+    expect(task.goalId).toBeNull();
+    expect(task.impact).toBe(3); // the rating pointed at the removed goal
+  });
 });
 
 describe("create_subtasks and the breakdown rule", () => {

@@ -324,6 +324,124 @@ describe("task CRUD and breakdown rule", () => {
     expect(listed.subtasks.map((s: { goalId: number | null }) => s.goalId)).toEqual([null, null]);
   });
 
+  it("enforces the ADR-4 impact gate on create (issue #65)", async () => {
+    // Non-neutral impact without a goal is rejected; nothing is created.
+    await request(app)
+      .post("/api/tasks")
+      .send({ title: "Boosted chore", categoryId: 1, impact: 5 })
+      .expect(400);
+    const list = await request(app).get("/api/tasks").expect(200);
+    expect(list.body.some((t: { title: string }) => t.title === "Boosted chore")).toBe(false);
+
+    // The web form's goal-less payload (explicit neutral 3) still passes.
+    await request(app)
+      .post("/api/tasks")
+      .send({ title: "Neutral chore", categoryId: 1, goalId: null, impact: 3 })
+      .expect(201);
+
+    // Out-of-range impact is a 400, not a raw constraint 500.
+    await request(app)
+      .post("/api/tasks")
+      .send({ title: "Overrated", categoryId: 1, impact: 99 })
+      .expect(400);
+  });
+
+  it("rejects an impact change on a goal-less task via PATCH (issue #65)", async () => {
+    const task = (
+      await request(app).post("/api/tasks").send({ title: "No-goal target", categoryId: 1 })
+    ).body;
+
+    const res = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({ impact: 5 })
+      .expect(400);
+    expect(res.body.error).toContain("ADR-4");
+
+    const listed = (await request(app).get("/api/tasks")).body.find(
+      (t: { id: number }) => t.id === task.id,
+    );
+    expect(listed.impact).toBe(3); // draw weight (impact²) stays honest
+
+    // Adding the goal in the same patch makes the rating meaningful — accepted.
+    const goal = (await request(app).post("/api/goals").send({ title: "Late-linked goal" })).body;
+    const linked = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({ goalId: goal.id, impact: 5 })
+      .expect(200);
+    expect(linked.body.task.impact).toBe(5);
+    expect(linked.body.task.goalId).toBe(goal.id);
+  });
+
+  it("keeps the edit form's no-op resend of a grandfathered impact working", async () => {
+    // Goal deletion sets goal_id NULL but keeps the historical rating — the
+    // edit form resends that stored impact verbatim (resolveSubmittedImpact),
+    // and the gate must not reject or silently reset it.
+    const goal = (await request(app).post("/api/goals").send({ title: "Doomed goal" })).body;
+    const task = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Grandfathered", categoryId: 1, goalId: goal.id, impact: 5 })
+    ).body;
+    await request(app).delete(`/api/goals/${goal.id}`).expect(200);
+
+    const edited = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({ title: "Grandfathered (renamed)", goalId: null, impact: 5 })
+      .expect(200);
+    expect(edited.body.task.impact).toBe(5);
+    expect(edited.body.task.goalId).toBeNull();
+
+    // A different rating on the still goal-less task stays forbidden...
+    await request(app).patch(`/api/tasks/${task.id}`).send({ impact: 4 }).expect(400);
+    // ...but an explicit reset to the neutral default is allowed.
+    const reset = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({ impact: 3 })
+      .expect(200);
+    expect(reset.body.task.impact).toBe(3);
+  });
+
+  it("resets impact to the neutral default when the goal is unlinked", async () => {
+    const goal = (await request(app).post("/api/goals").send({ title: "Unlink goal" })).body;
+    const mk = async (title: string) =>
+      (
+        await request(app)
+          .post("/api/tasks")
+          .send({ title, categoryId: 1, goalId: goal.id, impact: 5 })
+      ).body;
+
+    // The web form unlinks with an explicit reset (resolveSubmittedImpact)...
+    const viaClient = await mk("Unlink via form");
+    const clientRes = await request(app)
+      .patch(`/api/tasks/${viaClient.id}`)
+      .send({ goalId: null, impact: 3 })
+      .expect(200);
+    expect(clientRes.body.task.impact).toBe(3);
+    expect(clientRes.body.task.goalId).toBeNull();
+
+    // ...and a bare unlink (MCP update_task, direct PATCH) gets the same
+    // reset from the server: the rating pointed at the goal just removed.
+    const viaApi = await mk("Unlink bare");
+    const apiRes = await request(app)
+      .patch(`/api/tasks/${viaApi.id}`)
+      .send({ goalId: null })
+      .expect(200);
+    expect(apiRes.body.task.impact).toBe(3);
+
+    // Unlinking while trying to keep a rating is contradictory — rejected,
+    // and the task is untouched.
+    const kept = await mk("Unlink but keep 5");
+    await request(app)
+      .patch(`/api/tasks/${kept.id}`)
+      .send({ goalId: null, impact: 5 })
+      .expect(400);
+    const listed = (await request(app).get("/api/tasks")).body.find(
+      (t: { id: number }) => t.id === kept.id,
+    );
+    expect(listed.impact).toBe(5);
+    expect(listed.goalId).toBe(goal.id);
+  });
+
   it("deletes a task with cascade to subtasks", async () => {
     const parent = (
       await request(app).post("/api/tasks").send({ title: "Doomed", categoryId: 1 })
