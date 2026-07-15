@@ -8,10 +8,19 @@
   ┌──────────┐   │  ┌────────┐    ┌──────────┐  │   AI is used)
   │   User   │◄──┼─►│ Client │◄──►│  Server  │◄─┼──────────► Anthropic
   └──────────┘   │  │ (Vite/ │    │(Express+ │  │            Claude API
-                 │  │ React) │    │ SQLite)  │  │
-                 │  └────────┘    └──────────┘  │
-                 └──────────────────────────────┘
-                        localhost only
+       ▲         │  │ React) │    │ SQLite)  │  │
+       │         │  └────────┘    └────▲─────┘  │
+       │         │                     │ HTTP   │
+       │         │              ┌──────┴─────┐  │
+       │         │              │ MCP server │  │
+       │         │              │  (stdio)   │  │
+       │         └──────────────┴──────▲─────┴──┘
+       │ converses,                    │ stdio (JSON-RPC),
+       │ approves tool calls           │ localhost only
+  ┌────┴──────────────────────────┐    │
+  │ MCP client                    │◄───┘
+  │ (Claude Code, Claude Desktop) │
+  └───────────────────────────────┘
 ....
 
 [cols="1,2,2",options="header"]
@@ -25,6 +34,10 @@
 |*Anthropic Claude API*
 |Task/goal context + selected materials (as document blocks), structured-output schema
 |Subtask suggestions, backward-planning analysis, token counts (for cost estimates)
+
+|*MCP client (Claude Code, Claude Desktop)*
+|Domain tool calls (list/create/update/complete tasks, breakdowns, draw, timers, stats) — each write approved by the user in the client's own permission flow; no delete operations are exposed (ADR-19)
+|Task/goal/category/settings state as JSON; deck snapshot, gamification state, and goal-material content as MCP resources (`draw://deck`, `draw://gamification`, `draw://materials/{id}`)
 |===
 
 == 3.2 Technical Context
@@ -52,7 +65,17 @@
 |Express ↔ file system
 |`server/data/files/`
 |Uploaded goal materials
+
+|MCP client ↔ MCP server
+|stdio (JSON-RPC)
+|`npm run mcp -w server` (committed `.mcp.json`); tools + resources; stdout carries only protocol frames, logs go to stderr
+
+|MCP server ↔ Express
+|HTTP 127.0.0.1:3001 (`DRAW_API_URL`)
+|The same JSON REST the web client uses — the MCP adapter holds no domain logic and never opens the database (ADR-19); works without `ANTHROPIC_API_KEY`
 |===
 
 *Scope boundaries:* no mobile app, no multi-device sync, no calendar integration,
-no notifications. The Claude API is the only external system.
+no notifications. The Claude API is the only *remote* system; MCP clients are a
+second local consumer of the same loopback API — nothing becomes reachable from
+the network (section 2).
