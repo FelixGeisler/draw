@@ -1,6 +1,13 @@
 import { Router } from "express";
-import { db } from "../db.js";
-import { clearDanglingDraw, getCurrentDrawTaskId } from "../services/drawService.js";
+import { db, getSetting } from "../db.js";
+import {
+  clearCurrentDraw,
+  clearDanglingDraw,
+  getCurrentDrawTaskId,
+  isRestorable,
+  withBooleanBlocked,
+  type RestorableTask,
+} from "../services/drawService.js";
 import {
   completeTask,
   undoLatestCompletion,
@@ -17,7 +24,7 @@ const TASK_SELECT = `
          impact, effort_minutes AS effortMinutes, due_date AS dueDate,
          recur_every_days AS recurEveryDays, status,
          created_at AS createdAt, completed_at AS completedAt,
-         last_drawn_at AS lastDrawnAt,
+         last_drawn_at AS lastDrawnAt, deferred_until AS deferredUntil, blocked,
          EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open') AS hasOpenChildren,
          CASE
            WHEN EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open')
@@ -27,7 +34,10 @@ const TASK_SELECT = `
   FROM tasks`;
 
 function getTask(id: number) {
-  return db.prepare(`${TASK_SELECT} WHERE id = ?`).get(id) as Record<string, unknown> | undefined;
+  const task = db.prepare(`${TASK_SELECT} WHERE id = ?`).get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return task && withBooleanBlocked(task);
 }
 
 tasksRouter.get("/", (req, res) => {
@@ -56,7 +66,8 @@ tasksRouter.get("/", (req, res) => {
     `${TASK_SELECT} WHERE parent_id = ? AND status != 'archived' ORDER BY created_at ASC`,
   );
   for (const root of roots) {
-    root.subtasks = childStmt.all(root.id);
+    withBooleanBlocked(root);
+    root.subtasks = (childStmt.all(root.id) as Record<string, unknown>[]).map(withBooleanBlocked);
   }
   res.json(roots);
 });
@@ -154,13 +165,33 @@ tasksRouter.patch("/:id", (req, res) => {
     return res.json({ task: getTask(id), ...result });
   }
 
-  // Reopening: undo the latest completion so XP stays honest.
+  // Reopening: undo the latest completion so XP stays honest. A reopened
+  // task starts fresh in the deck — leftover snooze/block state is cleared
+  // (ADR-17), same as on completion.
   if (body.status === "open" && raw.status === "done") {
     db.transaction(() => {
       undoLatestCompletion(id);
-      db.prepare("UPDATE tasks SET status = 'open', completed_at = NULL WHERE id = ?").run(id);
+      db.prepare(
+        "UPDATE tasks SET status = 'open', completed_at = NULL, deferred_until = NULL, blocked = 0 WHERE id = ?",
+      ).run(id);
     })();
     return res.json({ task: getTask(id) });
+  }
+
+  // Snooze/block fields (ADR-17). deferredUntil is normalized to a UTC ISO
+  // string because the pool predicate compares it lexicographically in SQL.
+  if ("deferredUntil" in body && body.deferredUntil !== null) {
+    const v = body.deferredUntil;
+    if (typeof v !== "string" || Number.isNaN(new Date(v).getTime())) {
+      return res.status(400).json({ error: "deferredUntil must be null or an ISO datetime" });
+    }
+    body.deferredUntil = new Date(v).toISOString();
+  }
+  if ("blocked" in body) {
+    if (typeof body.blocked !== "boolean") {
+      return res.status(400).json({ error: "blocked must be a boolean" });
+    }
+    body.blocked = body.blocked ? 1 : 0;
   }
 
   const fields: Record<string, string> = {
@@ -173,6 +204,8 @@ tasksRouter.patch("/:id", (req, res) => {
     dueDate: "due_date",
     recurEveryDays: "recur_every_days",
     status: "status",
+    deferredUntil: "deferred_until",
+    blocked: "blocked",
   };
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -193,7 +226,23 @@ tasksRouter.patch("/:id", (req, res) => {
       db.prepare("UPDATE tasks SET goal_id = ? WHERE parent_id = ?").run(body.goalId ?? null, id);
     }
   })();
-  res.json({ task: getTask(id) });
+
+  const task = getTask(id)!;
+  // Snoozing/blocking the current draw dismisses the card, so the persisted
+  // pointer is cleared eagerly here, mirroring completeTask() — this is the
+  // one sideways mutation that must not wait for GET /api/draw/current's
+  // lazy validation (ADR-13): a snooze wears off (and a block can be woken
+  // from the Tasks page) without any GET in between, and the once-again
+  // restorable pointer would resurrect a card the user explicitly sent away
+  // (ADR-17).
+  if (
+    ("deferredUntil" in body || "blocked" in body) &&
+    getCurrentDrawTaskId() === id &&
+    !isRestorable(task as unknown as RestorableTask, getSetting("max_draw_effort", 30), new Date())
+  ) {
+    clearCurrentDraw(id);
+  }
+  res.json({ task });
 });
 
 tasksRouter.post("/:id/timer/start", (req, res) => {

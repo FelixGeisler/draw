@@ -1,9 +1,26 @@
 import type { Task } from "../api/types";
 
-export type DrawGroup = "ready" | "needs-estimate" | "too-big" | "container";
+export type DrawGroup = "ready" | "needs-estimate" | "too-big" | "container" | "snoozed";
 
-export function classifyTask(task: Task, maxDrawEffort: number): DrawGroup {
+/**
+ * Derived snooze state (ADR-17): blocked, or deferredUntil in the future.
+ * Never read from a stored flag — an expired snooze ends with no write.
+ */
+export function isSnoozed(
+  task: Pick<Task, "blocked" | "deferredUntil">,
+  now: Date = new Date(),
+): boolean {
+  return task.blocked || (task.deferredUntil != null && new Date(task.deferredUntil) > now);
+}
+
+/**
+ * Mirrors the server's pool predicate (`drawService.ts`), pinned by the shared
+ * vectors in `shared/drawableVectors.ts`. Precedence:
+ * container → snoozed → needs-estimate → too-big → ready.
+ */
+export function classifyTask(task: Task, maxDrawEffort: number, now: Date = new Date()): DrawGroup {
   if (task.hasOpenChildren) return "container";
+  if (isSnoozed(task, now)) return "snoozed";
   if (task.effortMinutes == null) return "needs-estimate";
   if (task.effortMinutes > maxDrawEffort) return "too-big";
   return "ready";

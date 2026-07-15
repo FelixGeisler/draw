@@ -25,6 +25,13 @@ export interface Task {
   createdAt: string;
   completedAt: string | null;
   lastDrawnAt: string | null;
+  /**
+   * Snooze/block (ADR-17). An expired deferredUntil is retained as the wake
+   * timestamp — "snoozed" is always derived (deferredUntil in the future or
+   * blocked), never read from a stored flag.
+   */
+  deferredUntil: string | null;
+  blocked: boolean;
   hasOpenChildren: number;
   /**
    * Derived at query time (never stored): sum of OPEN subtasks' estimates for a

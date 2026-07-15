@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { classifyTask, flattenOpen } from "./drawable";
+import { classifyTask, flattenOpen, isSnoozed } from "./drawable";
+import { DRAWABLE_VECTORS, VECTOR_NOW } from "../../../shared/drawableVectors";
 import type { Task } from "../api/types";
 
 function task(overrides: Partial<Task> = {}): Task {
@@ -18,6 +19,8 @@ function task(overrides: Partial<Task> = {}): Task {
     createdAt: "2026-07-14T00:00:00Z",
     completedAt: null,
     lastDrawnAt: null,
+    deferredUntil: null,
+    blocked: false,
     hasOpenChildren: 0,
     ...overrides,
   };
@@ -36,6 +39,37 @@ describe("classifyTask", () => {
 
   it("respects a custom effort limit", () => {
     expect(classifyTask(task({ effortMinutes: 45 }), 60)).toBe("ready");
+  });
+
+  // The same vectors pin the server's pool predicate — see
+  // shared/drawableVectors.ts and server/test/unit/drawable-vectors.test.ts.
+  describe("shared eligibility vectors (parity with drawService)", () => {
+    const now = new Date(VECTOR_NOW);
+    for (const v of DRAWABLE_VECTORS) {
+      it(v.name, () => {
+        const t = task({
+          hasOpenChildren: v.hasOpenChildren,
+          blocked: v.blocked,
+          deferredUntil: v.deferredUntil,
+          effortMinutes: v.effortMinutes,
+        });
+        expect(classifyTask(t, v.maxEffort, now)).toBe(v.expected);
+      });
+    }
+  });
+});
+
+describe("isSnoozed", () => {
+  const now = new Date(VECTOR_NOW);
+
+  it("is derived: future deferredUntil or blocked, never a stored flag", () => {
+    expect(isSnoozed(task({ deferredUntil: "2026-07-14T13:00:00.000Z" }), now)).toBe(true);
+    expect(isSnoozed(task({ blocked: true }), now)).toBe(true);
+    expect(isSnoozed(task(), now)).toBe(false);
+  });
+
+  it("an expired snooze ends with no write — the retained value is inert", () => {
+    expect(isSnoozed(task({ deferredUntil: "2026-07-14T11:00:00.000Z" }), now)).toBe(false);
   });
 });
 

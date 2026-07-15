@@ -2,7 +2,9 @@ import { useState } from "react";
 import type { Category, Goal, NewTask, Task } from "../api/types";
 import { useCreateSubtasks, useDeleteTask, useUpdateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
+import { isSnoozed } from "../lib/drawable";
 import { TaskBadges } from "./TaskBadges";
+import { SnoozeMenu } from "./SnoozeMenu";
 import { TaskForm } from "./TaskForm";
 import { SubtaskEditor } from "./SubtaskEditor";
 import { AiBreakdownPanel } from "./AiSuggestionPanel";
@@ -23,11 +25,18 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
   const [breakingDown, setBreakingDown] = useState(false);
   const [aiPanel, setAiPanel] = useState(false);
   const [expanded, setExpanded] = useState(true);
+  const [snoozing, setSnoozing] = useState(false);
   const [editing, setEditing] = useState(false);
 
   const category = categories.find((c) => c.id === task.categoryId);
   const hasSubtasks = (task.subtasks?.length ?? 0) > 0;
   const done = task.status === "done";
+  const snoozed = !done && isSnoozed(task);
+
+  function snooze(patch: { deferredUntil?: string; blocked?: boolean }) {
+    updateTask.mutate({ id: task.id, ...patch });
+    setSnoozing(false);
+  }
 
   async function saveEdit(patch: NewTask) {
     await updateTask.mutateAsync({ id: task.id, ...patch });
@@ -84,6 +93,22 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
           {task.title}
         </span>
         <TaskBadges task={task} />
+        {snoozed ? (
+          // Wake = deferredUntil now, not null (ADR-17): the retained value
+          // becomes the wake timestamp, so staleness counts from here.
+          <button
+            onClick={() => snooze({ deferredUntil: new Date().toISOString(), blocked: false })}
+            title="Put this task back in the deck"
+          >
+            Wake
+          </button>
+        ) : (
+          !done && (
+            <button onClick={() => setSnoozing((s) => !s)} title="Take this task out of the deck">
+              💤
+            </button>
+          )
+        )}
         {!done && task.parentId == null && (
           <button onClick={() => setBreakingDown((b) => !b)} title="Split into small steps">
             Break down
@@ -95,6 +120,7 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
             onClick={() => {
               setBreakingDown(false);
               setAiPanel(false);
+              setSnoozing(false);
               setEditing(true);
             }}
             title="Edit"
@@ -113,6 +139,14 @@ export function TaskRow({ task, categories, goals, maxEffort, depth = 0 }: Props
           🗑
         </button>
       </div>
+      )}
+      {snoozing && !snoozed && (
+        <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+          <SnoozeMenu
+            onSnooze={(iso) => snooze({ deferredUntil: iso })}
+            onBlock={() => snooze({ blocked: true })}
+          />
+        </div>
       )}
       {breakingDown && (
         <>

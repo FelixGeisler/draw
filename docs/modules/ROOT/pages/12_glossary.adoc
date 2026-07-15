@@ -28,6 +28,15 @@
 |*Container*
 |A task with open subtasks; never drawn itself
 
+|*Snooze*
+|Timed removal from the deck: `deferred_until` in the future. Expires with no write — the retained timestamp becomes the wake time for staleness (ADR-17)
+
+|*Block*
+|Indefinite removal from the deck (`blocked`); returns only via the explicit Wake action
+
+|*Wake*
+|Manual return to the deck: sets `deferred_until = now` (not `NULL`) and clears `blocked`, so staleness counts from the wake
+
 |*Completion*
 |A row in the `completions` table — the atomic fact behind XP, streaks, trophy deck, and history
 

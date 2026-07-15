@@ -56,16 +56,19 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
     task.id,
   );
 
+  // Completion clears snooze/block state (ADR-17) — critical for recurring
+  // tasks, which stay open and must be drawable for the next occurrence.
   const recurring = task.recur_every_days != null && task.recur_every_days > 0;
   if (recurring) {
     const next = new Date(now);
     next.setDate(next.getDate() + task.recur_every_days!);
-    db.prepare("UPDATE tasks SET due_date = ? WHERE id = ?").run(isoDate(next), task.id);
+    db.prepare(
+      "UPDATE tasks SET due_date = ?, deferred_until = NULL, blocked = 0 WHERE id = ?",
+    ).run(isoDate(next), task.id);
   } else {
-    db.prepare("UPDATE tasks SET status = 'done', completed_at = ? WHERE id = ?").run(
-      now.toISOString(),
-      task.id,
-    );
+    db.prepare(
+      "UPDATE tasks SET status = 'done', completed_at = ?, deferred_until = NULL, blocked = 0 WHERE id = ?",
+    ).run(now.toISOString(), task.id);
   }
 
   // A completed card leaves the deck: drop the persisted current draw if it
@@ -157,6 +160,9 @@ function unlockedKeys(): Set<string> {
   return new Set(rows.map((r) => r.key));
 }
 
+// Deliberately does NOT apply the snooze/block predicate (ADR-17): the
+// deck_clearer achievement must keep counting snoozed/blocked cards, or
+// snoozing the rest of the deck and completing one task would unlock it.
 function drawableCount(): number {
   const maxEffort = getSetting("max_draw_effort", 30);
   const row = db
