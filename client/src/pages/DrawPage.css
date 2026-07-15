@@ -1,4 +1,5 @@
 .draw-scene {
+  position: relative; /* anchors the ↻ overlay to the card bounds (#113) */
   perspective: 1200px;
   width: 300px;
   height: 420px;
@@ -63,6 +64,13 @@
   border-color: var(--accent);
 }
 
+/* Once flipped, the rotated-away front face must not eat clicks aimed at the
+   back face's controls (the ↻ regenerate button, #113): backface-visibility
+   hides it visually, but Chromium still hit-tests the element's back side. */
+.draw-card.flipped .draw-face.front {
+  pointer-events: none;
+}
+
 .draw-face.back {
   background: linear-gradient(160deg, #232735, #1b1e27);
   transform: rotateY(180deg);
@@ -109,8 +117,9 @@
   }
 }
 
-/* Regenerate (#113): a quiet corner control on the art itself — it re-rolls
-   the ARTWORK only, never the card (the draw stays a commitment, #88).
+/* Regenerate (#113): a quiet corner control on the art — it re-rolls the
+   ARTWORK only, never the card (the draw stays a commitment, #88). Sits on
+   .draw-scene (2D), NOT inside the 3D-flipped face, so it stays clickable.
    Rendered only when art exists, so degraded mode never shows it. */
 .draw-art-regen {
   position: absolute;
@@ -146,7 +155,7 @@
 }
 
 /* Card-back content paints above the absolutely positioned art layers. */
-.draw-face.back > :not(.draw-art, .draw-art-scrim, .draw-art-regen) {
+.draw-face.back > :not(.draw-art, .draw-art-scrim) {
   position: relative;
 }
 

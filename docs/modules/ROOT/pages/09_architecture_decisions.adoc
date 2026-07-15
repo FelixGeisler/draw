@@ -571,9 +571,13 @@ generation or sanitization failure throws before the write, so the old art
 always survives. At most one generation is in flight per task across both
 endpoints (`cardArtService` coalesces concurrent callers onto one promise);
 the GET keeps its at-most-once semantics — a cache hit never regenerates.
-Client-side the button lives on the drawn card's art layer, renders only when
-art exists (degraded mode shows nothing, keeping the silent-failure
-contract), and swaps the query cache from the mutation response.
+Client-side the ↻ button overlays the drawn card's corner — deliberately on
+the 2D `.draw-scene`, NOT inside the 3D flip faces, whose
+`backface-visibility` context Chromium does not hit-test reliably (caught in
+live verification: a button inside the face was visually present but
+unclickable). It renders only when art exists (degraded mode shows nothing,
+keeping the silent-failure contract) and swaps the query cache from the
+mutation response.
 
 == ADR-23: Recurring subtasks are banned under sequential parents
 

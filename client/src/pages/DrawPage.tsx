@@ -217,15 +217,6 @@ export function DrawPage() {
                   src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(cardArt.data.svg)}`}
                 />
                 <div className="draw-art-scrim" />
-                <button
-                  className={`draw-art-regen ${regenArt.isPending ? "pending" : ""}`}
-                  title="Regenerate artwork"
-                  aria-label="Regenerate artwork"
-                  disabled={regenArt.isPending}
-                  onClick={() => regenArt.mutate()}
-                >
-                  ↻
-                </button>
               </>
             )}
             {task && (
@@ -259,6 +250,22 @@ export function DrawPage() {
             )}
           </div>
         </div>
+        {/* Regenerate (#113) overlays the scene INSTEAD of living inside the
+            flipped face: elements in the backface-hidden 3D flip context are
+            not reliably hit-testable (Chromium), so the one interactive
+            control on the card sits in plain 2D above it. Rendered only when
+            there is art to replace — degraded mode never shows it. */}
+        {phase === "revealed" && task && cardArt.data?.svg && (
+          <button
+            className={`draw-art-regen ${regenArt.isPending ? "pending" : ""}`}
+            title="Regenerate artwork"
+            aria-label="Regenerate artwork"
+            disabled={regenArt.isPending}
+            onClick={() => regenArt.mutate()}
+          >
+            ↻
+          </button>
+        )}
       </div>
 
       {phase === "revealed" && task && !editing && (
