@@ -60,6 +60,15 @@ test("completing the last subtask flips the parent to done without manual action
   // The last subtask completed the parent server-side; the invalidated tasks
   // query repaints the row as done with no click on the parent itself.
   await expect(taskRow(page, PARENT_TITLE).getByRole("checkbox")).toBeChecked();
+
+  // The auto-completion is a genuine completion row: it lands in today's
+  // trophy pile as a plain mini-frame (wasDrawn 0 → ✅ glyph, no rarity) with
+  // the symbolic +1 XP — the frame's degraded states render it sanely.
+  await page.goto("/");
+  const trophy = page.locator(".trophy-card", { hasText: PARENT_TITLE });
+  await expect(trophy).toBeVisible();
+  await expect(trophy.locator(".trophy-card-xp")).toHaveText("+1");
+  await expect(trophy.locator(".trophy-card-glyph")).toHaveText("✅");
 });
 
 test("adding a new subtask reopens the done parent; completing it closes the loop", async ({

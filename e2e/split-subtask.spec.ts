@@ -5,8 +5,8 @@ import type { APIRequestContext, Page } from "@playwright/test";
 // only exists on root rows and nesting is banned (ADR-16). Split-in-place
 // replaces the too-big step with its parts as siblings at the same level:
 // break a root down into steps where one is too big, split that step, then
-// complete the parts and watch the parent complete normally (the archived
-// original never blocks it).
+// complete the parts and watch the parent auto-complete (#111, ADR-32) —
+// the archived original never blocks it.
 test.describe.configure({ mode: "serial" });
 
 const PARENT_TITLE = "Publish the woodworking course";
@@ -68,24 +68,33 @@ test("a too-big subtask offers Split with the even-split pre-fill; accepting rep
   await expect(taskRow(page, SMALL_STEP)).toBeVisible();
 });
 
-test("completing the parts lets the parent complete normally — the archived original never blocks it", async ({
+test("completing the parts auto-completes the parent — the archived original never blocks it", async ({
   page,
 }) => {
   await page.goto("/tasks");
+  // Keep done rows on screen: the last completion cascades to the parent
+  // (#111, ADR-32) and would otherwise unmount the whole tree from the
+  // open-only list mid-assertion.
+  await page.getByLabel("show done").check();
 
   // Plain click, not check(): the controlled checkbox only turns checked
   // after the mutation round-trip (same pattern as the other journey specs).
-  for (const title of [PART_ONE, PART_TWO, SMALL_STEP]) {
+  for (const title of [PART_ONE, PART_TWO]) {
     await taskRow(page, title).getByRole("checkbox").click();
     await expect(taskRow(page, title).getByRole("checkbox")).toBeChecked();
   }
+  // One open child left — the parent is still open.
+  await expect(taskRow(page, PARENT_TITLE).getByRole("checkbox")).not.toBeChecked();
 
-  // All open children done — the parent completes like any other task and
-  // leaves the open list (the archived original does not hold it hostage).
-  await taskRow(page, PARENT_TITLE).getByRole("checkbox").click();
-  await expect(page.getByText(PARENT_TITLE, { exact: true })).not.toBeVisible();
-
-  // It reappears under "show done" as completed, not stuck.
-  await page.getByLabel("show done").check();
+  // The last open child closes the breakdown: the parent completes on its
+  // own (#111, ADR-32) — the archived original neither blocks the cascade
+  // nor counts toward it.
+  await taskRow(page, SMALL_STEP).getByRole("checkbox").click();
+  await expect(taskRow(page, SMALL_STEP).getByRole("checkbox")).toBeChecked();
   await expect(taskRow(page, PARENT_TITLE).getByRole("checkbox")).toBeChecked();
+
+  // The finished tree leaves the open-only list (the archived original does
+  // not hold it hostage there either).
+  await page.getByLabel("show done").uncheck();
+  await expect(page.getByText(PARENT_TITLE, { exact: true })).not.toBeVisible();
 });
