@@ -128,3 +128,19 @@ test("the shine sweep runs only while lifted, and reduced motion stills it", asy
   );
   expect(bg).toContain("linear-gradient");
 });
+
+test("the history skyline reuses the tiers on its upright cards", async ({ page }) => {
+  await page.goto("/history");
+
+  // Today's tower sits at the right end, where the skyline opens.
+  const foilSky = page.locator(`.hoc-card[aria-label*="${FOIL_TITLE}"]`);
+  await expect(foilSky).toHaveClass(/rarity-foil/);
+  await expect(foilSky).toHaveAttribute("aria-label", /foil$/);
+
+  const silverSky = page.locator(`.hoc-card[aria-label*="${SILVER_TITLE}"]`);
+  await expect(silverSky).toHaveClass(/rarity-silver/);
+
+  const plainSky = page.locator(`.hoc-card[aria-label*="${PLAIN_TITLE}"]`);
+  await expect(plainSky).toBeVisible();
+  await expect(plainSky).not.toHaveClass(/rarity-/);
+});
