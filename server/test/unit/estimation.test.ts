@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEstimation,
-  latestCycleTrackedMinutes,
+  trackedCyclesInRange,
   type EstimationInputRow,
 } from "../../src/services/statsService.js";
 
@@ -108,7 +108,7 @@ describe("buildEstimation", () => {
   it("reflects a single cycle for a recurring task with two completed cycles (#39)", () => {
     // Cycle 1: 30 min tracked, completed 04-30 (before range).
     // Cycle 2: 45 min tracked, completed 05-03 (in range). Estimate 30/cycle.
-    const tracked = latestCycleTrackedMinutes(
+    const { minutes, cycles } = trackedCyclesInRange(
       ["2024-04-30T12:00:00.000Z", "2024-05-03T12:00:00.000Z"],
       [
         { startedAt: "2024-04-29T10:00:00.000Z", minutes: 30 },
@@ -117,9 +117,26 @@ describe("buildEstimation", () => {
       "2024-05-01",
       "2024-05-08",
     );
-    const e = buildEstimation([row({ estimatedMinutes: 30, trackedMinutes: tracked })]);
+    const e = buildEstimation([row({ estimatedMinutes: 30 * cycles, trackedMinutes: minutes })]);
     // Lifetime attribution would report 75/30 = 2.5 — inflated by cycle 1.
     expect(e.tasks[0].ratio).toBe(1.5);
+    expect(e.summary.accuracyRatio).toBe(1.5);
+  });
+
+  it("scores N tracked in-range cycles against N per-cycle estimates (#48)", () => {
+    // Two in-range completions, both cycles tracked. Estimate 30/cycle.
+    const { minutes, cycles } = trackedCyclesInRange(
+      ["2024-05-02T12:00:00.000Z", "2024-05-05T12:00:00.000Z"],
+      [
+        { startedAt: "2024-05-01T10:00:00.000Z", minutes: 20 },
+        { startedAt: "2024-05-04T10:00:00.000Z", minutes: 70 },
+      ],
+      "2024-05-01",
+      "2024-05-08",
+    );
+    const e = buildEstimation([row({ estimatedMinutes: 30 * cycles, trackedMinutes: minutes })]);
+    // 90 tracked over 2 × 30 estimated — not 90 (or 70) over a single 30.
+    expect(e.tasks[0]).toMatchObject({ estimatedMinutes: 60, trackedMinutes: 90, ratio: 1.5 });
     expect(e.summary.accuracyRatio).toBe(1.5);
   });
 
@@ -156,56 +173,79 @@ describe("buildEstimation", () => {
   });
 });
 
-describe("latestCycleTrackedMinutes", () => {
+describe("trackedCyclesInRange", () => {
   const FROM = "2024-05-01";
   const TO = "2024-05-08"; // exclusive, like the SQL range filters
   const entry = (startedAt: string, minutes: number) => ({ startedAt, minutes });
 
   it("counts all entries up to completion when there is no previous completion", () => {
     // One-shot task: work started long before the range still counts.
-    const tracked = latestCycleTrackedMinutes(
+    const tracked = trackedCyclesInRange(
       ["2024-05-03T12:00:00.000Z"],
       [entry("2024-04-20T10:00:00.000Z", 30), entry("2024-05-02T10:00:00.000Z", 15)],
       FROM,
       TO,
     );
-    expect(tracked).toBe(45);
+    expect(tracked).toEqual({ minutes: 45, cycles: 1 });
   });
 
   it("drops entries from before the previous completion", () => {
-    const tracked = latestCycleTrackedMinutes(
+    const tracked = trackedCyclesInRange(
       ["2024-04-30T12:00:00.000Z", "2024-05-03T12:00:00.000Z"],
       [entry("2024-04-29T10:00:00.000Z", 60), entry("2024-05-02T10:00:00.000Z", 20)],
       FROM,
       TO,
     );
-    expect(tracked).toBe(20);
+    expect(tracked).toEqual({ minutes: 20, cycles: 1 });
   });
 
   it("drops entries started after the cycle's completion (next cycle underway)", () => {
-    const tracked = latestCycleTrackedMinutes(
+    const tracked = trackedCyclesInRange(
       ["2024-05-03T12:00:00.000Z"],
       [entry("2024-05-02T10:00:00.000Z", 25), entry("2024-05-03T14:00:00.000Z", 40)],
       FROM,
       TO,
     );
-    expect(tracked).toBe(25);
+    expect(tracked).toEqual({ minutes: 25, cycles: 1 });
   });
 
-  it("attributes only the latest cycle when several completions fall in range", () => {
-    const tracked = latestCycleTrackedMinutes(
+  it("sums every tracked cycle when several completions fall in range (#48)", () => {
+    const tracked = trackedCyclesInRange(
       ["2024-05-02T12:00:00.000Z", "2024-05-05T12:00:00.000Z"],
       [entry("2024-05-01T10:00:00.000Z", 20), entry("2024-05-04T10:00:00.000Z", 30)],
       FROM,
       TO,
     );
-    expect(tracked).toBe(30);
+    expect(tracked).toEqual({ minutes: 50, cycles: 2 });
+  });
+
+  it("keeps a task whose entries all belong to the EARLIER in-range cycle (#48)", () => {
+    // Completed twice in range, timer only used before the first completion.
+    // Latest-cycle-only attribution returned 0 here and the task vanished.
+    const tracked = trackedCyclesInRange(
+      ["2024-05-02T12:00:00.000Z", "2024-05-05T12:00:00.000Z"],
+      [entry("2024-05-01T10:00:00.000Z", 20)],
+      FROM,
+      TO,
+    );
+    expect(tracked).toEqual({ minutes: 20, cycles: 1 });
+  });
+
+  it("skips untracked cycles entirely — they must not scale the estimate", () => {
+    // Three in-range completions, middle cycle checkbox-only: 2 cycles count.
+    const tracked = trackedCyclesInRange(
+      ["2024-05-02T12:00:00.000Z", "2024-05-04T12:00:00.000Z", "2024-05-06T12:00:00.000Z"],
+      [entry("2024-05-01T10:00:00.000Z", 20), entry("2024-05-05T10:00:00.000Z", 40)],
+      FROM,
+      TO,
+    );
+    expect(tracked).toEqual({ minutes: 60, cycles: 2 });
   });
 
   it("treats the boundaries as (previous completion, cycle completion]", () => {
     const prev = "2024-04-30T12:00:00.000Z";
     const end = "2024-05-03T12:00:00.000Z";
-    const tracked = latestCycleTrackedMinutes(
+    const tracked = trackedCyclesInRange(
       [prev, end],
       // Started exactly at the previous completion: previous cycle's edge, out.
       // Started exactly at this cycle's completion: still this cycle, in.
@@ -213,37 +253,37 @@ describe("latestCycleTrackedMinutes", () => {
       FROM,
       TO,
     );
-    expect(tracked).toBe(5);
+    expect(tracked).toEqual({ minutes: 5, cycles: 1 });
   });
 
   it("does not order-depend on the completions array", () => {
-    const tracked = latestCycleTrackedMinutes(
+    const tracked = trackedCyclesInRange(
       ["2024-05-03T12:00:00.000Z", "2024-04-30T12:00:00.000Z", "2024-04-27T12:00:00.000Z"],
       [entry("2024-04-28T10:00:00.000Z", 60), entry("2024-05-01T10:00:00.000Z", 10)],
       FROM,
       TO,
     );
-    expect(tracked).toBe(10);
+    expect(tracked).toEqual({ minutes: 10, cycles: 1 });
   });
 
-  it("returns 0 when no completion falls in range", () => {
-    const tracked = latestCycleTrackedMinutes(
+  it("returns zero cycles when no completion falls in range", () => {
+    const tracked = trackedCyclesInRange(
       ["2024-06-01T12:00:00.000Z"],
       [entry("2024-05-02T10:00:00.000Z", 30)],
       FROM,
       TO,
     );
-    expect(tracked).toBe(0);
+    expect(tracked).toEqual({ minutes: 0, cycles: 0 });
   });
 
-  it("returns 0 for a cycle without entries", () => {
-    // Cycle 1 tracked, cycle 2 completed untracked: nothing to compare.
-    const tracked = latestCycleTrackedMinutes(
+  it("returns zero cycles when the only in-range cycle has no entries", () => {
+    // Cycle 1 tracked but out of range, cycle 2 in range but checkbox-only.
+    const tracked = trackedCyclesInRange(
       ["2024-04-30T12:00:00.000Z", "2024-05-03T12:00:00.000Z"],
       [entry("2024-04-29T10:00:00.000Z", 30)],
       FROM,
       TO,
     );
-    expect(tracked).toBe(0);
+    expect(tracked).toEqual({ minutes: 0, cycles: 0 });
   });
 });
