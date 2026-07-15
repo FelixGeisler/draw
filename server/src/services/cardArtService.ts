@@ -23,6 +23,17 @@ import { sanitizeSvg } from "./svgSanitizer.js";
 // a failure never wedges a task (the next request simply starts a fresh one).
 const inFlight = new Map<number, Promise<string>>();
 
+// Both entry points check this twice: once up front (the pinned 404-first
+// contract) and once more AFTER the generation await — the task can be
+// deleted in a second tab while Claude paints, and writing the row then would
+// trip the card_art→tasks FK and surface as a 500 instead of a 404.
+// better-sqlite3 is synchronous, so nothing can delete the task between the
+// re-check and the write that follows it.
+function ensureTaskExists(taskId: number): void {
+  const task = db.prepare("SELECT id FROM tasks WHERE id = ?").get(taskId);
+  if (!task) throw new AiError(404, "task not found");
+}
+
 function generateSanitized(taskId: number): Promise<string> {
   const existing = inFlight.get(taskId);
   if (existing) return existing;
@@ -39,8 +50,7 @@ function generateSanitized(taskId: number): Promise<string> {
 }
 
 export async function getOrCreateCardArt(taskId: number): Promise<{ svg: string }> {
-  const task = db.prepare("SELECT id FROM tasks WHERE id = ?").get(taskId);
-  if (!task) throw new AiError(404, "task not found");
+  ensureTaskExists(taskId);
 
   const cached = db.prepare("SELECT svg FROM card_art WHERE task_id = ?").get(taskId) as
     | { svg: string }
@@ -50,6 +60,7 @@ export async function getOrCreateCardArt(taskId: number): Promise<{ svg: string 
   if (!isConfigured()) throw new AiError(503, "ai_not_configured");
 
   const svg = await generateSanitized(taskId);
+  ensureTaskExists(taskId); // deleted mid-generation → 404, not an FK 500
 
   // Concurrent first views coalesce above; a view racing a REGENERATE can
   // still land here after the regenerate already wrote. First writer wins so
@@ -71,12 +82,12 @@ export async function getOrCreateCardArt(taskId: number): Promise<{ svg: string 
  * the cache short-circuit: replacing the cache is the whole point.
  */
 export async function regenerateCardArt(taskId: number): Promise<{ svg: string }> {
-  const task = db.prepare("SELECT id FROM tasks WHERE id = ?").get(taskId);
-  if (!task) throw new AiError(404, "task not found");
+  ensureTaskExists(taskId);
 
   if (!isConfigured()) throw new AiError(503, "ai_not_configured");
 
   const svg = await generateSanitized(taskId);
+  ensureTaskExists(taskId); // deleted mid-generation → 404, not an FK 500
 
   db.prepare(
     "INSERT INTO card_art (task_id, svg, created_at) VALUES (?, ?, ?) " +

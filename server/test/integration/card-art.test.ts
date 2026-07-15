@@ -246,4 +246,65 @@ describe("regenerate (#113)", () => {
     expect(mocks.generateCardArt).toHaveBeenCalledTimes(1);
     expect(await storedSvg(artTaskId)).toBe(r1.body.svg);
   });
+
+  it("coalesces a cache-miss GET racing a regenerate onto that same single generation", async () => {
+    // The cross-endpoint half of the in-flight contract: GET and POST are the
+    // one racing pair whose writers use DIFFERENT SQL (DO NOTHING vs
+    // DO UPDATE) — benign only while both ride one generation and therefore
+    // write identical bytes. A refactor that splits the coalescing per
+    // endpoint must fail here.
+    const db = await testDb();
+    db.prepare("DELETE FROM card_art WHERE task_id = ?").run(artTaskId); // force the GET miss
+
+    mocks.generateCardArt.mockClear();
+    let release!: (svg: string) => void;
+    mocks.generateCardArt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => (release = resolve)),
+    );
+
+    const both = Promise.all([
+      request(app).get(`/api/tasks/${artTaskId}/card-art`),
+      request(app).post(`/api/tasks/${artTaskId}/card-art/regenerate`),
+    ]);
+    await vi.waitFor(() => expect(mocks.generateCardArt).toHaveBeenCalledTimes(1));
+    release(ART_A);
+
+    const [got, regen] = await both;
+    expect(got.status).toBe(200);
+    expect(regen.status).toBe(200);
+    expect(got.body.svg).toBe(regen.body.svg);
+    expect(got.body.svg).toContain('cx="150"');
+    expect(mocks.generateCardArt).toHaveBeenCalledTimes(1);
+    expect(await storedSvg(artTaskId)).toBe(regen.body.svg);
+  });
+
+  it("404s — not an FK-violation 500 — when the task is deleted mid-generation", async () => {
+    // Delete the drawn card in a second tab while ↻ paints: the post-await
+    // existence re-check must turn the doomed write into the same 404 the
+    // up-front check gives, and no orphaned row may appear.
+    const doomed = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Deleted mid-paint", categoryId: 1, effortMinutes: 5 })
+        .expect(201)
+    ).body;
+
+    mocks.generateCardArt.mockClear();
+    let release!: (svg: string) => void;
+    mocks.generateCardArt.mockImplementationOnce(
+      () => new Promise<string>((resolve) => (release = resolve)),
+    );
+
+    const pending = request(app)
+      .post(`/api/tasks/${doomed.id}/card-art/regenerate`)
+      .then((r) => r); // .then() actually dispatches the supertest request
+    await vi.waitFor(() => expect(mocks.generateCardArt).toHaveBeenCalledTimes(1));
+    await request(app).delete(`/api/tasks/${doomed.id}`).expect(200);
+    release(ART_A);
+
+    const res = await pending;
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/task not found/);
+    expect(await storedSvg(doomed.id)).toBeNull();
+  });
 });

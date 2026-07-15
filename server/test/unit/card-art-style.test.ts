@@ -95,6 +95,24 @@ describe("deterministic selection", () => {
     expect(seen.focals.size).toBe(FOCALS.length);
   });
 
+  it("spreads archetypes roughly uniformly over 700 ids (~1/7 each)", () => {
+    // Coverage alone (test above) would still pass if a salt change or a
+    // biased reduction skewed the spread; a deck where most cards share one
+    // look defeats the whole point of #113. Loose ±40% bounds: real drift
+    // fails, hash jitter does not (measured today: 92–112 per archetype).
+    const counts = new Map<string, number>();
+    for (let id = 1; id <= 700; id++) {
+      const name = selectCardArtStyle(id).archetype.name;
+      counts.set(name, (counts.get(name) ?? 0) + 1);
+    }
+    expect(counts.size).toBe(ARCHETYPES.length);
+    const ideal = 700 / ARCHETYPES.length;
+    for (const c of counts.values()) {
+      expect(c).toBeGreaterThan(ideal * 0.6);
+      expect(c).toBeLessThan(ideal * 1.4);
+    }
+  });
+
   it("neighboring ids do not move in lockstep across the axes", () => {
     // With one shared hash all axes would flip together; salted hashes keep
     // them independent. Loose bound: among 50 consecutive ids, adjacent pairs

@@ -141,8 +141,14 @@ export function DrawPage() {
   const cardArt = useCardArt(task?.id, phase === "revealed");
   // Regenerate (#113): replaces the art server-side, keeps the old one on
   // failure — as silent as the art itself. Rendered only when art exists, so
-  // degraded mode never shows the button at all.
-  const regenArt = useRegenerateCardArt(task?.id);
+  // degraded mode never shows the button at all. The task id travels as the
+  // mutation variable (pinned at mutate() time), so a regenerate that
+  // resolves after the drawn task changed still lands in the RIGHT cache
+  // entry — and the same variable scopes the pending state to this card: a
+  // card drawn while the previous card's regenerate is still in flight gets
+  // a live ↻, not the leftover spinner of a mutation that was never its own.
+  const regenArt = useRegenerateCardArt();
+  const regenPending = regenArt.isPending && regenArt.variables === task?.id;
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
   // An edit can push the drawn card out of the deck (effort too big/cleared,
   // status no longer open) — computed client-side, mirroring drawService.
@@ -257,11 +263,11 @@ export function DrawPage() {
             there is art to replace — degraded mode never shows it. */}
         {phase === "revealed" && task && cardArt.data?.svg && (
           <button
-            className={`draw-art-regen ${regenArt.isPending ? "pending" : ""}`}
+            className={`draw-art-regen ${regenPending ? "pending" : ""}`}
             title="Regenerate artwork"
             aria-label="Regenerate artwork"
-            disabled={regenArt.isPending}
-            onClick={() => regenArt.mutate()}
+            disabled={regenPending}
+            onClick={() => regenArt.mutate(task.id)}
           >
             ↻
           </button>
