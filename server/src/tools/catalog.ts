@@ -86,7 +86,9 @@ function defineTool<Shape extends z.ZodRawShape>(def: {
 /** Impact is a literal 1–5 rating, not any number (ADR-4). */
 const impactSchema = z
   .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5)])
-  .describe("Leverage toward the linked goal, 1 (low) to 5 (high). Only valid with goalId.");
+  .describe(
+    "Leverage toward the linked goal, 1 (low) to 5 (high). Non-neutral values (≠3) require a goalId.",
+  );
 
 const dateSchema = z
   .string()
@@ -206,8 +208,9 @@ const createTask = defineTool({
     "Create a task. categoryId is required (see list_categories). A task only enters the " +
     "drawable deck once effortMinutes is set and is at most max_draw_effort (see get_settings) — " +
     "bigger work should be created as a parent and broken down with create_subtasks. " +
-    "impact (1–5) is only accepted together with goalId: it rates leverage toward that goal " +
-    "(ADR-4). recurEveryDays makes it a recurring chore whose due date advances on completion. " +
+    "Non-neutral impact (≠3) requires a goalId: impact rates leverage toward that goal " +
+    "(ADR-4); goal-less tasks keep the neutral default 3. " +
+    "recurEveryDays makes it a recurring chore whose due date advances on completion. " +
     "windowDays + windowStart + windowEnd (all three together) give the task an availability " +
     "window: outside it the card is excluded from the draw and shows as scheduled.",
   inputSchema: {
@@ -259,9 +262,10 @@ const updateTask = defineTool({
     "Update fields of a task. Idempotent. status may be set to 'archived' (soft archive — the " +
     "task leaves every list but is not deleted) or back to 'open' (reopening a done task undoes " +
     "its latest completion so XP stays honest). To mark a task done, use complete_task instead — " +
-    "it runs the XP/achievements/recurrence path. impact follows ADR-4: it is only accepted on " +
-    "a task that has (or receives) a goalId, and unlinking the goal (goalId: null) resets impact " +
-    "to the neutral default 3.",
+    "it runs the XP/achievements/recurrence path. impact follows ADR-4: non-neutral impact (≠3) " +
+    "requires a task that has (or receives) a goalId — the neutral 3 and a no-op resend of the " +
+    "stored value are always accepted — and unlinking the goal (goalId: null) resets impact to " +
+    "the neutral default 3 on the task and its open subtasks; omit impact when unlinking.",
   inputSchema: {
     id: idSchema,
     title: z.string().min(1).optional(),
@@ -350,7 +354,13 @@ const createSubtasks = defineTool({
           title: z.string().min(1),
           description: z.string().optional(),
           effortMinutes: z.number().int().positive().optional(),
-          impact: impactSchema.optional(),
+          impact: impactSchema
+            .optional()
+            .describe(
+              "Rating 1–5; defaults to the parent's impact. Subtasks inherit the parent's " +
+                "goal; under a goal-less parent this ranks the siblings relative to each " +
+                "other (documented ADR-4 exception)",
+            ),
         }),
       )
       .min(1),

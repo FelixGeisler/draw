@@ -83,6 +83,25 @@ describe("task CRUD and breakdown rule", () => {
     ]);
   });
 
+  it("rejects an out-of-range subtask impact with a clean 400, creating nothing (issue #76)", async () => {
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Range parent", categoryId: 1 })
+    ).body;
+
+    // Used to hit the raw CHECK constraint as a 500 — now validated up front.
+    const res = await request(app)
+      .post(`/api/tasks/${parent.id}/subtasks`)
+      .send({ subtasks: [{ title: "would be created" }, { title: "range breaker", impact: 99 }] })
+      .expect(400);
+    expect(res.body.error).toContain("between 1 and 5");
+
+    const list = await request(app).get("/api/tasks").expect(200);
+    const listed = list.body.find((t: { id: number }) => t.id === parent.id);
+    expect(listed.subtasks).toEqual([]);
+  });
+
   it("keeps subtask creation transactional: one bad row rolls back the whole batch", async () => {
     const parent = (
       await request(app)
@@ -90,15 +109,25 @@ describe("task CRUD and breakdown rule", () => {
         .send({ title: "Atomic parent", categoryId: 1 })
     ).body;
 
-    // Second row violates the impact CHECK constraint mid-transaction.
+    // A value the driver cannot bind blows up the second INSERT
+    // mid-transaction, after validation passed and the orderMode write
+    // inside the same transaction already ran.
     await request(app)
       .post(`/api/tasks/${parent.id}/subtasks`)
-      .send({ subtasks: [{ title: "would be created" }, { title: "constraint breaker", impact: 99 }] })
+      .send({
+        orderMode: "sequential",
+        subtasks: [
+          { title: "would be created" },
+          { title: "binding breaker", description: { nested: true } },
+        ],
+      })
       .expect(500);
 
     const list = await request(app).get("/api/tasks").expect(200);
     const listed = list.body.find((t: { id: number }) => t.id === parent.id);
     expect(listed.subtasks).toEqual([]);
+    // The orderMode write participates in the rollback too.
+    expect(listed.subtaskOrderMode).toBe("parallel");
   });
 
   it("rejects breaking down a task that is itself a subtask (one level deep, ADR-16)", async () => {
@@ -575,6 +604,104 @@ describe("task CRUD and breakdown rule", () => {
     );
     expect(listed.impact).toBe(5);
     expect(listed.goalId).toBe(goal.id);
+  });
+
+  it("accepts per-subtask impact under a goal-less parent — documented ADR-4 exception (issue #76)", async () => {
+    // The AI breakdown of a goal-less parent rates siblings relative to each
+    // other and the review panel sends those ratings verbatim; the batch
+    // endpoint deliberately skips the impact-requires-goal gate.
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Goal-less breakdown", categoryId: 1, effortMinutes: 60 })
+    ).body;
+
+    const subs = (
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({
+          subtasks: [
+            { title: "Key exercise", effortMinutes: 20, impact: 5 },
+            { title: "Warm-up", effortMinutes: 10, impact: 1 },
+            { title: "Unrated step", effortMinutes: 10 },
+          ],
+        })
+        .expect(201)
+    ).body;
+
+    expect(subs.map((s: { impact: number }) => s.impact)).toEqual([5, 1, 3]); // 3 = parent's
+    expect(subs.every((s: { goalId: number | null }) => s.goalId === null)).toBe(true);
+  });
+
+  it("cascades the unlink impact reset to open subtasks, keeping done ones (issue #76)", async () => {
+    const goal = (await request(app).post("/api/goals").send({ title: "Cascade goal" })).body;
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Cascade parent", categoryId: 1, goalId: goal.id, impact: 4 })
+    ).body;
+    const subs = (
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({
+          subtasks: [
+            { title: "Open step", effortMinutes: 10, impact: 5 },
+            { title: "Finished step", effortMinutes: 10, impact: 4 },
+          ],
+        })
+        .expect(201)
+    ).body;
+    await request(app).patch(`/api/tasks/${subs[1].id}`).send({ status: "done" }).expect(200);
+
+    // Bare unlink on the parent: the server-owned reset reaches the parent
+    // AND its open subtasks — their ratings pointed at the removed goal.
+    const res = await request(app)
+      .patch(`/api/tasks/${parent.id}`)
+      .send({ goalId: null })
+      .expect(200);
+    expect(res.body.task.impact).toBe(3);
+
+    const listed = (await request(app).get("/api/tasks")).body.find(
+      (t: { id: number }) => t.id === parent.id,
+    );
+    const open = listed.subtasks.find((s: { id: number }) => s.id === subs[0].id);
+    const done = listed.subtasks.find((s: { id: number }) => s.id === subs[1].id);
+    expect(open.goalId).toBeNull();
+    expect(open.impact).toBe(3); // deck weight (impact²/effort) stays honest
+    expect(done.goalId).toBeNull();
+    expect(done.impact).toBe(4); // historical stats record keeps its rating
+  });
+
+  it("keeps grandfathered subtask ratings on a no-op goalId resend (issue #76)", async () => {
+    // Goal DELETION grandfathers ratings on the parent and its subtasks; the
+    // edit form then emits goalId: null plus the stored impact on every later
+    // edit — that resend must not wipe the children's ratings.
+    const goal = (await request(app).post("/api/goals").send({ title: "Deleted goal" })).body;
+    const parent = (
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: "Grandfather parent", categoryId: 1, goalId: goal.id, impact: 4 })
+    ).body;
+    const subs = (
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({ subtasks: [{ title: "Grandfathered step", effortMinutes: 10, impact: 5 }] })
+        .expect(201)
+    ).body;
+    await request(app).delete(`/api/goals/${goal.id}`).expect(200);
+
+    // The edit form's payload for a rename of the now goal-less parent.
+    await request(app)
+      .patch(`/api/tasks/${parent.id}`)
+      .send({ title: "Grandfather parent (renamed)", goalId: null, impact: 4 })
+      .expect(200);
+
+    const listed = (await request(app).get("/api/tasks")).body.find(
+      (t: { id: number }) => t.id === parent.id,
+    );
+    expect(listed.impact).toBe(4);
+    expect(listed.subtasks[0].id).toBe(subs[0].id);
+    expect(listed.subtasks[0].impact).toBe(5); // no deliberate unlink happened
   });
 
   it("deletes a task with cascade to subtasks", async () => {
