@@ -117,6 +117,35 @@ describe("update_task input schema", () => {
   });
 });
 
+describe("create_subtasks input schema", () => {
+  const schema = z.object(tool("create_subtasks").inputSchema);
+
+  it("accepts per-subtask impact only as a literal 1–5", () => {
+    for (const impact of [1, 3, 5]) {
+      expect(
+        schema.safeParse({ parentId: 1, subtasks: [{ title: "s", impact }] }).success,
+      ).toBe(true);
+    }
+    for (const impact of [0, 6, 99, 2.5, "3"]) {
+      expect(
+        schema.safeParse({ parentId: 1, subtasks: [{ title: "s", impact }] }).success,
+      ).toBe(false);
+    }
+  });
+});
+
+describe("ADR-4 wording in tool descriptions (issue #76)", () => {
+  // The enforced rule has exceptions (neutral 3, no-op resends of a stored
+  // value, subtask batches) — the descriptions must not overstate it, or a
+  // schema-guided read-modify-write client would wrongly conclude that
+  // resending a grandfathered impact fails.
+  it("states the non-neutral (≠3) form of the rule, with the unlink remedy", () => {
+    expect(tool("create_task").description).toContain("Non-neutral impact (≠3)");
+    expect(tool("update_task").description).toContain("non-neutral impact (≠3)");
+    expect(tool("update_task").description).toContain("omit impact when unlinking");
+  });
+});
+
 describe("goal-less impact rejection (ADR-4)", () => {
   // Since issue #65 the API enforces the gate on POST and PATCH alike, so the
   // catalog no longer duplicates the check — it must surface the API's 400

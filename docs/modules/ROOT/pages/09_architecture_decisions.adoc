@@ -32,6 +32,21 @@ predicate is one WHERE clause and cannot drift.
 tasks keep a neutral default of 3. Chores compete via urgency and staleness instead.
 *Rationale:* Impact is defined as _leverage toward a goal's measured outcome_;
 forcing users to rate chores would produce noise and erode the metric.
+*Enforcement boundary (#65, #76):* The API is the single enforcement point.
+Non-neutral impact (≠3) without a goal is rejected on `POST /api/tasks` and
+`PATCH /api/tasks/:id`; out-of-range impact is a clean 400 on every path.
+Two deliberate exceptions keep history and breakdowns honest: grandfathering —
+goal *deletion* keeps the historical rating everywhere, and the edit form's
+no-op resend of a stored value passes — and the subtask batch
+(`POST /api/tasks/:id/subtasks`, MCP `create_subtasks`), which accepts
+per-subtask impact even under a goal-less parent: subtasks inherit the
+parent's goal, and a goal-less breakdown's ratings rank the siblings relative
+to each other (the AI breakdown emits exactly those). A deliberate goal
+*unlink* is different from deletion: the server resets impact to 3 on the
+task and cascades the reset to its *open* subtasks — the ratings described
+leverage toward the goal that was just removed — while done/archived subtasks
+keep theirs as the historical stats record, mirroring the category cascade's
+open-only rule.
 
 == ADR-5: Gamification derived from the completions log
 

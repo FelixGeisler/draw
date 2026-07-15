@@ -260,6 +260,11 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
     if (!s.title || typeof s.title !== "string" || !s.title.trim()) {
       return res.status(400).json({ error: "every subtask needs a title" });
     }
+    // Range check only — a clean 400 instead of the CHECK constraint's raw
+    // 500. The ADR-4 goal gate is deliberately NOT applied here, see below.
+    if (s.impact != null && (!Number.isInteger(s.impact) || s.impact < 1 || s.impact > 5)) {
+      return res.status(400).json({ error: "impact must be an integer between 1 and 5" });
+    }
   }
   // "Do in order" travels with the breakdown itself (#23) — persisted on the
   // parent in the same transaction, so batch and mode cannot disagree.
@@ -281,6 +286,17 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
     return res.status(400).json({ error: RECURRING_SEQUENTIAL_ERROR });
   }
 
+  // ADR-4 exception, documented on purpose (#76): per-subtask impact is
+  // accepted here WITHOUT the impact-requires-goal gate POST / and PATCH
+  // enforce. Subtasks inherit the parent's goal, so under a goal-linked
+  // parent the rating is ordinary ADR-4 impact — and under a goal-less
+  // parent a breakdown's ratings rank the siblings relative to each other:
+  // the AI breakdown deliberately emits them and the review panel sends them
+  // verbatim (client/src/lib/impact.ts names goal-less breakdowns as a
+  // legitimate source of non-neutral goal-less impact). Gating here would
+  // 400 the accept step of every AI breakdown of a goal-less parent, while
+  // the `?? parent.impact` fallback below already inherits a possibly
+  // grandfathered non-neutral rating anyway. Only the 1–5 range is enforced.
   const insert = db.prepare(
     `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -410,14 +426,18 @@ tasksRouter.patch("/:id", (req, res) => {
     }
   }
   const goalAfter = "goalId" in body ? body.goalId : raw.goal_id;
+  // A DELIBERATE unlink — the stored goal is removed by this PATCH. Distinct
+  // from the edit form's no-op resend of goalId: null on an already goal-less
+  // task, which must not disturb grandfathered ratings. Also drives the
+  // subtask cascade below (#76).
+  const unlinking = "goalId" in body && body.goalId == null && raw.goal_id != null;
   if (goalAfter == null) {
-    const unlinking = "goalId" in body && raw.goal_id != null;
     if (unlinking) {
       if ("impact" in body && body.impact !== 3) {
         return res.status(400).json({
           error:
-            "unlinking the goal resets impact to the neutral default 3 (ADR-4) — to rate " +
-            "impact, set it together with a goalId",
+            "unlinking the goal resets impact to the neutral default 3 (ADR-4) — omit " +
+            "impact when unlinking, or set it together with a goalId to rate it",
         });
       }
       body.impact = 3; // the server owns the unlink reset
@@ -470,6 +490,17 @@ tasksRouter.patch("/:id", (req, res) => {
     // the children (breakdown is one level deep — only roots can be split).
     if ("goalId" in body) {
       db.prepare("UPDATE tasks SET goal_id = ? WHERE parent_id = ?").run(body.goalId ?? null, id);
+      // The server-owned unlink reset above cascades (#76): the subtasks'
+      // ratings described leverage toward the goal that was just removed,
+      // and they compete in the deck at impact²/effort like any other card.
+      // Scoped to a deliberate unlink — a no-op resend of goalId: null (the
+      // edit form emits one on every edit of a goal-less task) must not wipe
+      // grandfathered ratings (goal deletion, goal-less breakdowns). Open
+      // rows only: done/archived subtasks are historical records whose
+      // impact feeds the stats buckets, mirroring the category cascade below.
+      if (unlinking) {
+        db.prepare("UPDATE tasks SET impact = 3 WHERE parent_id = ? AND status = 'open'").run(id);
+      }
     }
     // Category cascades the same way (#44) — but only to OPEN subtasks:
     // done/archived rows are historical records, and completion stats and the

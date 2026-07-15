@@ -217,6 +217,29 @@ describe("update_task", () => {
     expect(task.goalId).toBeNull();
     expect(task.impact).toBe(3); // the rating pointed at the removed goal
   });
+
+  it("cascades the unlink impact reset to the subtasks (issue #76)", async () => {
+    const parent = (
+      await callTool("create_task", {
+        title: "Unlink cascade parent",
+        categoryId: 1,
+        goalId,
+        impact: 4,
+      })
+    ).json<TaskJson>();
+    await callTool("create_subtasks", {
+      parentId: parent.id,
+      subtasks: [{ title: "Rated step", effortMinutes: 10, impact: 5 }],
+    });
+
+    const res = await callTool("update_task", { id: parent.id, goalId: null });
+    expect(res.isError).toBe(false);
+
+    const listed = (await callTool("list_tasks")).json<TaskJson[]>().find((t) => t.id === parent.id)!;
+    expect(listed.impact).toBe(3);
+    expect(listed.subtasks![0].goalId).toBeNull();
+    expect(listed.subtasks![0].impact).toBe(3); // its rating pointed at the removed goal too
+  });
 });
 
 describe("create_subtasks and the breakdown rule", () => {
@@ -275,6 +298,33 @@ describe("create_subtasks and the breakdown rule", () => {
       .prepare("SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ?")
       .get(readCh1Id) as { n: number };
     expect(row.n).toBe(0);
+  });
+
+  it("accepts per-subtask impact under the goal-less parent — documented ADR-4 exception (#76)", async () => {
+    // The parent has no goal; a breakdown's ratings rank the siblings
+    // relative to each other, so the batch path skips the ADR-4 goal gate.
+    const res = await callTool("create_subtasks", {
+      parentId,
+      subtasks: [{ title: "Key exercise", effortMinutes: 10, impact: 5 }],
+    });
+    expect(res.isError).toBe(false);
+    const created = res.json<{ created: TaskJson[] }>().created;
+    expect(created[0].impact).toBe(5);
+    expect(created[0].goalId).toBeNull();
+  });
+
+  it("rejects an out-of-range per-subtask impact at the schema boundary", async () => {
+    const res = await callTool("create_subtasks", {
+      parentId,
+      subtasks: [{ title: "Overrated step", impact: 99 }],
+    });
+    expect(res.isError).toBe(true);
+    // The MCP SDK rejects at the schema boundary — the API is never reached.
+    expect(res.text).toMatch(/invalid/i);
+    expect(res.text).toContain("impact");
+
+    const parent = (await callTool("list_tasks")).json<TaskJson[]>().find((t) => t.id === parentId)!;
+    expect(parent.subtasks!.some((s) => s.title === "Overrated step")).toBe(false);
   });
 });
 

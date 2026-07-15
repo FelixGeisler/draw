@@ -38,8 +38,11 @@ async function seed(request: APIRequestContext) {
       data: { title: PARENT_TITLE, categoryId: categories[0].id, effortMinutes: 60 },
     })
   ).json();
+  // Rated subtask under a goal-less parent: the documented ADR-4 breakdown
+  // exception (#76) — the cascade test below watches this rating through
+  // attach, move and detach.
   await request.post(`/api/tasks/${parent.id}/subtasks`, {
-    data: { subtasks: [{ title: SUBTASK_TITLE, effortMinutes: 15 }] },
+    data: { subtasks: [{ title: SUBTASK_TITLE, effortMinutes: 15, impact: 5 }] },
   });
 }
 
@@ -150,13 +153,25 @@ test("goal link on a broken-down task cascades to its subtasks", async ({ page }
   await expect(goalCard(page).getByText("0/0 tasks")).toBeVisible();
   await expect(goalCard(page, SECOND_GOAL_TITLE).getByText("0/2 tasks")).toBeVisible();
 
+  // The subtask's seeded rating survives attach and move…
+  const readParent = async () => {
+    const tasks: {
+      title: string;
+      goalId: number | null;
+      subtasks: { goalId: number | null; impact: number }[];
+    }[] = await (await page.request.get("/api/tasks")).json();
+    return tasks.find((t) => t.title === PARENT_TITLE);
+  };
+  expect((await readParent())?.subtasks.map((s) => s.impact)).toEqual([5]);
+
   // Detach: the subtask's link is cleared too.
   await setParentGoal("no goal");
   await expect(goalCard(page, SECOND_GOAL_TITLE).getByText("0/0 tasks")).toBeVisible();
 
-  const tasks: { title: string; goalId: number | null; subtasks: { goalId: number | null }[] }[] =
-    await (await page.request.get("/api/tasks")).json();
-  const parent = tasks.find((t) => t.title === PARENT_TITLE);
+  const parent = await readParent();
   expect(parent?.goalId).toBeNull();
   expect(parent?.subtasks.map((s) => s.goalId)).toEqual([null]);
+  // …and only the deliberate unlink resets it to neutral (#76): the rating
+  // described leverage toward the goal that was just removed.
+  expect(parent?.subtasks.map((s) => s.impact)).toEqual([3]);
 });
