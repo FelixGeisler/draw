@@ -92,8 +92,8 @@ export function DrawPage() {
   }
 
   // "Not now" (issue #19): snooze or block the drawn card. The card leaves
-  // the deck server-side; the invalidated current-draw query then clears the
-  // stale persisted pointer, so a reload does not resurrect the card.
+  // the deck server-side and the PATCH handler eagerly clears the persisted
+  // current-draw pointer (ADR-17), so a reload does not resurrect the card.
   async function snoozeDrawn(patch: { deferredUntil?: string; blocked?: boolean }) {
     if (!result?.task) return;
     await updateTask.mutateAsync({ id: result.task.id, ...patch });

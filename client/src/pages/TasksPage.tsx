@@ -61,7 +61,13 @@ export function TasksPage() {
           </summary>
           <div className="panel" style={{ padding: "0 8px", marginTop: 8 }}>
             {snoozedRoots.map((t) => (
-              <TaskRow key={t.id} task={t} categories={categories.data ?? []} maxEffort={maxEffort} />
+              <TaskRow
+                key={t.id}
+                task={t}
+                categories={categories.data ?? []}
+                goals={goals.data}
+                maxEffort={maxEffort}
+              />
             ))}
           </div>
         </details>
