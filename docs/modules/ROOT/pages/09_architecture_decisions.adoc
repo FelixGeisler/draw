@@ -279,7 +279,19 @@ done/archived child is one status write away from being an open grandchild.
 Those two rules are also what keeps `parent_id` acyclic now that it is no
 longer INSERT-only (ADR-24): a childless mover can never become anyone's
 ancestor. An adopted task joins the breakdown in the universal
-(created_at, id) creation order (ADR-18).
+(created_at, id) creation order (ADR-18). Split-in-place (#108) is the
+sanctioned path for *deep* decomposition within this ban: a subtask above the
+draw limit cannot be broken down further, so `POST /api/tasks/:id/split`
+*replaces* it with two or more parts as siblings under the same parent — the
+original ends `archived` in the same transaction, never deleted (its time
+entries and completions survive; a running entry is closed at split time,
+mirroring completion, ADR-12). Part estimates deliberately carry no
+`<= max_draw_effort` cap — a part that is still too big is itself split
+again. The tree stays exactly two levels everywhere; decomposition is
+unlimited *by repetition, not by depth*. Recurring originals are rejected
+(parts are one-shot rows — no part could carry the recurrence; the repair is
+ADR-23's: drop the recurrence first), and the parts INSERT carries no
+recurrence column, so a split can never mint the ADR-23 ban either.
 
 == ADR-17: Snooze/block as retained timestamps, drawability stays derived
 
@@ -348,7 +360,23 @@ rule — a task adopted into a sequential breakdown queues by its original
 `created_at` like every other sibling, so a task older than the existing
 steps enters *ahead* of them and may jump the queue. One predicate, no
 stored positions; explicit sibling ordering remains a possible follow-up if
-queue-jumping proves wrong in practice. The "Do in order" toggle
+queue-jumping proves wrong in practice. Split-in-place (#108) leans on the
+same mechanism as a deliberate trick: the parts of a split subtask adopt the
+original's `created_at` *verbatim*, so they sort into the original's queue
+slot — splitting step 2 of 5 must not make its parts run after steps 3–5 —
+while their new, higher ids keep the parts themselves in array order via the
+id tie-break. In-slot placement is exact whenever sibling timestamps differ
+(breakdowns grown over time, and any sibling created after the original).
+*Known approximation:* batch-created siblings share one `created_at` string
+and are ordered purely by id, and there is no `(created_at, id)` value
+between `(T, id5)` and `(T, id6)` for a new row with a higher id — exact
+placement inside such a group is impossible without mutating sibling rows,
+so parts land at the *end* of the same-timestamp group, still ahead of every
+later-timestamp sibling. Accepted and documented; if it bites in practice,
+the explicit `position` column above is the named escalation. Adopting
+`created_at` also inherits the original's staleness base (up to ×2) —
+deliberate, consistent with ADR-17's wake semantics: the work has genuinely
+been lying around since then. The "Do in order" toggle
 travels with the breakdown batch (`orderMode` on `POST /:id/subtasks`,
 persisted on the parent in the same transaction) and as a plain
 `subtaskOrderMode` PATCH; the AI breakdown returns an `orderMatters` boolean

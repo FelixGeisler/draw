@@ -133,6 +133,36 @@ function fieldShapeError(body: Record<string, unknown>): string | null {
 }
 
 /**
+ * Split-in-place part validation (#108) — pure, exported for unit tests.
+ * Whole-body: any invalid part fails the entire request before a single row
+ * is written. Length >= 2 because one part is a rename (use edit). Each part
+ * needs a non-empty title and a positive-integer effortMinutes — required,
+ * unlike the batch endpoint's optional estimate: the split exists to divide
+ * a known-oversized estimate, so unestimated parts would defeat it. There is
+ * deliberately NO effortMinutes <= max_draw_effort cap: a part may still be
+ * too big — it can itself be split again (decomposition is unlimited by
+ * repetition, not by depth). Shape checks ride on fieldShapeError.
+ */
+export function splitPartsError(parts: unknown): string | null {
+  if (!Array.isArray(parts) || parts.length < 2) {
+    return "parts must be an array of at least 2 parts — splitting into one part is a rename, use edit instead";
+  }
+  for (const p of parts) {
+    if (p == null || typeof p !== "object" || Array.isArray(p)) {
+      return "every part must be an object with title and effortMinutes";
+    }
+    const part = p as Record<string, unknown>;
+    if (!("title" in part)) return "every part needs a title";
+    if (part.effortMinutes == null) {
+      return "every part needs effortMinutes (a positive integer)";
+    }
+    const shape = fieldShapeError(part);
+    if (shape) return shape;
+  }
+  return null;
+}
+
+/**
  * recurEveryDays type normalization (#84, PR #81): the web form and MCP send
  * numbers, but a raw-HTTP resend of a stored value as a string ("2" for 2)
  * must keep reading as the no-op the ADR-23 legacy tolerance detects with a
@@ -480,6 +510,135 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
       ids.push(Number(r.lastInsertRowid));
     }
     return ids.map((id) => getTask(id));
+  })();
+
+  res.status(201).json(created);
+});
+
+// Split-in-place (#108): a too-big SUBTASK dead-ends — ADR-16 keeps the tree
+// two levels, so it cannot be broken down further. Instead it is REPLACED by
+// its parts as siblings at the same level; decomposition becomes unlimited by
+// repetition, not by depth. The original is kept as ARCHIVED, never deleted:
+// delete would cascade its time_entries and completions away (the ADR-21
+// accepted limitation, which a routine planning action must not trigger),
+// while an archived subtask falls out of every derived surface with NO write
+// (the ADR-2/8.1 property) — the pool (status = 'open'), the Tasks page child
+// list (status != 'archived'), the remainingEffortMinutes rollup (open
+// children only), the sequential hold-back (open siblings only) and the
+// parent-completion 409 gate (open-children count). There is deliberately no
+// too-big gate on the original: the UI scopes the affordance to too-big rows,
+// but coupling the endpoint to a settings value buys nothing.
+tasksRouter.post("/:id/split", (req, res) => {
+  const id = Number(req.params.id);
+  const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+    | {
+        id: number;
+        parent_id: number | null;
+        status: string;
+        recur_every_days: number | null;
+        impact: number;
+        due_date: string | null;
+        window_days: string | null;
+        window_start: string | null;
+        window_end: string | null;
+        created_at: string;
+      }
+    | undefined;
+  if (!raw) return res.status(404).json({ error: "task not found" });
+  if (raw.parent_id == null) {
+    return res.status(400).json({
+      error:
+        "splitting in place is for subtasks — break a too-big root task down into subtasks instead",
+    });
+  }
+  if (raw.status !== "open") {
+    return res
+      .status(400)
+      .json({ error: "only an open subtask can be split — a done or archived row has nothing to split" });
+  }
+  // Recurring × split is incoherent: parts are one-shot rows, and "which part
+  // recurs?" has no answer. Same repair as ADR-23's: drop the recurrence
+  // first, then split. (No drop-recurrence-with-flag convenience — the
+  // surface stays small.)
+  if (raw.recur_every_days != null) {
+    return res.status(400).json({
+      error:
+        "a recurring subtask cannot be split — parts are one-shot rows, so no part could carry " +
+        "the recurrence; drop the recurrence first, then split",
+    });
+  }
+  // Whole-body validation BEFORE the transaction: any invalid part means
+  // nothing is written.
+  const partsError = splitPartsError(req.body?.parts);
+  if (partsError) return res.status(400).json({ error: partsError });
+  const parts = req.body.parts as { title: string; effortMinutes: number; description?: string }[];
+
+  const parent = db
+    .prepare("SELECT category_id AS categoryId, goal_id AS goalId FROM tasks WHERE id = ?")
+    .get(raw.parent_id) as { categoryId: number; goalId: number | null };
+
+  // Parts inherit exactly like the batch endpoint does by construction:
+  // category_id/goal_id from the PARENT (a subtask's category stays editable
+  // afterwards, but new rows of the breakdown start from the parent, like the
+  // batch), impact from the ORIGINAL — the parts continue the same work — and
+  // the original's due_date and availability window: deadline and doability
+  // constraints describe the work, not the row. NOT inherited: snooze/block
+  // (deferred_until NULL, blocked 0 — parts start fresh, even when the
+  // original was snoozed/blocked), last_drawn_at, and recurrence — this
+  // INSERT carries no recurrence column (like the batch), so parts under a
+  // sequential parent can never mint the ADR-23 ban.
+  //
+  // created_at is adopted VERBATIM from the original (ADR-18 amendment): the
+  // queue and the child list order by (created_at, id), so the parts sort
+  // into the original's slot — ahead of every later-timestamp sibling, and
+  // in array order among themselves via the new, higher ids. For siblings
+  // sharing the original's exact timestamp (batch groups) exact in-slot
+  // placement is impossible without mutating sibling rows — there is no
+  // (created_at, id) between (T, id5) and (T, id6) for a new higher id — so
+  // parts land at the end of that same-timestamp group (still ahead of
+  // later-timestamp siblings); the explicit position column stays the named
+  // escalation. Adopting created_at also inherits the original's staleness
+  // base (ADR-17) — deliberate: the work has genuinely been lying around
+  // since then.
+  const insert = db.prepare(
+    `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, due_date, window_days, window_start, window_end, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const created = db.transaction(() => {
+    const ids: number[] = [];
+    for (const p of parts) {
+      const r = insert.run(
+        p.title.trim(),
+        p.description ?? null,
+        parent.categoryId,
+        parent.goalId,
+        raw.parent_id,
+        raw.impact,
+        p.effortMinutes,
+        raw.due_date,
+        raw.window_days,
+        raw.window_start,
+        raw.window_end,
+        raw.created_at,
+      );
+      ids.push(Number(r.lastInsertRowid));
+    }
+    db.prepare("UPDATE tasks SET status = 'archived' WHERE id = ?").run(id);
+    // The work session on the original is over — close its running time entry
+    // at split time, mirroring what completion does (ADR-12). Its minutes
+    // stay attributed to the original, whose stats survive archiving.
+    db.prepare("UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL").run(
+      new Date().toISOString(),
+      id,
+    );
+    // The original can normally never BE the current draw (too big = not
+    // drawable), but the endpoint has no size gate, so an API/MCP caller can
+    // split the drawable-sized persisted draw. Archiving fails isRestorable
+    // with no path back short of an explicit reopen, so ADR-13's lazy clear
+    // would suffice — the eager clear is one line and keeps symmetry with
+    // complete/delete.
+    clearCurrentDraw(id);
+    return ids.map((partId) => getTask(partId));
   })();
 
   res.status(201).json(created);

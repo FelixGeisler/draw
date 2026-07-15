@@ -83,6 +83,32 @@ export function useDeleteTask() {
   });
 }
 
+export function useSplitTask() {
+  const invalidate = useInvalidateTasks();
+  const qc = useQueryClient();
+  return useMutation({
+    // Split-in-place (#108): replaces a too-big subtask with >= 2 parts as
+    // siblings; the original ends archived, so the row disappears from the
+    // child list. The parts adopt its created_at: among timestamp-distinct
+    // siblings they render in its slot, within a same-timestamp batch group
+    // at the group's end (ADR-18).
+    mutationFn: ({
+      id,
+      parts,
+    }: {
+      id: number;
+      parts: { title: string; effortMinutes: number; description?: string }[];
+    }) => api.post<Task[]>(`/api/tasks/${id}/split`, { parts }),
+    onSuccess: () => {
+      invalidate();
+      // The split closes a running time entry on the original server-side
+      // (ADR-12 mirror) — refresh the TimerBar now instead of letting it
+      // show a dead timer until the next 60 s poll.
+      qc.invalidateQueries({ queryKey: ["timer"] });
+    },
+  });
+}
+
 export function useCreateSubtasks() {
   const invalidate = useInvalidateTasks();
   return useMutation({
