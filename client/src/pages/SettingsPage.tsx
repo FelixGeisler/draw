@@ -443,6 +443,12 @@ export function SettingsPage() {
               value={settings.data.daily_goal_completions}
               hint="keeps the streak flame lit"
             />
+            <SettingInput
+              label="Hours between warm-up draws"
+              settingKey="warmup_every_hours"
+              value={settings.data.warmup_every_hours}
+              hint="the 🔰 warm-up deals your smallest card, once per window"
+            />
           </>
         )}
       </section>

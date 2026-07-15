@@ -5,6 +5,8 @@ import {
   getSetting,
   getSettingString,
   setSetting,
+  WARMUP_DRAW_SETTING,
+  WARMUP_LAST_DEALT_SETTING,
 } from "../db.js";
 
 export interface Candidate {
@@ -37,9 +39,18 @@ export interface DrawFilters {
 
 export interface DrawResult {
   task: Record<string, unknown> | null;
-  reason?: "no_ready_tasks" | "all_too_big" | "all_outside_window";
+  reason?:
+    | "no_ready_tasks"
+    | "all_too_big"
+    | "all_outside_window"
+    | "cooling_down"
+    | "warmup_unavailable";
   poolSize?: number;
   probability?: number;
+  /** Present when the deal was a warm-up (#57, ADR-30). */
+  warmup?: WarmupMarker;
+  /** Present with reason "warmup_unavailable": when the next deal opens. */
+  nextWarmupAt?: string;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -54,16 +65,24 @@ export function urgencyFactor(dueDate: string | null, now: Date): number {
   return 1 + (3 * (7 - daysLeft)) / 7;
 }
 
-export function stalenessFactor(candidate: Candidate, now: Date): number {
+/**
+ * The date staleness counts from: creation, or the last completion for
+ * recurring tasks, bumped forward by a later snooze wake — snooze time is not
+ * "lying around": deferred_until is retained after expiry (ADR-17), so a
+ * woken card's staleness counts from its wake time. Shared by stalenessFactor
+ * and the warm-up tie-break (#57) so "most stale" can never mean two things.
+ */
+export function stalenessAnchor(candidate: Candidate): Date {
   const base =
     candidate.recurEveryDays != null && candidate.lastCompletedAt
       ? new Date(candidate.lastCompletedAt)
       : new Date(candidate.createdAt);
-  // Snooze time is not "lying around": deferred_until is retained after expiry
-  // (ADR-17), so a woken card's staleness counts from its wake time.
   const wake = candidate.deferredUntil ? new Date(candidate.deferredUntil) : null;
-  const since = wake && wake > base ? wake : base;
-  const days = Math.max(0, (now.getTime() - since.getTime()) / DAY_MS);
+  return wake && wake > base ? wake : base;
+}
+
+export function stalenessFactor(candidate: Candidate, now: Date): number {
+  const days = Math.max(0, (now.getTime() - stalenessAnchor(candidate).getTime()) / DAY_MS);
   return 1 + Math.min(days, 30) / 30; // up to x2
 }
 
@@ -265,6 +284,60 @@ export function drawPool(filters: DrawFilters): {
   };
 }
 
+/**
+ * Why an otherwise-eligible pool came up empty — shared by drawTask and
+ * warmupDraw so an empty warm-up reports the same honest reasons. Out-of-
+ * window candidates take precedence over the anyOpen dispatch (#33): if the
+ * SQL query produced candidates and only the window filter emptied the pool,
+ * the honest answer is "scheduled for later" — these cards return on their
+ * own, so the break-something-down hint would mislead. A task that is
+ * oversized AND out-of-window never reaches the window filter (SQL already
+ * dropped it) and still counts toward all_too_big: it will not become
+ * drawable by waiting. Beyond that, "nothing at all" is distinguished from
+ * "only oversized/unestimated tasks": snoozed/blocked cards are not "too
+ * big" — they come back on their own (or on wake) — and held-back sequential
+ * siblings surface by completing the step in front, never by being broken
+ * down (#23), so neither triggers the break-something-down hint.
+ */
+function emptyPoolReason(
+  filters: DrawFilters,
+  windowExcluded: number,
+  now: Date,
+): "no_ready_tasks" | "all_too_big" | "all_outside_window" {
+  if (windowExcluded > 0) return "all_outside_window";
+  const filter = filterConditions(filters);
+  const anyOpen = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM tasks t
+       WHERE t.status = 'open'
+         AND ${SNOOZE_CONDITION}
+         AND NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')
+         AND NOT ${heldBackSql("t")}
+         ${filter.conditions.map((c) => `AND ${c}`).join(" ")}`,
+    )
+    .get(now.toISOString(), ...filter.params) as { n: number };
+  return anyOpen.n > 0 ? "all_too_big" : "no_ready_tasks";
+}
+
+/** Full payload row for a freshly dealt card — a pool candidate is an open
+ *  leaf by construction, so hasOpenChildren/heldBack are constant 0. */
+function dealtTaskRow(id: number): Record<string, unknown> {
+  return db
+    .prepare(
+      `SELECT t.id, t.title, t.description,
+              t.category_id AS categoryId, t.goal_id AS goalId, t.parent_id AS parentId,
+              t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
+              t.recur_every_days AS recurEveryDays, t.status,
+              t.created_at AS createdAt, t.completed_at AS completedAt,
+              t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
+              t.subtask_order_mode AS subtaskOrderMode,
+              t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
+              0 AS hasOpenChildren, 0 AS heldBack
+       FROM tasks t WHERE t.id = ?`,
+    )
+    .get(id) as Record<string, unknown>;
+}
+
 export function drawTask(filters: DrawFilters): DrawResult {
   const maxEffort = getSetting("max_draw_effort", 30);
   const cooldown = getSetting("draw_cooldown_minutes", 60);
@@ -276,33 +349,7 @@ export function drawTask(filters: DrawFilters): DrawResult {
     // The draw replaced whatever card was showing — even an empty draw, so a
     // reload doesn't resurrect a card the user already saw disappear.
     clearCurrentDraw();
-    // Out-of-window candidates take precedence over the anyOpen dispatch
-    // below (#33): if the SQL query produced candidates and only the window
-    // filter emptied the pool, the honest answer is "scheduled for later" —
-    // these cards return on their own, so the break-something-down hint
-    // would mislead. A task that is oversized AND out-of-window never
-    // reaches the window filter (SQL already dropped it) and still counts
-    // toward all_too_big: it will not become drawable by waiting.
-    if (windowExcluded > 0) {
-      return { task: null, reason: "all_outside_window" };
-    }
-    // Distinguish "nothing at all" from "only oversized/unestimated tasks".
-    // Snoozed/blocked cards are not "too big" — they come back on their own
-    // (or on wake), so they must not trigger the break-something-down hint.
-    // Held-back sequential siblings are excluded the same way: they surface
-    // by completing the step in front, never by being broken down (#23).
-    const filter = filterConditions(filters);
-    const anyOpen = db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM tasks t
-         WHERE t.status = 'open'
-           AND ${SNOOZE_CONDITION}
-           AND NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open')
-           AND NOT ${heldBackSql("t")}
-           ${filter.conditions.map((c) => `AND ${c}`).join(" ")}`,
-      )
-      .get(now.toISOString(), ...filter.params) as { n: number };
-    return { task: null, reason: anyOpen.n > 0 ? "all_too_big" : "no_ready_tasks" };
+    return { task: null, reason: emptyPoolReason(filters, windowExcluded, now) };
   }
 
   const weights = poolWeights(candidates, now, cooldown);
@@ -320,26 +367,13 @@ export function drawTask(filters: DrawFilters): DrawResult {
   const chosen = candidates[picked];
   db.prepare("UPDATE tasks SET last_drawn_at = ? WHERE id = ?").run(now.toISOString(), chosen.id);
   // Persist the draw so a page reload restores the card (ADR-13) — a new
-  // draw simply overwrites the previous one.
+  // draw simply overwrites the previous one. A regular draw is never a
+  // warm-up, so a leftover marker is dropped with the pointer it described.
   setSetting(CURRENT_DRAW_SETTING, String(chosen.id));
-
-  const task = db
-    .prepare(
-      `SELECT t.id, t.title, t.description,
-              t.category_id AS categoryId, t.goal_id AS goalId, t.parent_id AS parentId,
-              t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
-              t.recur_every_days AS recurEveryDays, t.status,
-              t.created_at AS createdAt, t.completed_at AS completedAt,
-              t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
-              t.subtask_order_mode AS subtaskOrderMode,
-              t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
-              0 AS hasOpenChildren, 0 AS heldBack
-       FROM tasks t WHERE t.id = ?`,
-    )
-    .get(chosen.id) as Record<string, unknown>;
+  deleteSetting(WARMUP_DRAW_SETTING);
 
   return {
-    task: toTaskPayload(task),
+    task: toTaskPayload(dealtTaskRow(chosen.id)),
     poolSize: candidates.length,
     probability: weights[picked] / total,
   };
@@ -402,10 +436,17 @@ export function getCurrentDrawTaskId(): number | null {
   return raw == null ? null : Number(raw);
 }
 
-/** Clear the persisted draw — unconditionally, or only if it matches taskId. */
+/**
+ * Clear the persisted draw — unconditionally, or only if it matches taskId.
+ * The warm-up marker (#57) describes the current draw and nothing else, so it
+ * dies with the pointer on every path — complete, snooze/block, delete,
+ * redraw, lazy restore invalidation — and can never point at a card that is
+ * no longer the current draw.
+ */
 export function clearCurrentDraw(taskId?: number) {
   if (taskId === undefined || getCurrentDrawTaskId() === taskId) {
     deleteSetting(CURRENT_DRAW_SETTING);
+    deleteSetting(WARMUP_DRAW_SETTING);
   }
 }
 
@@ -421,15 +462,18 @@ export function clearDanglingDraw() {
   const id = getCurrentDrawTaskId();
   if (id != null && !db.prepare("SELECT 1 FROM tasks WHERE id = ?").get(id)) {
     deleteSetting(CURRENT_DRAW_SETTING);
+    deleteSetting(WARMUP_DRAW_SETTING);
   }
 }
 
 /**
  * The persisted current draw, for restore after a reload. A pointer that went
  * stale sideways (task completed elsewhere, edited out of the deck, turned
- * into a container) is cleared lazily here and null is returned.
+ * into a container) is cleared lazily here and null is returned. When the
+ * restored card was warm-up dealt (#57) the marker rides along, so the badge
+ * and bonus-window hint survive a reload exactly like the card (ADR-13).
  */
-export function currentDraw(): { task: Record<string, unknown> } | null {
+export function currentDraw(): { task: Record<string, unknown>; warmup?: WarmupMarker } | null {
   const id = getCurrentDrawTaskId();
   if (id == null) return null;
 
@@ -455,5 +499,143 @@ export function currentDraw(): { task: Record<string, unknown> } | null {
     clearCurrentDraw();
     return null;
   }
-  return { task: payload };
+  const marker = getWarmupMarker();
+  return marker && marker.taskId === id ? { task: payload, warmup: marker } : { task: payload };
+}
+
+// ---------------------------------------------------------------------------
+// Warm-up draw (#57, ADR-30) — the "I can't start" escape hatch: one
+// deterministic deal of the objectively smallest eligible card, offered on
+// the IDLE deck only. NOT a re-roll (#88): the route rejects a deal while a
+// valid current draw exists, and the dealt card is the same commitment as a
+// drawn one — persisted as the current draw, resolvable only by complete,
+// snooze/block, or delete.
+
+export interface WarmupMarker {
+  taskId: number;
+  dealtAt: string;
+  /** Bonus window in minutes from dealtAt: max(effort at deal time, 15). */
+  windowMinutes: number;
+}
+
+function readJsonSetting<T>(key: string): T | null {
+  const raw = getSettingString(key);
+  if (raw == null) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    // hand-edited DB — treat as absent rather than breaking every draw read
+    return null;
+  }
+}
+
+/** The warm-up marker on the CURRENT draw, or null. */
+export function getWarmupMarker(): WarmupMarker | null {
+  return readJsonSetting<WarmupMarker>(WARMUP_DRAW_SETTING);
+}
+
+/** The last warm-up deal ever — rate-limit state, never cleared. */
+export function getLastWarmupDeal(): { taskId: number; dealtAt: string } | null {
+  return readJsonSetting<{ taskId: number; dealtAt: string }>(WARMUP_LAST_DEALT_SETTING);
+}
+
+/** One warm-up per `warmup_every_hours` (public setting, default 8). */
+export function warmupAvailability(now: Date): { available: boolean; nextWarmupAt: string | null } {
+  const everyHours = getSetting("warmup_every_hours", 8);
+  const last = getLastWarmupDeal();
+  if (!last) return { available: true, nextWarmupAt: null };
+  const nextAt = new Date(new Date(last.dealtAt).getTime() + everyHours * 3_600_000);
+  return nextAt <= now
+    ? { available: true, nextWarmupAt: null }
+    : { available: false, nextWarmupAt: nextAt.toISOString() };
+}
+
+/**
+ * The deterministic warm-up pick: minimum effort_minutes, tie-broken by most
+ * stale (the stalenessAnchor shared with the weight formula — including the
+ * recurring last-completion base and the snooze-wake bump), final tie-break
+ * lowest id. Impact, urgency, and the staleness WEIGHT are deliberately
+ * bypassed — the whole point is the objectively smallest card, not a clever
+ * one. The cooldown applies as EXCLUSION, not the regular draw's ×0.15
+ * dampening: a dampener is meaningless for a deterministic pick, and
+ * exclusion prevents deal → discard → deal-the-same-card churn. Returns null
+ * when the exclusion emptied the pool ("cooling down").
+ */
+export function pickWarmup<T extends Candidate>(
+  candidates: T[],
+  now: Date,
+  cooldownMinutes: number,
+): T | null {
+  let best: T | null = null;
+  let bestAnchor = 0;
+  for (const c of candidates) {
+    if (
+      c.lastDrawnAt != null &&
+      (now.getTime() - new Date(c.lastDrawnAt).getTime()) / 60_000 < cooldownMinutes
+    ) {
+      continue;
+    }
+    const anchor = stalenessAnchor(c).getTime();
+    if (
+      best == null ||
+      c.effortMinutes < best.effortMinutes ||
+      (c.effortMinutes === best.effortMinutes &&
+        (anchor < bestAnchor || (anchor === bestAnchor && c.id < best.id)))
+    ) {
+      best = c;
+      bestAnchor = anchor;
+    }
+  }
+  return best;
+}
+
+/**
+ * Deal the warm-up card. Same eligibility pool as drawTask (queryCandidates —
+ * the two can never drift), same deal side effects (last_drawn_at stamp,
+ * persisted current draw), plus the warm-up marker and the irrevocable
+ * allowance consumption. Precondition (enforced by the route with the same
+ * lazy validation GET /api/draw/current uses): no valid current draw exists —
+ * the warm-up is only ever offered on the idle deck (#88).
+ */
+export function warmupDraw(filters: DrawFilters): DrawResult {
+  const now = new Date();
+  const availability = warmupAvailability(now);
+  if (!availability.available) {
+    return { task: null, reason: "warmup_unavailable", nextWarmupAt: availability.nextWarmupAt! };
+  }
+
+  const maxEffort = getSetting("max_draw_effort", 30);
+  const cooldown = getSetting("draw_cooldown_minutes", 60);
+  const { candidates, windowExcluded } = queryCandidates(filters, maxEffort, now);
+  if (candidates.length === 0) {
+    // Nothing was dealt: the allowance is NOT consumed, and there is no
+    // current draw to clear (the route's idle guard already ensured that).
+    return { task: null, reason: emptyPoolReason(filters, windowExcluded, now) };
+  }
+
+  const chosen = pickWarmup(candidates, now, cooldown);
+  if (!chosen) return { task: null, reason: "cooling_down" };
+
+  db.prepare("UPDATE tasks SET last_drawn_at = ? WHERE id = ?").run(now.toISOString(), chosen.id);
+  setSetting(CURRENT_DRAW_SETTING, String(chosen.id));
+  const marker: WarmupMarker = {
+    taskId: chosen.id,
+    dealtAt: now.toISOString(),
+    // Small cards get a floor: a 2-minute card with a 2-minute window would
+    // punish reading the description.
+    windowMinutes: Math.max(chosen.effortMinutes, 15),
+  };
+  setSetting(WARMUP_DRAW_SETTING, JSON.stringify(marker));
+  // Consumed at DEAL time, never refunded — snoozing or deleting the dealt
+  // card must not open a second deal, or the warm-up becomes a fishing rod.
+  setSetting(
+    WARMUP_LAST_DEALT_SETTING,
+    JSON.stringify({ taskId: chosen.id, dealtAt: now.toISOString() }),
+  );
+
+  return {
+    task: toTaskPayload(dealtTaskRow(chosen.id)),
+    poolSize: candidates.length,
+    warmup: marker,
+  };
 }
