@@ -94,6 +94,18 @@ CREATE TABLE achievements (
   unlocked_at TEXT NOT NULL
 );
 
+-- Streak freeze tokens (#58, ADR-28): append-only log of EARNED events only.
+-- milestone_day is the local day the streak crossed a 7-real-day multiple;
+-- its UNIQUE constraint makes earning idempotent per milestone (undo/redo
+-- cannot farm). Consumption is never stored — it is derived on every read by
+-- the walk-back fold in streak.ts, keeping GET side-effect free (ADR-5: log
+-- over counters). The streak itself stays fully derived (ADR-2).
+CREATE TABLE streak_freezes (
+  id INTEGER PRIMARY KEY,
+  milestone_day TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL

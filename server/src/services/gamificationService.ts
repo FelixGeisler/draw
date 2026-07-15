@@ -1,5 +1,16 @@
-import { db, getSetting } from "../db.js";
+import { db, getSetting, getSettingString } from "../db.js";
 import { clearCurrentDraw } from "./drawService.js";
+import {
+  computeStreak,
+  FREEZE_BANK_CAP,
+  shouldEarnFreeze,
+  type StreakState,
+} from "./streak.js";
+
+// Public setting (routes/settings.ts allowlist): JSON array of rest weekdays
+// in JS getDay convention (0=Sun..6=Sat), same as tasks.window_days. Absent
+// or empty = pre-#58 behavior (every day required).
+export const REST_WEEKDAYS_SETTING = "streak_rest_weekdays";
 
 export interface TaskRow {
   id: number;
@@ -76,6 +87,17 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
   // drawn session just ended, matching how the client dismisses the card.
   clearCurrentDraw(task.id);
 
+  // Freeze token earn (#58, ADR-28): the 7th/14th/... REAL completion day of
+  // the unbroken run banks one token, capped at FREEZE_BANK_CAP unconsumed.
+  // shouldEarnFreeze's milestone-day check plus the UNIQUE(milestone_day)
+  // constraint make the earn idempotent — undo/redo cannot farm tokens.
+  const earnDay = localDate(now);
+  if (shouldEarnFreeze(streakState(), earnedFreezeDays(), earnDay)) {
+    db.prepare(
+      "INSERT OR IGNORE INTO streak_freezes (milestone_day, created_at) VALUES (?, ?)",
+    ).run(earnDay, now.toISOString());
+  }
+
   const levelAfter = levelFromXp(totalXp()).level;
   const newAchievements = checkAchievements({ completedTask: task });
 
@@ -105,7 +127,11 @@ export function levelFromXp(xp: number): { level: number; intoLevel: number; nee
 }
 
 // ---------------------------------------------------------------------------
-// Streak — consecutive calendar days (local server time) with >= 1 completion.
+// Streak — real completion days (local server time) in an unbroken run.
+// Rest weekdays and freeze-covered days neither break nor extend (#58,
+// ADR-28). Fully derived on every read: completions log + rest setting +
+// append-only freeze earn log feed the pure fold in streak.ts — no stored
+// counter anywhere (ADR-2/ADR-5), and reads have no write side effects.
 
 function completionDays(): Set<string> {
   const rows = db
@@ -114,18 +140,44 @@ function completionDays(): Set<string> {
   return new Set(rows.map((r) => r.day));
 }
 
-export function currentStreak(): number {
-  const days = completionDays();
-  const cursor = new Date();
-  let streak = 0;
-  // Today counts if present, but doesn't break the streak if missing yet.
-  if (days.has(localDate(cursor))) streak++;
-  cursor.setDate(cursor.getDate() - 1);
-  while (days.has(localDate(cursor))) {
-    streak++;
-    cursor.setDate(cursor.getDate() - 1);
+function restWeekdays(): Set<number> {
+  const raw = getSettingString(REST_WEEKDAYS_SETTING);
+  if (!raw) return new Set();
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const days = new Set(
+        parsed.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6),
+      );
+      // All 7 never passes PATCH validation; a hand-edited row must not turn
+      // every missed day into a rest day, so fall back to "no rest days".
+      if (days.size < 7) return days;
+    }
+  } catch {
+    // malformed setting value — behave like the default
   }
-  return streak;
+  return new Set();
+}
+
+/** Milestone days of earned tokens, chronological (the fold replays by day). */
+function earnedFreezeDays(): string[] {
+  const rows = db
+    .prepare("SELECT milestone_day AS day FROM streak_freezes ORDER BY milestone_day")
+    .all() as { day: string }[];
+  return rows.map((r) => r.day);
+}
+
+export function streakState(): StreakState {
+  return computeStreak({
+    completionDays: completionDays(),
+    restWeekdays: restWeekdays(),
+    earnedFreezeDays: earnedFreezeDays(),
+    today: localDate(new Date()),
+  });
+}
+
+export function currentStreak(): number {
+  return streakState().streak;
 }
 
 function localDate(d: Date): string {
@@ -145,8 +197,12 @@ export interface AchievementDef {
 export const ACHIEVEMENTS: AchievementDef[] = [
   { key: "first_draw", title: "First draw", emoji: "🃏", description: "Draw your first card." },
   { key: "first_completion", title: "Off the mark", emoji: "✅", description: "Complete your first task." },
-  { key: "streak_7", title: "One week strong", emoji: "🔥", description: "A 7-day completion streak." },
-  { key: "streak_30", title: "Unstoppable", emoji: "🌋", description: "A 30-day completion streak." },
+  // Streak thresholds count REAL completion days (#58): rest and frozen days
+  // keep the run alive but never increment it, so 7 completed days may span
+  // more than 7 calendar days. Already-unlocked rows stay unlocked — the
+  // achievements table is append-only.
+  { key: "streak_7", title: "One week strong", emoji: "🔥", description: "7 completed days in one unbroken streak." },
+  { key: "streak_30", title: "Unstoppable", emoji: "🌋", description: "30 completed days in one unbroken streak." },
   { key: "monster_slayer", title: "Monster slayer", emoji: "🐉", description: "Finish every subtask of a big task." },
   { key: "leverage_master", title: "Leverage master", emoji: "🎯", description: "60% of a week's time on 4–5★ tasks." },
   { key: "deck_clearer", title: "Deck clearer", emoji: "🏜", description: "Empty the drawable deck by completing it." },
@@ -238,7 +294,7 @@ export function checkAchievements(event: { completedTask?: TaskRow; drew?: boole
 export function gamificationState() {
   const xp = totalXp();
   const { level, intoLevel, needed } = levelFromXp(xp);
-  const streak = currentStreak();
+  const streakInfo = streakState();
   const dailyGoal = getSetting("daily_goal_completions", 1);
 
   const todayCompletions = db
@@ -261,7 +317,14 @@ export function gamificationState() {
     xp,
     level,
     levelProgress: { intoLevel, needed },
-    streak,
+    // streak stays a plain number for compatibility; the sibling fields let
+    // the client render rest/frozen days honestly (#58) — never as completed.
+    streak: streakInfo.streak,
+    todayKind: streakInfo.todayKind,
+    freezesBanked: streakInfo.freezesBanked,
+    freezeBankCap: FREEZE_BANK_CAP,
+    frozenDays: streakInfo.frozenDays,
+    restDays: streakInfo.restDays,
     dailyGoalMet: todayCompletions.length >= dailyGoal,
     dailyGoal,
     todayCompletions,

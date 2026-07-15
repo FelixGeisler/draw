@@ -708,3 +708,59 @@ explainable from what the user can see. A dedicated endpoint over reusing the
 stats query because TaskForm mounts on four surfaces and needs one small,
 stably-cacheable all-history array — not a week-scoped Stats object whose
 range semantics the hint would have to fight.
+
+== ADR-28: Streak rest days and freeze tokens — the streak stays derived, only earned freezes are state
+
+*Context:* The streak broke on any local day without a completion, including
+days off the user planned on purpose (#58). Punishing a deliberate Saturday
+teaches users to stop trusting the flame — but the fix must not violate
+ADR-2/ADR-5: no stored streak counter, ever, and `GET /api/gamification`
+must stay side-effect free.
+*Decision:* Three parts. (a) *Rest weekdays* are a plain setting
+(`streak_rest_weekdays`, JSON array in JS `getDay` convention, same as
+`tasks.window_days`; `PATCH /api/settings` rejects all 7 — at least one
+weekday must stay required). A rest weekday without a completion neither
+breaks nor extends the run; one *with* a completion counts +1 like any other
+day, so resting is never better than completing. (b) *Freeze tokens* are
+genuine state, but only the EARN side: `streak_freezes` is an append-only
+log of earned events (v8 migration), one row per 7-real-day milestone with
+the milestone's local day under a UNIQUE constraint — earning is idempotent
+per milestone, so complete → reopen (`undoLatestCompletion`) → complete
+again cannot farm tokens; the bank caps at 2 banked. *Consumption is
+never stored:* every read re-runs a deterministic fold (the pure
+`computeStreak()` in `streak.ts`) that replays the calendar FORWARD from
+the earliest completion/earn day with the bank as a plain counter: an earn
+adds a token (clamped to the cap inside the fold, so re-aggregation under a
+changed rest setting can never resurrect a token past it), a missed
+non-rest day inside a run consumes one banked token (earns bank only after
+their own day is classified, so a token covers strictly later days — never
+the day it was earned on or earlier), and a miss the bank cannot cover is a
+break: the run dies and the bank expires with it, so a dead run's tokens
+never shield a later streak and letting a streak die can never increase the
+balance (a broken gap consumes nothing — it expires, Duolingo-style).
+Today-in-progress still neither breaks nor consumes, and the replay is
+bounded by the earliest recorded fact, so even 6 configured rest weekdays
+terminate. The first cut walked BACKWARD, assigning each missed day the
+oldest unconsumed token earned strictly before it (issue #58's suggested
+reading), but the PR #98 review proved that shape wrong twice: the
+assignment flipped between reads — a new miss could steal the token that
+covered an older, already-frozen day and retroactively break the run there
+despite a feasible cover — and consumption inside runs the walk never
+reached evaporated, resurrecting dead runs' tokens past the cap. The
+counter-based forward replay is assignment-free (any feasible cover banks
+the same count, so coverage is maximal) and prefix-stable: a new miss can
+only affect days after the previous read, never rewrite committed
+history. (c) The streak number counts REAL completion days only — rest
+and frozen days keep the run alive but never increment it — and the API
+exposes `todayKind`/`frozenDays`/`restDays`/`freezesBanked` so the client
+renders four honest flame states instead of presenting covered days as
+completed. `streak_7`/`streak_30` keep testing `currentStreak() >= N`,
+which now means N completed days possibly spanning more calendar days;
+their copy says so, and already-unlocked rows stay (append-only table).
+*Rationale:* The earn events are facts (like `completions` rows) — they
+happened and survive an undo; a stored "banked" counter or consumed-rows
+would be writable from a GET path or need provably idempotent writes, the
+exact drift ADR-5 exists to prevent. Deriving consumption keeps reads pure,
+re-aggregatable, and auditable, and the append-only log plus UNIQUE
+milestone day is the entire anti-farming story — no trigger, no counter,
+no reconciliation job.

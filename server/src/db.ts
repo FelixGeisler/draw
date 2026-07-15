@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 7;
+export const CURRENT_VERSION = 8;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -138,6 +138,15 @@ function migrate() {
         );
         for (const id of reparented) adopt.run(id);
       })();
+    }
+    if (version < 8) {
+      // Streak freeze tokens (issue #58, ADR-28): append-only earn log;
+      // consumption stays derived at read time.
+      db.exec(`CREATE TABLE streak_freezes (
+        id INTEGER PRIMARY KEY,
+        milestone_day TEXT NOT NULL UNIQUE,
+        created_at TEXT NOT NULL
+      )`);
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);

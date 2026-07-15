@@ -5,7 +5,15 @@ export interface GamificationState {
   xp: number;
   level: number;
   levelProgress: { intoLevel: number; needed: number };
+  /** Real completion days in the unbroken run — rest/frozen days never count. */
   streak: number;
+  todayKind: "completed" | "pending" | "rest";
+  freezesBanked: number;
+  freezeBankCap: number;
+  /** Local days ("YYYY-MM-DD") a consumed freeze covered, most recent first. */
+  frozenDays: string[];
+  /** Rest days without a completion inside the run, most recent first. */
+  restDays: string[];
   dailyGoalMet: boolean;
   dailyGoal: number;
   todayCompletions: {

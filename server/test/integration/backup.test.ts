@@ -52,12 +52,20 @@ async function importArchive(archive: Buffer) {
 
 /** Full API snapshot used to prove "identical" and "untouched". */
 async function apiSnapshot() {
-  const [tasks, goals, settings] = await Promise.all([
+  const [tasks, goals, settings, gamification] = await Promise.all([
     request(app).get("/api/tasks").expect(200),
     request(app).get("/api/goals").expect(200),
     request(app).get("/api/settings").expect(200),
+    // Derived from completions + rest setting + freeze earn log (ADR-28) —
+    // equality here proves the streak inputs made the round trip.
+    request(app).get("/api/gamification").expect(200),
   ]);
-  return { tasks: tasks.body, goals: goals.body, settings: settings.body };
+  return {
+    tasks: tasks.body,
+    goals: goals.body,
+    settings: settings.body,
+    gamification: gamification.body,
+  };
 }
 
 let goalId: number;
@@ -99,7 +107,16 @@ beforeAll(async () => {
   await request(app).patch(`/api/tasks/${done.id}`).send({ status: "done" }).expect(200);
 
   await request(app).patch("/api/settings").send({ max_draw_effort: 45 }).expect(200);
+  await request(app).patch("/api/settings").send({ streak_rest_weekdays: [6, 0] }).expect(200);
   await request(app).put("/api/ai/key").send({ key: "sk-ant-backup-test-000" }).expect(200);
+
+  // Streak/freeze state (#58, ADR-28) must survive the round trip too. One
+  // earned token is banked directly — earning organically needs a 7-day
+  // streak — using the same localtime day convention completeTask writes.
+  const db = await testDb();
+  db.prepare(
+    "INSERT INTO streak_freezes (milestone_day, created_at) VALUES (date('now', 'localtime'), ?)",
+  ).run(new Date().toISOString());
 });
 
 describe("GET /api/backup/export", () => {
@@ -183,7 +200,7 @@ describe("POST /api/backup/import — round trip", () => {
     db.exec(
       `DELETE FROM completions; DELETE FROM time_entries; DELETE FROM card_art;
        DELETE FROM materials; DELETE FROM tasks; DELETE FROM achievements;
-       DELETE FROM goals; DELETE FROM settings;`,
+       DELETE FROM goals; DELETE FROM settings; DELETE FROM streak_freezes;`,
     );
     for (const f of fs.readdirSync(filesDir())) {
       fs.rmSync(path.join(filesDir(), f), { recursive: true, force: true });
@@ -201,6 +218,12 @@ describe("POST /api/backup/import — round trip", () => {
     expect(after.tasks).toEqual(before.tasks);
     expect(after.goals).toEqual(before.goals);
     expect(after.settings).toEqual(before.settings);
+    expect(after.gamification).toEqual(before.gamification);
+    // The banked token itself, not just the derived number (#58, ADR-28) —
+    // testDb() is re-fetched because the import swapped and reopened `db`.
+    expect(after.gamification.freezesBanked).toBe(1);
+    const restored = await testDb();
+    expect(restored.prepare("SELECT COUNT(*) AS n FROM streak_freezes").get()).toEqual({ n: 1 });
 
     const download = await request(app)
       .get(`/api/materials/${materialId}/download`)
@@ -367,9 +390,11 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     const current = fs.readFileSync(schemaPath, "utf-8");
     const v2Schema = current
       .replace(/last_drawn_at TEXT,[\s\S]*?window_end TEXT\r?\n/, "last_drawn_at TEXT\n")
-      .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "");
+      .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "")
+      .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "");
     expect(v2Schema).not.toContain("deferred_until");
     expect(v2Schema).not.toContain("card_art");
+    expect(v2Schema).not.toContain("streak_freezes");
 
     const legacyDbPath = path.join(dataDir(), "legacy-backup.db");
     const legacy = new Database(legacyDbPath);
