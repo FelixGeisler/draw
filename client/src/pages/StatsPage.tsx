@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
 import { ActivityHeatmap } from "../components/ActivityHeatmap";
+import { biasStatement } from "../lib/estimationCoach";
 
 interface Estimation {
   tasks: { taskId: number; title: string; estimatedMinutes: number; trackedMinutes: number; ratio: number }[];
@@ -17,6 +18,7 @@ interface Estimation {
     categoryId: number;
     name: string;
     color: string;
+    taskCount: number;
     estimatedMinutes: number;
     trackedMinutes: number;
     ratio: number;
@@ -136,6 +138,23 @@ function EstimationSection({ estimation }: { estimation: Estimation }) {
                   </span>
                 </div>
               ))}
+              {/* Coaching statements (#55): only categories with enough
+                  qualifying tasks in range get a line — biasStatement returns
+                  null below the minimum sample, and nothing renders then. */}
+              {byCategory.flatMap((c) => {
+                const statement = biasStatement(c);
+                return statement === null
+                  ? []
+                  : [
+                      <p
+                        key={c.categoryId}
+                        data-testid="bias-statement"
+                        style={{ color: ratioColor(c.ratio), fontSize: 13, margin: "8px 0 0" }}
+                      >
+                        {statement}
+                      </p>,
+                    ];
+              })}
             </div>
           )}
         </>
