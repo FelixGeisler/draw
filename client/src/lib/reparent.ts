@@ -52,6 +52,28 @@ export function promoteBlockReason(task: Pick<Task, "parentId">): string | null 
   return task.parentId == null ? ALREADY_ROOT_REASON : null;
 }
 
+/**
+ * Whether a task is offered as a "Move under…" destination at all. Done and
+ * archived tasks are omitted outright (not listed disabled) — adopting new
+ * work under finished work is never what reorganizing means. Shared by the
+ * picker's candidate list and the DnD routing (#101, inert rows there), so
+ * the two inputs cannot silently diverge on what is offered vs merely
+ * blocked-with-reason.
+ */
+export function isOfferableTarget(target: Pick<Task, "status">): boolean {
+  return target.status === "open";
+}
+
+/**
+ * Whether a task's row offers the "Move under…" gesture at all: only root
+ * tasks do — a subtask's single reorganize gesture is promotion, because
+ * breakdowns are one level deep (ADR-16) and moving between parents is not a
+ * thing. Shared by TaskRow's button gate and the DnD routing (#101).
+ */
+export function offersMoveUnder(task: Pick<Task, "parentId">): boolean {
+  return task.parentId == null;
+}
+
 export interface ReparentTarget {
   target: Task;
   /** null = pickable; otherwise shown as the disabled option's reason. */
@@ -59,14 +81,13 @@ export interface ReparentTarget {
 }
 
 /**
- * The "Move under…" picker's option list: every OPEN root task except the
- * moved one, each carrying its block reason (ADR-23 targets stay listed but
- * disabled, so the rule is visible instead of the target silently missing).
- * Done/archived roots are not offered — adopting new work under finished
- * work is never what reorganizing means.
+ * The "Move under…" picker's option list: every offerable (open) root task
+ * except the moved one, each carrying its block reason (ADR-23 targets stay
+ * listed but disabled, so the rule is visible instead of the target silently
+ * missing).
  */
 export function reparentTargets(task: ReparentSource, roots: Task[]): ReparentTarget[] {
   return roots
-    .filter((r) => r.id !== task.id && r.parentId == null && r.status === "open")
+    .filter((r) => r.id !== task.id && r.parentId == null && isOfferableTarget(r))
     .map((target) => ({ target, blockReason: moveUnderBlockReason(task, target) }));
 }
