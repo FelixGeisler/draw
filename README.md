@@ -75,7 +75,7 @@ weight = impact² / effort × urgency × staleness
 - `÷ effort` — quick wins float up
 - `urgency` — ramps ×1→×4 in the last 7 days before the due date, ×5 when overdue
 - `staleness` — the longer a task sits (or a chore goes undone), the louder it gets (up to ×2)
-- recently drawn cards are dampened ×0.15 for an hour, so "Draw again" gives variety
+- recently drawn cards are dampened ×0.15 for an hour, so successive draws give variety
 
 ## Documentation
 

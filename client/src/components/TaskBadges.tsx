@@ -1,4 +1,4 @@
-import type { Task } from "../api/types";
+import type { Goal, Task } from "../api/types";
 import { formatWindow, isDueSoon, isSnoozed, isWithinWindow } from "../lib/drawable";
 import { displayEffort } from "../lib/effort";
 
@@ -18,9 +18,23 @@ export function ImpactStars({ value }: { value: number }) {
   );
 }
 
-export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolean }) {
+export function TaskBadges({
+  task,
+  showStars,
+  goals,
+}: {
+  task: Task;
+  showStars?: boolean;
+  /**
+   * Goal chip (#88): rendered only when the caller supplies the goals list —
+   * the Tasks page rows let you edit the goal link (#17), so they show which
+   * goal that is. Callers without the list (drawn card, Capture) stay as-is.
+   */
+  goals?: Goal[];
+}) {
   const due = isDueSoon(task.dueDate);
   const effort = displayEffort(task);
+  const goal = task.goalId != null ? goals?.find((g) => g.id === task.goalId) : undefined;
   return (
     <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
       {effort != null && <span className="chip">{effort} min</span>}
@@ -81,6 +95,15 @@ export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolea
           }
         >
           🕒 {formatWindow(task.windowDays, task.windowStart, task.windowEnd)}
+        </span>
+      )}
+      {goal && (
+        <span
+          className="chip"
+          style={{ color: "var(--text-dim)" }}
+          title={`Linked to goal: ${goal.title}`}
+        >
+          🎯 {goal.title}
         </span>
       )}
       {(showStars ?? task.goalId != null) && <ImpactStars value={task.impact} />}

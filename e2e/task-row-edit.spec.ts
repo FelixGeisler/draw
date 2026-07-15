@@ -6,6 +6,8 @@ import type { APIRequestContext } from "@playwright/test";
 // attached to a goal. Runs against the shared E2E database after the other
 // specs; all seeded titles are unique to this spec and goal-count
 // assertions are scoped to this spec's own goal card.
+// getByTitle("Edit") is always exact here: the goal chip's tooltip (#88)
+// contains this spec's goal title, whose "row-edit" would substring-match.
 test.describe.configure({ mode: "serial" });
 
 const GOAL_TITLE = "E2E row-edit goal";
@@ -59,7 +61,7 @@ test("edit from the row: prefilled form, cancel discards, save persists", async 
   await page.goto("/tasks");
 
   // The form opens prefilled with the task's current values.
-  await row(page, TASK_TITLE).getByTitle("Edit").click();
+  await row(page, TASK_TITLE).getByTitle("Edit", { exact: true }).click();
   const title = page.getByPlaceholder("What needs doing?");
   await expect(title).toHaveValue(TASK_TITLE);
   await expect(page.getByTitle("Effort estimate in minutes")).toHaveValue("10");
@@ -71,7 +73,7 @@ test("edit from the row: prefilled form, cancel discards, save persists", async 
   await expect(page.getByText(TASK_TITLE, { exact: true })).toBeVisible();
 
   // Save PATCHes and the row re-renders from the invalidated query.
-  await row(page, TASK_TITLE).getByTitle("Edit").click();
+  await row(page, TASK_TITLE).getByTitle("Edit", { exact: true }).click();
   await title.fill(EDITED_TITLE);
   await page.getByTitle("Effort estimate in minutes").fill("25");
   await page.getByRole("button", { name: "Save", exact: true }).click();
@@ -84,21 +86,31 @@ test("edit from the row: prefilled form, cancel discards, save persists", async 
 test("goal link: attach via edit, goal count reflects it, detach again", async ({ page }) => {
   await page.goto("/tasks");
 
-  await row(page, EDITED_TITLE).getByTitle("Edit").click();
+  await row(page, EDITED_TITLE).getByTitle("Edit", { exact: true }).click();
   const goalSelect = page.getByTitle("Link to a goal (enables impact rating)");
   await goalSelect.selectOption({ label: `🎯 ${GOAL_TITLE}` });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(goalSelect).not.toBeVisible();
+
+  // The row now wears the goal chip (#88) — the link it lets you edit is
+  // visible at a glance. A goal-less row next to it stays chip-free.
+  await expect(
+    row(page, EDITED_TITLE).locator(".chip", { hasText: `🎯 ${GOAL_TITLE}` }),
+  ).toBeVisible();
+  await expect(row(page, PARENT_TITLE).locator(".chip", { hasText: "🎯" })).toHaveCount(0);
 
   await page.goto("/goals");
   await expect(goalCard(page).getByText("0/1 tasks")).toBeVisible();
 
   // Detach: back to "no goal"; the count drops again.
   await page.goto("/tasks");
-  await row(page, EDITED_TITLE).getByTitle("Edit").click();
+  await row(page, EDITED_TITLE).getByTitle("Edit", { exact: true }).click();
   await goalSelect.selectOption({ label: "no goal" });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(goalSelect).not.toBeVisible();
+
+  // The chip is gone with the link.
+  await expect(row(page, EDITED_TITLE).locator(".chip", { hasText: "🎯" })).toHaveCount(0);
 
   await page.goto("/goals");
   await expect(goalCard(page).getByText("0/0 tasks")).toBeVisible();
@@ -116,7 +128,7 @@ test("subtask rows offer edit without the goal select; done rows offer none", as
   await page.goto("/tasks");
 
   // Subtasks follow their parent's goal — the form opens without the select.
-  await row(page, SUBTASK_TITLE).getByTitle("Edit").click();
+  await row(page, SUBTASK_TITLE).getByTitle("Edit", { exact: true }).click();
   await expect(page.getByPlaceholder("What needs doing?")).toHaveValue(SUBTASK_TITLE);
   await expect(page.getByTitle("Link to a goal (enables impact rating)")).not.toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
@@ -125,7 +137,7 @@ test("subtask rows offer edit without the goal select; done rows offer none", as
   await page.getByLabel("show done").check();
   const doneRow = row(page, DONE_TITLE);
   await expect(doneRow.getByRole("checkbox")).toBeChecked();
-  await expect(doneRow.getByTitle("Edit")).not.toBeVisible();
+  await expect(doneRow.getByTitle("Edit", { exact: true })).not.toBeVisible();
 });
 
 test("goal link on a broken-down task cascades to its subtasks", async ({ page }) => {
@@ -137,7 +149,7 @@ test("goal link on a broken-down task cascades to its subtasks", async ({ page }
   const goalSelect = page.getByTitle("Link to a goal (enables impact rating)");
   async function setParentGoal(label: string) {
     await page.goto("/tasks");
-    await row(page, PARENT_TITLE).getByTitle("Edit").click();
+    await row(page, PARENT_TITLE).getByTitle("Edit", { exact: true }).click();
     await goalSelect.selectOption({ label });
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(goalSelect).not.toBeVisible();

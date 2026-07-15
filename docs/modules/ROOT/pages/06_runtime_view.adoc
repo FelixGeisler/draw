@@ -29,6 +29,13 @@ not held back behind a sequential sibling, inside its availability window) and
 lazily clears a pointer that went stale, e.g. because the card was edited out
 of the deck.
 
+A revealed card offers no re-draw (#88): the draw is a commitment — re-rolling
+would mean fishing for a comfortable card, which defeats the
+anti-procrastination purpose. The card leaves the screen only by being
+resolved: completed, snoozed/blocked ("Not now", ADR-17), or deleted. Changing
+the category/goal filter while a card is revealed applies to the next draw
+only.
+
 == 6.2 Completing a task (single transaction)
 
 ....

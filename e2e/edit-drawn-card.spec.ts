@@ -39,6 +39,11 @@ test("edit: saving updates the card in place, drawn state preserved", async ({ p
   const title = page.getByPlaceholder("What needs doing?");
   await expect(title).toHaveValue(TASK_TITLE);
   await expect(page.getByTitle("Effort estimate in minutes")).toHaveValue("10");
+  // No goal select mid-draw (#88): the page's goal filter covers that axis,
+  // and goal (re)linking lives on the Tasks page rows. The task IS
+  // goal-linked, so the impact stars still render.
+  await expect(page.getByTitle("Link to a goal (enables impact rating)")).toHaveCount(0);
+  await expect(page.getByTitle("Impact toward the goal (1–5)")).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
   await expect(title).not.toBeVisible();
   await expect(page.locator(".draw-face.back h2")).toHaveText(TASK_TITLE);
@@ -61,9 +66,16 @@ test("edit: saving updates the card in place, drawn state preserved", async ({ p
   // The tasks queries were invalidated — the Tasks page shows the edit.
   await page.goto("/tasks");
   await expect(page.getByText(EDITED_TITLE)).toBeVisible();
+
+  // The hidden goal select resent the stored link unchanged (#88) — the
+  // edit must not silently detach the task from its goal.
+  const tasks: { title: string; goalId: number | null }[] = await (
+    await page.request.get("/api/tasks")
+  ).json();
+  expect(tasks.find((t) => t.title === EDITED_TITLE)?.goalId).not.toBeNull();
 });
 
-test("edit above max_draw_effort: card stays with hint and draw-again offer", async ({
+test("edit above max_draw_effort: card stays with the resolve hint, no draw-again", async ({
   page,
 }) => {
   await drawFromGoal(page, GOAL_TITLE);
@@ -78,7 +90,10 @@ test("edit above max_draw_effort: card stays with hint and draw-again offer", as
   await expect(page.locator(".draw-face.back h2")).toHaveText(EDITED_TITLE);
   await expect(page.locator(".draw-face.back").getByText("90 min")).toBeVisible();
   await expect(page.locator(".draw-hint")).toContainText("out of the deck");
-  await expect(page.getByRole("button", { name: "Draw again" })).toBeVisible();
+  // The draw is a commitment (#88): no "Draw again" even for a card that was
+  // edited out of the deck — the way forward is resolving it ("Not now").
+  await expect(page.getByRole("button", { name: "Draw again" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "💤 Not now" })).toBeVisible();
 });
 
 test("delete from the card dismisses it and returns to the idle draw", async ({ page }) => {
