@@ -272,7 +272,14 @@ cannot create the nesting the UI already forbids (the one-level
 remaining-effort rollup and the one-level goal/category cascades rely on it).
 Databases that acquired nesting before that guard are repaired at startup by
 the v7 migration (#80, ADR-24), so the invariant holds for every database,
-not only for post-guard writes.
+not only for post-guard writes. Reparenting (#100, `PATCH parentId`) enforces
+the same invariant from both directions: the target must be a root task, and
+the moved task must be childless — children of *any* status, since a
+done/archived child is one status write away from being an open grandchild.
+Those two rules are also what keeps `parent_id` acyclic now that it is no
+longer INSERT-only (ADR-24): a childless mover can never become anyone's
+ancestor. An adopted task joins the breakdown in the universal
+(created_at, id) creation order (ADR-18).
 
 == ADR-17: Snooze/block as retained timestamps, drawability stays derived
 
@@ -332,8 +339,16 @@ finishing the step in front, not by breakdown), while an oversized *exposed*
 first step still does. `isRestorable` (ADR-13) rejects held-back cards
 lazily — unlike a snooze wear-off there is no path where a held-back card
 becomes restorable again without a user action that legitimately frees it,
-so no eager pointer clear is needed. Manual ordering stays out of scope
-(creation order only, no `position` column). The "Do in order" toggle
+so no eager pointer clear is needed — reparenting the drawn card into a
+held-back position (#100) is the exception: like a snooze wear-off, the card
+would become restorable again the moment the step in front completes, so the
+reparent PATCH clears the pointer eagerly. Manual ordering stays out of scope
+(creation order only, no `position` column); reparenting (#100) keeps that
+rule — a task adopted into a sequential breakdown queues by its original
+`created_at` like every other sibling, so a task older than the existing
+steps enters *ahead* of them and may jump the queue. One predicate, no
+stored positions; explicit sibling ordering remains a possible follow-up if
+queue-jumping proves wrong in practice. The "Do in order" toggle
 travels with the breakdown batch (`orderMode` on `POST /:id/subtasks`,
 persisted on the parent in the same transaction) and as a plain
 `subtaskOrderMode` PATCH; the AI breakdown returns an `orderMatters` boolean
@@ -528,7 +543,10 @@ be re-gated with no user action — cards oscillating in and out of the deck.
 create it, in the routes where all domain invariants live: creating a subtask
 with `recurEveryDays` under a `sequential` parent (`POST /api/tasks` with
 `parentId`; the batch endpoint's INSERT carries no recurrence at all), adding
-a recurrence to an existing subtask of a sequential parent (`PATCH`), and
+a recurrence to an existing subtask of a sequential parent (`PATCH`),
+reparenting a recurring task into a sequential breakdown (`PATCH parentId`,
+#100 — judged on the effective recurrence, so clearing the recurrence in the
+same PATCH legalizes the move), and
 flipping a parent to `sequential` — via `PATCH subtaskOrderMode` or the
 breakdown batch's `orderMode` — while *any* subtask carries a recurrence
 (any status: done and archived rows can be revived by a plain status write).
@@ -564,15 +582,20 @@ cascades one level and leaves the grandchild's `goal_id` stale, and
 completing the middle task 409s with no visible open subtask anywhere — an
 undiagnosable dead end. Elsewhere legacy rows are tolerated (ADR-4 impact,
 ADR-23 recurring-sequential), but those rows stay *operable*; a nested row
-breaks derived state and has no user-reachable repair (no re-parent edit
-exists in any UI or API).
+breaks derived state and had no user-reachable repair (at the time no
+re-parent edit existed in any UI or API — #100 added one later, after every
+stored database had already been repaired by this migration).
 *Decision:* The v6 → v7 migration (`server/src/db.ts`) re-parents every task
 whose parent is itself a subtask to its root ancestor — the exact flattening
 the guard's 400 message tells callers to perform — one level per pass until
 the tree is two levels deep everywhere (arbitrary legacy depth; terminates
-because `parent_id` is only ever written at INSERT referencing an existing
-row, so ancestor chains are acyclic and finite — and the pass count is
-bounded by the initial nested-row count anyway, so a corrupt cyclic chain
+because ancestor chains in the migrated data are acyclic and finite — every
+pre-v7 database was written by code that only ever set `parent_id` at INSERT
+referencing an existing row. Since #100 `parent_id` is also rewritten by the
+reparent PATCH, but the guarantee carries over: a reparent target must be a
+root and the moved task must be childless, so the moved node never becomes
+anyone's ancestor and no cycle can be minted. The pass count is bounded by
+the initial nested-row count anyway, so a corrupt cyclic chain
 aborts the boot with a diagnosable error instead of hanging it). Re-parented
 rows then join their new breakdown under the same cascade rules a parent
 edit applies (routes/tasks.ts): `goal_id` follows the root unconditionally,
@@ -590,9 +613,13 @@ recurrence pass), both user repairs stay open (drop the recurrence, or flip
 the root to parallel), and the transition guards prevent re-creating it once
 repaired — pinned by `server/test/integration/migration-v6-recurring.test.ts`.
 Second, under a goal-less root the cascade leaves re-parented rows with
-`goal_id` NULL and their stored impact untouched — route-cascade parity: a
-parent goal unlink cascades NULL without resetting children's impact either,
-and the ADR-4 no-op tolerance keeps such rows editable.
+`goal_id` NULL and their stored impact untouched — deliberate grandfathering,
+not route parity: a *deliberate* goal wipe resets impact to the neutral 3 (a
+parent unlink cascades the reset to open subtasks since #76, and a #100
+reparent into a goal-less root resets the moved task the same way), but the
+migration moves rows the user never asked to move, so it keeps the
+historical rating the way goal deletion keeps one, and the ADR-4 no-op
+tolerance keeps such rows editable.
 *Rationale:* Repair over grandfathering because every listed pathology is a
 *silent* corruption of derived state (ADR-2's core promise) rather than a
 stale-but-honest stored value, and the flattened result is exactly what the

@@ -64,8 +64,13 @@ function migrate() {
       // the guard's 400 message prescribes). Each pass reads a snapshot of
       // (id, grandparent) pairs first, so a pass moves every nested row
       // exactly one step up its original chain — the loop terminates because
-      // parent_id is only ever written at INSERT referencing an existing
-      // row, making the ancestor graph acyclic, and each pass strictly
+      // the ancestor graph is acyclic: every pre-v7 database was written by
+      // code that only ever set parent_id at INSERT referencing an existing
+      // row. (Since #100 parent_id is also rewritten by the reparent PATCH —
+      // which postdates this migration — but the guarantee carries over: a
+      // reparent target must be a root and the moved task must be childless,
+      // so the moved node never becomes anyone's ancestor and no cycle can
+      // be minted, ADR-24.) Each pass strictly
       // shrinks the maximum depth. Defensively the pass count is bounded
       // anyway (a chain of depth d holds d-2 nested rows, so acyclic data
       // needs at most one pass per initially nested row): a parent_id cycle
@@ -110,10 +115,13 @@ function migrate() {
         // follows the parent unconditionally, category_id only while open —
         // done/archived rows are historical records and keep the category
         // they were actually finished under (#44). impact is deliberately
-        // left as-is, even where the adopted goal_id is NULL: a parent goal
-        // unlink cascades NULL without resetting children's impact either,
-        // and the ADR-4 no-op tolerance keeps such rows editable —
-        // grandfathered, not an oversight.
+        // left as-is, even where the adopted goal_id is NULL: this repair
+        // moves rows the user never asked to move, so unlike a DELIBERATE
+        // goal wipe — a parent unlink (#76) or a #100 reparent into a
+        // goal-less root, both of which reset impact to the neutral 3 — the
+        // historical rating is grandfathered the way goal deletion
+        // grandfathers one, and the ADR-4 no-op tolerance keeps such rows
+        // editable. Not an oversight (ADR-24).
         const adopt = db.prepare(
           `UPDATE tasks
            SET goal_id = (SELECT r.goal_id FROM tasks r WHERE r.id = tasks.parent_id),
