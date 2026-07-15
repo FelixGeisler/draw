@@ -83,6 +83,22 @@ export function useCardArt(taskId: number | undefined, revealed: boolean) {
   });
 }
 
+/**
+ * Regenerate the card art (#113): the server generates -> sanitizes ->
+ * REPLACES the cached row; a failure keeps the old art. Same silent contract
+ * as useCardArt — callers read only isPending, never error state, so a 503
+ * (degraded) or 502 (bad generation) shows nothing. On success the response
+ * is written straight into the card-art cache (staleTime: Infinity means the
+ * query itself never refetches), which swaps the art in without a second GET.
+ */
+export function useRegenerateCardArt(taskId: number | undefined) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<{ svg: string }>(`/api/tasks/${taskId}/card-art/regenerate`),
+    onSuccess: (data) => qc.setQueryData(["card-art", taskId], data),
+  });
+}
+
 export function useAiStatus() {
   return useQuery({
     queryKey: ["ai-status"],

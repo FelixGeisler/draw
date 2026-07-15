@@ -109,8 +109,44 @@
   }
 }
 
+/* Regenerate (#113): a quiet corner control on the art itself — it re-rolls
+   the ARTWORK only, never the card (the draw stays a commitment, #88).
+   Rendered only when art exists, so degraded mode never shows it. */
+.draw-art-regen {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: rgba(27, 30, 39, 0.7);
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1;
+  opacity: 0.55;
+}
+
+.draw-art-regen:hover:not(:disabled) {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.draw-art-regen.pending {
+  animation: regen-spin 1s linear infinite;
+  cursor: wait;
+}
+
+@keyframes regen-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Card-back content paints above the absolutely positioned art layers. */
-.draw-face.back > :not(.draw-art, .draw-art-scrim) {
+.draw-face.back > :not(.draw-art, .draw-art-scrim, .draw-art-regen) {
   position: relative;
 }
 

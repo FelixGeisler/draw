@@ -4,7 +4,7 @@ import confetti from "canvas-confetti";
 import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
 import { useCurrentDraw, useDraw, type DrawResponse } from "../hooks/useDraw";
-import { useCardArt } from "../hooks/useAi";
+import { useCardArt, useRegenerateCardArt } from "../hooks/useAi";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
 import { FocusOverlay } from "../components/FocusOverlay";
 import { SnoozeMenu } from "../components/SnoozeMenu";
@@ -139,6 +139,10 @@ export function DrawPage() {
   // AI card art (#27): kicked off by the reveal, never awaited by it. The
   // hook swallows every failure (incl. 503 degraded mode) into "no art".
   const cardArt = useCardArt(task?.id, phase === "revealed");
+  // Regenerate (#113): replaces the art server-side, keeps the old one on
+  // failure — as silent as the art itself. Rendered only when art exists, so
+  // degraded mode never shows the button at all.
+  const regenArt = useRegenerateCardArt(task?.id);
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
   // An edit can push the drawn card out of the deck (effort too big/cleared,
   // status no longer open) — computed client-side, mirroring drawService.
@@ -204,12 +208,24 @@ export function DrawPage() {
             {task && cardArt.data?.svg && (
               <>
                 <img
+                  // dataUpdatedAt changes when a regenerate swaps the cache
+                  // entry — remounting replays the fade-in for the new art.
+                  key={cardArt.dataUpdatedAt}
                   className="draw-art"
                   alt=""
                   aria-hidden="true"
                   src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(cardArt.data.svg)}`}
                 />
                 <div className="draw-art-scrim" />
+                <button
+                  className={`draw-art-regen ${regenArt.isPending ? "pending" : ""}`}
+                  title="Regenerate artwork"
+                  aria-label="Regenerate artwork"
+                  disabled={regenArt.isPending}
+                  onClick={() => regenArt.mutate()}
+                >
+                  ↻
+                </button>
               </>
             )}
             {task && (
