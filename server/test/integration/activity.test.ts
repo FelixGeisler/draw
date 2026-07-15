@@ -144,10 +144,18 @@ describe("params and defaults", () => {
     expect(days[55].date).toBe(localDay(new Date()));
   });
 
-  it("accepts to-only and from-only", async () => {
+  it("accepts to-only (from defaults to the 56-day window)", async () => {
     const res = await request(app).get("/api/activity?to=2026-01-31").expect(200);
     expect(res.body.days[55].date).toBe("2026-01-31");
     expect(res.body.days[0].date).toBe("2025-12-07");
+  });
+
+  it("accepts from-only (to defaults to local today)", async () => {
+    const from = localDay(noonDaysAgo(10));
+    const res = await request(app).get(`/api/activity?from=${from}`).expect(200);
+    expect(res.body.days).toHaveLength(11);
+    expect(res.body.days[0].date).toBe(from);
+    expect(res.body.days[10].date).toBe(localDay(new Date()));
   });
 
   it("rejects malformed and impossible dates", async () => {

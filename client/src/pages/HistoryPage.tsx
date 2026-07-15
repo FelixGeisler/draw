@@ -22,6 +22,13 @@ const DAY_W = 68;
 const OVERSCAN = 7;
 /** 8 weeks per fetch window; "Load earlier" extends `from` by another one. */
 const WINDOW_DAYS = 56;
+/**
+ * Mirror of the server's MAX_RANGE_DAYS cap on GET /api/activity (~10 years) —
+ * wider requests 400. "Load earlier" clamps to it and disables at the
+ * boundary, so the UI never sends a request the server would reject
+ * (PR #68 review).
+ */
+const MAX_RANGE_DAYS = 3653;
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
@@ -205,6 +212,9 @@ function Tower({
 export function HistoryPage() {
   const today = localToday();
   const [from, setFrom] = useState(() => addDays(today, -(WINDOW_DAYS - 1)));
+  // Oldest `from` the server accepts for a window ending today (range cap).
+  const minFrom = addDays(today, -(MAX_RANGE_DAYS - 1));
+  const atRangeCap = from <= minFrom;
   const activity = useActivity(from, today);
   const categories = useCategories();
   // Tap/click lift (hover and keyboard focus are pure CSS), one card at most.
@@ -234,6 +244,14 @@ export function HistoryPage() {
   // changing days.length (it stays one window) — the totals transition is
   // what re-runs the effect once the skyline exists (PR #68 review).
   const initialised = useRef(false);
+
+  // An error unmounts the skyline (`days` collapses to []); re-arm the
+  // initialisation so recovery lands on the right end again instead of
+  // remounting the scroll container at scrollLeft 0.
+  useEffect(() => {
+    if (activity.isError) initialised.current = false;
+  }, [activity.isError]);
+
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el || days.length === 0 || initialised.current) return;
@@ -284,15 +302,34 @@ export function HistoryPage() {
     <div className="content">
       <div className="hoc-header">
         <h1 style={{ flex: 1 }}>History</h1>
-        <button onClick={() => setFrom(addDays(from, -WINDOW_DAYS))}>← Load earlier</button>
+        <button
+          onClick={() =>
+            setFrom((f) => {
+              const next = addDays(f, -WINDOW_DAYS);
+              return next < minFrom ? minFrom : next;
+            })
+          }
+          disabled={atRangeCap}
+          title={atRangeCap ? "The history view loads at most ten years" : undefined}
+        >
+          ← Load earlier
+        </button>
       </div>
       <p className="hoc-legend">
         <span className="hoc-swatch completed" /> completed that day ·{" "}
         <span className="hoc-swatch face-down" /> started but left unfinished — that card stays
         face-down for good ({formatDay(from)} – today)
+        {atRangeCap && " · you've reached the oldest day this view can load (ten years back)"}
       </p>
 
-      {activity.data && totalCards === 0 ? (
+      {activity.isError ? (
+        <div className="panel" style={{ marginTop: 16 }}>
+          <p style={{ color: "var(--text-dim)" }}>
+            Couldn't load this history window ({activity.error.message}).{" "}
+            <button onClick={() => activity.refetch()}>Retry</button>
+          </p>
+        </div>
+      ) : activity.data && totalCards === 0 ? (
         <div className="panel" style={{ marginTop: 16 }}>
           <p style={{ color: "var(--text-dim)" }}>
             No activity in this window yet. Start a timer or complete a task and today's tower
