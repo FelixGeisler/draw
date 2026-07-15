@@ -150,6 +150,21 @@ describe("create_subtasks input schema", () => {
   });
 });
 
+describe("parent-lifecycle wording in tool descriptions (issue #111, ADR-32)", () => {
+  // Schema-guided clients plan around these sentences: without them an agent
+  // would complete the last subtask AND then call complete_task on the
+  // parent (double completion), or never realize a create_subtasks call can
+  // reopen a done card.
+  it("names the auto-complete cascade, the reopen rules, and the surfaced result", () => {
+    expect(tool("complete_task").description).toContain("auto-completes");
+    expect(tool("complete_task").description).toContain("parentCompletion");
+    expect(tool("create_subtasks").description).toContain("DONE parent reopens");
+    expect(tool("update_task").description).toContain("reopens its done parent");
+    const parentId = (tool("update_task").inputSchema.parentId as z.ZodType).description ?? "";
+    expect(parentId).toContain("done root reopens");
+  });
+});
+
 describe("ADR-4 wording in tool descriptions (issue #76)", () => {
   // The enforced rule has exceptions (neutral 3, no-op resends of a stored
   // value, subtask batches) — the descriptions must not overstate it, or a

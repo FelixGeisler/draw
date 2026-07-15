@@ -14,10 +14,17 @@ days and freeze consumption are re-derived on every read from the rest-weekday
 setting and the append-only `streak_freezes` earn log — ADR-28), weekly grade
 (aggregation over `time_entries`), and the displayed effort of a broken-down
 task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at query
-time; the stored estimate stays what the user typed and keeps feeding XP and
-edit forms; the one-level sum is exact for every database because the API
+time, and NULL while any non-archived subtask exists but none are open: with
+a breakdown the subtasks own the estimate, ADR-32; the stored estimate stays
+what the user typed and keeps feeding edit forms and the revives-as-leaf path,
+but never the parent's XP or drawability while a breakdown exists; the
+one-level sum is exact for every database because the API
 rejects new nested breakdowns, ADR-16, and the v7 startup migration
-re-parented any pre-guard nesting to the root, ADR-24). Goal feasibility
+re-parented any pre-guard nesting to the root, ADR-24). The parent's own
+status is lifecycle-derived from the same facts (ADR-32): the last subtask
+closing completes it through `completeTask()` at a symbolic 1 XP, and an
+open subtask arriving under a done parent reopens it, deleting its latest
+completion row (ADR-5). Goal feasibility
 (#60) is the same rule at goal scope: `GET /api/goals` derives
 `remainingOpenEffortMinutes` (SUM over the goal's open *leaf* tasks — a
 broken-down parent counts through its open subtasks, which inherit the goal

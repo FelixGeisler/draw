@@ -1001,3 +1001,76 @@ absorbed by ATK and the star row (one datum, one place); the focus overlay
 (#56) adopts exactly the type-line pill and nothing else — its job is the
 clock, not the frame. Follow-ups noted in their issues: the skyline
 mini-cards (#53) and the daily hand (#59) adopt the frame when built.
+
+== ADR-32: Parent-task lifecycle follows the subtasks — derived effort, auto-complete at a symbolic 1 XP, reopen on new subtasks
+
+*Context:* Explicit user feedback (#111): a broken-down task's estimate
+should just be its subtasks' estimates, finishing the last subtask should
+finish the task, and adding new ones should reopen it. Before this decision
+all three were violated: `remainingEffortMinutes` fell back to the parent's
+own stored estimate the moment the last subtask closed (and the parent
+re-entered the draw pool as if it were a leaf), the parent then had to be
+completed manually — earning XP from its own `effort_minutes ?? 10` on top
+of the effort-XP the subtasks had already paid — and creating or adopting a
+subtask under a done parent reopened nothing (#104 item 1).
+*Decision:* One lifecycle package, three rules. *(1) The subtasks own the
+estimate:* a parent with >= 1 NON-ARCHIVED subtask never uses its own stored
+`effort_minutes` for display or drawability — not even when all subtasks are
+done. `remainingEffortMinutes` sums OPEN subtasks (NULL when none are open
+or none estimated); the pool predicate, `isRestorable`, the client's
+`classifyTask` (new derived `hasNonArchivedChildren` field, pinned by the
+shared drawable vectors) and the goal rollup all exclude such parents. The
+stored estimate is IGNORED, NOT NULLED: nulling would lose the sizing
+history and strand the parent-revives-as-leaf path (PR #102 — children all
+moved away or archived leave zero non-archived subtasks and the stored value
+becomes meaningful again; ADR-2: derive at read time, keep stored fields as
+source data). *(2) Auto-complete:* after every write that changes a
+subtask's status (complete, archive, reopen, un-archive), a parent that is
+open, non-recurring and ALL-DONE — >= 1 done subtask, zero open, archived
+ignored on both sides — completes through `completeTask()` in the same
+transaction: a genuine completion row (ADR-5 derivations, achievements
+including `monster_slayer` at its natural moment, timer close, ADR-13
+pointer hygiene all flow normally), with an explicit effort override of 0 —
+the subtasks already earned the effort-XP — and `wasDrawn` false (under rule
+1 a parent with children is never in the deck); the existing `xp < 1` floor
+lifts it to a symbolic *1 XP*, keeping every completion row >= 1 for the
+trophy pile and today displays. It COUNTS toward the daily goal and the
+streak like any completion — it is one honest row, and excluding it would
+need a new stored distinction (rejected for simplicity and honesty). Manual
+completion of a parent with >= 1 non-archived subtask awards the same
+zero-effort XP (legacy all-done-open rows resolve this way); a parent whose
+subtasks are ALL archived is a leaf again and completes on its own estimate.
+A split-in-place (#108) can never trigger the predicate — the archived
+original is replaced by open parts in the same transaction. Sequential mode
+(ADR-18) needs no extra bookkeeping: the hold-back is derived, so the last
+freed step's completion is an ordinary trigger. *Recurring parents are
+EXCLUDED:* their completion advances the due date and keeps the task open
+(ADR-6), but the subtasks would stay done — every later occurrence an empty
+shell — and auto-reopening subtasks on recurrence is undefined territory. A
+recurring parent whose breakdown is all done simply stays open (rule 1 keeps
+it out of the deck and its estimate inert); manual completion remains
+available and follows ADR-6 unchanged, at the zero-effort XP. *(3) Reopen:*
+every path that puts an OPEN child under a DONE parent reopens it — subtask
+creation (single and batch), adoption via reparent (resolving #104 item 1
+for done roots; archived-root adoption stays open in #104), reopening a done
+subtask (symmetry with rule 2), and un-archiving one. Reopening sets status
+open, clears `completed_at` and snooze/block (ADR-17), and deletes the
+parent's latest completion row via `undoLatestCompletion` (ADR-5 no-farming
+— exactly the auto-completion being undone; a harmless no-op on legacy done
+parents without one). Adopting a DONE task under a done root reopens
+nothing — no open child appeared. Reparenting AWAY is not a trigger: an old
+parent left with only done children resolves like a legacy row, on its next
+subtask status change or by manual completion. The subtask-completion
+response carries the parent's result as `parentCompletion` (XP,
+achievements, level-up) so the client and MCP surface the cascade without a
+second request.
+*Rationale:* The parent's row is bookkeeping for the breakdown once
+subtasks exist — the work, the estimates and the XP live in the leaves, so
+every derived surface (effort, drawability, completion, reopening) follows
+the leaves too, and no stored counter or flag is introduced anywhere
+(ADR-2/ADR-5). Zero-effort-plus-floor was chosen over bypassing the floor
+(a true 0-XP row would break the "every trophy carries >= 1 XP" uniformity)
+and over any estimate-derived award (double-earning is the exact bug being
+fixed). No migration: legacy all-done-open parents are not retro-completed —
+they resolve on their next subtask status change or via manual completion.
+

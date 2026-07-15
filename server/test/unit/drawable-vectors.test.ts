@@ -22,6 +22,9 @@ describe("shared eligibility vectors (parity with classifyTask)", () => {
         status: "open",
         effortMinutes: v.effortMinutes,
         hasOpenChildren: v.hasOpenChildren,
+        // #111: absent in a vector means "same as hasOpenChildren" — an open
+        // child is non-archived by definition.
+        hasNonArchivedChildren: v.hasNonArchivedChildren ?? v.hasOpenChildren,
         blocked: v.blocked,
         deferredUntil: v.deferredUntil,
         heldBack: v.heldBack,

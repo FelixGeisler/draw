@@ -47,7 +47,7 @@ describe("gamification", () => {
     expect(res.newAchievements).toContain("first_draw");
   });
 
-  it("unlocks monster_slayer when the last of 2+ subtasks completes the parent", async () => {
+  it("unlocks monster_slayer when the last of 2+ subtasks auto-completes the parent (#111)", async () => {
     const parent = (
       await request(app).post("/api/tasks").send({ title: "Monster", categoryId: 1, effortMinutes: 90 })
     ).body;
@@ -56,13 +56,15 @@ describe("gamification", () => {
         .post(`/api/tasks/${parent.id}/subtasks`)
         .send({ subtasks: [{ title: "a", effortMinutes: 10 }, { title: "b", effortMinutes: 10 }] })
     ).body;
-    for (const s of subs) {
-      await request(app).patch(`/api/tasks/${s.id}`).send({ status: "done" });
-    }
+    await request(app).patch(`/api/tasks/${subs[0].id}`).send({ status: "done" }).expect(200);
+    // The last subtask's completion cascades: the parent completes through
+    // completeTask, so checkAchievements fires at the natural moment and the
+    // unlock rides the surfaced parentCompletion.
     const done = (
-      await request(app).patch(`/api/tasks/${parent.id}`).send({ status: "done" })
+      await request(app).patch(`/api/tasks/${subs[1].id}`).send({ status: "done" }).expect(200)
     ).body;
-    expect(done.newAchievements).toContain("monster_slayer");
+    expect(done.parentCompletion.task.id).toBe(parent.id);
+    expect(done.parentCompletion.newAchievements).toContain("monster_slayer");
   });
 
   it("computes streaks from consecutive completion days", async () => {

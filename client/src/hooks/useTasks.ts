@@ -73,7 +73,13 @@ export function useUpdateTask() {
       invalidate();
       // Completing a task may have closed its running timer server-side.
       qc.invalidateQueries({ queryKey: ["timer"] });
-      announceAchievements(data.newAchievements);
+      // A subtask completion can auto-complete its parent (#111, ADR-32) —
+      // the parent's fresh achievements ride the same response and deserve
+      // the same toast; the invalidations above already repaint the lists.
+      announceAchievements([
+        ...(data.newAchievements ?? []),
+        ...(data.parentCompletion?.newAchievements ?? []),
+      ]);
     },
   });
 }

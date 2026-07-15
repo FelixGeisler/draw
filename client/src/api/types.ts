@@ -64,6 +64,14 @@ export interface Task {
   windowEnd: string | null;
   hasOpenChildren: number;
   /**
+   * Derived at query time like hasOpenChildren (0/1): ANY non-archived child
+   * — done ones included — keeps a parent classified as a container and out
+   * of the deck (#111, ADR-32); only archived-out or moved-away children
+   * revive it as a leaf. Optional: the draw payloads carry it as a constant
+   * 0 (dealt cards are leaves by construction).
+   */
+  hasNonArchivedChildren?: number;
+  /**
    * Derived at query time like hasOpenChildren (0/1): an older open sibling
    * under a 'sequential' parent holds this task out of the deck until the
    * earlier steps close. Never stored — completing the step in front frees
@@ -99,6 +107,13 @@ export interface CompletionResponse {
   bonus?: "warmup" | "momentum" | null;
   newAchievements?: string[];
   recurring?: boolean;
+  /**
+   * Present when completing (or archiving) the last open subtask
+   * auto-completed its parent (#111, ADR-32): the parent's own completion
+   * result — a symbolic 1 XP (zero-effort floor, the subtasks already earned
+   * the effort XP), plus any achievements/level-up it triggered.
+   */
+  parentCompletion?: Omit<CompletionResponse, "parentCompletion">;
 }
 
 export type Settings = Record<string, string>;
