@@ -5,6 +5,7 @@ import { settingsRouter } from "./routes/settings.js";
 import { drawRouter } from "./routes/draw.js";
 import { timerRouter } from "./routes/timer.js";
 import { statsRouter } from "./routes/stats.js";
+import { activityRouter } from "./routes/activity.js";
 import { gamificationRouter } from "./routes/gamification.js";
 import { goalsRouter } from "./routes/goals.js";
 import { goalMaterialsRouter, materialsRouter } from "./routes/materials.js";
@@ -24,6 +25,7 @@ export function createApp() {
   app.use("/api/draw", drawRouter);
   app.use("/api/timer", timerRouter);
   app.use("/api/stats", statsRouter);
+  app.use("/api/activity", activityRouter);
   app.use("/api/gamification", gamificationRouter);
   app.use("/api/goals", goalsRouter);
   app.use("/api/goals/:id/materials", goalMaterialsRouter);

@@ -65,7 +65,10 @@ Timestamps stored as ISO 8601 UTC strings. Date-only values (due dates) are
 compared as strings. Date-range arithmetic happens in UTC (`addDays` in
 `routes/stats.ts`) — local-timezone `Date` round-trips caused an off-by-one-day bug
 (see xref:11_risks_and_technical_debt.adoc[section 11]). Streak days use SQLite
-`date(..., 'localtime')` because a "day" is a user-local concept.
+`date(..., 'localtime')` because a "day" is a user-local concept; the history
+skyline's day buckets follow the same rule (`localDayOf` in `activityService`,
+ADR-19), with the UTC offset injectable so unit tests can pin midnight-boundary
+behavior on any machine.
 
 == 8.7 Testing strategy
 

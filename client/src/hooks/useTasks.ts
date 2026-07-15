@@ -42,6 +42,8 @@ function useInvalidateTasks() {
     qc.invalidateQueries({ queryKey: ["tasks"] });
     qc.invalidateQueries({ queryKey: ["gamification"] });
     qc.invalidateQueries({ queryKey: ["stats"] });
+    // Completions/reopens/deletes change the History skyline's card set.
+    qc.invalidateQueries({ queryKey: ["activity"] });
     // Task mutations can clear or invalidate the server-persisted current
     // draw (complete/delete clear it, edits can push it out of the deck).
     qc.invalidateQueries({ queryKey: ["draw", "current"] });
