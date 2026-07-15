@@ -20,7 +20,7 @@ server/src/
 ├── aiSchemas.ts             zod schemas for structured AI outputs
 ├── routes/                  HTTP layer (validation, status codes)
 │   ├── tasks.ts             CRUD, subtask bulk-create, timer start, completion entry point,
-│   │                        card-art endpoint (cache-or-generate)
+│   │                        card-art endpoints (cache-or-generate + regenerate, #113)
 │   ├── categories.ts        CRUD (delete blocked while referenced)
 │   ├── goals.ts             CRUD with task/material counts
 │   ├── materials.ts         multer upload, download, delete (disk + row)
@@ -41,7 +41,9 @@ server/src/
     ├── aiService.ts         Anthropic client, material blocks, prompts, token guard
     ├── aiPostprocess.ts     deterministic generate-tasks shaping (ADR-14): pure, SDK-/DB-free
     ├── svgSanitizer.ts      allowlist re-serializer for model-written SVG (ADR-22): pure
-    └── cardArtService.ts    card-art cache orchestration (generate → sanitize → store once)
+    ├── cardArtStyle.ts      deterministic per-task style directives (#113): pure
+    └── cardArtService.ts    card-art cache orchestration (generate → sanitize → store once;
+                             #113 regenerate replaces, generations coalesce per task)
 ....
 
 [cols="1,2,2",options="header"]
@@ -68,9 +70,9 @@ server/src/
 |Claude API access
 |Requests blocked without key (503) or above 180K input tokens (400)
 
-|`svgSanitizer` + `cardArtService`
-|Card art safety and cost (ADR-22)
-|Only allowlist-re-serialized SVG is ever stored or served; at most one generation per task
+|`svgSanitizer` + `cardArtService` + `cardArtStyle`
+|Card art safety, cost and variety (ADR-22)
+|Only allowlist-re-serialized SVG is ever stored or served; at most one generation *in flight* per task; style directives are a pure function of the task id; regenerate is the only path that replaces a row (generate-then-replace)
 |===
 
 == 5.3 Whitebox: Client
