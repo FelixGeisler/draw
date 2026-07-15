@@ -109,19 +109,28 @@ describe("task CRUD and breakdown rule", () => {
         .send({ title: "Atomic parent", categoryId: 1 })
     ).body;
 
-    // A value the driver cannot bind blows up the second INSERT
-    // mid-transaction, after validation passed and the orderMode write
-    // inside the same transaction already ran.
-    await request(app)
-      .post(`/api/tasks/${parent.id}/subtasks`)
-      .send({
-        orderMode: "sequential",
-        subtasks: [
-          { title: "would be created" },
-          { title: "binding breaker", description: { nested: true } },
-        ],
-      })
-      .expect(500);
+    // The old trigger — a description the driver cannot bind — is a clean
+    // 400 since the #84 shape sweep and never reaches the transaction. A
+    // row-level SQLite trigger aborts the SECOND insert instead: a genuine
+    // mid-transaction failure after validation passed and the orderMode
+    // write inside the same transaction already ran.
+    const db = await testDb();
+    db.exec(
+      `CREATE TRIGGER test_batch_boom BEFORE INSERT ON tasks
+       WHEN NEW.title = 'transaction breaker'
+       BEGIN SELECT RAISE(ABORT, 'test-injected mid-transaction failure'); END`,
+    );
+    try {
+      await request(app)
+        .post(`/api/tasks/${parent.id}/subtasks`)
+        .send({
+          orderMode: "sequential",
+          subtasks: [{ title: "would be created" }, { title: "transaction breaker" }],
+        })
+        .expect(500);
+    } finally {
+      db.exec("DROP TRIGGER test_batch_boom");
+    }
 
     const list = await request(app).get("/api/tasks").expect(200);
     const listed = list.body.find((t: { id: number }) => t.id === parent.id);

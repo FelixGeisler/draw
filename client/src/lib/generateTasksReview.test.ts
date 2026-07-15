@@ -242,6 +242,25 @@ describe("commitLeaves", () => {
     expect(leaf.description).toBe("Exercise 3 · ~20 min · exam.pdf");
   });
 
+  it("rounds edited decimal minutes to the integers the API accepts (#84)", () => {
+    const list = items(
+      { statedMinutes: 20 },
+      {
+        parts: [
+          { title: "part a", minutes: 30 },
+          { title: "part b", minutes: 30 },
+        ],
+      },
+    );
+    // The editable fields bypass form `step` validation — decimals and a
+    // cleared-to-0 field must still commit as positive integers.
+    list[0].minutes = 12.5;
+    list[1].parts[0].minutes = 7.4;
+    list[1].parts[1].minutes = 0;
+    const leaves = commitLeaves(list, null);
+    expect(leaves.map((l) => l.effortMinutes)).toEqual([13, 7, 1]);
+  });
+
   it("excludes unchecked exercises, unchecked parts, and blank titles", () => {
     let list = items(
       {},

@@ -2,7 +2,7 @@ import { useCategories, useCreateTask, useSettings, useTasks, useUpdateTask } fr
 import { useGoals } from "../hooks/useGoals";
 import { TaskForm } from "../components/TaskForm";
 import { TaskBadges } from "../components/TaskBadges";
-import { classifyTask, flattenOpen, type DrawGroup } from "../lib/drawable";
+import { classifyTask, flattenOpen, groupSiblings, type DrawGroup } from "../lib/drawable";
 import type { Task } from "../api/types";
 
 const GROUPS: { key: DrawGroup; title: string; hint: string }[] = [
@@ -17,18 +17,46 @@ const GROUPS: { key: DrawGroup; title: string; hint: string }[] = [
 function EstimateInput({ task }: { task: Task }) {
   const updateTask = useUpdateTask();
   return (
-    <input
-      type="number"
-      min={1}
-      placeholder="min"
-      style={{ width: 70 }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          const v = Number((e.target as HTMLInputElement).value);
-          if (v > 0) updateTask.mutate({ id: task.id, effortMinutes: v });
-        }
+    <>
+      <input
+        type="number"
+        min={1}
+        placeholder="min"
+        style={{ width: 70 }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            // Enter-keydown bypasses the form's `step` validation and the API
+            // wants integer minutes (#84) — round at the send boundary.
+            const v = Math.round(Number((e.target as HTMLInputElement).value));
+            if (v > 0) updateTask.mutate({ id: task.id, effortMinutes: v });
+          }
+        }}
+      />
+      {/* A failed save must not leave the task silently stuck here. */}
+      {updateTask.isError && (
+        <span role="alert" style={{ color: "var(--danger)", fontSize: 12 }}>
+          {(updateTask.error as Error).message}
+        </span>
+      )}
+    </>
+  );
+}
+
+function Row({ task, groupKey }: { task: Task; groupKey: DrawGroup }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "8px 0",
+        borderBottom: "1px solid var(--border)",
       }}
-    />
+    >
+      <span style={{ flex: 1 }}>{task.title}</span>
+      <TaskBadges task={task} />
+      {groupKey === "needs-estimate" && <EstimateInput task={task} />}
+    </div>
   );
 }
 
@@ -40,7 +68,8 @@ export function CapturePage() {
   const createTask = useCreateTask();
 
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
-  const open = flattenOpen(tasks.data ?? []);
+  const roots = tasks.data ?? [];
+  const open = flattenOpen(roots);
   const grouped = new Map<DrawGroup, Task[]>();
   for (const t of open) {
     const g = classifyTask(t, maxEffort);
@@ -64,6 +93,9 @@ export function CapturePage() {
       {GROUPS.map(({ key, title, hint }) => {
         const items = grouped.get(key) ?? [];
         if (items.length === 0 && key !== "ready") return null;
+        // Sibling leaves collapse under their parent (#30): a 40-leaf import
+        // is one header row, not 40 rows drowning the rest of the section.
+        const { flat, clusters } = groupSiblings(items, roots);
         return (
           <section key={key} style={{ marginTop: 24 }}>
             <h3 style={{ marginBottom: 4 }}>
@@ -74,21 +106,27 @@ export function CapturePage() {
               {items.length === 0 && (
                 <p style={{ color: "var(--text-dim)" }}>Nothing here — capture something above.</p>
               )}
-              {items.map((t) => (
-                <div
-                  key={t.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 10,
-                    padding: "8px 0",
-                    borderBottom: "1px solid var(--border)",
-                  }}
-                >
-                  <span style={{ flex: 1 }}>{t.title}</span>
-                  <TaskBadges task={t} />
-                  {key === "needs-estimate" && <EstimateInput task={t} />}
-                </div>
+              {flat.map((t) => (
+                <Row key={t.id} task={t} groupKey={key} />
+              ))}
+              {clusters.map(({ parent, items: siblings }) => (
+                <details key={parent.id}>
+                  <summary
+                    style={{
+                      cursor: "pointer",
+                      padding: "8px 0",
+                      borderBottom: "1px solid var(--border)",
+                    }}
+                  >
+                    📂 {parent.title}{" "}
+                    <span style={{ color: "var(--text-dim)" }}>({siblings.length})</span>
+                  </summary>
+                  <div style={{ paddingLeft: 20 }}>
+                    {siblings.map((t) => (
+                      <Row key={t.id} task={t} groupKey={key} />
+                    ))}
+                  </div>
+                </details>
               ))}
             </div>
           </section>

@@ -9,6 +9,7 @@ import {
 
 export interface Candidate {
   id: number;
+  parentId: number | null;
   impact: number;
   effortMinutes: number;
   dueDate: string | null;
@@ -75,6 +76,41 @@ export function weight(c: Candidate, now: Date, cooldownMinutes: number, poolSiz
     if (minutesSinceDrawn < cooldownMinutes) w *= 0.15;
   }
   return w;
+}
+
+/**
+ * Sibling damping (#30, ADR-25): a k-sibling breakdown flooding the pool
+ * competes like ~√k cards instead of k. Simulation (server/scripts/
+ * sim-issue30.ts) showed a 40-leaf #29 import taking 58% of the probability
+ * mass on day 0 against a 12-task organic deck — rising to 63% within a week
+ * because fresh leaves gain staleness while old organic tasks sit at the ×2
+ * cap. Damped, the same import holds ~18% and the share decays smoothly as
+ * leaves complete. k = 1 (parentless tasks, single children) is exactly 1.
+ */
+export function siblingDamping(poolSiblingCount: number): number {
+  return 1 / Math.sqrt(Math.max(poolSiblingCount, 1));
+}
+
+/**
+ * Weights for a candidate pool — the single home of the damping rule so
+ * drawTask() and drawPool() cannot drift. k counts siblings PRESENT IN THE
+ * POOL, not open siblings: a held-back sequential queue (#23), snoozed or
+ * out-of-window siblings do not flood the deck, so they must not dampen the
+ * one card that represents them (a sequential 40-leaf import competes as the
+ * single fairly-weighted card it shows).
+ */
+export function poolWeights(candidates: Candidate[], now: Date, cooldownMinutes: number): number[] {
+  const siblingsInPool = new Map<number, number>();
+  for (const c of candidates) {
+    if (c.parentId != null) {
+      siblingsInPool.set(c.parentId, (siblingsInPool.get(c.parentId) ?? 0) + 1);
+    }
+  }
+  return candidates.map(
+    (c) =>
+      weight(c, now, cooldownMinutes, candidates.length) *
+      siblingDamping(c.parentId == null ? 1 : (siblingsInPool.get(c.parentId) as number)),
+  );
 }
 
 // Snooze/block (ADR-17): kept as a derived predicate alongside the rest —
@@ -180,7 +216,7 @@ function queryCandidates(
   ];
   const rows = db
     .prepare(
-      `SELECT t.id, t.title, t.category_id AS categoryId, t.goal_id AS goalId,
+      `SELECT t.id, t.title, t.parent_id AS parentId, t.category_id AS categoryId, t.goal_id AS goalId,
               t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
               t.created_at AS createdAt, t.recur_every_days AS recurEveryDays,
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil,
@@ -210,7 +246,7 @@ export function drawPool(filters: DrawFilters): {
   const cooldown = getSetting("draw_cooldown_minutes", 60);
   const now = new Date();
   const { candidates } = queryCandidates(filters, maxEffort, now);
-  const weights = candidates.map((c) => weight(c, now, cooldown, candidates.length));
+  const weights = poolWeights(candidates, now, cooldown);
   const total = weights.reduce((a, b) => a + b, 0);
   return {
     poolSize: candidates.length,
@@ -269,7 +305,7 @@ export function drawTask(filters: DrawFilters): DrawResult {
     return { task: null, reason: anyOpen.n > 0 ? "all_too_big" : "no_ready_tasks" };
   }
 
-  const weights = candidates.map((c) => weight(c, now, cooldown, candidates.length));
+  const weights = poolWeights(candidates, now, cooldown);
   const total = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * total;
   let picked = candidates.length - 1;

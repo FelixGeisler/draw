@@ -28,6 +28,7 @@ const emptyRow = (): Row => ({ key: nextKey++, title: "", effortMinutes: null })
 export function SubtaskEditor({ maxEffort, initialOrderMode, sequentialLocked, onAccept, onCancel }: Props) {
   const [rows, setRows] = useState<Row[]>([emptyRow(), emptyRow()]);
   const [inOrder, setInOrder] = useState(initialOrderMode === "sequential");
+  const [error, setError] = useState<string | null>(null);
 
   function update(key: number, patch: Partial<Row>) {
     setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
@@ -83,16 +84,36 @@ export function SubtaskEditor({ maxEffort, initialOrderMode, sequentialLocked, o
         <button
           className="primary"
           disabled={valid.length === 0}
-          onClick={() =>
-            onAccept(
-              valid.map(({ title, effortMinutes }) => ({ title: title.trim(), effortMinutes })),
-              inOrder ? "sequential" : "parallel",
-            )
-          }
+          onClick={async () => {
+            setError(null);
+            try {
+              // This is a plain button, not a form submit, so the inputs'
+              // `step` validation never runs — round to the integer minutes
+              // the API wants (#84); a cleared-to-0 field clamps to 1, like
+              // the generate-tasks review's commitLeaves.
+              await onAccept(
+                valid.map(({ title, effortMinutes }) => ({
+                  title: title.trim(),
+                  effortMinutes:
+                    effortMinutes == null ? null : Math.max(1, Math.round(effortMinutes)),
+                })),
+                inOrder ? "sequential" : "parallel",
+              );
+            } catch (e) {
+              // Surface the rejection instead of letting it vanish — the
+              // editor stays open with the rows kept for the user to correct.
+              setError(e instanceof Error ? e.message : String(e));
+            }
+          }}
         >
           Add {valid.length} subtask{valid.length === 1 ? "" : "s"}
         </button>
       </div>
+      {error && (
+        <div role="alert" style={{ color: "var(--danger)", fontSize: 13 }}>
+          {error}
+        </div>
+      )}
     </div>
   );
 }
