@@ -23,6 +23,10 @@ export interface PoolCandidate extends Candidate {
   title: string;
   categoryId: number;
   goalId: number | null;
+  /** Availability window (#33, ADR-20) — window_days as raw JSON text. */
+  windowDays: string | null;
+  windowStart: string | null;
+  windowEnd: string | null;
 }
 
 export interface DrawFilters {
@@ -32,7 +36,7 @@ export interface DrawFilters {
 
 export interface DrawResult {
   task: Record<string, unknown> | null;
-  reason?: "no_ready_tasks" | "all_too_big";
+  reason?: "no_ready_tasks" | "all_too_big" | "all_outside_window";
   poolSize?: number;
   probability?: number;
 }
@@ -94,6 +98,47 @@ export function heldBackSql(alias: string): string {
   )`;
 }
 
+/**
+ * Availability-window predicate (#33, ADR-20): true when the task has no
+ * window, or `now` falls on one of its weekdays inside [start, end) — start
+ * inclusive, end exclusive, "24:00" meaning end-of-day. Deliberately LOCAL
+ * wall clock (`getDay`/`getHours`, never `getUTC*`): "Mon–Fri 08:00–12:00"
+ * means the user's own clock, consistent with due-date urgency above. This is
+ * also why the check runs in TypeScript and not in the candidate SQL —
+ * SQLite's strftime('%w')/time('now') evaluate in UTC. Mirrored by the client
+ * (drawable.ts) and pinned by shared/drawableVectors.ts WINDOW_VECTORS.
+ */
+export function isWithinWindow(
+  days: number[] | null | undefined,
+  start: string | null | undefined,
+  end: string | null | undefined,
+  now: Date,
+): boolean {
+  if (days == null || start == null || end == null) return true;
+  if (!days.includes(now.getDay())) return false;
+  const toMinutes = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m; // "24:00" → 1440
+  };
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  return minutes >= toMinutes(start) && minutes < toMinutes(end);
+}
+
+/**
+ * window_days column (validated JSON) → number[] | null. Writes are validated,
+ * so corrupt JSON only exists in a hand-edited DB — but this runs on every
+ * task payload, so contain it as null (= unwindowed, the pool-safe reading)
+ * rather than letting one bad row take down whole endpoints.
+ */
+export function parseWindowDays(raw: unknown): number[] | null {
+  if (typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw) as number[];
+  } catch {
+    return null;
+  }
+}
+
 function filterConditions(filters: DrawFilters): { conditions: string[]; params: unknown[] } {
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -111,9 +156,18 @@ function filterConditions(filters: DrawFilters): { conditions: string[]; params:
 /**
  * The drawable-candidate query — the single home of the drawability
  * predicate (ADR-2). Reused by drawTask() and the side-effect-free
- * drawPool() below so the two can never drift.
+ * drawPool() below so the two can never drift. The availability window
+ * (#33) is applied here as a TypeScript post-filter over the SQL rows —
+ * local wall-clock semantics that SQLite's UTC time functions cannot
+ * express — so both callers share one predicate by construction.
+ * `windowExcluded` counts the rows the window filter removed; drawTask's
+ * empty-pool dispatch needs it to report `all_outside_window`.
  */
-function queryCandidates(filters: DrawFilters, maxEffort: number, now: Date): PoolCandidate[] {
+function queryCandidates(
+  filters: DrawFilters,
+  maxEffort: number,
+  now: Date,
+): { candidates: PoolCandidate[]; windowExcluded: number } {
   const filter = filterConditions(filters);
   const conditions = [
     "t.status = 'open'",
@@ -124,16 +178,21 @@ function queryCandidates(filters: DrawFilters, maxEffort: number, now: Date): Po
     `NOT ${heldBackSql("t")}`,
     ...filter.conditions,
   ];
-  return db
+  const rows = db
     .prepare(
       `SELECT t.id, t.title, t.category_id AS categoryId, t.goal_id AS goalId,
               t.impact, t.effort_minutes AS effortMinutes, t.due_date AS dueDate,
               t.created_at AS createdAt, t.recur_every_days AS recurEveryDays,
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil,
+              t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
               (SELECT MAX(completed_at) FROM completions WHERE task_id = t.id) AS lastCompletedAt
        FROM tasks t WHERE ${conditions.join(" AND ")}`,
     )
     .all(maxEffort, now.toISOString(), ...filter.params) as PoolCandidate[];
+  const candidates = rows.filter((r) =>
+    isWithinWindow(parseWindowDays(r.windowDays), r.windowStart, r.windowEnd, now),
+  );
+  return { candidates, windowExcluded: rows.length - candidates.length };
 }
 
 /**
@@ -150,7 +209,7 @@ export function drawPool(filters: DrawFilters): {
   const maxEffort = getSetting("max_draw_effort", 30);
   const cooldown = getSetting("draw_cooldown_minutes", 60);
   const now = new Date();
-  const candidates = queryCandidates(filters, maxEffort, now);
+  const { candidates } = queryCandidates(filters, maxEffort, now);
   const weights = candidates.map((c) => weight(c, now, cooldown, candidates.length));
   const total = weights.reduce((a, b) => a + b, 0);
   return {
@@ -175,12 +234,22 @@ export function drawTask(filters: DrawFilters): DrawResult {
   const cooldown = getSetting("draw_cooldown_minutes", 60);
   const now = new Date();
 
-  const candidates = queryCandidates(filters, maxEffort, now);
+  const { candidates, windowExcluded } = queryCandidates(filters, maxEffort, now);
 
   if (candidates.length === 0) {
     // The draw replaced whatever card was showing — even an empty draw, so a
     // reload doesn't resurrect a card the user already saw disappear.
     clearCurrentDraw();
+    // Out-of-window candidates take precedence over the anyOpen dispatch
+    // below (#33): if the SQL query produced candidates and only the window
+    // filter emptied the pool, the honest answer is "scheduled for later" —
+    // these cards return on their own, so the break-something-down hint
+    // would mislead. A task that is oversized AND out-of-window never
+    // reaches the window filter (SQL already dropped it) and still counts
+    // toward all_too_big: it will not become drawable by waiting.
+    if (windowExcluded > 0) {
+      return { task: null, reason: "all_outside_window" };
+    }
     // Distinguish "nothing at all" from "only oversized/unestimated tasks".
     // Snoozed/blocked cards are not "too big" — they come back on their own
     // (or on wake), so they must not trigger the break-something-down hint.
@@ -227,21 +296,27 @@ export function drawTask(filters: DrawFilters): DrawResult {
               t.created_at AS createdAt, t.completed_at AS completedAt,
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
               t.subtask_order_mode AS subtaskOrderMode,
+              t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
               0 AS hasOpenChildren, 0 AS heldBack
        FROM tasks t WHERE t.id = ?`,
     )
     .get(chosen.id) as Record<string, unknown>;
 
   return {
-    task: withBooleanBlocked(task),
+    task: toTaskPayload(task),
     poolSize: candidates.length,
     probability: weights[picked] / total,
   };
 }
 
-/** SQLite stores booleans as 0/1 — task JSON payloads expose a real boolean. */
-export function withBooleanBlocked(task: Record<string, unknown>): Record<string, unknown> {
+/**
+ * Row → JSON payload: SQLite stores booleans as 0/1 (blocked becomes a real
+ * boolean) and the availability window's weekdays as JSON text (windowDays
+ * becomes number[] | null).
+ */
+export function toTaskPayload(task: Record<string, unknown>): Record<string, unknown> {
   task.blocked = Boolean(task.blocked);
+  task.windowDays = parseWindowDays(task.windowDays);
   return task;
 }
 
@@ -256,14 +331,21 @@ export interface RestorableTask {
   blocked: number | boolean;
   deferredUntil: string | null;
   heldBack: number | boolean;
+  /** Parsed window (#33) — run rows through toTaskPayload() before validating. */
+  windowDays: number[] | null;
+  windowStart: string | null;
+  windowEnd: string | null;
 }
 
 /**
  * Restore-validation for a persisted draw. Mirrors the client's
  * `classifyTask` and the candidate WHERE clause above: only an open leaf
  * task with an estimate within the draw limit, neither blocked nor snoozed
- * into the future nor held back behind a sequential sibling (#23), is still
- * in the deck. Pinned against the same vectors as the client
+ * into the future nor held back behind a sequential sibling (#23) nor
+ * outside its availability window (#33), is still in the deck. Like
+ * snooze wear-off, the window check makes the stale pointer clear lazily —
+ * a card whose window closed (or that was edited out of its window) is not
+ * resurrected by a reload. Pinned against the same vectors as the client
  * (`shared/drawableVectors.ts`) so the two cannot drift.
  */
 export function isRestorable(task: RestorableTask, maxEffort: number, now: Date): boolean {
@@ -273,6 +355,7 @@ export function isRestorable(task: RestorableTask, maxEffort: number, now: Date)
     !task.blocked &&
     (task.deferredUntil == null || new Date(task.deferredUntil) <= now) &&
     !task.heldBack &&
+    isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, now) &&
     task.effortMinutes != null &&
     task.effortMinutes <= maxEffort
   );
@@ -323,16 +406,18 @@ export function currentDraw(): { task: Record<string, unknown> } | null {
               t.created_at AS createdAt, t.completed_at AS completedAt,
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
               t.subtask_order_mode AS subtaskOrderMode,
+              t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
               EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open') AS hasOpenChildren,
               ${heldBackSql("t")} AS heldBack
        FROM tasks t WHERE t.id = ?`,
     )
-    .get(id) as (Record<string, unknown> & RestorableTask) | undefined;
+    .get(id) as Record<string, unknown> | undefined;
 
   const maxEffort = getSetting("max_draw_effort", 30);
-  if (!task || !isRestorable(task, maxEffort, new Date())) {
+  const payload = task && toTaskPayload(task); // parses windowDays for isRestorable
+  if (!payload || !isRestorable(payload as unknown as RestorableTask, maxEffort, new Date())) {
     clearCurrentDraw();
     return null;
   }
-  return { task: withBooleanBlocked(task) };
+  return { task: payload };
 }

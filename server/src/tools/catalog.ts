@@ -95,6 +95,22 @@ const dateSchema = z
 
 const idSchema = z.number().int().positive();
 
+// Availability window (#33, ADR-20) — mirrors the route validation: all three
+// fields together (or windowDays: null to clear), [start, end) on the user's
+// LOCAL clock, end may be "24:00", end must be after start (no overnight).
+const windowDaysSchema = z
+  .array(z.number().int().min(0).max(6))
+  .min(1)
+  .describe("Weekdays the task is available, JS getDay() numbers (0 = Sunday). Set with windowStart + windowEnd.");
+const windowStartSchema = z
+  .string()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "must be HH:MM")
+  .describe("Daily window start, HH:MM local time (inclusive)");
+const windowEndSchema = z
+  .string()
+  .regex(/^(([01]\d|2[0-3]):[0-5]\d|24:00)$/, "must be HH:MM, up to 24:00")
+  .describe("Daily window end, HH:MM local time (exclusive; 24:00 = end of day, must be after windowStart)");
+
 function query(params: Record<string, unknown>): string {
   const pairs = Object.entries(params).filter(([, v]) => v !== undefined && v !== null);
   if (pairs.length === 0) return "";
@@ -191,7 +207,9 @@ const createTask = defineTool({
     "drawable deck once effortMinutes is set and is at most max_draw_effort (see get_settings) — " +
     "bigger work should be created as a parent and broken down with create_subtasks. " +
     "impact (1–5) is only accepted together with goalId: it rates leverage toward that goal " +
-    "(ADR-4). recurEveryDays makes it a recurring chore whose due date advances on completion.",
+    "(ADR-4). recurEveryDays makes it a recurring chore whose due date advances on completion. " +
+    "windowDays + windowStart + windowEnd (all three together) give the task an availability " +
+    "window: outside it the card is excluded from the draw and shows as scheduled.",
   inputSchema: {
     title: z.string().min(1),
     categoryId: idSchema.describe("Required — list_categories shows the options"),
@@ -201,6 +219,9 @@ const createTask = defineTool({
     effortMinutes: z.number().int().positive().optional(),
     dueDate: dateSchema.optional(),
     recurEveryDays: z.number().int().positive().optional(),
+    windowDays: windowDaysSchema.optional(),
+    windowStart: windowStartSchema.optional(),
+    windowEnd: windowEndSchema.optional(),
     parentId: idSchema
       .optional()
       .describe("Create as a subtask of this task (prefer create_subtasks for batches)"),
@@ -246,6 +267,12 @@ const updateTask = defineTool({
     effortMinutes: z.number().int().positive().nullable().optional(),
     dueDate: dateSchema.nullable().optional(),
     recurEveryDays: z.number().int().positive().nullable().optional(),
+    windowDays: windowDaysSchema
+      .nullable()
+      .optional()
+      .describe("Availability weekdays (0-6, 0 = Sunday); null clears the whole window"),
+    windowStart: windowStartSchema.nullable().optional(),
+    windowEnd: windowEndSchema.nullable().optional(),
     status: z
       .enum(["open", "archived"])
       .optional()
@@ -336,10 +363,12 @@ const drawCard = defineTool({
   description:
     "Draw the next card from the deck — the answer to \"what should I do right now?\". Picks a " +
     "weighted-random drawable task (open leaf, estimated, within max_draw_effort, not snoozed or " +
-    "blocked), favoring high-impact, low-effort, urgent, stale tasks. NOT read-only: it stamps " +
-    "the task's last_drawn_at (dampening quick redraws) and can unlock achievements. If the deck " +
-    "is empty the result says why: no_ready_tasks (nothing open and ready) or all_too_big " +
-    "(everything needs an estimate or a create_subtasks breakdown).",
+    "blocked, inside its availability window if it has one), favoring high-impact, low-effort, " +
+    "urgent, stale tasks. NOT read-only: it stamps the task's last_drawn_at (dampening quick " +
+    "redraws) and can unlock achievements. If the deck is empty the result says why: " +
+    "no_ready_tasks (nothing open and ready), all_too_big (everything needs an estimate or a " +
+    "create_subtasks breakdown), or all_outside_window (every candidate returns on its own when " +
+    "its availability window opens).",
   inputSchema: {
     categoryId: idSchema.optional().describe("Only draw from this category"),
     goalId: idSchema.optional().describe("Only draw from this goal"),
@@ -359,8 +388,11 @@ const drawCard = defineTool({
         body.reason === "all_too_big"
           ? "Open tasks exist, but each is unestimated or exceeds max_draw_effort — pick one and " +
             "break it down with create_subtasks (split, never clamp)."
-          : "No open task is ready to draw — create_task something small, or check list_tasks " +
-            "for snoozed/blocked cards that come back on their own.";
+          : body.reason === "all_outside_window"
+            ? "Every ready card is outside its availability window right now — they return on " +
+              "their own when a window opens; nothing needs breaking down."
+            : "No open task is ready to draw — create_task something small, or check list_tasks " +
+              "for snoozed/blocked cards that come back on their own.";
       return ok({ ...body, hint });
     }
     return ok(body);

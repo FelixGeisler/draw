@@ -15,15 +15,19 @@ User          Client (DrawPage)        Server (drawService)
  │ card flips      │ + achievement check    │
 ....
 
-Empty pool returns `{task: null, reason: 'no_ready_tasks' | 'all_too_big'}` —
-the UI turns this into a "break something down" call to action.
+Empty pool returns
+`{task: null, reason: 'no_ready_tasks' | 'all_too_big' | 'all_outside_window'}` —
+the UI turns `all_too_big` into a "break something down" call to action, while
+`all_outside_window` (every remaining candidate is outside its availability
+window, ADR-20) says "scheduled for later": those cards return on their own.
 
 The pick is persisted as the *current draw* (ADR-13). On mount the DrawPage
 restores it from `GET /api/draw/current` — revealed, no shuffle — the same
 pattern as the TimerBar (6.4). The endpoint validates the task is still
 drawable (open leaf, estimated, within `max_draw_effort`, not snoozed/blocked,
-not held back behind a sequential sibling) and lazily clears a
-pointer that went stale, e.g. because the card was edited out of the deck.
+not held back behind a sequential sibling, inside its availability window) and
+lazily clears a pointer that went stale, e.g. because the card was edited out
+of the deck.
 
 == 6.2 Completing a task (single transaction)
 

@@ -338,3 +338,49 @@ into the MCP client; the in-app AI keeps checkbox review (ADR-14) because the
 web UI has no per-call gate. stdout stays a pure JSON-RPC channel (logs on
 stderr), and loopback-only remains untouched (section 2) — the MCP server is
 a local process talking to a local API.
+
+== ADR-20: Availability windows on the local wall clock, filtered in TypeScript
+
+*Context:* Some tasks are only doable at certain times — calling the doctor's
+office works Mon–Fri 08:00–12:00 — but the deck held such cards around the
+clock, and drawing them at 21:00 wasted the draw (the recurring cousin of the
+one-off problem ADR-17 solves). Time semantics in the repo are mixed: due-date
+urgency parses local wall clock, stats arithmetic is UTC.
+*Decision:* One optional window per task: `window_days` (JSON array of JS
+`getDay()` integers, 0 = Sunday) plus `window_start`/`window_end` (`"HH:MM"`),
+all three set or all three NULL (API-enforced all-or-none; `windowDays: null`
+clears). Semantics are deliberately **local wall clock** — the app is a local
+single-user tool, so "Mon–Fri 08:00–12:00" means the user's own clock,
+consistent with due-date urgency. Corollary: the check lives in
+**TypeScript**, never SQL — SQLite's `strftime('%w','now')`/`time('now')`
+evaluate in UTC and would shift the window by the user's offset. The shared
+candidate query (ADR-2) selects the three columns and one exported pure
+predicate (`isWithinWindow`) post-filters the rows for both `drawTask()` and
+`drawPool()`; the same predicate guards `isRestorable` (ADR-13, lazy pointer
+clear like an expired snooze in reverse) and is mirrored in the client as the
+`scheduled` classify group (precedence container → snoozed → queued →
+scheduled → needs-estimate → too-big → ready; explicit snooze and queue
+position outrank the schedule). Both sides are pinned by shared vectors
+(`shared/drawableVectors.ts`) — window vectors are expressed as *offsets*
+relative to "now" and materialized per run, because fixed weekdays would make
+the suites timezone-dependent. Boundaries are `[start, end)` — start
+inclusive, end exclusive — with `"24:00"` allowed as end-of-day, so
+`00:00–24:00` is a full day and future back-to-back windows cannot overlap.
+`end <= start` is rejected (400): with a weekday set, a midnight-crossing
+window is ambiguous (does Mon 22:00–02:00 need Tuesday selected?); resolving
+that only pays off with multi-window support, the designated follow-up — a
+night window is approximated as `22:00–24:00`. Weights are untouched: the
+window is hard pool membership, an overdue windowed card keeps its ×5 urgency
+inside the window and does not exist outside it. The empty-pool dispatch
+gains `all_outside_window`, reported whenever the SQL query produced
+candidates and only the window filter emptied the pool — those cards return
+on their own, so the "break something down" hint would mislead; a card that
+is oversized *and* out-of-window still counts toward `all_too_big`, because
+waiting will not fix it. The window gates the draw only: manual timer start
+and completion work at any time.
+*Rationale:* A derived, wall-clock predicate keeps every mutation path
+automatically correct (the ADR-2 argument), needs no scheduler or background
+job to "reopen" cards, and no write when a window opens or closes. The
+TypeScript placement trades one SQL-side filter for immunity against the
+UTC/local mismatch that already bit the repo elsewhere (`isDueSoon` vs.
+`urgencyFactor`).

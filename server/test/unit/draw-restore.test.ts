@@ -16,6 +16,9 @@ function task(overrides: Partial<RestorableTask> = {}): RestorableTask {
     blocked: 0,
     deferredUntil: null,
     heldBack: 0,
+    windowDays: null,
+    windowStart: null,
+    windowEnd: null,
     ...overrides,
   };
 }
@@ -72,5 +75,21 @@ describe("isRestorable", () => {
   it("rejects a held-back sequential sibling (0/1 and boolean forms)", () => {
     expect(isRestorable(task({ heldBack: 1 }), 30, NOW)).toBe(false);
     expect(isRestorable(task({ heldBack: true }), 30, NOW)).toBe(false);
+  });
+
+  // #33: a drawn card whose availability window closed (or that was edited
+  // out of its window) left the deck — the stale pointer clears lazily here,
+  // like an expired snooze in reverse. LOCAL wall clock, so the vectors
+  // derive the window from NOW's local weekday/time instead of pinning one.
+  it("rejects a card outside its availability window, accepts one inside", () => {
+    const otherDay = (NOW.getDay() + 1) % 7;
+    const minutes = NOW.getHours() * 60 + NOW.getMinutes();
+    const fmt = (m: number) => {
+      const c = Math.max(0, Math.min(1440, m));
+      return `${String(Math.floor(c / 60)).padStart(2, "0")}:${String(c % 60).padStart(2, "0")}`;
+    };
+    const around = { windowStart: fmt(minutes - 60), windowEnd: fmt(minutes + 60) };
+    expect(isRestorable(task({ windowDays: [NOW.getDay()], ...around }), 30, NOW)).toBe(true);
+    expect(isRestorable(task({ windowDays: [otherDay], ...around }), 30, NOW)).toBe(false);
   });
 });

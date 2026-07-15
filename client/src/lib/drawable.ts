@@ -1,6 +1,13 @@
 import type { Task } from "../api/types";
 
-export type DrawGroup = "ready" | "needs-estimate" | "too-big" | "container" | "snoozed" | "queued";
+export type DrawGroup =
+  | "ready"
+  | "needs-estimate"
+  | "too-big"
+  | "container"
+  | "snoozed"
+  | "queued"
+  | "scheduled";
 
 /**
  * Derived snooze state (ADR-17): blocked, or deferredUntil in the future.
@@ -14,20 +21,67 @@ export function isSnoozed(
 }
 
 /**
+ * Availability-window predicate (#33, ADR-20) — mirrors the server's
+ * `isWithinWindow` in drawService.ts, pinned by the shared WINDOW_VECTORS.
+ * True when the task has no window, or `now` falls on one of its weekdays
+ * inside [start, end) — start inclusive, end exclusive, "24:00" meaning
+ * end-of-day. Deliberately LOCAL wall clock (getDay/getHours, never getUTC*).
+ */
+export function isWithinWindow(
+  days: number[] | null | undefined,
+  start: string | null | undefined,
+  end: string | null | undefined,
+  now: Date,
+): boolean {
+  if (days == null || start == null || end == null) return true;
+  if (!days.includes(now.getDay())) return false;
+  const toMinutes = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m; // "24:00" → 1440
+  };
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  return minutes >= toMinutes(start) && minutes < toMinutes(end);
+}
+
+/**
  * Mirrors the server's pool predicate (`drawService.ts`), pinned by the shared
  * vectors in `shared/drawableVectors.ts`. Precedence:
- * container → snoozed → queued → needs-estimate → too-big → ready.
+ * container → snoozed → queued → scheduled → needs-estimate → too-big → ready.
  * Snoozed outranks queued: an explicit user action (snooze/block) is more
  * informative than the derived queue position, and it keeps the Wake
  * affordance visible — on wake the task simply re-classifies as queued.
+ * Queued outranks scheduled: a card behind a sequential sibling is out of the
+ * deck regardless of its window, and the queue explains why better.
  */
 export function classifyTask(task: Task, maxDrawEffort: number, now: Date = new Date()): DrawGroup {
   if (task.hasOpenChildren) return "container";
   if (isSnoozed(task, now)) return "snoozed";
   if (task.heldBack) return "queued";
+  if (!isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, now)) return "scheduled";
   if (task.effortMinutes == null) return "needs-estimate";
   if (task.effortMinutes > maxDrawEffort) return "too-big";
   return "ready";
+}
+
+const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+// Chips render Mon-first even though storage is getDay() numbers (0 = Sun).
+const DISPLAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+
+/** Compact window chip label, e.g. "Mon–Fri 08:00–12:00" or "daily 06:00–09:00". */
+export function formatWindow(days: number[], start: string, end: string): string {
+  const range = `${start}–${end}`;
+  const positions = DISPLAY_ORDER.map((d, i) => (days.includes(d) ? i : -1)).filter((i) => i >= 0);
+  if (positions.length === 7) return `daily ${range}`;
+  const parts: string[] = [];
+  for (let s = 0; s < positions.length; ) {
+    let e = s;
+    while (e + 1 < positions.length && positions[e + 1] === positions[e] + 1) e++;
+    const from = DAY_LABELS[DISPLAY_ORDER[positions[s]]];
+    const to = DAY_LABELS[DISPLAY_ORDER[positions[e]]];
+    parts.push(s === e ? from : e - s === 1 ? `${from}, ${to}` : `${from}–${to}`);
+    s = e + 1;
+  }
+  return `${parts.join(", ")} ${range}`;
 }
 
 /** Flatten roots + subtasks into a single list of open tasks. */

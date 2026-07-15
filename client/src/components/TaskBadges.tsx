@@ -1,5 +1,5 @@
 import type { Task } from "../api/types";
-import { isDueSoon, isSnoozed } from "../lib/drawable";
+import { formatWindow, isDueSoon, isSnoozed, isWithinWindow } from "../lib/drawable";
 import { displayEffort } from "../lib/effort";
 
 /** Compact local wake time for the 💤 chip, e.g. "2026-07-15 18:00". */
@@ -61,6 +61,25 @@ export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolea
       {Boolean(task.heldBack) && !isSnoozed(task) && (
         <span className="chip" title="In line — this breakdown is done in order; finish the steps in front first">
           ⏳ queued
+        </span>
+      )}
+      {/* Availability window (#33): warn-colored while currently outside it —
+          the card is out of the deck and returns on its own. */}
+      {task.windowDays != null && task.windowStart != null && task.windowEnd != null && (
+        <span
+          className="chip"
+          style={
+            isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, new Date())
+              ? undefined
+              : { borderColor: "var(--warn)", color: "var(--warn)" }
+          }
+          title={
+            isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, new Date())
+              ? "Availability window — currently open"
+              : "Outside its availability window — out of the deck until it opens again"
+          }
+        >
+          🕒 {formatWindow(task.windowDays, task.windowStart, task.windowEnd)}
         </span>
       )}
       {(showStars ?? task.goalId != null) && <ImpactStars value={task.impact} />}

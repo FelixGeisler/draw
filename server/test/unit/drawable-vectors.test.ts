@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isRestorable, type RestorableTask } from "../../src/services/drawService.js";
-import { DRAWABLE_VECTORS, VECTOR_NOW } from "../../../shared/drawableVectors.js";
+import { DRAWABLE_VECTORS, VECTOR_NOW, materializeWindow } from "../../../shared/drawableVectors.js";
 
 // Deck eligibility exists twice by design (ADR-2 predicate, one per tier):
 // the candidate WHERE clause / isRestorable() here, classifyTask() on the
@@ -13,6 +13,11 @@ const NOW = new Date(VECTOR_NOW);
 describe("shared eligibility vectors (parity with classifyTask)", () => {
   for (const v of DRAWABLE_VECTORS) {
     it(`${v.name} → ${v.expected === "ready" ? "in the deck" : "out"}`, () => {
+      // Windows are local wall-clock (#33), so window vectors carry offsets
+      // relative to NOW instead of fixed weekdays — deterministic anywhere.
+      const window = v.window
+        ? materializeWindow(v.window, NOW)
+        : { windowDays: null, windowStart: null, windowEnd: null };
       const task: RestorableTask = {
         status: "open",
         effortMinutes: v.effortMinutes,
@@ -20,6 +25,7 @@ describe("shared eligibility vectors (parity with classifyTask)", () => {
         blocked: v.blocked,
         deferredUntil: v.deferredUntil,
         heldBack: v.heldBack,
+        ...window,
       };
       expect(isRestorable(task, v.maxEffort, NOW)).toBe(v.expected === "ready");
     });
