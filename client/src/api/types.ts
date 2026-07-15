@@ -79,10 +79,13 @@ export interface Task {
    */
   heldBack: number;
   /**
-   * Derived at query time (never stored): sum of OPEN subtasks' estimates for a
-   * broken-down task, the task's own effortMinutes otherwise. Null when the open
-   * subtasks are all unestimated. Absent on task shapes from the draw/timer
-   * endpoints, which only ever carry drawable leaves.
+   * Derived at query time (never stored, #111/ADR-32): while ANY non-archived
+   * subtask exists, the sum of OPEN subtasks' estimates — null when none are
+   * open (all-done breakdown) or none estimated — and NEVER the task's own
+   * stored effortMinutes. Only a task with zero non-archived children (a true
+   * leaf, or a parent revived by its children all archiving or moving away)
+   * reports its own effortMinutes here. Absent on task shapes from the
+   * draw/timer endpoints, which only ever carry drawable leaves.
    */
   remainingEffortMinutes?: number | null;
   /**

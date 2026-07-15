@@ -114,7 +114,9 @@ export interface CompleteOptions {
    * XP, and the `effort_minutes ?? 10` default would double-earn (or mint 10
    * minutes of XP for an unestimated parent). The `xp < 1` floor below lifts
    * the zero base to the symbolic 1 XP, keeping every completion row
-   * uniformly >= 1 for the trophy/today displays.
+   * uniformly >= 1 for the trophy/today displays. The override also forces
+   * the warm-up branch off, for the same honesty reason as the caller-forced
+   * `wasDrawn: false` — see the marker read below.
    */
   effortMinutes?: number;
 }
@@ -131,8 +133,14 @@ export function completeTask(
   const now = new Date();
   // Read the warm-up marker BEFORE clearCurrentDraw below wipes it. The
   // marker only ever describes the current draw, so a matching taskId means
-  // this completion resolves the dealt warm-up card.
-  const marker = getWarmupMarker();
+  // this completion resolves the dealt warm-up card. The effort override
+  // skips the read entirely (#111): a symbolic zero-effort completion never
+  // resolves the deal — a dealt card that was broken down auto-completes
+  // through here while the marker still points at it (POST /:id/subtasks
+  // leaves the pointer for ADR-13's lazy clear), and recording was_warmup = 1
+  // on that row would lie in the log and arm the ×1.25 momentum window off a
+  // completion the user never made on the dealt card.
+  const marker = opts?.effortMinutes == null ? getWarmupMarker() : null;
   const warmup =
     marker != null && marker.taskId === task.id
       ? {

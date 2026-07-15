@@ -1025,18 +1025,32 @@ history and strand the parent-revives-as-leaf path (PR #102 — children all
 moved away or archived leave zero non-archived subtasks and the stored value
 becomes meaningful again; ADR-2: derive at read time, keep stored fields as
 source data). *(2) Auto-complete:* after every write that changes a
-subtask's status (complete, archive, reopen, un-archive), a parent that is
-open, non-recurring and ALL-DONE — >= 1 done subtask, zero open, archived
-ignored on both sides — completes through `completeTask()` in the same
+subtask's status (complete, archive, reopen, un-archive) or deletes one (the
+trash button sits on every subtask row, and deleting the last open step next
+to a done sibling is an everyday finisher — deleting a parent's ONLY subtask
+instead leaves zero children and revives it as a leaf, not as done), a
+parent that is open, non-recurring and ALL-DONE — >= 1 done subtask, zero
+open, archived ignored on both sides — completes through `completeTask()` in the same
 transaction: a genuine completion row (ADR-5 derivations, achievements
 including `monster_slayer` at its natural moment, timer close, ADR-13
 pointer hygiene all flow normally), with an explicit effort override of 0 —
 the subtasks already earned the effort-XP — and `wasDrawn` false (under rule
-1 a parent with children is never in the deck); the existing `xp < 1` floor
+1 a parent with children is never in the deck); the override also forces the
+warm-up branch off (ADR-30): a dealt card that was broken down still owns
+the marker when its symbolic completion runs, and a `was_warmup = 1` row
+would lie in the log and arm the ×1.25 momentum window off a completion the
+user never made on the dealt card. The existing `xp < 1` floor
 lifts it to a symbolic *1 XP*, keeping every completion row >= 1 for the
 trophy pile and today displays. It COUNTS toward the daily goal and the
 streak like any completion — it is one honest row, and excluding it would
-need a new stored distinction (rejected for simplicity and honesty). Manual
+need a new stored distinction (rejected for simplicity and honesty). The
+estimation block (ADR-15) usually never sees the symbolic cycle — the
+attributed window has no tracked minutes (checkbox-only cycles are skipped)
+or an unestimated parent fails the positive-estimate rule — but a parent
+with BOTH pre-breakdown tracked time and a positive stored estimate DOES
+enter the block on auto-completion, exactly as the same row would have on
+manual completion before this decision; the data point is real and
+deliberately kept. Manual
 completion of a parent with >= 1 non-archived subtask awards the same
 zero-effort XP (legacy all-done-open rows resolve this way); a parent whose
 subtasks are ALL archived is a leaf again and completes on its own estimate.

@@ -249,7 +249,9 @@ export function breakdownAllDone(childStatuses: string[]): boolean {
 /**
  * Auto-complete an open, non-recurring parent whose breakdown just became
  * all-done (#111, ADR-32). Evaluated after every write that changes a
- * subtask's status (complete, archive, reopen, un-archive); must run inside
+ * subtask's status (complete, archive, reopen, un-archive) or removes one
+ * (DELETE — the trash button sits on every subtask row, so deleting the last
+ * open step next to a done sibling is an everyday finisher); must run inside
  * the caller's transaction. Flows through completeTask() — a genuine
  * completion row (ADR-5), achievements, timer close, daily/streak count —
  * with effort overridden to 0 (the subtasks already earned the effort XP;
@@ -1158,12 +1160,33 @@ tasksRouter.post("/:id/timer/start", (req, res) => {
 
 tasksRouter.delete("/:id", (req, res) => {
   const id = Number(req.params.id);
-  const result = db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-  if (result.changes === 0) return res.status(404).json({ error: "task not found" });
+  const row = db.prepare("SELECT parent_id AS parentId FROM tasks WHERE id = ?").get(id) as
+    | { parentId: number | null }
+    | undefined;
+  if (!row) return res.status(404).json({ error: "task not found" });
+  // Deleting a subtask can finish the breakdown (#111, ADR-32): "this
+  // remaining step is irrelevant" is a natural way to close one out, so the
+  // lifecycle hook runs here like on every status-changing write, in the
+  // same transaction. Deleting a parent's ONLY subtask instead leaves zero
+  // children — the all-done predicate needs >= 1 done one — and the parent
+  // revives as a leaf (PR #102), not as done. The reopen direction needs no
+  // hook: a delete only ever removes children, never adds an open one.
+  const parentCompletion = db.transaction((): CompletionResult | null => {
+    db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
+    return row.parentId != null ? maybeAutoCompleteParent(row.parentId) : null;
+  })();
   // A deleted card leaves the deck — whether it was deleted directly or
   // cascade-deleted with its parent. Cleared on row absence, not id match:
   // a freed id (no AUTOINCREMENT) could be re-bound to the next captured
   // task before the lazy restore validation ever runs.
   clearDanglingDraw();
-  res.json({ ok: true });
+  res.json({
+    ok: true,
+    // Same cascade surface as the completion paths (#111): XP, achievements
+    // and level-up without a second request. The client's delete mutation
+    // invalidates gamification/stats/tasks anyway; MCP flows read it.
+    ...(parentCompletion
+      ? { parentCompletion: { task: getTask(row.parentId!), ...parentCompletion } }
+      : {}),
+  });
 });

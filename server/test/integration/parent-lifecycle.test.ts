@@ -383,6 +383,11 @@ describe("current-draw pointer through the cascade (ADR-13)", () => {
   });
 });
 
+// Third case, deliberately NOT pinned as an exclusion (ADR-32): a parent with
+// BOTH pre-breakdown tracked time AND a positive stored estimate DOES enter
+// the block on auto-completion — the cycle is tracked and the estimate rule
+// passes, exactly as the same row would have on manual completion. The data
+// point is real and kept.
 describe("estimation stats stay clean (ADR-15)", () => {
   it("a parent auto-completion never reaches the estimation block", async () => {
     // Parent A: stored estimate but NO tracked time → zero tracked cycles.
@@ -450,5 +455,93 @@ describe("rule 1: drawability and display without the parent's own estimate", ()
     const goals = (await request(app).get("/api/goals").expect(200)).body;
     const row = goals.find((g: { id: number }) => g.id === goal.id);
     expect(row.remainingOpenEffortMinutes).toBeNull(); // not the parent's 60
+  });
+});
+
+describe("deleting a subtask triggers the lifecycle (the trash button is on every row)", () => {
+  async function deleteTask(id: number) {
+    return (await request(app).delete(`/api/tasks/${id}`).expect(200)).body;
+  }
+
+  it("deleting the last open subtask next to a done sibling auto-completes the parent", async () => {
+    const parent = await mkTask({ title: "Delete-finisher parent", effortMinutes: 60 });
+    const [done, irrelevant] = await mkSubtasks(parent.id, [
+      { title: "delete-finisher done step", effortMinutes: 10 },
+      { title: "delete-finisher irrelevant step", effortMinutes: 20 },
+    ]);
+    await patchTask(done.id, { status: "done" });
+    expect((await listedTask(parent.id)).status).toBe("open"); // sibling still open
+
+    // "This remaining step is irrelevant, delete it" finishes the breakdown:
+    // same symbolic completion as the status-changing paths, same response
+    // surface (parentCompletion), same transaction.
+    const res = await deleteTask(irrelevant.id);
+    expect(res.ok).toBe(true);
+    expect(res.parentCompletion.task.id).toBe(parent.id);
+    expect(res.parentCompletion.task.status).toBe("done");
+    expect(res.parentCompletion.xpAwarded).toBe(1);
+    expect((await listedTask(parent.id)).status).toBe("done");
+    expect(completionsOf(parent.id)).toEqual([{ wasDrawn: 0, wasWarmup: 0, xp: 1 }]);
+  });
+
+  it("deleting a parent's ONLY subtask revives it as a leaf — children GONE, not done", async () => {
+    const parent = await mkTask({ title: "Delete-only-child parent", effortMinutes: 45 });
+    const [only] = await mkSubtasks(parent.id, [
+      { title: "delete-only step", effortMinutes: 10 },
+    ]);
+
+    // Zero children left: the all-done predicate (>= 1 done subtask) cannot
+    // fire — the parent stays open and its own estimate speaks again (PR #102).
+    const res = await deleteTask(only.id);
+    expect(res.parentCompletion).toBeUndefined();
+    const listed = await listedTask(parent.id);
+    expect(listed.status).toBe("open");
+    expect(listed.hasNonArchivedChildren).toBe(0);
+    expect(listed.remainingEffortMinutes).toBe(45); // leaf rules — own estimate
+    expect(completionsOf(parent.id)).toEqual([]);
+  });
+});
+
+describe("the warm-up marker never leaks into a symbolic completion (ADR-30)", () => {
+  it("a broken-down warm-up card auto-completes with was_warmup = 0 and arms no momentum", async () => {
+    // Test plumbing (mirrors warmup.test.ts): free the deal allowance and any
+    // pointer earlier scenarios left behind — production never resets these.
+    db.prepare(
+      "DELETE FROM settings WHERE key IN ('warmup_last_dealt', 'warmup_current_draw', 'current_draw_task_id')",
+    ).run();
+
+    // Deal the smallest card of a dedicated goal, then break it down. The
+    // breakdown does NOT clear the pointer (ADR-13 clears lazily on GET
+    // /api/draw/current, which an MCP-driven flow may never hit), so the
+    // marker still names the parent when the cascade completes it.
+    const goal = await mkGoal("warmup leak goal");
+    const parent = await mkTask({ title: "Warmup leak parent", goalId: goal.id, effortMinutes: 5 });
+    const deal = (
+      await request(app).post("/api/draw/warmup").send({ goalId: goal.id }).expect(200)
+    ).body;
+    expect(deal.task.id).toBe(parent.id);
+    const [a, b] = await mkSubtasks(parent.id, [
+      { title: "warmup leak step a", effortMinutes: 10 },
+      { title: "warmup leak step b", effortMinutes: 10 },
+    ]);
+
+    // Complete the breakdown inside the bonus window (>= 15 minutes).
+    await patchTask(a.id, { status: "done" });
+    const last = await patchTask(b.id, { status: "done" });
+    expect(last.parentCompletion.task.id).toBe(parent.id);
+    expect(last.parentCompletion.xpAwarded).toBe(1);
+    expect(last.parentCompletion.bonus).toBeNull(); // not "warmup"
+    // The symbolic row is honest: the user never completed the dealt card.
+    expect(completionsOf(parent.id)).toEqual([{ wasDrawn: 0, wasWarmup: 0, xp: 1 }]);
+    // The parent's own completeTask cleared pointer and marker together.
+    expect((await request(app).get("/api/draw/current").expect(200)).body).toBeNull();
+
+    // No was_warmup row means hasMomentum() stays disarmed: a task completed
+    // right afterwards earns plain XP (×1.25 would make this 13, bonus
+    // "momentum").
+    const probe = await mkTask({ title: "Momentum probe", effortMinutes: 10 });
+    const plain = await patchTask(probe.id, { status: "done" });
+    expect(plain.xpAwarded).toBe(10);
+    expect(plain.bonus).toBeNull();
   });
 });
