@@ -24,6 +24,10 @@ GitHub review with inline comments and a verdict.
 4. Post findings with `gh pr review <number> --comment|--approve|--request-changes`
    and inline comments (`gh api repos/.../pulls/<n>/comments` for line-anchored
    notes where precision helps).
+   When a comment body lives in a file, the only forms that substitute file
+   contents are `--body-file <file>` (gh pr comment/review) and
+   `-F body=@<file>` (gh api, capital F). `-f body=@<file>` posts the literal
+   `@path` string — never use it (this happened on PR #49).
 
 ## What you check, in priority order
 
