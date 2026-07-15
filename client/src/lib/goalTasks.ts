@@ -23,3 +23,24 @@ export function filterByTitle(tasks: Task[], query: string): Task[] {
   if (!q) return tasks;
   return tasks.filter((t) => t.title.toLowerCase().includes(q));
 }
+
+/**
+ * Whether the picker renders its search box: above the threshold, typing
+ * beats scanning. The SAME predicate must gate applying the query — see
+ * shownCandidates below.
+ */
+export function isSearchable(candidates: Task[]): boolean {
+  return candidates.length > LINK_SEARCH_THRESHOLD;
+}
+
+/**
+ * The rows the picker lists: the query applies ONLY while the search box is
+ * rendered. Linking tasks out of a searched list can drop the candidates to
+ * the threshold, which unmounts the box while the query state survives —
+ * without this guard the list would stay filtered by an invisible,
+ * unclearable query, worst case "no match" with no search box in sight
+ * (PR #89 review).
+ */
+export function shownCandidates(candidates: Task[], query: string): Task[] {
+  return isSearchable(candidates) ? filterByTitle(candidates, query) : candidates;
+}

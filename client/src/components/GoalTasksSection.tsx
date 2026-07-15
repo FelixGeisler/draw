@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Task } from "../api/types";
 import { useTasks, useUpdateTask } from "../hooks/useTasks";
-import { filterByTitle, LINK_SEARCH_THRESHOLD, linkableTasks } from "../lib/goalTasks";
+import { isSearchable, linkableTasks, shownCandidates } from "../lib/goalTasks";
 import { TaskBadges } from "./TaskBadges";
 
 /**
@@ -21,11 +21,29 @@ export function GoalTasksSection({ goalId }: { goalId: number }) {
   // One announcement slot: the unlinked row disappears from this list, so the
   // feedback ("impact reset") must outlive the row itself.
   const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   async function unlink(task: Task) {
     // No confirm — fully reversible via the picker right below.
-    await updateTask.mutateAsync({ id: task.id, goalId: null });
-    setNotice(`"${task.title}" moved to no goal — impact reset to neutral.`);
+    setError(null);
+    try {
+      const res = await updateTask.mutateAsync({ id: task.id, goalId: null });
+      // Derive the announcement from the response instead of asserting it:
+      // on a stale row (goal already gone via another tab) the PATCH degrades
+      // to a no-op resend of goalId: null, which deliberately preserves
+      // grandfathered non-neutral ratings (PR #74) — claiming "impact reset"
+      // there would be false.
+      setNotice(
+        res.task.goalId == null && res.task.impact === 3
+          ? `"${task.title}" moved to no goal — impact reset to neutral.`
+          : `"${task.title}" moved to no goal.`,
+      );
+    } catch (e) {
+      // api.patch throws on any non-2xx and nothing above catches mutateAsync
+      // rejections — without this the failure would be a silent unhandled
+      // rejection (same error surface as MaterialsSection).
+      setError((e as Error).message);
+    }
   }
 
   const doneCount = doneTasks.data?.length ?? 0;
@@ -38,7 +56,12 @@ export function GoalTasksSection({ goalId }: { goalId: number }) {
         </strong>
         <span style={{ flex: 1 }} />
         <button
-          onClick={() => setPicking((p) => !p)}
+          onClick={() => {
+            // Toggling the picker retires the unlink notice — "moved to no
+            // goal" must not linger under a list that may re-link the task.
+            setNotice(null);
+            setPicking((p) => !p);
+          }}
           title="Attach an existing goal-less task to this goal"
         >
           🔗 Link existing
@@ -70,12 +93,28 @@ export function GoalTasksSection({ goalId }: { goalId: number }) {
           ✓ {doneCount} done
         </div>
       )}
-      {notice && (
-        <div role="status" style={{ marginTop: 6, fontSize: 13, color: "var(--text-dim)" }}>
-          {notice}
-        </div>
+      {error && (
+        <div style={{ marginTop: 6, fontSize: 13, color: "var(--danger)" }}>{error}</div>
       )}
-      {picking && <LinkTaskPicker goalId={goalId} onClose={() => setPicking(false)} />}
+      {/* Always-mounted live region: screen readers only reliably announce a
+          role="status" whose container pre-exists its text — one that mounts
+          together with its content is skipped by several of them, and this
+          line is the whole feedback for a row that just left the list. */}
+      <div
+        role="status"
+        style={{ marginTop: notice ? 6 : 0, fontSize: 13, color: "var(--text-dim)" }}
+      >
+        {notice}
+      </div>
+      {picking && (
+        <LinkTaskPicker
+          goalId={goalId}
+          onClose={() => setPicking(false)}
+          // Re-linking a just-unlinked task makes the lingering "moved to no
+          // goal" line contradict the list right above it.
+          onLinked={() => setNotice(null)}
+        />
+      )}
     </div>
   );
 }
@@ -87,13 +126,37 @@ export function GoalTasksSection({ goalId }: { goalId: number }) {
  * offered. Linking a broken-down parent cascades the goal to its open
  * subtasks server-side.
  */
-function LinkTaskPicker({ goalId, onClose }: { goalId: number; onClose: () => void }) {
+function LinkTaskPicker({
+  goalId,
+  onClose,
+  onLinked,
+}: {
+  goalId: number;
+  onClose: () => void;
+  onLinked: () => void;
+}) {
   const allOpen = useTasks({ status: "open" });
   const updateTask = useUpdateTask();
   const [query, setQuery] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const candidates = linkableTasks(allOpen.data ?? []);
-  const shown = filterByTitle(candidates, query);
+  // The query applies ONLY while the search box is rendered: linking tasks
+  // away can shrink the pool to LINK_SEARCH_THRESHOLD, unmounting the box
+  // while the query state survives — the list must not stay filtered by an
+  // invisible, unclearable query (PR #89 review; pinned in goalTasks.test.ts).
+  const searchable = isSearchable(candidates);
+  const shown = shownCandidates(candidates, query);
+
+  async function link(task: Task) {
+    setError(null);
+    try {
+      await updateTask.mutateAsync({ id: task.id, goalId });
+      onLinked();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
 
   return (
     <div
@@ -115,7 +178,7 @@ function LinkTaskPicker({ goalId, onClose }: { goalId: number; onClose: () => vo
           Close
         </button>
       </div>
-      {candidates.length > LINK_SEARCH_THRESHOLD && (
+      {searchable && (
         <input
           autoFocus
           placeholder="Search goal-less tasks…"
@@ -124,6 +187,7 @@ function LinkTaskPicker({ goalId, onClose }: { goalId: number; onClose: () => vo
           style={{ fontSize: 13 }}
         />
       )}
+      {error && <div style={{ color: "var(--danger)", fontSize: 13 }}>{error}</div>}
       {shown.map((t) => (
         <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
           <span style={{ flex: 1 }}>{t.title}</span>
@@ -131,7 +195,7 @@ function LinkTaskPicker({ goalId, onClose }: { goalId: number; onClose: () => vo
           <button
             style={{ padding: "2px 8px" }}
             disabled={updateTask.isPending}
-            onClick={() => updateTask.mutate({ id: t.id, goalId })}
+            onClick={() => link(t)}
             title={`Attach "${t.title}" to this goal`}
           >
             + Link
