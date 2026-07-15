@@ -81,3 +81,57 @@ test("warm-up deals the smallest card with its badge; completing pays the bonus 
   // momentum by construction (ADR-2 derived state).
   await page.request.patch(`/api/tasks/${ids[SMALL_TASK]}`, { data: { status: "open" } });
 });
+
+const TIMER_TASK = "Warmup timer-bar hand-off";
+
+test("a warm-up card completed from the TimerBar dismisses itself and keeps the bonus (#110 × #57)", async ({
+  page,
+}) => {
+  // The test above spent the once-per-8h allowance; the public setting is the
+  // sanctioned reset (the internal marker keys are hidden — settings hygiene).
+  await page.request.patch("/api/settings", { data: { warmup_every_hours: 0 } });
+  const goals: { id: number; title: string }[] = await (await page.request.get("/api/goals")).json();
+  const goal = goals.find((g) => g.title === GOAL_TITLE)!;
+  const categories: { id: number }[] = await (await page.request.get("/api/categories")).json();
+  // Effort 4 undercuts even the reopened 5-minute card, so the deterministic
+  // pick lands here without leaning on its cooldown exclusion.
+  const task = await (
+    await page.request.post("/api/tasks", {
+      data: { title: TIMER_TASK, categoryId: categories[0].id, goalId: goal.id, effortMinutes: 4 },
+    })
+  ).json();
+
+  await page.goto("/");
+  await page.locator(".draw-filters select").selectOption({ label: `🎯 ${GOAL_TITLE}` });
+  await page.getByRole("button", { name: /Warm-up — deal my smallest card/ }).click();
+  await expect(page.locator(".draw-face.back h2")).toHaveText(TIMER_TASK);
+  await expect(page.locator(".warmup-chip")).toBeVisible();
+
+  // Start the timer from the card, Escape the focus overlay: the TimerBar
+  // now runs NEXT TO the still-revealed dealt card.
+  await page.locator(".draw-actions").getByRole("button", { name: "▶ Start now" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toBeHidden();
+
+  // Completing on the OTHER surface: the deal wrote the same current-draw
+  // pointer as a regular draw, so the derived card (#110) leaves on its own.
+  await page.locator(".timer-bar").getByRole("button", { name: "✓ Done" }).click();
+  await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
+  await expect(page.getByText("click to draw")).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await (await page.request.get("/api/draw/current")).json()).toBeNull();
+
+  // The bonus is server-derived from the marker, indifferent to the acting
+  // surface: round(4 × 1.25) = 5 — not the plain 4, not the drawn 6. And a
+  // deal is never "drawn" in the display derivations (ADR-30).
+  const g = await (await page.request.get("/api/gamification")).json();
+  const completion = g.todayCompletions.find((c: { title: string }) => c.title === TIMER_TASK);
+  expect(completion.xpAwarded).toBe(5);
+  expect(completion.wasDrawn).toBe(0);
+
+  // Hygiene: disarm momentum (reopen deletes the completion) and restore the
+  // allowance setting for later specs.
+  await page.request.patch(`/api/tasks/${task.id}`, { data: { status: "open" } });
+  await page.request.patch("/api/settings", { data: { warmup_every_hours: 8 } });
+});

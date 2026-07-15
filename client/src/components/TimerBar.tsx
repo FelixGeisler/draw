@@ -20,6 +20,7 @@ export function TimerBar() {
 
   return (
     <div
+      className="timer-bar"
       style={{
         display: "flex",
         alignItems: "center",

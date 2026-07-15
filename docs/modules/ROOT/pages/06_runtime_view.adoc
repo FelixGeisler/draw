@@ -21,9 +21,13 @@ the UI turns `all_too_big` into a "break something down" call to action, while
 `all_outside_window` (every remaining candidate is outside its availability
 window, ADR-20) says "scheduled for later": those cards return on their own.
 
-The pick is persisted as the *current draw* (ADR-13). On mount the DrawPage
-restores it from `GET /api/draw/current` — revealed, no shuffle — the same
-pattern as the TimerBar (6.4). The endpoint validates the task is still
+The pick is persisted as the *current draw* (ADR-13). The DrawPage DERIVES
+the standing card from `GET /api/draw/current` continuously (#110, ADR-29
+amendment): a reload restores it — revealed, no shuffle, the same pattern as
+the TimerBar (6.4) — and a pointer cleared by a completion, snooze, or
+delete on another surface (TimerBar, Tasks page, MCP, a second tab)
+dismisses the card on the query's next refetch without a second ✓ Done.
+The endpoint validates the task is still
 drawable (open leaf, estimated, within `max_draw_effort`, not snoozed/blocked,
 not held back behind a sequential sibling, inside its availability window) and
 lazily clears a pointer that went stale, e.g. because the card was edited out
@@ -34,7 +38,9 @@ would mean fishing for a comfortable card, which defeats the
 anti-procrastination purpose. The card leaves the screen only by being
 resolved: completed, snoozed/blocked ("Not now", ADR-17), or deleted. Editing
 the card out of the deck (the "this card was a mistake" case) also resolves it
-— the lazy restore validation clears the persisted pointer on the next check.
+— the lazy restore validation clears the persisted pointer on the next check,
+while the session keeps the card on screen with a resolve hint until it is
+resolved on-page, so the edit never turns into a hidden re-roll (#110).
 Changing the category/goal filter while a card is revealed applies to the next
 draw only.
 

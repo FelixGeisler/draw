@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import confetti from "canvas-confetti";
 import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
 import {
   useCurrentDraw,
+  useCurrentDrawCache,
   useDraw,
   useWarmupDraw,
   useWarmupStatus,
@@ -18,6 +19,7 @@ import { TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
 import { classifyTask } from "../lib/drawable";
+import { resolveDrawnCard } from "../lib/drawnCard";
 import { resolveDrawView } from "../lib/focusView";
 import type { NewTask } from "../api/types";
 import "./DrawPage.css";
@@ -39,10 +41,21 @@ export function DrawPage() {
   const goals = useGoals();
   const [categoryId, setCategoryId] = useState<number | undefined>();
   const [goalId, setGoalId] = useState<number | undefined>();
-  const [phase, setPhase] = useState<Phase>("idle");
+  const [shuffling, setShuffling] = useState(false);
+  // The latest draw response of THIS session: the odds line and the
+  // empty-deck reason render from it, and its task doubles as the session
+  // snapshot for resolveDrawnCard's two exceptions. The standing card itself
+  // is NOT this state — see the derivation below (#110).
   const [result, setResult] = useState<DrawResponse | null>(null);
   const [editing, setEditing] = useState(false);
   const [edited, setEdited] = useState(false);
+  // An on-page edit pushed the card out of the deck (#88): the pointer is
+  // forfeit server-side (cleared lazily on the next GET), but the session
+  // keeps the card with the resolve hint until it is resolved here — the
+  // draw is a commitment, an edit must not become a hidden re-roll. Sticky
+  // across further edits (editing the card back into the deck cannot
+  // resurrect the cleared pointer); reset by resolution and by a new draw.
+  const [editedOutOfDeck, setEditedOutOfDeck] = useState(false);
   const [snoozing, setSnoozing] = useState(false);
   // Escape peeked out of the focus view (issue #56). Session-local on
   // purpose: the view itself is DERIVED from timer + current draw (ADR-29),
@@ -52,28 +65,39 @@ export function DrawPage() {
   // cleared by the next draw/deal.
   const [bonusNote, setBonusNote] = useState<string | null>(null);
 
-  // Restore the server-persisted draw once per mount (issue #25) — a reload
-  // lands straight on the revealed card, no shuffle, mirroring the TimerBar.
-  // The one-shot guard keeps a late or stale response from resurrecting a
-  // card after the user already drew, completed, or deleted in this session.
+  // The standing card DERIVES from the server-persisted current draw (#110,
+  // extending ADR-29): a reload restores it revealed, no shuffle (issue #25,
+  // mirroring the TimerBar) — and a completion, snooze, or delete on ANY
+  // surface (TimerBar, Tasks page, MCP, a second tab) clears the pointer, so
+  // the next refetch dismisses the card without a second ✓ Done.
   const currentDraw = useCurrentDraw();
-  const restoreAttempted = useRef(false);
-  useEffect(() => {
-    if (restoreAttempted.current || currentDraw.isFetching || currentDraw.data === undefined)
-      return;
-    restoreAttempted.current = true;
-    if (currentDraw.data?.task && phase === "idle" && result === null) {
-      // The warm-up marker rides along (#57) so the badge survives reloads.
-      setResult({ task: currentDraw.data.task, warmup: currentDraw.data.warmup });
-      setPhase("revealed");
-    }
-  }, [currentDraw.isFetching, currentDraw.data, phase, result]);
+  const setCurrentDraw = useCurrentDrawCache();
+  const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
+  const task = resolveDrawnCard({
+    shuffling,
+    serverTask: currentDraw.data === undefined ? undefined : (currentDraw.data?.task ?? null),
+    sessionTask: result?.task ?? null,
+    editedOutOfDeck,
+  });
+  const phase: Phase = shuffling ? "shuffling" : task ? "revealed" : "idle";
+  // The warm-up marker rides GET /api/draw/current (#57), so the badge and
+  // window hint survive reloads exactly like the derived card itself; the
+  // session's deal response bridges any gap before the cache settles.
+  const warmupInfo =
+    task == null
+      ? undefined
+      : currentDraw.data?.warmup?.taskId === task.id
+        ? currentDraw.data.warmup
+        : result?.warmup?.taskId === task.id
+          ? result.warmup
+          : undefined;
 
   async function reveal(mutate: () => Promise<DrawResponse>) {
-    setPhase("shuffling");
+    setShuffling(true);
     setResult(null);
     setEditing(false);
     setEdited(false);
+    setEditedOutOfDeck(false);
     setSnoozing(false);
     setFocusExited(false);
     setBonusNote(null);
@@ -81,59 +105,80 @@ export function DrawPage() {
       mutate(),
       new Promise((r) => setTimeout(r, 450)), // let the shuffle play
     ]);
+    // The reveal works off the mutation response: both draw hooks write it
+    // through to the current-draw cache on success, so ending the shuffle
+    // flips straight to the drawn card — no refetch race in the animation.
     setResult(response);
-    setPhase(response.task ? "revealed" : "idle");
+    setShuffling(false);
   }
 
   const doDraw = () => reveal(() => draw.mutateAsync({ categoryId, goalId }));
   // Warm-up (#57): deterministic deal of the smallest card — same filters,
-  // same reveal, but a handed-out commitment instead of a gamble.
+  // same reveal, but a handed-out commitment instead of a gamble. The deal
+  // persists the same current-draw pointer, so the derived card picks it up
+  // exactly like a regular draw.
   const doWarmup = () => reveal(() => warmup.mutateAsync({ categoryId, goalId }));
 
-  // The card renders from local state, so the PATCH response must be written
-  // back into `result` — query invalidation alone would not refresh it.
   async function saveEdit(patch: NewTask) {
-    if (!result?.task) return;
-    const response = await updateTask.mutateAsync({ id: result.task.id, ...patch });
-    setResult((prev) => (prev ? { ...prev, task: response.task } : prev));
+    if (!task) return;
+    const response = await updateTask.mutateAsync({ id: task.id, ...patch });
+    // The PATCH response settles the card's fate ahead of the confirming
+    // refetch: still drawable → it IS the current draw (pointer intact
+    // server-side); edited out of the deck → the pointer is forfeit and the
+    // sticky flag holds the session's card (#88, see above).
+    setResult({ task: response.task });
+    if (response.task.status !== "open" || classifyTask(response.task, maxEffort) !== "ready") {
+      setEditedOutOfDeck(true);
+    } else if (!editedOutOfDeck) {
+      // Keep the warm-up marker (#57) riding the cache: an in-deck edit
+      // leaves the pointer — and thus the marker — intact server-side.
+      setCurrentDraw({ task: response.task, warmup: warmupInfo });
+    }
     setEdited(true);
     setEditing(false);
   }
 
   async function deleteDrawn() {
-    if (!result?.task) return;
-    if (!confirm(`Delete "${result.task.title}"?`)) return;
-    await deleteTask.mutateAsync(result.task.id);
+    if (!task) return;
+    if (!confirm(`Delete "${task.title}"?`)) return;
+    await deleteTask.mutateAsync(task.id);
+    // The delete cleared the pointer server-side; write that through so the
+    // card flips back instantly instead of after the confirming refetch.
+    setCurrentDraw(null);
     setResult(null);
+    setEditedOutOfDeck(false);
     setEditing(false);
-    setPhase("idle");
   }
 
   async function completeDrawn() {
-    if (!result?.task) return;
+    if (!task) return;
     // No wasDrawn flag: the server derives the drawn-card bonus from the
     // persisted current draw (ADR-13), so it survives reloads too.
-    const response = await updateTask.mutateAsync({ id: result.task.id, status: "done" });
+    const response = await updateTask.mutateAsync({ id: task.id, status: "done" });
+    // Celebration belongs to the acting surface (#110): confetti fires for
+    // the page's own ✓ Done only — a completion arriving from the TimerBar
+    // or the Tasks page dismisses the derived card without fanfare.
     confetti({ particleCount: 120, spread: 75, origin: { y: 0.6 } });
     // Surface why the XP was higher (#57) alongside the confetti.
     if (response.bonus === "warmup") setBonusNote("🔰 Warm-up bonus: +25% XP");
     else if (response.bonus === "momentum") setBonusNote("⚡ Momentum bonus: +25% XP");
+    setCurrentDraw(null);
     setResult(null);
-    setPhase("idle");
+    setEditedOutOfDeck(false);
   }
 
   // "Not now" (issue #19): snooze or block the drawn card. The card leaves
   // the deck server-side and the PATCH handler eagerly clears the persisted
   // current-draw pointer (ADR-17), so a reload does not resurrect the card.
   async function snoozeDrawn(patch: { deferredUntil?: string; blocked?: boolean }) {
-    if (!result?.task) return;
-    await updateTask.mutateAsync({ id: result.task.id, ...patch });
+    if (!task) return;
+    await updateTask.mutateAsync({ id: task.id, ...patch });
+    setCurrentDraw(null);
     setSnoozing(false);
     setResult(null);
-    setPhase("idle");
+    setEditedOutOfDeck(false);
   }
 
-  const task = result?.task ?? null;
   const category = task ? categories.data?.find((c) => c.id === task.categoryId) : null;
 
   // "▶ Start now" (issue #56): one click starts the timer AND drops into the
@@ -160,7 +205,6 @@ export function DrawPage() {
   // AI card art (#27): kicked off by the reveal, never awaited by it. The
   // hook swallows every failure (incl. 503 degraded mode) into "no art".
   const cardArt = useCardArt(task?.id, phase === "revealed");
-  const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
   // An edit can push the drawn card out of the deck (effort too big/cleared,
   // status no longer open) — computed client-side, mirroring drawService.
   const nonDrawable =
@@ -248,11 +292,11 @@ export function DrawPage() {
                 <TaskBadges task={task} />
                 {/* Warm-up deal (#57): badge + bonus-window hint. No odds
                     line renders — a deal has no probability by construction. */}
-                {result?.warmup && (
+                {warmupInfo && (
                   <div className="warmup-note">
                     <span className="chip warmup-chip">🔰 Warm-up</span>
                     <div className="warmup-window-hint">
-                      finish within ~{result.warmup.windowMinutes} min for a bonus
+                      finish within ~{warmupInfo.windowMinutes} min for a bonus
                     </div>
                   </div>
                 )}
@@ -263,8 +307,9 @@ export function DrawPage() {
                   </div>
                 )}
                 {/* The odds reflect the original draw; hide them once the
-                    task was edited instead of showing a stale number. */}
-                {!edited && result?.probability != null && (
+                    task was edited — and never pin them under a card the
+                    session did not draw (restored or swapped elsewhere). */}
+                {!edited && result?.probability != null && result.task?.id === task.id && (
                   <div className="draw-chance">
                     {Math.round(result.probability * 100)}% draw chance · {result.poolSize} card
                     {result.poolSize === 1 ? "" : "s"} in the deck
