@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Material } from "../api/types";
+import type { Material, Task } from "../api/types";
 import { useMaterials } from "../hooks/useGoals";
 import { useCreateSubtasks, useCreateTask, useDeleteTask } from "../hooks/useTasks";
 import {
@@ -138,7 +138,10 @@ export function AiBreakdownPanel({
 }: {
   taskId: number;
   goalId: number | null;
-  onAccept: (subtasks: { title: string; effortMinutes: number; impact: number }[]) => Promise<unknown>;
+  onAccept: (
+    subtasks: { title: string; effortMinutes: number; impact: number }[],
+    orderMode: Task["subtaskOrderMode"],
+  ) => Promise<unknown>;
   onClose: () => void;
 }) {
   const materials = useMaterials(goalId ?? -1);
@@ -147,6 +150,9 @@ export function AiBreakdownPanel({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [rows, setRows] = useState<SuggestionRow<AiSubtask>[] | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  // "Do in order" (#23): defaulted from the model's orderMatters judgment —
+  // its subtasks already come in execution sequence — flippable before accept.
+  const [inOrder, setInOrder] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const materialList = goalId ? (materials.data ?? []) : [];
@@ -166,6 +172,7 @@ export function AiBreakdownPanel({
       const result = await run.mutateAsync({ taskId, materialIds: [...selected] });
       setRows(result.subtasks.map((data) => ({ data, included: true })));
       setNote(result.approachNote);
+      setInOrder(result.orderMatters);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -198,6 +205,15 @@ export function AiBreakdownPanel({
       )}
       {note && <p style={{ margin: 0, fontSize: 13, color: "var(--text-dim)" }}>💡 {note}</p>}
       {rows && <SuggestionList rows={rows} setRows={setRows} />}
+      {rows && (
+        <label
+          style={{ display: "flex", gap: 6, alignItems: "center", color: "var(--text-dim)", fontSize: 13 }}
+          title="Sequential mode: only the first open step enters the deck; the rest queue up behind it"
+        >
+          <input type="checkbox" checked={inOrder} onChange={(e) => setInOrder(e.target.checked)} />
+          Do in order — draw only the next open step
+        </label>
+      )}
       <div style={{ display: "flex", gap: 8 }}>
         <span style={{ flex: 1 }} />
         <button onClick={onClose}>Close</button>
@@ -212,7 +228,7 @@ export function AiBreakdownPanel({
                   effortMinutes: r.data.effortMinutes,
                   impact: r.data.impact,
                 }));
-              if (accepted.length > 0) await onAccept(accepted);
+              if (accepted.length > 0) await onAccept(accepted, inOrder ? "sequential" : "parallel");
               onClose();
             }}
           >

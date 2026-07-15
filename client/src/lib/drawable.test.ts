@@ -21,7 +21,9 @@ function task(overrides: Partial<Task> = {}): Task {
     lastDrawnAt: null,
     deferredUntil: null,
     blocked: false,
+    subtaskOrderMode: "parallel",
     hasOpenChildren: 0,
+    heldBack: 0,
     ...overrides,
   };
 }
@@ -51,6 +53,7 @@ describe("classifyTask", () => {
           hasOpenChildren: v.hasOpenChildren,
           blocked: v.blocked,
           deferredUntil: v.deferredUntil,
+          heldBack: v.heldBack,
           effortMinutes: v.effortMinutes,
         });
         expect(classifyTask(t, v.maxEffort, now)).toBe(v.expected);

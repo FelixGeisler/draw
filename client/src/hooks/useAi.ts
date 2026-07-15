@@ -22,6 +22,9 @@ export interface AiSubtask {
 export interface BreakdownResult {
   subtasks: AiSubtask[];
   approachNote: string;
+  /** #23: the model's judgment on whether its execution sequence is binding —
+   *  pre-sets the "Do in order" toggle; the user has the last word. */
+  orderMatters: boolean;
 }
 
 export interface PlanTask extends AiSubtask {

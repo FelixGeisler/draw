@@ -1,5 +1,5 @@
 import type { Task } from "../api/types";
-import { isDueSoon } from "../lib/drawable";
+import { isDueSoon, isSnoozed } from "../lib/drawable";
 import { displayEffort } from "../lib/effort";
 
 /** Compact local wake time for the 💤 chip, e.g. "2026-07-15 18:00". */
@@ -54,6 +54,13 @@ export function TaskBadges({ task, showStars }: { task: Task; showStars?: boolea
       {task.blocked && (
         <span className="chip" title="Blocked — out of the deck until woken">
           ⛔ blocked
+        </span>
+      )}
+      {/* Sequential hold-back (#23): derived queue position, hidden while the
+          task is snoozed (classifyTask precedence — snoozed wins). */}
+      {Boolean(task.heldBack) && !isSnoozed(task) && (
+        <span className="chip" title="In line — this breakdown is done in order; finish the steps in front first">
+          ⏳ queued
         </span>
       )}
       {(showStars ?? task.goalId != null) && <ImpactStars value={task.impact} />}

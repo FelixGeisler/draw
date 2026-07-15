@@ -4,7 +4,9 @@
 
 Anything that can drift is computed at read time: drawability (SQL predicate),
 "snoozed" (`blocked` or `deferred_until` still ahead — an expired snooze
-re-enters the deck with no write, ADR-17), "in progress" (running time entry
+re-enters the deck with no write, ADR-17), "held back" (an older open sibling
+under a `sequential` parent — completing the step in front frees the next one
+with no write, ADR-18), "in progress" (running time entry
 exists), XP/level/streak (aggregates over `completions`), weekly grade
 (aggregation over `time_entries`), and the displayed effort of a broken-down
 task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at query
