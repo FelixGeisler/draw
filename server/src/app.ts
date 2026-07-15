@@ -11,6 +11,7 @@ import { goalsRouter } from "./routes/goals.js";
 import { goalMaterialsRouter, materialsRouter } from "./routes/materials.js";
 import { aiRouter } from "./routes/ai.js";
 import { backupRouter } from "./routes/backup.js";
+import { cardArtRouter } from "./routes/cardArt.js";
 
 export function createApp() {
   const app = express();
@@ -33,6 +34,9 @@ export function createApp() {
   app.use("/api/materials", materialsRouter);
   app.use("/api/ai", aiRouter);
   app.use("/api/backup", backupRouter);
+  // Cache-only batch art reads for the trophy pile (#114) — deliberately NOT
+  // under /api/tasks/:id: the per-task route generates on miss, this never.
+  app.use("/api/card-art", cardArtRouter);
 
   return app;
 }

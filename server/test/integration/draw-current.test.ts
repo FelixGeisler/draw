@@ -204,4 +204,29 @@ describe("current draw lifecycle", () => {
     const settings = (await request(app).get("/api/settings").expect(200)).body;
     expect(settings).not.toHaveProperty("current_draw_task_id");
   });
+
+  it("carries trackedMinutes (DEF, #115) — CLOSED entries only, derived at query time", async () => {
+    const { goalId, task } = await seedGoalTask("def-stat");
+
+    // 25 closed minutes across two entries, plus a RUNNING entry that must
+    // NOT count: the client adds the running entry's elapsed itself (the
+    // live DEF tick), so counting it here would double it.
+    const minsAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+    const entry = db.prepare(
+      "INSERT INTO time_entries (task_id, started_at, ended_at) VALUES (?, ?, ?)",
+    );
+    entry.run(task.id, minsAgo(120), minsAgo(110)); // 10 min
+    entry.run(task.id, minsAgo(60), minsAgo(45)); // 15 min
+    entry.run(task.id, minsAgo(30), null); // running — excluded
+
+    const drawn = await draw(goalId);
+    expect(drawn.task.trackedMinutes).toBe(25);
+
+    // The restore payload derives the same number (ADR-13: one card, one truth).
+    expect((await current()).task.trackedMinutes).toBe(25);
+
+    // A card that was never fought reads 0, not null — DEF always renders.
+    const fresh = await seedGoalTask("def-zero");
+    expect((await draw(fresh.goalId)).task.trackedMinutes).toBe(0);
+  });
 });

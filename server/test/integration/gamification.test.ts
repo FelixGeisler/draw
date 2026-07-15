@@ -81,10 +81,12 @@ describe("gamification", () => {
     expect(g.todayCompletions.length).toBeGreaterThanOrEqual(4);
   });
 
-  it("exposes the rarity facts (impact, wasDrawn) on todayCompletions", async () => {
+  it("exposes the rarity facts (impact, wasDrawn) and goalId on todayCompletions", async () => {
     // Contract guard for issue #62: the client derives foil/silver rarity at
     // render time from exactly these two fields — nothing is stored. A drawn
     // impact-5 completion must surface impact 5 and a truthy wasDrawn.
+    // goalId (#115) rides the same live join: the trophy mini-frame gates its
+    // level stars on goal linkage (ADR-4), never on impact alone.
     const goal = (await request(app).post("/api/goals").send({ title: "rarity goal" })).body;
     const task = (
       await request(app)
@@ -101,7 +103,11 @@ describe("gamification", () => {
 
     const g = (await request(app).get("/api/gamification")).body;
     const entry = g.todayCompletions.find((c: { taskId: number }) => c.taskId === task.id);
-    expect(entry).toMatchObject({ impact: 5, wasDrawn: 1 });
+    expect(entry).toMatchObject({ impact: 5, wasDrawn: 1, goalId: goal.id });
+
+    // A goal-less completion surfaces goalId: null — "no goal, no star row".
+    const bare = g.todayCompletions.find((c: { goalId: number | null }) => c.goalId === null);
+    expect(bare).toBeTruthy();
   });
 
   it("keeps XP consistent with the completions log", async () => {

@@ -319,6 +319,17 @@ function emptyPoolReason(
   return anyOpen.n > 0 ? "all_too_big" : "no_ready_tasks";
 }
 
+/**
+ * DEF stat for the TCG frame (#115): minutes tracked on the task so far,
+ * derived at query time from time_entries (ADR-2 spirit — never a counter).
+ * CLOSED entries only, on purpose: the client already polls the running
+ * timer, so it adds the in-flight entry's elapsed time itself — a live tick
+ * without refetching this payload every minute, and no double count.
+ */
+const TRACKED_MINUTES_SQL = `(SELECT CAST(ROUND(COALESCE(SUM(
+         (julianday(e.ended_at) - julianday(e.started_at)) * 1440.0), 0)) AS INTEGER)
+       FROM time_entries e WHERE e.task_id = t.id AND e.ended_at IS NOT NULL)`;
+
 /** Full payload row for a freshly dealt card — a pool candidate is an open
  *  leaf by construction, so hasOpenChildren/heldBack are constant 0. */
 function dealtTaskRow(id: number): Record<string, unknown> {
@@ -332,7 +343,8 @@ function dealtTaskRow(id: number): Record<string, unknown> {
               t.last_drawn_at AS lastDrawnAt, t.deferred_until AS deferredUntil, t.blocked,
               t.subtask_order_mode AS subtaskOrderMode,
               t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
-              0 AS hasOpenChildren, 0 AS heldBack
+              0 AS hasOpenChildren, 0 AS heldBack,
+              ${TRACKED_MINUTES_SQL} AS trackedMinutes
        FROM tasks t WHERE t.id = ?`,
     )
     .get(id) as Record<string, unknown>;
@@ -488,7 +500,8 @@ export function currentDraw(): { task: Record<string, unknown>; warmup?: WarmupM
               t.subtask_order_mode AS subtaskOrderMode,
               t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
               EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open') AS hasOpenChildren,
-              ${heldBackSql("t")} AS heldBack
+              ${heldBackSql("t")} AS heldBack,
+              ${TRACKED_MINUTES_SQL} AS trackedMinutes
        FROM tasks t WHERE t.id = ?`,
     )
     .get(id) as Record<string, unknown> | undefined;

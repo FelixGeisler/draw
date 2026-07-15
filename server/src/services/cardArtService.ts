@@ -75,6 +75,24 @@ export async function getOrCreateCardArt(taskId: number): Promise<{ svg: string 
 }
 
 /**
+ * Cache-only batch read (#114/#115): the trophy pile renders every completed
+ * card's art in ONE round trip, and rendering the pile must NEVER trigger a
+ * Claude generation — that is a Draw-page concern (getOrCreateCardArt above).
+ * Plain SELECT, no isConfigured() check, no in-flight map: with or without an
+ * API key this function only ever reads what earlier generations stored.
+ * Unknown ids simply produce no row (the client falls back to the gradient);
+ * duplicates are deduped so the IN list stays minimal.
+ */
+export function getCachedCardArt(taskIds: number[]): { taskId: number; svg: string }[] {
+  const unique = [...new Set(taskIds)];
+  if (unique.length === 0) return [];
+  const placeholders = unique.map(() => "?").join(",");
+  return db
+    .prepare(`SELECT task_id AS taskId, svg FROM card_art WHERE task_id IN (${placeholders})`)
+    .all(...unique) as { taskId: number; svg: string }[];
+}
+
+/**
  * Regenerate (#113): generate-then-replace. The existing row is touched only
  * AFTER a new generation fully survived sanitization — a failed generation or
  * sanitization throws before the write, so the old art always survives
