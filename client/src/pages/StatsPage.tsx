@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
+import { ActivityHeatmap } from "../components/ActivityHeatmap";
 
 interface Estimation {
   tasks: { taskId: number; title: string; estimatedMinutes: number; trackedMinutes: number; ratio: number }[];
@@ -306,6 +307,10 @@ export function StatsPage() {
           <AchievementsGrid />
         </>
       )}
+
+      {/* Independent of the stats query and of the week/month toggle: the
+          heatmap always shows its 26-week consistency record (#54). */}
+      <ActivityHeatmap />
     </div>
   );
 }

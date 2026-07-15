@@ -72,13 +72,15 @@ client/src/
 ├── hooks/                     TanStack Query wrappers (useTasks, useDraw, useTimer,
 │                              useGamification, useGoals, useAi, useActivity)
 ├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip), Capture,
-│                              Tasks, Goals, Stats, History (skyline), Settings
+│                              Tasks, Goals, Stats (incl. activity heatmap), History
+│                              (skyline), Settings
 ├── lib/                       pure client logic (drawable classification, effort display,
-│                              generate-tasks review model) — unit-tested without rendering
+│                              generate-tasks review model, heatmap grid/quantization)
+│                              — unit-tested without rendering
 └── components/                TaskRow/Form/Badges, SubtaskEditor, TimerBar,
-                               GamificationHeader, TrophyDeck, AchievementToast,
-                               MaterialsSection, AiSuggestionPanel (breakdown, plan,
-                               generate-tasks panels)
+                               GamificationHeader, TrophyDeck, ActivityHeatmap,
+                               AchievementToast, MaterialsSection, AiSuggestionPanel
+                               (breakdown, plan, generate-tasks panels)
 ....
 
 All server state flows through TanStack Query; task mutations invalidate the
