@@ -27,10 +27,16 @@ weight = impact² / max(effort, 5)          leverage per minute
                                            last completion (recurring), or the
                                            snooze wake time (ADR-17)
        × 0.15 if drawn within cooldown     variety on "draw again"
+       ÷ sqrt(pool siblings)               sibling damping (ADR-25): a k-leaf
+                                           breakdown competes like ~√k cards;
+                                           k counts siblings in the pool
 ....
 
 Household chores work without ratings: no goal → neutral impact 3, and staleness
-makes neglected chores progressively louder.
+makes neglected chores progressively louder. Sibling damping keeps a 40-leaf
+import (#29) from drowning them: measured at 58% of the probability mass on
+day 0 (and rising with staleness), damped to ~18% — methodology and numbers in
+`server/scripts/sim-issue30.ts`, guarded by `test/unit/draw-weights.test.ts`.
 
 == 8.3 Error handling
 
