@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import Database from "better-sqlite3";
 import fs from "node:fs";
@@ -13,12 +13,24 @@ import { freshApp, testDb } from "../helpers.js";
 //   v3 → v4 adds subtask_order_mode                    (issue #23)
 //   v4 → v5 adds window_days/window_start/window_end   (issue #33)
 //   v5 → v6 creates the card_art cache table           (issue #27)
+//   v6 → v7 re-parents pre-guard nested breakdowns     (issue #80)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence.
 
 let app: express.Express;
 let legacyTaskId: number;
+
+// Pre-guard nested tree (#80): ids captured at seed time because the tree is
+// asserted before the legacy-task tests below ever look anything up.
+let goalId: number;
+let staleGoalId: number;
+let rootId: number;
+let middleId: number;
+let siblingId: number;
+let grandchildId: number;
+let greatGrandchildId: number;
+let doneGrandchildId: number;
 
 beforeAll(async () => {
   // Reconstruct the v2 schema: today's schema.sql minus the v3/v4/v5 columns
@@ -43,16 +55,179 @@ beforeAll(async () => {
   legacy
     .prepare("INSERT INTO tasks (title, category_id, effort_minutes, created_at) VALUES (?, ?, ?, ?)")
     .run("Legacy task", 1, 10, new Date().toISOString());
+
+  // Pre-guard nested breakdown (#80): a 4-level chain plus a sibling and a
+  // done grandchild, inserted the way pre-#35 API calls could have written
+  // them — parent_id pointing at a task that is itself a subtask, with the
+  // deep rows carrying a stale goal/category from before a root-level
+  // cascade edit. Distinct ascending created_at keeps the sequential queue
+  // order deterministic; all efforts sit under the max_draw_effort default
+  // (30) so pool assertions are about structure, not size.
+  const insertGoal = legacy.prepare("INSERT INTO goals (title, created_at) VALUES (?, ?)");
+  goalId = Number(insertGoal.run("Current goal", "2025-01-01T00:00:00.000Z").lastInsertRowid);
+  staleGoalId = Number(insertGoal.run("Stale goal", "2025-01-01T00:00:00.000Z").lastInsertRowid);
+  const insertTask = legacy.prepare(
+    `INSERT INTO tasks (title, category_id, goal_id, parent_id, effort_minutes, status, completed_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const seed = (
+    title: string,
+    categoryId: number,
+    goal: number | null,
+    parentId: number | null,
+    effort: number,
+    status: "open" | "done",
+    createdAt: string,
+  ) =>
+    Number(
+      insertTask.run(
+        title,
+        categoryId,
+        goal,
+        parentId,
+        effort,
+        status,
+        status === "done" ? "2025-06-02T00:00:00.000Z" : null,
+        createdAt,
+      ).lastInsertRowid,
+    );
+  rootId = seed("Nested root", 1, goalId, null, 60, "open", "2025-06-01T00:00:00.000Z");
+  middleId = seed("Nested middle", 1, goalId, rootId, 25, "open", "2025-06-01T00:01:00.000Z");
+  siblingId = seed("Nested sibling", 1, goalId, rootId, 20, "open", "2025-06-01T00:02:00.000Z");
+  grandchildId = seed("Nested grandchild", 2, staleGoalId, middleId, 15, "open", "2025-06-01T00:03:00.000Z");
+  greatGrandchildId = seed("Nested great-grandchild", 3, null, grandchildId, 10, "open", "2025-06-01T00:04:00.000Z");
+  doneGrandchildId = seed("Nested done grandchild", 2, staleGoalId, middleId, 5, "done", "2025-06-01T00:05:00.000Z");
+  // Sanity: the file really contains depth-3 and depth-4 rows before migrate().
+  const depth = legacy.prepare(
+    `SELECT COUNT(*) AS n FROM tasks t JOIN tasks p ON p.id = t.parent_id WHERE p.parent_id IS NOT NULL`,
+  );
+  expect(depth.get()).toEqual({ n: 3 }); // grandchild, great-grandchild, done grandchild
+
   legacy.pragma("user_version = 2");
   legacy.close();
 
   app = await freshApp(); // importing db.ts runs migrate() on the v2 file
 });
 
-describe("migration v2 → v6 (deferred_until, blocked, subtask_order_mode, window_*, card_art)", () => {
-  it("bumps user_version to 6", async () => {
+describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root (#80, ADR-24)", () => {
+  // The tree must not leak into the legacy-task draw expectations below:
+  // completing/blocking is done via the same DB the app uses, and the root
+  // goes back to 'parallel' so no hold-back state lingers either.
+  afterAll(async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(6);
+    db.prepare("UPDATE tasks SET subtask_order_mode = 'parallel' WHERE id = ?").run(rootId);
+    const block = db.prepare("UPDATE tasks SET blocked = 1 WHERE id = ?");
+    for (const id of [rootId, middleId, siblingId, grandchildId, greatGrandchildId, doneGrandchildId]) {
+      block.run(id);
+    }
+  });
+
+  it("flattens the tree to two levels: every former grandchild hangs off the root", async () => {
+    const db = await testDb();
+    // Structural invariant, arbitrary depth: no task's parent is a subtask.
+    const nested = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM tasks t JOIN tasks p ON p.id = t.parent_id WHERE p.parent_id IS NOT NULL`,
+      )
+      .get();
+    expect(nested).toEqual({ n: 0 });
+
+    // The formerly invisible rows are now regular, visible subtasks of the root.
+    const list = await request(app).get("/api/tasks").expect(200);
+    const root = list.body.find((t: { id: number }) => t.id === rootId);
+    expect(root).toBeTruthy();
+    const byId = new Map(root.subtasks.map((s: { id: number }) => [s.id, s]));
+    for (const id of [middleId, siblingId, grandchildId, greatGrandchildId, doneGrandchildId]) {
+      expect((byId.get(id) as { parentId: number } | undefined)?.parentId).toBe(rootId);
+    }
+  });
+
+  it("restores a consistent rollup: the root's remaining effort equals its displayed open children", async () => {
+    const list = await request(app).get("/api/tasks").expect(200);
+    const root = list.body.find((t: { id: number }) => t.id === rootId);
+    // 25 + 20 + 15 + 10 — the done grandchild does not count, and no stored
+    // middle estimate hides a grandchild sum anymore.
+    expect(root.remainingEffortMinutes).toBe(70);
+    const openChildren = root.subtasks.filter((s: { status: string }) => s.status === "open");
+    const displayedSum = openChildren.reduce(
+      (sum: number, s: { remainingEffortMinutes: number }) => sum + s.remainingEffortMinutes,
+      0,
+    );
+    expect(displayedSum).toBe(root.remainingEffortMinutes); // list no longer contradicts itself
+    const middle = root.subtasks.find((s: { id: number }) => s.id === middleId);
+    expect(middle.remainingEffortMinutes).toBe(25); // its own estimate again — no hidden children
+  });
+
+  it("applies the same cascade rules as a parent edit: goal always, category only while open", async () => {
+    const list = await request(app).get("/api/tasks").expect(200);
+    const root = list.body.find((t: { id: number }) => t.id === rootId);
+    const byId = new Map<number, { goalId: number | null; categoryId: number }>(
+      root.subtasks.map((s: { id: number; goalId: number | null; categoryId: number }) => [s.id, s]),
+    );
+    // Open re-parented rows adopt the root's goal AND category.
+    expect(byId.get(grandchildId)).toMatchObject({ goalId, categoryId: 1 });
+    expect(byId.get(greatGrandchildId)).toMatchObject({ goalId, categoryId: 1 });
+    // Done rows follow the goal (route cascade has no status filter) but keep
+    // the category they were finished under (#44).
+    expect(byId.get(doneGrandchildId)).toMatchObject({ goalId, categoryId: 2 });
+    // Rows that were never nested are untouched.
+    expect(byId.get(middleId)).toMatchObject({ goalId, categoryId: 1 });
+    expect(byId.get(siblingId)).toMatchObject({ goalId, categoryId: 1 });
+  });
+
+  it("makes the pool sane: every drawable task is visible, containers stay out", async () => {
+    const pool = await request(app).get("/api/draw/pool").expect(200);
+    const poolIds = pool.body.candidates.map((c: { id: number }) => c.id);
+    // Exactly the open leaves: the four open subtasks plus the standalone
+    // legacy task. The root is a container, the done grandchild is done.
+    const legacyList = await request(app).get("/api/tasks").expect(200);
+    const legacy = legacyList.body.find((t: { title: string }) => t.title === "Legacy task");
+    expect([...poolIds].sort((a, b) => a - b)).toEqual(
+      [legacy.id, middleId, siblingId, grandchildId, greatGrandchildId].sort((a, b) => a - b),
+    );
+    // No invisible-but-drawable card: everything in the pool is either a
+    // listed root or a listed subtask.
+    const visible = new Set<number>();
+    for (const t of legacyList.body) {
+      visible.add(t.id);
+      for (const s of t.subtasks) visible.add(s.id);
+    }
+    for (const id of poolIds) expect(visible.has(id)).toBe(true);
+  });
+
+  it("the sequential hold-back queue reads the flattened breakdown front-to-back", async () => {
+    await request(app)
+      .patch(`/api/tasks/${rootId}`)
+      .send({ subtaskOrderMode: "sequential" })
+      .expect(200);
+    const pool = await request(app).get("/api/draw/pool").expect(200);
+    const treeIds = new Set([middleId, siblingId, grandchildId, greatGrandchildId]);
+    const exposed = pool.body.candidates
+      .map((c: { id: number }) => c.id)
+      .filter((id: number) => treeIds.has(id));
+    // Only the first open step in creation order — no grandchild leaks past
+    // the queue anymore.
+    expect(exposed).toEqual([middleId]);
+    await request(app)
+      .patch(`/api/tasks/${rootId}`)
+      .send({ subtaskOrderMode: "parallel" })
+      .expect(200);
+  });
+
+  it("resolves the phantom 409: the former middle task completes without invisible open subtasks", async () => {
+    const done = await request(app)
+      .patch(`/api/tasks/${middleId}`)
+      .send({ status: "done" })
+      .expect(200);
+    expect(done.body.task.status).toBe("done");
+    expect(done.body.xpAwarded).toBeGreaterThan(0);
+  });
+});
+
+describe("migration v2 → v7 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting)", () => {
+  it("bumps user_version to 7", async () => {
+    const db = await testDb();
+    expect(db.pragma("user_version", { simple: true })).toBe(7);
   });
 
   it("creates the card_art cache table with its cascade wired to tasks (#27)", async () => {

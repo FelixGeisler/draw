@@ -13,9 +13,10 @@ exists), XP/level/streak (aggregates over `completions`), weekly grade
 (aggregation over `time_entries`), and the displayed effort of a broken-down
 task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at query
 time; the stored estimate stays what the user typed and keeps feeding XP and
-edit forms; the one-level sum is exact because the API rejects nested
-breakdowns, ADR-16). Only facts are stored (tasks, entries, completions,
-unlocked achievements).
+edit forms; the one-level sum is exact for every database because the API
+rejects new nested breakdowns, ADR-16, and the v7 startup migration
+re-parented any pre-guard nesting to the root, ADR-24). Only facts are stored
+(tasks, entries, completions, unlocked achievements).
 
 == 8.2 The weight formula
 

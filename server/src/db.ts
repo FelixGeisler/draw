@@ -16,7 +16,7 @@ export const db = new Database(path.join(dataDir, "app.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-const CURRENT_VERSION = 6;
+const CURRENT_VERSION = 7;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -52,6 +52,80 @@ function migrate() {
         svg TEXT NOT NULL,
         created_at TEXT NOT NULL
       )`);
+    }
+    if (version < 7) {
+      // Legacy nested breakdowns (issue #80, ADR-16/ADR-24): before the #35
+      // guard, API/MCP calls could nest subtasks arbitrarily deep. Such rows
+      // are draw-eligible yet invisible in every list, corrupt the one-level
+      // rollup, leak past the sequential hold-back queue, and 409-deadlock
+      // their parent — so they are repaired, not grandfathered: every task
+      // whose parent is itself a subtask is re-parented one level up per
+      // pass until the tree is two levels everywhere (the same flattening
+      // the guard's 400 message prescribes). Each pass reads a snapshot of
+      // (id, grandparent) pairs first, so a pass moves every nested row
+      // exactly one step up its original chain — the loop terminates because
+      // parent_id is only ever written at INSERT referencing an existing
+      // row, making the ancestor graph acyclic, and each pass strictly
+      // shrinks the maximum depth. Defensively the pass count is bounded
+      // anyway (a chain of depth d holds d-2 nested rows, so acyclic data
+      // needs at most one pass per initially nested row): a parent_id cycle
+      // — impossible via the API, but this migration exists precisely for
+      // rows no current code path writes — aborts the boot with a
+      // diagnosable error instead of hanging it forever. Transactional: a
+      // crash between hoist and cascade must not leave rows the re-run can
+      // no longer tell apart.
+      //
+      // Hoisting can PLACE a recurring row directly under a 'sequential'
+      // root — the combination the #66 guard rejects on every write path
+      // (ADR-23). Deliberate, recorded in ADR-24: the row is tolerated-but-
+      // repairable exactly like a pre-ban row (no-op resends pass; the user
+      // drops the recurrence or flips the root to parallel, and the
+      // transition guards prevent re-creating it). The guard must NOT run
+      // here — it would fail the migration on the very legacy data it
+      // exists to repair. Pinned by migration-v6-recurring.test.ts.
+      db.transaction(() => {
+        const findNested = db.prepare(
+          `SELECT t.id AS id, p.parent_id AS grandparentId
+           FROM tasks t JOIN tasks p ON p.id = t.parent_id
+           WHERE p.parent_id IS NOT NULL`,
+        );
+        const hoist = db.prepare("UPDATE tasks SET parent_id = ? WHERE id = ?");
+        const reparented = new Set<number>();
+        const maxPasses = (findNested.all() as unknown[]).length + 1;
+        for (let pass = 0; ; pass++) {
+          const nested = findNested.all() as { id: number; grandparentId: number }[];
+          if (nested.length === 0) break;
+          if (pass >= maxPasses) {
+            throw new Error(
+              "v7 migration: tasks.parent_id contains a cycle — repair the database by hand (issue #80, ADR-24)",
+            );
+          }
+          for (const { id, grandparentId } of nested) {
+            hoist.run(grandparentId, id);
+            reparented.add(id);
+          }
+        }
+        // Re-parented rows join their new parent's breakdown under the same
+        // cascade rules a parent edit applies (routes/tasks.ts): goal_id
+        // follows the parent unconditionally, category_id only while open —
+        // done/archived rows are historical records and keep the category
+        // they were actually finished under (#44). impact is deliberately
+        // left as-is, even where the adopted goal_id is NULL: a parent goal
+        // unlink cascades NULL without resetting children's impact either,
+        // and the ADR-4 no-op tolerance keeps such rows editable —
+        // grandfathered, not an oversight.
+        const adopt = db.prepare(
+          `UPDATE tasks
+           SET goal_id = (SELECT r.goal_id FROM tasks r WHERE r.id = tasks.parent_id),
+               category_id = CASE
+                 WHEN status = 'open'
+                   THEN (SELECT r.category_id FROM tasks r WHERE r.id = tasks.parent_id)
+                 ELSE category_id
+               END
+           WHERE id = ?`,
+        );
+        for (const id of reparented) adopt.run(id);
+      })();
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);
