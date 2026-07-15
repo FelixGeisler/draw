@@ -61,18 +61,28 @@ export function validateManifest(raw: unknown): string | null {
   return null;
 }
 
+// Windows reserved device names (CON, PRN, AUX, NUL, COM1-9, LPT1-9 — with or
+// without an extension). fs calls on them fail or hit the console device on
+// Windows, so staging such an entry would 500 mid-import. Rejected on EVERY
+// platform: the guard must behave identically everywhere, and an archive that
+// stages fine on Linux must still be restorable on Windows.
+const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+
 /**
  * Map a `files/...` zip entry to its extraction target, or null when the
  * entry would escape the staging directory (zip-slip: `files/../evil`,
- * backslash variants, absolute or drive-qualified paths). Backslashes are
- * treated as separators on EVERY platform — a zip is foreign input, and an
- * entry that is hostile on Windows must not pass validation on Linux either.
+ * backslash variants, absolute or drive-qualified paths) or could not land on
+ * disk everywhere (Windows reserved device names). Backslashes are treated as
+ * separators on EVERY platform — a zip is foreign input, and an entry that is
+ * hostile on Windows must not pass validation on Linux either.
  */
 export function fileEntryTarget(entryName: string, stagingDir: string): string | null {
   const relative = entryName.slice(FILES_PREFIX.length).replaceAll("\\", "/");
   if (!relative || relative.startsWith("/") || relative.includes(":")) return null;
   const segments = relative.split("/");
-  if (segments.some((s) => s === "" || s === "." || s === "..")) return null;
+  if (segments.some((s) => s === "" || s === "." || s === ".." || WINDOWS_RESERVED_NAME.test(s))) {
+    return null;
+  }
   const root = path.resolve(stagingDir);
   const target = path.resolve(root, ...segments);
   // Belt and braces — the segment checks above already guarantee this.
@@ -230,10 +240,26 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
     staged.close();
   }
 
+  stageFileEntries(entries, stagedFilesDir);
+}
+
+/**
+ * Extract every `files/...` entry into the staging directory. Separators are
+ * normalized BEFORE the prefix match: some Windows zip tools write
+ * `files\x.pdf`, and a prefix test on the raw name would silently drop such
+ * entries — the import would "succeed" with material rows pointing at files
+ * that never landed. Normalizing first also keeps the zip-slip guard airtight
+ * for both separator styles: `files\..\evil` matches the prefix and then
+ * fails fileEntryTarget, a 400 instead of a skip.
+ */
+export function stageFileEntries(entries: AdmZip.IZipEntry[], stagedFilesDir: string) {
   fs.mkdirSync(stagedFilesDir, { recursive: true });
   for (const entry of entries) {
-    if (entry.isDirectory || !entry.entryName.startsWith(FILES_PREFIX)) continue;
-    const target = fileEntryTarget(entry.entryName, stagedFilesDir);
+    // adm-zip flags a trailing `\` as a directory just like a trailing `/`.
+    if (entry.isDirectory) continue;
+    const entryName = entry.entryName.replaceAll("\\", "/");
+    if (!entryName.startsWith(FILES_PREFIX)) continue;
+    const target = fileEntryTarget(entryName, stagedFilesDir);
     if (!target) throw new BackupError(400, `unsafe file path in archive: ${entry.entryName}`);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, entry.getData());
