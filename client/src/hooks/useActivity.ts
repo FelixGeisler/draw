@@ -7,6 +7,8 @@ export interface ActivityCard {
   categoryId: number;
   categoryColor: string;
   effortMinutes: number | null;
+  /** Live task rating (like title) — with wasDrawn it derives rarity (#62). */
+  impact: number;
   trackedMinutes: number;
   /** Upright (completed on this local day) vs face-down (worked, not done). */
   completed: boolean;

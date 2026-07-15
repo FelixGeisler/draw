@@ -114,7 +114,84 @@
   display: block;
 }
 
-/* Reduced motion: skip the transition, keep the lift itself. */
+/* Rarity sheens (issue #62): drawn impact-5 completions get a faint
+   iridescent foil, drawn impact-4 a faint monochrome silver — rare-card
+   aesthetics for exactly the behavior the app rewards with the XP bonus.
+   The sheen is a pure-CSS overlay pseudo-element stacked ABOVE whatever card
+   face exists (today's gradient, later #27 per-task art shows through
+   beneath it unchanged), absolutely positioned inside the inner card —
+   overlay only, so the pile's no-layout-shift invariant holds. The inner's
+   overflow:hidden clips it to the rounded corners. Opacities stay low so
+   title, category dot, and XP line remain readable through it. */
+
+.rarity-foil .trophy-card-inner,
+.rarity-silver .trophy-card-inner {
+  position: relative; /* anchors the sheen overlay */
+}
+
+.rarity-foil .trophy-card-inner::after,
+.rarity-silver .trophy-card-inner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Oversized so the lift-only sweep below can move the band without ever
+     changing the element's box. Centered, the band rests mid-card. */
+  background-size: 250% 250%;
+  background-position: 50% 50%;
+}
+
+.rarity-foil .trophy-card-inner::after {
+  background-image: linear-gradient(
+    115deg,
+    transparent 25%,
+    rgba(255, 110, 199, 0.13) 38%,
+    rgba(255, 226, 130, 0.11) 46%,
+    rgba(120, 255, 214, 0.12) 54%,
+    rgba(120, 170, 255, 0.13) 62%,
+    transparent 75%
+  );
+}
+
+.rarity-silver .trophy-card-inner::after {
+  background-image: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(214, 224, 240, 0.09) 42%,
+    rgba(255, 255, 255, 0.14) 50%,
+    rgba(214, 224, 240, 0.09) 58%,
+    transparent 70%
+  );
+}
+
+/* The shine sweep runs ONLY while the card is lifted (hover / keyboard focus
+   / tap toggle) — collapsed pile cards keep a static sheen. Slow and
+   alternating: a glint you notice, not a casino. Gated behind
+   no-preference (rather than overridden in the reduce block below) so
+   reduced motion keeps the static sheen without a specificity contest
+   against these :hover/.lifted selectors. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes trophy-sheen-sweep {
+    from {
+      background-position: 0% 0%;
+    }
+    to {
+      background-position: 100% 100%;
+    }
+  }
+
+  .rarity-foil:hover .trophy-card-inner::after,
+  .rarity-foil:focus-visible .trophy-card-inner::after,
+  .rarity-foil.lifted .trophy-card-inner::after,
+  .rarity-silver:hover .trophy-card-inner::after,
+  .rarity-silver:focus-visible .trophy-card-inner::after,
+  .rarity-silver.lifted .trophy-card-inner::after {
+    animation: trophy-sheen-sweep 3.5s ease-in-out infinite alternate;
+  }
+}
+
+/* Reduced motion: skip the transition, keep the lift itself (the rarity
+   sheen stays too — only its sweep is motion-gated above, issue #62). */
 @media (prefers-reduced-motion: reduce) {
   .trophy-card,
   .trophy-card-inner {

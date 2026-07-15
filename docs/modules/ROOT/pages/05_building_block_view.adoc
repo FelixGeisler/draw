@@ -86,8 +86,8 @@ client/src/
 │                              (skyline), Settings
 ├── lib/                       pure client logic (drawable classification, effort display,
 │                              generate-tasks review model, heatmap grid/quantization,
-│                              shared local-day math, estimation coaching decisions)
-│                              — unit-tested without rendering
+│                              shared local-day math, estimation coaching decisions,
+│                              trophy rarity tiers) — unit-tested without rendering
 └── components/                TaskRow/Form/Badges, SubtaskEditor, TimerBar,
                                GamificationHeader, TrophyDeck, ActivityHeatmap,
                                AchievementToast, MaterialsSection, AiSuggestionPanel
