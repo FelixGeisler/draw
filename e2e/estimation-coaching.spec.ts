@@ -1,0 +1,114 @@
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+
+// Estimation coaching (#55, ADR-27): a passive hint under TaskForm's effort
+// field and per-category bias statements on the Stats page. History arises
+// from the real user flows only (task POST, timer routes, PATCH status done —
+// no direct DB seeding), which keeps tracked time near zero: the seeded
+// category therefore carries a consistent, strongly divergent ratio of 0×.
+// Everything asserts against OWN categories so the shared serial database's
+// other specs can never skew the sample.
+test.describe.configure({ mode: "serial" });
+
+const COACHED = "Coached cat";
+const UNCOACHED = "Uncoached cat";
+
+async function seedBiasHistory(request: APIRequestContext) {
+  const coached = await (
+    await request.post("/api/categories", { data: { name: COACHED, color: "#ff8c5f" } })
+  ).json();
+  // A category the coach must stay silent about: it exists, but has no
+  // completed-and-tracked history (below MIN_SAMPLE).
+  await request.post("/api/categories", { data: { name: UNCOACHED, color: "#5fd3ff" } });
+
+  // Three qualifying tasks: estimated 60 min, tracked a few real seconds via
+  // the timer routes, completed. Consistent bias, sample size 3 = MIN_SAMPLE.
+  for (const title of ["Coach seed A", "Coach seed B", "Coach seed C"]) {
+    const task = await (
+      await request.post("/api/tasks", {
+        data: { title, categoryId: coached.id, effortMinutes: 60 },
+      })
+    ).json();
+    await request.post(`/api/tasks/${task.id}/timer/start`);
+    // The tracked cycle must own > 0 minutes to qualify — give the entry a
+    // measurable duration instead of racing start/stop within the same ms.
+    await new Promise((r) => setTimeout(r, 300));
+    await request.post("/api/timer/stop");
+    await request.patch(`/api/tasks/${task.id}`, { data: { status: "done" } });
+  }
+}
+
+function form(page: Page) {
+  return page.locator("form");
+}
+const categorySelect = (page: Page) => form(page).locator("select").first();
+const effortInput = (page: Page) => form(page).getByPlaceholder("min");
+const hint = (page: Page) => page.getByTestId("estimate-hint");
+
+test("TaskForm shows the passive hint only while its preconditions hold", async ({ page }) => {
+  await seedBiasHistory(page.request);
+  await page.goto("/capture");
+
+  // Divergent estimate in the coached category → the hint appears. Tracked
+  // ~0 min against 180 estimated makes the all-history ratio exactly 0, so
+  // the suggestion is pinned at the 5-minute floor.
+  await categorySelect(page).selectOption({ label: COACHED });
+  await effortInput(page).fill("40");
+  await expect(hint(page)).toHaveText(
+    `history suggests ~5 min (you track 0× your ${COACHED} estimates)`,
+  );
+
+  // Switching to a category without history removes it...
+  await categorySelect(page).selectOption({ label: UNCOACHED });
+  await expect(hint(page)).toHaveCount(0);
+
+  // ...switching back restores it, clearing the estimate removes it again.
+  await categorySelect(page).selectOption({ label: COACHED });
+  await expect(hint(page)).toBeVisible();
+  await effortInput(page).fill("");
+  await expect(hint(page)).toHaveCount(0);
+});
+
+test("the hint never rewrites the field or the submitted estimate", async ({ page }) => {
+  await page.goto("/capture");
+  await categorySelect(page).selectOption({ label: COACHED });
+  await form(page).getByPlaceholder("What needs doing?").fill("Passivity probe");
+  await effortInput(page).fill("40");
+  await expect(hint(page)).toBeVisible();
+
+  // The field still holds exactly what was typed, hint or no hint.
+  await expect(effortInput(page)).toHaveValue("40");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+
+  // The stored task carries the user's 40 — not the suggested 5.
+  await expect(async () => {
+    const tasks = (await (await page.request.get("/api/tasks")).json()) as {
+      id: number;
+      title: string;
+      effortMinutes: number | null;
+    }[];
+    const probe = tasks.find((t) => t.title === "Passivity probe");
+    expect(probe?.effortMinutes).toBe(40);
+  }).toPass();
+
+  // Leave no residue in the shared DB for later spec files.
+  const tasks = (await (await page.request.get("/api/tasks")).json()) as {
+    id: number;
+    title: string;
+  }[];
+  await page.request.delete(`/api/tasks/${tasks.find((t) => t.title === "Passivity probe")!.id}`);
+});
+
+test("the Stats page states the coached category's bias, threshold met", async ({ page }) => {
+  await page.goto("/stats");
+
+  // The three seeds completed just now sit inside the default 7-day range;
+  // ratio 0 < 0.9 reads as over-estimating.
+  const statement = page.getByTestId("bias-statement").filter({ hasText: COACHED });
+  await expect(statement).toHaveText(
+    `${COACHED}: tracked 0× estimated over 3 tasks — your ${COACHED} estimates run high, trim them.`,
+  );
+
+  // No statement for any category below the minimum sample — the uncoached
+  // category must not even appear as a placeholder.
+  await expect(page.getByTestId("bias-statement").filter({ hasText: UNCOACHED })).toHaveCount(0);
+});

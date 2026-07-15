@@ -10,6 +10,20 @@ export interface Health {
   time: string;
 }
 
+/**
+ * One row of GET /api/stats/estimation-bias (#55): a category's all-history
+ * tracked/estimated ratio over its qualifying completed tasks. The server
+ * returns every category with data; minimum-sample thresholds are applied
+ * client-side (lib/estimationCoach.ts).
+ */
+export interface CategoryBias {
+  categoryId: number;
+  name: string;
+  color: string;
+  taskCount: number;
+  ratio: number;
+}
+
 export interface Task {
   id: number;
   title: string;

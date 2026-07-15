@@ -87,7 +87,7 @@ export function completeTask(task: TaskRow, wasDrawn: boolean): CompletionResult
   // drawn session just ended, matching how the client dismisses the card.
   clearCurrentDraw(task.id);
 
-  // Freeze token earn (#58, ADR-26): the 7th/14th/... REAL completion day of
+  // Freeze token earn (#58, ADR-28): the 7th/14th/... REAL completion day of
   // the unbroken run banks one token, capped at FREEZE_BANK_CAP unconsumed.
   // shouldEarnFreeze's milestone-day check plus the UNIQUE(milestone_day)
   // constraint make the earn idempotent — undo/redo cannot farm tokens.
@@ -129,7 +129,7 @@ export function levelFromXp(xp: number): { level: number; intoLevel: number; nee
 // ---------------------------------------------------------------------------
 // Streak — real completion days (local server time) in an unbroken run.
 // Rest weekdays and freeze-covered days neither break nor extend (#58,
-// ADR-26). Fully derived on every read: completions log + rest setting +
+// ADR-28). Fully derived on every read: completions log + rest setting +
 // append-only freeze earn log feed the pure fold in streak.ts — no stored
 // counter anywhere (ADR-2/ADR-5), and reads have no write side effects.
 

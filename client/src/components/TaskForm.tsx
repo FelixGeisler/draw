@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { Category, Goal, NewTask, Task } from "../api/types";
+import { useEstimationBias } from "../hooks/useEstimationBias";
+import { estimateHint, hintText } from "../lib/estimationCoach";
 import { resolveSubmittedImpact } from "../lib/impact";
 
 interface Props {
@@ -61,6 +63,17 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
   const [windowStart, setWindowStart] = useState(initial?.windowStart ?? "09:00");
   const [windowEnd, setWindowEnd] = useState(initial?.windowEnd ?? "17:00");
   const [error, setError] = useState<string | null>(null);
+
+  // Passive estimation coaching (#55, ADR-27). Fetched here (not passed in)
+  // because TaskForm is shared by Capture, Goals, the Tasks-row editor and
+  // the drawn-card edit; the query is cached under one key across all of
+  // them. The hint is advice only — it never writes into `effort` and the
+  // submitted payload below stays exactly what the user typed.
+  const bias = useEstimationBias();
+  const hint = estimateHint(
+    bias.data?.find((b) => b.categoryId === categoryId),
+    effort === "" ? null : Number(effort),
+  );
 
   // All-or-none (server-validated): an editor left incomplete submits no
   // window at all — identical to toggling it off.
@@ -222,6 +235,16 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
             value={windowEnd}
             onChange={(e) => setWindowEnd(e.target.value)}
           />
+        </div>
+      )}
+      {hint && (
+        // Dim, non-interactive, own row: appearing/disappearing while the
+        // user types must never shift the input they are typing into.
+        <div
+          data-testid="estimate-hint"
+          style={{ flexBasis: "100%", color: "var(--text-dim)", fontSize: 12 }}
+        >
+          {hintText(hint, categories.find((c) => c.id === categoryId)?.name ?? "")}
         </div>
       )}
       {error && (

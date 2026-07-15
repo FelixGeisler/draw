@@ -4,8 +4,14 @@
 |===
 |Constraint |Background
 
-|Local-only, single user
-|Runs on the owner's Windows 11 PC; no accounts, no sync, no server deployment
+|Local-only, single user (current deployment)
+|Draw currently runs on one Windows 11 PC; no accounts, no sync, no server
+deployment. This is the state of the deployment today, not the product's
+identity — the xref:01_introduction_and_goals.adoc#vision[vision] names
+multi-device, mobile, and multi-deck use as the direction. Features that
+further harden local-only assumptions (localhost binding, the single running
+timer, settings singletons) must explicitly flag the trade-off against that
+vision
 
 |Windows compatibility
 |Native dependencies must ship prebuilt win32 binaries (better-sqlite3 does)

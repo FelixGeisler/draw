@@ -157,6 +157,7 @@ describe("buildEstimation", () => {
         categoryId: 2,
         name: "Study",
         color: "#a06bff",
+        taskCount: 1,
         estimatedMinutes: 100,
         trackedMinutes: 80,
         ratio: 0.8,
@@ -165,11 +166,24 @@ describe("buildEstimation", () => {
         categoryId: 1,
         name: "Work",
         color: "#4f8cff",
+        taskCount: 2,
         estimatedMinutes: 40,
         trackedMinutes: 60,
         ratio: 1.5,
       },
     ]);
+  });
+
+  it("counts only qualifying tasks in a category's taskCount (#55)", () => {
+    // The unestimated task shares the category but says nothing about
+    // estimation accuracy — it must not inflate the coaching sample size.
+    const e = buildEstimation([
+      row({ categoryId: 1, estimatedMinutes: 30, trackedMinutes: 45 }),
+      row({ categoryId: 1, estimatedMinutes: null, trackedMinutes: 120 }),
+      row({ categoryId: 1, estimatedMinutes: 0, trackedMinutes: 60 }),
+    ]);
+    expect(e.byCategory).toHaveLength(1);
+    expect(e.byCategory[0]).toMatchObject({ categoryId: 1, taskCount: 1, ratio: 1.5 });
   });
 });
 
@@ -285,5 +299,33 @@ describe("trackedCyclesInRange", () => {
       TO,
     );
     expect(tracked).toEqual({ minutes: 0, cycles: 0 });
+  });
+
+  describe('all-history bounds ("" to 9999-12-31) as used by the bias endpoint (#55)', () => {
+    it("attributes every tracked cycle regardless of year, still per-cycle", () => {
+      // Same lexicographic comparisons as the SQL filters: "" sorts before
+      // every ISO timestamp, year 9999 after every plausible one.
+      const tracked = trackedCyclesInRange(
+        ["2020-01-05T12:00:00.000Z", "2024-05-03T12:00:00.000Z"],
+        [
+          entry("2020-01-04T10:00:00.000Z", 45), // cycle 1, years back
+          entry("2024-05-02T10:00:00.000Z", 25), // cycle 2
+          entry("2024-05-03T14:00:00.000Z", 99), // after the last completion: next cycle, out
+        ],
+        "",
+        "9999-12-31",
+      );
+      expect(tracked).toEqual({ minutes: 70, cycles: 2 });
+    });
+
+    it("still skips checkbox-only cycles over all history", () => {
+      const tracked = trackedCyclesInRange(
+        ["2023-03-01T12:00:00.000Z", "2023-06-01T12:00:00.000Z"],
+        [entry("2023-02-27T10:00:00.000Z", 30)],
+        "",
+        "9999-12-31",
+      );
+      expect(tracked).toEqual({ minutes: 30, cycles: 1 });
+    });
   });
 });

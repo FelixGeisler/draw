@@ -4,7 +4,7 @@ import type express from "express";
 import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
 
-// Streak rest weekdays + freeze tokens (#58, ADR-26). Time-dependent state is
+// Streak rest weekdays + freeze tokens (#58, ADR-28). Time-dependent state is
 // seeded by backdating completions relative to the real "today" — rest
 // weekdays are derived from the actual weekday of each backdated day, so the
 // suite is deterministic on any day of the week.

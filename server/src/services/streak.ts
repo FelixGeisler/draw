@@ -1,4 +1,4 @@
-// Pure streak fold (#58, ADR-26 — reshaped after the PR #98 review). No DB,
+// Pure streak fold (#58, ADR-28 — reshaped after the PR #98 review). No DB,
 // no clock — everything the fold needs is passed in, so the logic is
 // unit-testable like the draw weights.
 //
