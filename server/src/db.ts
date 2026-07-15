@@ -16,7 +16,7 @@ export const db = new Database(path.join(dataDir, "app.db"));
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
-const CURRENT_VERSION = 6;
+const CURRENT_VERSION = 7;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -52,6 +52,55 @@ function migrate() {
         svg TEXT NOT NULL,
         created_at TEXT NOT NULL
       )`);
+    }
+    if (version < 7) {
+      // Legacy nested breakdowns (issue #80, ADR-16/ADR-24): before the #35
+      // guard, API/MCP calls could nest subtasks arbitrarily deep. Such rows
+      // are draw-eligible yet invisible in every list, corrupt the one-level
+      // rollup, leak past the sequential hold-back queue, and 409-deadlock
+      // their parent — so they are repaired, not grandfathered: every task
+      // whose parent is itself a subtask is re-parented one level up per
+      // pass until the tree is two levels everywhere (the same flattening
+      // the guard's 400 message prescribes). Each pass reads a snapshot of
+      // (id, grandparent) pairs first, so a pass moves every nested row
+      // exactly one step up its original chain — the loop terminates because
+      // parent_id is only ever written at INSERT referencing an existing
+      // row, making the ancestor graph acyclic, and each pass strictly
+      // shrinks the maximum depth. Transactional: a crash between hoist and
+      // cascade must not leave rows the re-run can no longer tell apart.
+      db.transaction(() => {
+        const findNested = db.prepare(
+          `SELECT t.id AS id, p.parent_id AS grandparentId
+           FROM tasks t JOIN tasks p ON p.id = t.parent_id
+           WHERE p.parent_id IS NOT NULL`,
+        );
+        const hoist = db.prepare("UPDATE tasks SET parent_id = ? WHERE id = ?");
+        const reparented = new Set<number>();
+        for (;;) {
+          const nested = findNested.all() as { id: number; grandparentId: number }[];
+          if (nested.length === 0) break;
+          for (const { id, grandparentId } of nested) {
+            hoist.run(grandparentId, id);
+            reparented.add(id);
+          }
+        }
+        // Re-parented rows join their new parent's breakdown under the same
+        // cascade rules a parent edit applies (routes/tasks.ts): goal_id
+        // follows the parent unconditionally, category_id only while open —
+        // done/archived rows are historical records and keep the category
+        // they were actually finished under (#44).
+        const adopt = db.prepare(
+          `UPDATE tasks
+           SET goal_id = (SELECT r.goal_id FROM tasks r WHERE r.id = tasks.parent_id),
+               category_id = CASE
+                 WHEN status = 'open'
+                   THEN (SELECT r.category_id FROM tasks r WHERE r.id = tasks.parent_id)
+                 ELSE category_id
+               END
+           WHERE id = ?`,
+        );
+        for (const id of reparented) adopt.run(id);
+      })();
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);
