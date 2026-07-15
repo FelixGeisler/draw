@@ -953,3 +953,51 @@ discard-until-happy). Reusing the pool predicate and the staleness anchor
 keeps one definition of "eligible" and "stale"; reusing the current-draw
 machinery keeps one commitment lifecycle — the warm-up adds a marker and a
 rate limit, not a second draw system.
+
+== ADR-31: TCG card frame — one client-side frame language, derived stats, cache-only pile art
+
+*Context:* Card surfaces had grown ad-hoc: the drawn card was a gradient
+panel with loose chips, the trophy pile a text stack with a dot and a bare
+"done HH:MM" line (#114). The user set an explicit visual direction (#115):
+cards should read as trading-card-game cards, with a canonical attribute
+mapping — Level stars = impact, Monster Type = category, ATK = estimated
+minutes — extended in that spirit by DEF = tracked minutes, flavor text =
+description, rarity = the #62/#107 sheens, art window = the #113 art.
+*Decision:* (a) One frame language, entirely client-side:
+`CardFrame`/`CardFrame.css` renders the full frame (DrawPage back face);
+the trophy pile renders mini-frames from the same shared pieces (the
+`TypeLine` pill, `ImpactStars`, the same scrim/art conventions and the
+`--cf-cat` tint variable). The server stores no presentation — every mapped
+stat is a render-time derivation from data that already exists (ADR-2/ADR-5
+spirit). (b) Legibility is computed, not eyeballed: the type-line pill's
+ink is the higher WCAG-contrast choice of a dark/light pair
+(`lib/cardFrame.typeLineInk`, unit-pinned per color); every text zone sits
+on a solid band or scrim, never raw on art; the frame tint derives from the
+category color via CSS `color-mix`. (c) DEF = tracked minutes is derived
+live in two halves: the draw payloads carry the CLOSED entries' sum
+(`trackedMinutes`, query-time SQL), and the client adds the running entry's
+elapsed whole minutes from the timer state it already polls — no double
+count by construction, no per-minute refetch; stopping the timer
+invalidates the current draw so the closed entry folds into the base.
+(d) The pile reads art through `GET /api/card-art?taskIds=…` — a cache-only
+batch endpoint that can NEVER generate (#114's hard constraint; the
+per-task GET generates on miss, so it must not be called blindly for N
+cards). Batch over lazy per-card fetches: the pile renders all faces at
+once, N+1 requests buy nothing, and the response stays small (a few KB of
+sanitized SVG per row, local HTTP). (e) Degraded grace is part of the
+frame contract: no art → the gradient placeholder tinted by category (the
+frame looks intentional without AI), no goal → no star row (ADR-4), no
+estimate → no ATK. (f) Pile overflow WRAPS (flex-wrap + flex-shrink: 0):
+a non-wrapping row shrank cards below hoverable size at 20+ completions
+(PR #117's discovery); horizontal scrolling would clip the #47 lift
+(overflow-x: auto forces overflow-y: auto), and a max-visible + counter
+hides trophies on a reward shelf.
+*Rationale:* Presentation-only derivation keeps every invariant that
+already holds: the #47 lift stays transform + z-index with no layout shift
+(art/scrim/sheen are absolutely positioned overlays), rarity stays a
+render-time function, and no new state can drift. The one deliberate
+duplication-removal: the drawn card's effort chip and star badges are
+absorbed by ATK and the star row (one datum, one place); the focus overlay
+(#56) adopts exactly the type-line pill and nothing else — its job is the
+clock, not the frame. Follow-ups noted in their issues: the skyline
+mini-cards (#53) and the daily hand (#59) adopt the frame when built.
