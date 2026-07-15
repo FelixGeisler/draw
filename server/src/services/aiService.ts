@@ -18,6 +18,7 @@ import {
   postprocessGenerateTasks,
   type GenerateTasksProcessed,
 } from "./aiPostprocess.js";
+import { buildCardArtPrompt } from "./cardArtStyle.js";
 
 export const MODEL = "claude-opus-4-8";
 const MAX_INPUT_TOKENS = 180_000;
@@ -28,9 +29,12 @@ const INPUT_USD_PER_MTOK = 5;
 const DEFAULT_MAX_TOKENS = 16_000;
 const GENERATE_TASKS_MAX_TOKENS = 32_000;
 // Card art (#27): an SVG background is ~2-4K output tokens, but adaptive
-// thinking shares this cap — 6K leaves headroom so light thinking cannot
-// truncate the markup mid-tag.
-const CARD_ART_MAX_TOKENS = 6_000;
+// thinking shares this cap. Raised 6K -> 8K for #113: the dense archetypes
+// (constellation fields, shard mosaics) legitimately emit more markup, and
+// the headroom keeps light thinking from truncating it mid-tag. Reviewed
+// together with the sanitizer's MAX_INPUT_LENGTH guard (svgSanitizer.ts),
+// which must stay the same order of magnitude as a real generation.
+const CARD_ART_MAX_TOKENS = 8_000;
 
 // Resolved per request (not at module load) so a key set through the
 // Settings UI takes effect immediately, without a server restart.
@@ -75,17 +79,22 @@ Principles you always apply:
 
 // Card art (#27) is neither planning nor transcription — its own prompt keeps
 // the task directives out and pins the constraints the sanitizer and the deck
-// aesthetic rely on: abstract, strictly no text, dark palette anchored on the
-// app background with the category color as the single accent, 5:7 viewBox.
-export const CARD_ART_SYSTEM_PROMPT = `You are the card artist of "Draw", an anti-procrastination app that presents tasks as playing cards. You create ABSTRACT, decorative SVG artwork for the back of a drawn card.
+// aesthetic rely on. #113 moved the LOOK out of this prompt: one fixed recipe
+// here ("the single accent", one abstract-themes list) made every card
+// converge on the same image, so the per-request style — archetype, palette
+// harmony, density, focal placement — now arrives with the user prompt
+// (cardArtStyle.ts, deterministic per task). What stays here are the hard
+// rules no style may trade away.
+export const CARD_ART_SYSTEM_PROMPT = `You are the card artist of "Draw", an anti-procrastination app that presents tasks as playing cards. You create ABSTRACT, decorative SVG artwork for the back of a drawn card. Each request names a style archetype, a palette harmony and a composition — follow them precisely: they are what keeps every card in the deck visually distinct.
 
 Hard rules for every artwork:
 - Output one single self-contained <svg> element with viewBox="0 0 300 420" (the card's 5:7 ratio), filling the whole area.
 - Strictly NO text of any kind: no <text> or <tspan> elements, and no letters, digits or words drawn as paths.
 - No <script>, no <foreignObject>, no <image>, no <style>, no event-handler attributes, and no external references of any kind (no http(s):, data: or file URLs) — reference only your own <defs> via url(#id) or href="#id". A server-side sanitizer strips everything else.
-- Dark, calm palette anchored on the app background: base tones between #1b1e27 and #232735, with the task's category color as the single accent so every card reads as part of one deck. Keep contrast subtle — the artwork sits BEHIND light card text that must stay legible.
-- Make it abstract and quietly evocative of the task's theme: geometry, layered gradients, flowing paths, constellations, subtle patterns. Never literal illustrations, icons, mascots or clip-art.
-- Keep it compact: at most ~60 elements; filters no heavier than a gentle blur or turbulence.`;
+- Dark, calm base anchored on the app background: base tones between #1b1e27 and #232735, with the requested palette harmony built around the task's category color so every card still reads as part of one deck. Keep contrast subtle — the artwork sits BEHIND light card text that must stay legible.
+- Compose for a portrait art window: the focal interest lives in the upper-center region of the canvas (a card frame may crop the lower part), while the full area stays covered.
+- Make it abstract and quietly evocative of the task's theme within the requested archetype. Never literal illustrations, icons, mascots or clip-art.
+- Keep it compact: at most ~80 elements — express repetition through <defs> with <use> or <pattern> instead of duplicated markup. Filters are welcome (turbulence, blur, displacement, soft light) but no heavier than the archetype needs.`;
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -298,6 +307,9 @@ function generateTasksContext(goalId: number, instruction: string): ContentBlock
 // Theming inputs for the card art (#27): task title, category name + color,
 // and the goal title when the task is linked to one. Deliberately no
 // materials — the artwork keys off what the card says, not what it cites.
+// The prompt text itself — including the deterministic per-task style
+// directives (#113) — is built by the pure buildCardArtPrompt, so tests can
+// verify it without a DB or an API call; this wrapper only adds the lookup.
 function cardArtContext(taskId: number): ContentBlock[] {
   const task = db
     .prepare(
@@ -315,17 +327,14 @@ function cardArtContext(taskId: number): ContentBlock[] {
         | undefined)
     : undefined;
 
-  const lines = [
-    `Create the card-back artwork for this drawn task.`,
-    ``,
-    `Task: ${task.title}`,
-    `Category: ${task.category} (accent color: ${task.color})`,
-    goal ? `Part of goal: ${goal.title}` : "",
-    ``,
-    `Return the complete SVG markup in the svg field.`,
-  ].filter(Boolean);
-
-  return [{ type: "text", text: lines.join("\n") }];
+  const text = buildCardArtPrompt({
+    taskId,
+    title: task.title,
+    category: task.category,
+    color: task.color,
+    goalTitle: goal?.title ?? null,
+  });
+  return [{ type: "text", text }];
 }
 
 // ---------------------------------------------------------------------------

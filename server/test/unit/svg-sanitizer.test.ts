@@ -289,3 +289,98 @@ describe("rejection of unusable input", () => {
     expect(out).not.toContain("<a");
   });
 });
+
+// #113: each style archetype nudges the model toward specific SVG techniques.
+// These are representative snippets of what those archetypes are likely to
+// emit — every one must survive sanitization with its defining construct
+// intact, or an archetype would silently 502 on every generation.
+describe("archetype-representative output survives (#113)", () => {
+  it("gradient mesh: overlapping radial gradients under a soft blur", () => {
+    const out = sanitizeSvg(
+      wrap(
+        `<defs>` +
+          `<radialGradient id="m1" cx="0.3" cy="0.25" r="0.6"><stop offset="0" stop-color="#4f8cff" stop-opacity="0.5"/><stop offset="1" stop-color="#1b1e27" stop-opacity="0"/></radialGradient>` +
+          `<radialGradient id="m2" cx="0.7" cy="0.4" r="0.7"><stop offset="0" stop-color="#7a5cff" stop-opacity="0.35"/><stop offset="1" stop-color="#1b1e27" stop-opacity="0"/></radialGradient>` +
+          `<filter id="soft"><feGaussianBlur stdDeviation="18"/></filter>` +
+          `</defs>` +
+          `<ellipse cx="110" cy="120" rx="150" ry="130" fill="url(#m1)" filter="url(#soft)"/>` +
+          `<circle cx="210" cy="170" r="140" fill="url(#m2)" filter="url(#soft)" opacity="0.8"/>`,
+      ),
+    );
+    expect(out).toBeTruthy();
+    expect(out).toContain("<radialGradient");
+    expect(out).toContain("<feGaussianBlur");
+    expect(out).toContain('filter="url(#soft)"');
+  });
+
+  it("brush strokes: turbulence-displaced tapered strokes", () => {
+    const out = sanitizeSvg(
+      wrap(
+        `<defs><filter id="rough">` +
+          `<feTurbulence type="fractalNoise" baseFrequency="0.08" numOctaves="3" seed="11" result="noise"/>` +
+          `<feDisplacementMap in="SourceGraphic" in2="noise" scale="9" xChannelSelector="R" yChannelSelector="G"/>` +
+          `</filter></defs>` +
+          `<path d="M20 340 C 90 220, 160 200, 270 90" stroke="#8bc34a" stroke-width="26" stroke-linecap="round" fill="none" opacity="0.5" filter="url(#rough)"/>` +
+          `<path d="M40 380 C 120 300, 190 260, 285 150" stroke="#5a7d3a" stroke-width="14" stroke-linecap="round" fill="none" opacity="0.35" filter="url(#rough)"/>`,
+      ),
+    );
+    expect(out).toBeTruthy();
+    expect(out).toContain("<feTurbulence");
+    expect(out).toContain("<feDisplacementMap");
+    expect(out).toContain('stroke-linecap="round"');
+  });
+
+  it("constellation: a defs dot placed via <use>, haloed by a soft shadow", () => {
+    const out = sanitizeSvg(
+      wrap(
+        `<defs><circle id="dot" r="2.5" fill="#e0b34f"/><filter id="halo"><feDropShadow dx="0" dy="0" stdDeviation="4" flood-color="#e0b34f" flood-opacity="0.6"/></filter></defs>` +
+          `<use href="#dot" x="60" y="80" filter="url(#halo)"/>` +
+          `<use href="#dot" x="140" y="55"/>` +
+          `<use href="#dot" x="205" y="110"/>` +
+          `<line x1="60" y1="80" x2="140" y2="55" stroke="#e0b34f" stroke-width="0.5" stroke-opacity="0.4"/>` +
+          `<line x1="140" y1="55" x2="205" y2="110" stroke="#e0b34f" stroke-width="0.5" stroke-opacity="0.4"/>`,
+      ),
+    );
+    expect(out).toBeTruthy();
+    expect(out).toContain("<feDropShadow");
+    expect(out).toContain('href="#dot"');
+    expect(out).toContain("<line");
+  });
+
+  it("layered geometric: clipped translucent polygons over a pattern", () => {
+    const out = sanitizeSvg(
+      wrap(
+        `<defs>` +
+          `<pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><rect width="24" height="24" fill="#20242f"/><rect width="1" height="24" fill="#262b38"/></pattern>` +
+          `<clipPath id="slice"><rect x="0" y="0" width="300" height="220"/></clipPath>` +
+          `</defs>` +
+          `<rect width="300" height="420" fill="url(#grid)"/>` +
+          `<polygon points="0,60 300,10 300,180 0,240" fill="#4f8cff" fill-opacity="0.14"/>` +
+          `<polygon points="0,140 300,90 300,260 0,320" fill="#4f8cff" fill-opacity="0.09" clip-path="url(#slice)" transform="rotate(-3 150 210)"/>`,
+      ),
+    );
+    expect(out).toBeTruthy();
+    expect(out).toContain("<pattern");
+    expect(out).toContain('clip-path="url(#slice)"');
+    expect(out).toContain("<polygon");
+  });
+
+  it("organic curves / contour lines: gradient-stroked paths faded by a mask", () => {
+    const out = sanitizeSvg(
+      wrap(
+        `<defs>` +
+          `<linearGradient id="sweep" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#c25b8a"/><stop offset="1" stop-color="#232735"/></linearGradient>` +
+          `<mask id="fade"><rect width="300" height="420" fill="url(#sweep)"/></mask>` +
+          `</defs>` +
+          `<g mask="url(#fade)">` +
+          `<path d="M-20 120 C 80 60, 220 180, 320 100" stroke="url(#sweep)" stroke-width="20" fill="none" opacity="0.5"/>` +
+          `<path d="M150 90 c -40 10, -60 50, -20 70 c 40 20, 90 -10, 60 -50 c -15 -20, -30 -25, -40 -20 z" fill="none" stroke="#c25b8a" stroke-width="1.2" stroke-opacity="0.5"/>` +
+          `</g>`,
+      ),
+    );
+    expect(out).toBeTruthy();
+    expect(out).toContain("<mask");
+    expect(out).toContain('mask="url(#fade)"');
+    expect(out).toContain('stroke="url(#sweep)"');
+  });
+});
