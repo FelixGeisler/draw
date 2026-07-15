@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Category, Task } from "../api/types";
 import { focusClock } from "../lib/time";
+import { TypeLine } from "./CardFrame";
 import "./FocusOverlay.css";
 
 /**
@@ -77,12 +78,12 @@ export function FocusOverlay({
       aria-modal="true"
       aria-label={`Focus: ${task.title}`}
     >
-      {category && (
-        <span className="chip">
-          <span className="dot" style={{ background: category.color }} />
-          {category.name}
-        </span>
-      )}
+      {/* The TCG frame's type line (#115) carries the category here too —
+          deliberately the ONLY frame element the focus view adopts: focus
+          mode is "the drawn card's essentials and the clock, nothing else"
+          (#56), so the full frame chrome would fight its purpose while the
+          shared pill keeps the visual language consistent. */}
+      {category && <TypeLine category={category} />}
       <h1 className="focus-title">{task.title}</h1>
       <div className={`focus-clock ${clock.mode}`}>{clock.text}</div>
       <div className="focus-est">

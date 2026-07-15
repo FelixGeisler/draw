@@ -62,4 +62,22 @@ describe("regenerateCardArtMutation (#113)", () => {
     expect(qc.getQueryData(["card-art", 8])).toBeUndefined();
     expect(postMock).toHaveBeenCalledExactlyOnceWith("/api/tasks/7/card-art/regenerate");
   });
+
+  // PR #120 review: a RECURRING task completed earlier today sits in the pile
+  // and re-enters the pool — if it is redrawn and regenerated the same day,
+  // the batch query (staleTime: Infinity, keyed only by the id set) would pin
+  // the pile to the OLD art until the id set changed or the page reloaded.
+  it("invalidates the pile's batch art, so a redrawn recurring task cannot show stale art", async () => {
+    const qc = new QueryClient();
+    // Today's pile already holds task 7's art under the batch key.
+    qc.setQueryData(["card-art-batch", "7"], { arts: [{ taskId: 7, svg: "<svg>old</svg>" }] });
+    const observer = new MutationObserver(qc, regenerateCardArtMutation(qc));
+    postMock.mockResolvedValueOnce({ svg: "<svg>new</svg>" });
+
+    await observer.mutate(7);
+
+    // Invalidation is what breaks staleTime: Infinity — any mounted
+    // useCardArtBatch refetches (a cache-only SELECT server-side).
+    expect(qc.getQueryState(["card-art-batch", "7"])?.isInvalidated).toBe(true);
+  });
 });

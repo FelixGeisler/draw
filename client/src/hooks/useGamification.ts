@@ -24,6 +24,8 @@ export interface GamificationState {
     taskId: number;
     title: string;
     categoryId: number;
+    /** Level stars on the mini-frame render only when goal-linked (ADR-4). */
+    goalId: number | null;
     impact: number;
   }[];
   achievements: {

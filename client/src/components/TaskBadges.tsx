@@ -9,9 +9,11 @@ function formatWake(iso: string): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function ImpactStars({ value }: { value: number }) {
+export function ImpactStars({ value, size }: { value: number; size?: number }) {
+  // size: the trophy mini-frames (#115) shrink the row to fit a 90px card;
+  // everywhere else keeps the 13px default.
   return (
-    <span title={`Impact ${value}/5`} style={{ color: "#ffb64f", fontSize: 13 }}>
+    <span title={`Impact ${value}/5`} style={{ color: "#ffb64f", fontSize: size ?? 13 }}>
       {"★".repeat(value)}
       <span style={{ opacity: 0.25 }}>{"★".repeat(5 - value)}</span>
     </span>
@@ -21,10 +23,17 @@ export function ImpactStars({ value }: { value: number }) {
 export function TaskBadges({
   task,
   showStars,
+  showEffort,
   goals,
 }: {
   task: Task;
   showStars?: boolean;
+  /**
+   * Effort chip toggle (#115): the drawn card's TCG frame renders the
+   * estimate as its ATK stat, so it suppresses the "N min" chip — one datum,
+   * one place. Every other caller keeps the chip (default true).
+   */
+  showEffort?: boolean;
   /**
    * Goal chip (#88): rendered only when the caller supplies the goals list —
    * the Tasks page rows let you edit the goal link (#17), so they show which
@@ -37,7 +46,7 @@ export function TaskBadges({
   const goal = task.goalId != null ? goals?.find((g) => g.id === task.goalId) : undefined;
   return (
     <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-      {effort != null && <span className="chip">{effort} min</span>}
+      {(showEffort ?? true) && effort != null && <span className="chip">{effort} min</span>}
       {task.dueDate && (
         <span
           className="chip"

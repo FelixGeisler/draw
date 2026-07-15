@@ -9,7 +9,13 @@
    z-index, which applies because the cards are flex items (z-index works on
    flex items without `position`). The visual card is an inner wrapper with
    `min-height: 100%` so the lifted card can grow past the 126px flow box
-   (full title + details) without clipping or reflow. */
+   (full title + details) without clipping or reflow.
+
+   #115 turns each card into a TCG mini-frame: cached art (batch, cache-only
+   reads — #114) as the face, level stars for goal-linked completions, the
+   category type-line pill on lift, completion time + XP in an always-visible
+   footer, frame tint by category (--cf-cat), the #107 rarity sheens
+   composing above it all. */
 
 .trophy-deck {
   margin-top: 32px;
@@ -21,14 +27,25 @@
   font-size: 14px;
 }
 
+/* Pile overflow (#115, from PR #117's discovery): the row WRAPS. A
+   non-wrapping row shrank cards below hoverable size on heavy days (every
+   hover center landed under the right neighbor); horizontal scrolling is out
+   because overflow-x: auto forces overflow-y to auto too, and the container
+   would clip the lift; hiding cards behind a "+N" counter defeats a reward
+   shelf. Wrapped rows center independently and keep every trophy at full
+   size and hoverable — the lift pops above neighboring rows via its
+   z-index, exactly like it pops above siblings. */
 .trophy-pile {
   display: flex;
+  flex-wrap: wrap;
   justify-content: center;
+  row-gap: 16px;
 }
 
 .trophy-card {
   width: 90px;
   height: 126px;
+  flex-shrink: 0; /* wrap instead of shrinking below hoverable size */
   cursor: pointer;
   touch-action: manipulation;
   transform: rotate(var(--trophy-rot, 0deg));
@@ -40,11 +57,18 @@
 }
 
 .trophy-card-inner {
+  position: relative; /* anchors art, scrim and the rarity sheen overlay */
+  display: flex;
+  flex-direction: column;
   width: 100%;
   min-height: 100%;
   border-radius: 10px;
-  border: 1px solid var(--border);
-  background: linear-gradient(160deg, #232735, #1b1e27);
+  border: 1px solid color-mix(in srgb, var(--cf-cat, var(--accent)) 35%, var(--border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--cf-cat, var(--accent)) 12%, #232735),
+    #1b1e27
+  );
   padding: 8px;
   font-size: 11px;
   overflow: hidden;
@@ -52,8 +76,55 @@
   transition: box-shadow 0.18s ease;
 }
 
+/* The face art (#114): absolutely positioned UNDER scrim, text and sheen —
+   overlay layers only, so the #47 no-layout-shift invariant holds. */
+.trophy-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* Legibility scrim between the art and the text: light up top (the art stays
+   visible), denser toward the footer band. */
+.trophy-art-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(18, 20, 26, 0.5),
+    rgba(18, 20, 26, 0.32) 40%,
+    rgba(18, 20, 26, 0.72)
+  );
+}
+
+/* Text and chrome paint above the absolutely positioned art layers; the
+   rarity sheen (::after, further down) still paints above them in turn. */
+.trophy-card-inner > :not(.trophy-art, .trophy-art-scrim) {
+  position: relative;
+}
+
+.trophy-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
 .trophy-card-glyph {
   font-size: 16px;
+}
+
+/* Level stars (goal-linked only, ADR-4) on a scrim chip, like the full
+   frame's — legible over any art. */
+.trophy-stars {
+  padding: 2px 5px;
+  border-radius: 999px;
+  background: rgba(18, 20, 26, 0.72);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .trophy-card-title {
@@ -61,6 +132,7 @@
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  text-shadow: 0 1px 2px rgba(18, 20, 26, 0.9);
 }
 
 .trophy-details {
@@ -69,13 +141,43 @@
   color: var(--text-dim);
 }
 
-.trophy-details .dot {
-  vertical-align: -1px;
+/* The mini type line: the shared category pill (CardFrame.css), shrunk. */
+.trophy-details .cf-type-line {
+  font-size: 10px;
+  padding: 2px 8px;
+  max-width: 100%;
+}
+
+/* Mini-frame footer (#115): completion time + XP, always visible — in the
+   collapsed pile too (#114), not lift-gated like the details above. Wraps as
+   a whole (XP drops below the chip) rather than breaking the time mid-chip
+   when a wide locale format ("08:52 PM") meets a 90px card. */
+.trophy-footer {
+  margin-top: auto;
+  padding-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2px 4px;
+}
+
+.trophy-time {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(18, 20, 26, 0.72);
+  border: 1px solid color-mix(in srgb, var(--cf-cat, var(--accent)) 30%, var(--border));
+  color: var(--text-dim);
+  font-size: 8.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  white-space: nowrap;
 }
 
 .trophy-card-xp {
   color: var(--ok);
-  margin-top: 4px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(18, 20, 26, 0.9);
 }
 
 /* The lifted state — identical for hover, keyboard focus, and tap toggle. */
@@ -117,17 +219,12 @@
 /* Rarity sheens (issue #62): drawn impact-5 completions get a faint
    iridescent foil, drawn impact-4 a faint monochrome silver — rare-card
    aesthetics for exactly the behavior the app rewards with the XP bonus.
-   The sheen is a pure-CSS overlay pseudo-element stacked ABOVE whatever card
-   face exists (today's gradient, later #27 per-task art shows through
-   beneath it unchanged), absolutely positioned inside the inner card —
-   overlay only, so the pile's no-layout-shift invariant holds. The inner's
+   The sheen is a pure-CSS overlay pseudo-element stacked ABOVE the card face
+   (the #114 per-task art shows through beneath it unchanged, as the #62
+   comment promised), absolutely positioned inside the inner card — overlay
+   only, so the pile's no-layout-shift invariant holds. The inner's
    overflow:hidden clips it to the rounded corners. Opacities stay low so
-   title, category dot, and XP line remain readable through it. */
-
-.rarity-foil .trophy-card-inner,
-.rarity-silver .trophy-card-inner {
-  position: relative; /* anchors the sheen overlay */
-}
+   title, pill, time and XP remain readable through it. */
 
 .rarity-foil .trophy-card-inner::after,
 .rarity-silver .trophy-card-inner::after {

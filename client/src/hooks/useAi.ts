@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { batchArtKey } from "../lib/cardFrame";
 
 export interface AiStatus {
   configured: boolean;
@@ -84,6 +85,32 @@ export function useCardArt(taskId: number | undefined, revealed: boolean) {
 }
 
 /**
+ * Batch card art for the trophy pile (#114): ONE cache-only round trip for
+ * all of today's completions — the endpoint never generates, so rendering
+ * the pile can never trigger a Claude call (with or without a key). Absent
+ * rows simply keep the gradient face. The key is deduped + sorted
+ * (batchArtKey), so completion order can't mint duplicate cache entries, and
+ * a new completion changes the id set and refetches naturally. Same silent
+ * contract as useCardArt: failures resolve to "no art", callers read only
+ * `data`.
+ */
+export function useCardArtBatch(taskIds: number[]) {
+  const key = batchArtKey(taskIds);
+  return useQuery({
+    queryKey: ["card-art-batch", key],
+    queryFn: () =>
+      api.get<{ arts: { taskId: number; svg: string }[] }>(`/api/card-art?taskIds=${key}`),
+    enabled: key !== "",
+    // Cached art only changes through a regenerate on the DRAWN card — but a
+    // recurring task completed earlier today can be redrawn the same day, so
+    // the regenerate mutation invalidates this key; nothing else can stale it.
+    staleTime: Infinity,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/**
  * Regenerate the card art (#113): the server generates -> sanitizes ->
  * REPLACES the cached row; a failure keeps the old art. Same silent contract
  * as useCardArt — callers read only isPending, never error state, so a 503
@@ -106,6 +133,12 @@ export function regenerateCardArtMutation(qc: QueryClient) {
       api.post<{ svg: string }>(`/api/tasks/${taskId}/card-art/regenerate`),
     onSuccess: (data: { svg: string }, taskId: number) => {
       qc.setQueryData(["card-art", taskId], data);
+      // A recurring task completed earlier today sits in the trophy pile AND
+      // re-enters the pool — regenerating its art on a same-day redraw must
+      // refresh the pile's batch cache too (staleTime: Infinity means nothing
+      // else ever will). Cheap: the batch endpoint is cache-only server-side,
+      // so the refetch is a plain SELECT, never a Claude call.
+      void qc.invalidateQueries({ queryKey: ["card-art-batch"] });
     },
   };
 }
