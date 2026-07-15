@@ -26,7 +26,7 @@ export interface ActivityTaskMeta {
   effortMinutes: number | null;
   /**
    * Live task rating from the tasks join (like title) — with wasDrawn it lets
-   * the client derive foil/silver card rarity (#62); never snapshotted.
+   * the client derive holo/silver card rarity (#62); never snapshotted.
    */
   impact: number;
 }

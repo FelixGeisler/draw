@@ -84,7 +84,7 @@ describe("gamification", () => {
   });
 
   it("exposes the rarity facts (impact, wasDrawn) and goalId on todayCompletions", async () => {
-    // Contract guard for issue #62: the client derives foil/silver rarity at
+    // Contract guard for issue #62: the client derives holo/silver rarity at
     // render time from exactly these two fields — nothing is stored. A drawn
     // impact-5 completion must surface impact 5 and a truthy wasDrawn.
     // goalId (#115) rides the same live join: the trophy mini-frame gates its
@@ -93,7 +93,7 @@ describe("gamification", () => {
     const task = (
       await request(app)
         .post("/api/tasks")
-        .send({ title: "foil", categoryId: 1, goalId: goal.id, impact: 5, effortMinutes: 10 })
+        .send({ title: "holo", categoryId: 1, goalId: goal.id, impact: 5, effortMinutes: 10 })
     ).body;
     // Backdate last_drawn_at within 6h — the was_drawn heuristic path, same
     // as the bonus test above (a real POST /api/draw could land elsewhere).

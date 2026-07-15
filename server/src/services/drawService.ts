@@ -331,15 +331,18 @@ function emptyPoolReason(
 }
 
 /**
- * DEF stat for the TCG frame (#115): minutes tracked on the task so far,
- * derived at query time from time_entries (ADR-2 spirit — never a counter).
- * CLOSED entries only, on purpose: the client already polls the running
- * timer, so it adds the in-flight entry's elapsed time itself — a live tick
- * without refetching this payload every minute, and no double count.
- * Floored, not rounded: the client live tick floors (liveTrackedMinutes), so
- * rounding here would let DEF jump one higher the moment a timer stops (live
- * 10 + 1.9 showed DEF/11; ROUND(11.9) folded to 12). CAST truncates toward
- * zero, which equals floor for these non-negative durations.
+ * Minutes tracked on the task so far, derived at query time from
+ * time_entries (ADR-2 spirit — never a counter). Introduced as the TCG
+ * frame's DEF stat (#115); the UI no longer renders it since #123 dropped
+ * the frame, but the field stays on the draw payloads for API/MCP consumers
+ * — dropping it would break them for no gain. CLOSED entries only: a
+ * consumer that wants a live total adds the running entry's elapsed time
+ * itself instead of refetching this payload every minute (useStopTimer
+ * still folds a just-closed entry into the cached copy). Floored, not
+ * rounded — CAST truncates toward zero, which equals floor for these
+ * non-negative durations — so the total agrees with any consumer's own
+ * floored live math and can never fold one higher the moment a timer stops
+ * (live 10 + 1.9 showed 11; ROUND(11.9) folded to 12).
  */
 const TRACKED_MINUTES_SQL = `(SELECT CAST(COALESCE(SUM(
          (julianday(e.ended_at) - julianday(e.started_at)) * 1440.0), 0) AS INTEGER)

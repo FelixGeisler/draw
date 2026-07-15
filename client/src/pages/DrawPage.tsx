@@ -303,7 +303,11 @@ export function DrawPage() {
               </>
             )}
             {task && (
-              <>
+              /* The scroll container keeps long content INSIDE the fixed
+                 300x420 face (the deleted CardFrame's cf-body contract):
+                 centered while it fits, scrolling once it doesn't — never
+                 painting over the filter chips above or the actions below. */
+              <div className="draw-card-content">
                 {/* Info stays subtle chips (#123): category pill (computed
                     ink), title, description, and the TaskBadges row — effort,
                     due/recur/window, impact stars for goal-linked cards. */}
@@ -338,7 +342,7 @@ export function DrawPage() {
                     {result.poolSize === 1 ? "" : "s"} in the deck
                   </div>
                 )}
-              </>
+              </div>
             )}
             {/* Holo (#123): a drawn 5★ goal-linked card shimmers — an
                 iridescent overlay painting ABOVE the face (last child,

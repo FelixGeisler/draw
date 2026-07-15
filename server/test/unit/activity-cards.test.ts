@@ -80,7 +80,7 @@ describe("buildActivityDays", () => {
     expect(worked).toMatchObject({ taskId: 1, completed: false, trackedMinutes: 25, xpAwarded: 0 });
     expect(done).toMatchObject({ taskId: 2, completed: true, xpAwarded: 12, wasDrawn: true });
     // Rarity facts (#62): impact passes through from the live task meta, so
-    // the client can derive foil/silver on upright cards without new state.
+    // the client can derive holo/silver on upright cards without new state.
     expect(worked.impact).toBe(5);
     expect(done.impact).toBe(3);
   });

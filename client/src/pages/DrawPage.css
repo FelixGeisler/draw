@@ -74,8 +74,27 @@
 .draw-face.back {
   background: linear-gradient(160deg, #232735, #1b1e27);
   transform: rotateY(180deg);
-  gap: 14px;
   text-align: center;
+  /* Nothing ever paints outside the fixed 300x420 card bounds — long
+     content scrolls INSIDE .draw-card-content below instead of blowing
+     the frame (the deleted CardFrame's cf-body contract, #115 → #123). */
+  overflow: hidden;
+}
+
+/* The in-flow card content, capped at the face's content box: centered by
+   the face while it fits, scrollable once it doesn't — a long title or
+   description can never push the pill off the face or paint the odds line
+   over the page's buttons. (min-height: 0 releases the flex item's
+   content-based floor so max-height can actually cap it.) */
+.draw-card-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
 }
 
 .draw-face.back h2 {
@@ -100,9 +119,13 @@
   animation: art-fade 0.8s ease both;
 }
 
-/* Legibility scrim between the art and the text: denser toward the top and
-   bottom edges where the pill and the odds line sit, lighter mid-card so the
-   artwork stays the visible background — text never sits raw on art. */
+/* Legibility scrim between the art and the text. The content block huddles
+   mid-card (justify-content: center) and spans the whole face once long
+   content scrolls, so the middle band carries most of the text and must be
+   dense enough on its own; the edges go denser still for content that
+   reaches them. The #113 prompt contracts dark low-saturation art, but
+   nothing downstream enforces that palette — the scrim plus the per-element
+   backings below have to hold on worst-case bright art too. */
 .draw-art-scrim {
   position: absolute;
   inset: 0;
@@ -110,27 +133,40 @@
   pointer-events: none;
   background: linear-gradient(
     rgba(18, 20, 26, 0.72),
-    rgba(18, 20, 26, 0.48) 30%,
-    rgba(18, 20, 26, 0.48) 65%,
+    rgba(18, 20, 26, 0.6) 30%,
+    rgba(18, 20, 26, 0.6) 65%,
     rgba(18, 20, 26, 0.78)
   );
 }
 
-/* The face's in-flow content must PAINT above the absolutely positioned
-   art/scrim layers (positioned boxes with z-index: auto otherwise cover
-   in-flow text) — same pattern as the trophy cards. The holo overlay is
-   excluded: as the LAST positioned child it composes above everything. */
+/* The face's in-flow content (the .draw-card-content wrapper) must PAINT
+   above the absolutely positioned art/scrim layers (positioned boxes with
+   z-index: auto otherwise cover in-flow text) — same pattern as the trophy
+   cards. The holo overlay is excluded: as the LAST positioned child it
+   composes above everything. */
 .draw-face.back > :not(.draw-art, .draw-art-scrim, .draw-holo) {
   position: relative;
 }
 
-/* Over art, the see-through chips get a solid backing so their dim ink stays
-   readable on any artwork; without art the backing blends into the gradient.
-   (The category pill needs none — its background IS the solid category
-   color, with the computed contrast ink on top.) Title and description get
-   a text-shadow for the same reason. */
-.draw-face.back .chip {
+/* Over art, the see-through chips AND the bare 12–13px text lines (odds,
+   out-of-deck hint, warm-up window hint — the dimmest ink on the face) get
+   a solid backing so they stay readable on ANY artwork, including art that
+   defies the prompt's dark-palette contract; without art the backing blends
+   into the gradient. (The category pill needs none — its background IS the
+   solid category color, with the computed contrast ink on top.) Title and
+   description get a text-shadow for the same reason. */
+.draw-face.back .chip,
+.draw-face.back .draw-chance,
+.draw-face.back .draw-hint,
+.draw-face.back .warmup-window-hint {
   background-color: rgba(18, 20, 26, 0.66);
+}
+
+.draw-face.back .draw-chance,
+.draw-face.back .draw-hint,
+.draw-face.back .warmup-window-hint {
+  padding: 3px 10px;
+  border-radius: 10px;
 }
 
 .draw-face.back h2,

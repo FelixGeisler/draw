@@ -22,6 +22,13 @@ const HOLO_TITLE = "Fullbleed five star holo card";
 const HOLO_DESC = "A well-described high-leverage endeavor.";
 const CHORE_CATEGORY = "Fullbleed chores";
 const CHORE_TITLE = "Fullbleed three star chore";
+const LONG_GOAL_TITLE = "Fullbleed long content goal";
+// PR #125 review repro: a sentence-length title (AI-generated tasks routinely
+// have them) plus a paragraph description used to overflow the fixed face.
+const LONG_TITLE =
+  "Rehearse the two-minute demo flow until the transitions feel effortless and every screen state is preloaded before the call";
+const LONG_DESC =
+  "Run the full flow twice with the projector profile active. Preload the draw page, the goals board and the history skyline in separate tabs, confirm the seeded demo deck still matches the script, and note every place where a transition stutters or a tooltip lingers. Then run it once more cold, phone on the desk, narrating out loud at presentation pace to catch the spots where the story outruns the screen.";
 
 // Deterministic stand-in for generated art: visibly non-gradient, fine to
 // serve from a route stub (the client renders it as an <img> data URI).
@@ -275,4 +282,63 @@ test("a 3★ chore never shimmers: chips only, no holo on the card or its trophy
     (el) => getComputedStyle(el.querySelector(".trophy-card-inner")!, "::after").backgroundImage,
   );
   expect(sheen).toBe("none");
+});
+
+test("long content stays INSIDE the fixed face — the content block scrolls, nothing paints over the page", async ({
+  page,
+}) => {
+  // PR #125 review (blocker): with a long title + description the centered,
+  // unclamped content block grew taller than the 300x420 face and painted
+  // over the filter chips above and the ✓ Done / 💤 Not now buttons below.
+  // The fix keeps the deleted CardFrame's contract: long content scrolls
+  // inside the card instead of blowing the frame.
+  const goal = await (
+    await page.request.post("/api/goals", { data: { title: LONG_GOAL_TITLE } })
+  ).json();
+  const categories: { id: number }[] = await (await page.request.get("/api/categories")).json();
+  await page.request.post("/api/tasks", {
+    data: {
+      title: LONG_TITLE,
+      description: LONG_DESC,
+      categoryId: categories[0].id,
+      goalId: goal.id,
+      impact: 5,
+      effortMinutes: 10,
+      dueDate: "2026-08-15",
+      recurEveryDays: 7,
+    },
+  });
+  await drawFromGoal(page, LONG_GOAL_TITLE);
+
+  const back = page.locator(".draw-face.back");
+  await expect(back.locator("h2")).toHaveText(LONG_TITLE);
+  // Let the flip transition SETTLE before measuring geometry (see above).
+  await expect(page.locator(".draw-card")).toHaveCSS(
+    "transform",
+    "matrix3d(-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1)",
+  );
+
+  // This content IS taller than the face — the wrapper must be scrollable…
+  const content = back.locator(".draw-card-content");
+  expect(await content.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+
+  // …with everything geometrically contained: the title's first line no
+  // longer paints above the card over the category filter chips, and the
+  // pill is not pushed off the face.
+  const faceBox = (await back.boundingBox())!;
+  const titleBox = (await back.locator("h2").boundingBox())!;
+  expect(titleBox.y).toBeGreaterThanOrEqual(faceBox.y - 1);
+  const pillBox = (await back.locator(".category-pill").boundingBox())!;
+  expect(pillBox.y).toBeGreaterThanOrEqual(faceBox.y - 1);
+
+  // Scrolled to the end, the badges and the odds line sit above the face's
+  // bottom edge instead of on top of the ✓ Done / 💤 Not now buttons.
+  await content.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  await expect(back.locator(".chip", { hasText: "due 2026-08-15" })).toBeVisible();
+  await expect(back.locator(".chip", { hasText: "↻ 7d" })).toBeVisible();
+  const chanceBox = (await back.locator(".draw-chance").boundingBox())!;
+  expect(chanceBox.y).toBeGreaterThanOrEqual(faceBox.y - 1);
+  expect(chanceBox.y + chanceBox.height).toBeLessThanOrEqual(faceBox.y + faceBox.height + 1);
 });
