@@ -18,6 +18,9 @@ open pull request.
    run tail).
 5. Never commit directly to main. Never merge your own PR — that is the
    pr-reviewer's and the user's call.
+6. When posting a PR/issue comment from a file, use `--body-file <file>` (or
+   `gh api -F body=@<file>`, capital F). `-f body=@<file>` posts the literal
+   `@path` string instead of the file contents.
 
 ## Quality gates before opening the PR (all mandatory)
 
