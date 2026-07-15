@@ -74,7 +74,7 @@ User commits           → POST /api/tasks            (one umbrella parent, no e
                        → POST /api/tasks/:id/subtasks (ONE transactional batch of leaves,
                          │                            provenance in description)
                          └─ batch failed? DELETE the parent (cascade) — no
-                            half-imported state (ADR-15)
+                            half-imported state (ADR-16)
 ....
 
 == 6.4 Timer invariant

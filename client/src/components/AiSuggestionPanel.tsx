@@ -357,7 +357,7 @@ export function AiPlanPanel({
 // Generate-tasks panel (for a goal, #29): transcribe materials into an
 // umbrella parent + flat leaves. Nothing is written until the user commits;
 // the commit is one POST /api/tasks (parent) plus one transactional subtasks
-// batch, with a compensating parent delete if the batch fails (ADR-15).
+// batch, with a compensating parent delete if the batch fails (ADR-16).
 
 function aiErrorMessage(e: unknown): string {
   const message = e instanceof Error ? e.message : String(e);

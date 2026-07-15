@@ -178,7 +178,30 @@ deterministic mapping is auditable during review, where every rationale cites
 its source row. Keeping the user's checkbox as the only write path preserves
 the app's trust boundary no matter how many tasks the AI proposes at once.
 
-== ADR-15: Bulk accept commits one umbrella parent plus one transactional subtasks batch
+== ADR-15: Estimation accuracy attributes tracked time per completion cycle
+
+*Context:* The "Estimates vs. reality" block (stats) compared a task's single
+per-cycle effort estimate against ALL of its lifetime time entries. Recurring
+tasks (`recur_every_days`) complete over and over, so every finished cycle
+inflated their ratio — and the summary/byCategory aggregates — a bit more.
+Recurring chores are exactly where users track time repeatedly.
+*Decision:* Tracked time is attributed per cycle: for each task completed in
+the requested range, only entries in the window
+`(previous completion, latest in-range completion]` count. One-shot tasks have
+no previous completion, so all their work still counts even when it started
+before the range; entries tracked after the in-range completion belong to the
+next, not-yet-completed cycle and are excluded. The window logic lives in the
+pure `latestCycleTrackedMinutes()` (statsService) fed by plain per-task
+queries, keeping it unit-testable like the draw weights. Recurring tasks
+completing several times in range score their latest cycle only — one
+estimate, one cycle. Range-filtered time totals (`totalMinutes`, byCategory
+minutes, leverage) are untouched: every tracked minute still counts there.
+*Rationale:* Per-cycle attribution over excluding recurring tasks from the
+block, because recurring work is where estimation feedback matters most;
+attribution in TypeScript over correlated SQL subqueries so the boundary rules
+are testable without a DB and readable next to `buildEstimation()`.
+
+== ADR-16: Bulk accept commits one umbrella parent plus one transactional subtasks batch
 
 *Context:* The plan-backward accept loop fires N sequential, non-atomic
 `POST /api/tasks` calls. For the generate-tasks flow (ADR-14) with 40+
