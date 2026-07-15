@@ -1,5 +1,5 @@
 /**
- * Estimation coaching (#55, ADR-26): pure decision logic shared by the
+ * Estimation coaching (#55, ADR-27): pure decision logic shared by the
  * TaskForm hint and the Stats page bias statements. Everything here is
  * read-only advice — nothing in this module (or its callers) ever mutates an
  * estimate, blocks a submit, or feeds the draw weights.

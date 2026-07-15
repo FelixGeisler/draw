@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useCategories, useSettings } from "../hooks/useTasks";
 import { useAiStatus, useRemoveApiKey, useSetApiKey } from "../hooks/useAi";
+import { useImportBackup, type ImportSummary } from "../hooks/useBackup";
 import type { Category } from "../api/types";
 
 function SettingInput({
@@ -104,6 +105,116 @@ function AiKeySection() {
         <div style={{ color: "var(--danger)", fontSize: 13 }}>
           {(setKey.error ?? removeKey.error)?.message}
         </div>
+      )}
+    </section>
+  );
+}
+
+function BackupSection() {
+  const importBackup = useImportBackup();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null);
+  // Destructive restore is gated twice: an explicit warning step (armed) plus
+  // typing REPLACE — one confirm() is not enough for "deletes everything".
+  const [armed, setArmed] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [summary, setSummary] = useState<ImportSummary | null>(null);
+
+  function reset() {
+    setFile(null);
+    setArmed(false);
+    setConfirmText("");
+    if (fileInput.current) fileInput.current.value = "";
+  }
+
+  function restore() {
+    if (!file || confirmText !== "REPLACE") return;
+    importBackup.mutate(file, {
+      onSuccess: (s) => {
+        setSummary(s);
+        reset();
+      },
+    });
+  }
+
+  return (
+    <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
+      <h3 style={{ margin: 0 }}>Backup</h3>
+      <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
+        One zip archive with the complete database and all goal material files. The Claude API
+        key is never included in backups — re-enter it after restoring on a new machine.
+      </p>
+      <div>
+        <a href="/api/backup/export" style={{ color: "var(--accent)" }}>
+          ⬇ Download backup
+        </a>
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".zip"
+          aria-label="Backup archive"
+          onChange={(e) => {
+            setFile(e.target.files?.[0] ?? null);
+            setArmed(false);
+            setConfirmText("");
+            setSummary(null);
+            importBackup.reset();
+          }}
+          style={{ flex: 1, maxWidth: 380 }}
+        />
+        <button disabled={!file || armed} onClick={() => setArmed(true)}>
+          Restore from backup
+        </button>
+      </div>
+      {armed && (
+        <div
+          style={{
+            border: "1px solid var(--danger)",
+            borderRadius: 6,
+            padding: 12,
+            display: "grid",
+            gap: 10,
+          }}
+        >
+          <strong style={{ color: "var(--danger)" }}>
+            Restoring replaces ALL current data.
+          </strong>
+          <p style={{ margin: 0, fontSize: 13 }}>
+            Tasks, goals, materials, settings, history and the current draw are replaced with
+            the backup&apos;s contents. Your current database is kept on disk as{" "}
+            <code>app.db.bak</code> (and the material files as <code>files.bak</code>) in case
+            you need to go back.
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              aria-label="Type REPLACE to confirm"
+              placeholder="Type REPLACE to confirm"
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              style={{ width: 220 }}
+            />
+            <button
+              disabled={confirmText !== "REPLACE" || importBackup.isPending}
+              onClick={restore}
+            >
+              {importBackup.isPending ? "Restoring…" : "Replace everything"}
+            </button>
+            <button disabled={importBackup.isPending} onClick={reset}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {summary && (
+        <p style={{ margin: 0, color: "var(--ok)" }}>
+          ✓ Backup restored — {summary.tasks} tasks, {summary.goals} goals, {summary.materials}{" "}
+          materials.
+        </p>
+      )}
+      {importBackup.error && (
+        <div style={{ color: "var(--danger)", fontSize: 13 }}>{importBackup.error.message}</div>
       )}
     </section>
   );
@@ -270,6 +381,8 @@ export function SettingsPage() {
           <div style={{ color: "var(--danger)", fontSize: 13 }}>{addCategory.error.message}</div>
         )}
       </section>
+
+      <BackupSection />
     </div>
   );
 }

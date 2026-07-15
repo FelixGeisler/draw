@@ -113,4 +113,25 @@ AI degraded mode).
 
 `PRAGMA user_version` switch in `db.ts`: fresh databases execute `schema.sql`
 (always the current schema); existing databases run incremental `ALTER TABLE`
-steps. No migration framework.
+steps. No migration framework. Backup import (section 8.9) reuses the same
+`migrate()` after swapping in a restored database, so backups from older app
+versions are migrated forward exactly like an old database on boot.
+
+== 8.9 Backup and restore
+
+`GET /api/backup/export` streams one zip: an `app.db` snapshot taken with
+`VACUUM INTO` (safe under WAL — the live file is never copied raw), all
+material files, and a manifest (ADR-26). The Claude API key is stripped from
+the snapshot only — backups never contain it; the live DB keeps it.
+
+`POST /api/backup/import` **replaces everything** — tasks, goals, materials,
+settings, gamification history, the current draw. There is no merge and no
+partial restore. Safety nets, both inside `DATA_DIR`:
+
+- the previous database is kept as `app.db.bak` (overwritten on the next import),
+- the previous material files as `files.bak`.
+
+Every rejected import (foreign zip, corrupt or newer-versioned database,
+unsafe paths) is a `400` with the live data untouched: validation runs
+against staged temp copies before anything is swapped. The Settings page
+gates the restore behind an explicit warning plus typing `REPLACE`.

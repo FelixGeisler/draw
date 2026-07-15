@@ -8,7 +8,7 @@ import {
   roundSuggestion,
 } from "./estimationCoach";
 
-// Pure decision logic for estimation coaching (#55, ADR-26). Everything here
+// Pure decision logic for estimation coaching (#55, ADR-27). Everything here
 // is advice-only: none of these functions may ever be handed a setter or a
 // payload — the tests pin the *decision*, TaskForm passivity is pinned E2E.
 

@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 
-// Estimation coaching (#55, ADR-26): a passive hint under TaskForm's effort
+// Estimation coaching (#55, ADR-27): a passive hint under TaskForm's effort
 // field and per-category bias statements on the Stats page. History arises
 // from the real user flows only (task POST, timer routes, PATCH status done —
 // no direct DB seeding), which keeps tracked time near zero: the seeded

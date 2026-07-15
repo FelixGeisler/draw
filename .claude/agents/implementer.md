@@ -21,6 +21,9 @@ open pull request.
 6. When posting a PR/issue comment from a file, use `--body-file <file>` (or
    `gh api -F body=@<file>`, capital F). `-f body=@<file>` posts the literal
    `@path` string instead of the file contents.
+7. A new risk/technical-debt row added to docs section 11
+   (`docs/modules/ROOT/pages/11_risks_and_technical_debt.adoc`) must reference
+   a GitHub issue — create one first if none exists.
 
 ## Quality gates before opening the PR (all mandatory)
 

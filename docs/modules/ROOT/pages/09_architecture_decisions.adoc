@@ -375,7 +375,7 @@ management is never exposed); read tools carry `readOnlyHint: true`,
 achievements), and nothing is marked destructive. Read-heavy state ships as
 resources: `draw://deck` (backed by the new side-effect-free
 `GET /api/draw/pool`, reusing the ADR-2 candidate query), `draw://gamification`,
-and `draw://materials/{id}`. No `ANTHROPIC_API_KEY` is needed anywhere — the
+and `draw://materials/\{id}`. No `ANTHROPIC_API_KEY` is needed anywhere — the
 intelligence is the MCP client's.
 *Rationale:* Trade-off accepted: the dev server must be running —
 `ECONNREFUSED` maps to an actionable tool error naming `npm run dev`. In
@@ -636,7 +636,43 @@ distinct organic cards seen in a 10-draw session recover from 3.6 to 6.3 of
 7% to ~13% (pre-import: 16%). Per-goal quotas and changes to the
 urgency/staleness/cooldown factors were explicitly out of scope (#30).
 
-== ADR-26: Estimation coaching is read-only advice — hints never mutate, weights stay on stated estimates
+== ADR-26: Backups are one zip — VACUUM INTO snapshot + material files; import swaps files with the DB rename as commit point
+
+*Context:* All user data lives in `DATA_DIR`: the WAL-mode SQLite database
+and the uploaded goal materials under `files/` (#61). Hand-copying `app.db`
+while the server runs silently drops every commit still sitting in
+`app.db-wal`, and a DB-only backup would restore `materials.stored_name`
+rows that point at nothing. Restore is destructive by nature, and the app
+has exactly one live `better-sqlite3` handle opened at module scope.
+*Decision:* `backupService.ts` exports one archive: an `app.db` snapshot
+taken with `VACUUM INTO` (the safe online-copy path under WAL — never a raw
+file copy), every file under `files/`, and a `manifest.json` (app marker,
+timestamp, `user_version`, row counts) that lets import reject foreign zips
+up front. The `anthropic_api_key` settings row is deleted from the
+*snapshot* only (ADR-11: it is stored plaintext, and backups get copied
+around); the live DB keeps it. Import validates everything against staged
+temp copies first — readable zip, our manifest, `integrity_check`,
+`1 <= user_version <= CURRENT_VERSION`, required tables present, zip-slip
+guard on `files/` entries — and only then swaps: checkpoint + close, delete
+stale `-wal`/`-shm` (a leftover WAL would be replayed into the restored
+database — the torn-DB hazard), *copy* `app.db` to `app.db.bak` (copy, not
+rename: the live path never disappears, so a crash cannot boot into a fresh
+empty DB), swap `files/` (previous kept as `files.bak`), and last the
+staged snapshot is renamed onto `app.db` — a single same-volume rename, the
+atomic commit point. Reopen (`db` is an exported `let`; ESM live bindings
+update every importer) runs `migrate()`, so older backups move forward
+exactly like an old database would on boot. The whole swap is one
+synchronous block: better-sqlite3 is synchronous, so no request can
+interleave with a half-swapped state.
+*Rationale:* one archive keeps backups self-contained (acceptance was
+export → wipe → import → byte-identical material files); validating on
+staged copies means every rejection is a 400 with live data untouched; and
+ordering the swap around a final atomic rename means a crash at any step
+boots either the complete old state or the complete new state. `adm-zip`
+handles both zip directions synchronously, fitting the no-framework
+guardrails; `multer` (already a dependency) receives the upload.
+
+== ADR-27: Estimation coaching is read-only advice — hints never mutate, weights stay on stated estimates
 
 *Context:* The estimation block (ADR-15) measures per-category
 estimated-vs-tracked bias but stops short of coaching: nothing said *which

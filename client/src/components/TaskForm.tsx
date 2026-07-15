@@ -64,7 +64,7 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
   const [windowEnd, setWindowEnd] = useState(initial?.windowEnd ?? "17:00");
   const [error, setError] = useState<string | null>(null);
 
-  // Passive estimation coaching (#55, ADR-26). Fetched here (not passed in)
+  // Passive estimation coaching (#55, ADR-27). Fetched here (not passed in)
   // because TaskForm is shared by Capture, Goals, the Tasks-row editor and
   // the drawn-card edit; the query is cached under one key across all of
   // them. The hint is advice only — it never writes into `effort` and the

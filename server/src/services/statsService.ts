@@ -259,7 +259,7 @@ const ALL_HISTORY_TO = "9999-12-31";
  * Per-category estimation bias over ALL history (#55), reusing the same
  * qualifying rules (positive estimate, tracked time in an attributed cycle)
  * and per-cycle attribution (ADR-15, #48) as the range-scoped estimation
- * block. Read-only coaching input — never feeds the draw weights (ADR-26).
+ * block. Read-only coaching input — never feeds the draw weights (ADR-27).
  */
 export function computeEstimationBias(): CategoryBias[] {
   const { byCategory } = buildEstimation(estimationRowsInRange(ALL_HISTORY_FROM, ALL_HISTORY_TO));
