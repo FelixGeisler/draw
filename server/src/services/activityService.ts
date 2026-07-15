@@ -24,6 +24,11 @@ export interface ActivityTaskMeta {
   categoryId: number;
   categoryColor: string;
   effortMinutes: number | null;
+  /**
+   * Live task rating from the tasks join (like title) — with wasDrawn it lets
+   * the client derive foil/silver card rarity (#62); never snapshotted.
+   */
+  impact: number;
 }
 
 export interface ActivityCard {
@@ -32,6 +37,7 @@ export interface ActivityCard {
   categoryId: number;
   categoryColor: string;
   effortMinutes: number | null;
+  impact: number;
   trackedMinutes: number;
   /** Upright (completed on this local day) vs face-down (worked, not done). */
   completed: boolean;
@@ -150,6 +156,7 @@ export function buildActivityDays(
         categoryId: m.categoryId,
         categoryColor: m.categoryColor,
         effortMinutes: m.effortMinutes,
+        impact: m.impact,
         trackedMinutes: Math.round(acc.minutes),
         completed: acc.completed,
         xpAwarded: acc.xp,
@@ -201,7 +208,7 @@ export function computeActivity(from: string, to: string): ActivityDay[] {
   const tasks = db
     .prepare(
       `SELECT t.id AS taskId, t.title, t.category_id AS categoryId,
-              c.color AS categoryColor, t.effort_minutes AS effortMinutes
+              c.color AS categoryColor, t.effort_minutes AS effortMinutes, t.impact
        FROM tasks t JOIN categories c ON c.id = t.category_id
        WHERE t.id IN (
          SELECT task_id FROM time_entries WHERE started_at >= ? AND started_at < ?

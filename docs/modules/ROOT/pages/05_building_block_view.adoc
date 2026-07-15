@@ -87,8 +87,8 @@ client/src/
 ├── lib/                       pure client logic (drawable classification, effort display,
 │                              generate-tasks review model, heatmap grid/quantization,
 │                              shared local-day math, estimation coaching decisions,
-│                              timer/countdown formatting + focus-view decision)
-│                              — unit-tested without rendering
+│                              timer/countdown formatting + focus-view decision,
+│                              trophy rarity tiers) — unit-tested without rendering
 └── components/                TaskRow/Form/Badges, SubtaskEditor, TimerBar,
                                FocusOverlay (fullscreen focus mode, ADR-29),
                                GamificationHeader, TrophyDeck, ActivityHeatmap,

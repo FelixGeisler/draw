@@ -124,6 +124,44 @@
   border-color: rgba(0, 0, 0, 0.35);
 }
 
+/* Rarity sheens (#62), the trophy pile's tiers reused on upright cards:
+   drawn impact-5 = faint iridescent foil, drawn impact-4 = faint silver. An
+   overlay pseudo-element above the category-colored face — static always
+   (the towers are a calm record, no sweep here), pointer-events: none, and
+   absolutely positioned so nothing in the skyline can reflow. Face-down
+   cards never carry a rarity class (wasDrawn folds out of completions). */
+.hoc-card.rarity-foil .hoc-card-face::after,
+.hoc-card.rarity-silver .hoc-card-face::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.hoc-card.rarity-foil .hoc-card-face::after {
+  background-image: linear-gradient(
+    115deg,
+    transparent 25%,
+    rgba(255, 110, 199, 0.22) 38%,
+    rgba(255, 226, 130, 0.18) 46%,
+    rgba(120, 255, 214, 0.2) 54%,
+    rgba(120, 170, 255, 0.22) 62%,
+    transparent 75%
+  );
+}
+
+.hoc-card.rarity-silver .hoc-card-face::after {
+  background-image: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(220, 228, 244, 0.16) 42%,
+    rgba(255, 255, 255, 0.24) 50%,
+    rgba(220, 228, 244, 0.16) 58%,
+    transparent 70%
+  );
+}
+
 /* The details panel sits above the card, inside its DOM but absolutely
    positioned — revealing it cannot shift any sibling. */
 .hoc-details {
