@@ -1,17 +1,30 @@
 import { Router } from "express";
-import { API_KEY_SETTING, CURRENT_DRAW_SETTING, db, setSetting } from "../db.js";
+import {
+  API_KEY_SETTING,
+  CURRENT_DRAW_SETTING,
+  db,
+  setSetting,
+  WARMUP_DRAW_SETTING,
+  WARMUP_LAST_DEALT_SETTING,
+} from "../db.js";
 import { REST_WEEKDAYS_SETTING } from "../services/gamificationService.js";
 
 export const settingsRouter = Router();
 
 // The stored Claude API key must never leak through the generic settings
 // endpoints — it is managed exclusively via PUT/DELETE /api/ai/key. The
-// current-draw pointer is internal session state (GET /api/draw/current),
-// not a user setting.
+// current-draw pointer and the warm-up marker/rate-limit state (#57) are
+// internal session state (GET /api/draw/current, GET /api/draw/warmup),
+// not user settings.
 function publicSettings(): Record<string, string> {
   const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?)")
-    .all(API_KEY_SETTING, CURRENT_DRAW_SETTING) as { key: string; value: string }[];
+    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?)")
+    .all(
+      API_KEY_SETTING,
+      CURRENT_DRAW_SETTING,
+      WARMUP_DRAW_SETTING,
+      WARMUP_LAST_DEALT_SETTING,
+    ) as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
 
@@ -46,7 +59,12 @@ settingsRouter.patch("/", (req, res) => {
     if (normalized.error) return res.status(400).json({ error: normalized.error });
     restWeekdays = normalized.value;
   }
-  const allowed = ["max_draw_effort", "draw_cooldown_minutes", "daily_goal_completions"];
+  const allowed = [
+    "max_draw_effort",
+    "draw_cooldown_minutes",
+    "daily_goal_completions",
+    "warmup_every_hours",
+  ];
   for (const key of allowed) {
     if (key in body) setSetting(key, String(body[key]));
   }

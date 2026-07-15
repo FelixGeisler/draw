@@ -852,3 +852,56 @@ tracked stats as plain entries, overtime simply reads as a ratio > 1.
 already say and could contradict them (a dead overlay counting down for a
 stopped timer). Deriving keeps the invariant surface unchanged — one
 running entry, one persisted draw — and the whole feature stays client-only.
+
+== ADR-30: The warm-up draw is a deterministic deal — cooldown as exclusion, XP capped below the drawn ×1.5
+
+*Context:* The main draw is a gamble: it can serve a 30-minute card when
+even ten minutes feels impossible. The warm-up (#57) is the "I can't start"
+escape hatch — one secondary click on the IDLE Draw page deals the
+objectively smallest eligible card. It must not become a re-roll (#88), a
+fishing rod for comfortable cards, or the XP meta.
+*Decision:* (a) `warmupDraw()` reuses `queryCandidates()` — the exact
+eligibility pool of the weighted draw — but picks deterministically:
+minimum `effort_minutes`, tie-broken by most stale using the same
+`stalenessAnchor` the weight formula uses (creation, last completion for
+recurring tasks, bumped by a snooze wake — one definition of "stale",
+shared by construction), final tie-break lowest id. Impact, urgency, and
+the staleness weight are deliberately bypassed: the point is the smallest
+card, not a clever one. (b) The draw cooldown applies as EXCLUSION, not the
+regular ×0.15 dampening — a dampener is meaningless for a deterministic
+pick, and exclusion prevents deal → discard → deal-the-same-card churn; an
+exclusion-emptied pool answers `cooling_down`. (c) The deal is the same
+commitment as a draw: `last_drawn_at` stamped, persisted as the current
+draw (ADR-13, focus mode included), resolvable only via complete, snooze/
+block, or delete — and the route rejects a deal while a valid current draw
+exists, so the warm-up only ever exists on the idle deck (#88). A marker
+(internal settings key next to the pointer: task id, dealt-at, bonus-window
+minutes) is cleared everywhere the pointer is cleared and overwritten by
+every regular draw, so it can never describe a card that is not the current
+draw. (d) One deal per `warmup_every_hours` (public setting, default 8),
+consumed irrevocably AT DEAL TIME — discarding the card does not refund the
+allowance. (e) XP: a warm-up completion NEVER earns the drawn ×1.5 (it was
+handed out, not gambled — the `last_drawn_at` stamp of the deal is also
+excluded from the 6-hour drawn heuristic by exact-timestamp match): inside
+its window (`max(effort at deal time, 15)` minutes) ×1.25, late ×1.0.
+Completing any OTHER task within 30 minutes of a warm-up completion earns
+momentum ×1.25, combining with the drawn bonus but capped at ×1.5 total.
+Momentum never applies to a warm-up completion itself. Momentum is derived
+from `completions.was_warmup` rows at completion time, never stored —
+reopening the warm-up deletes its completion and disarms momentum
+automatically (ADR-2/ADR-5). (f) Display derivations agree with the XP:
+everywhere a completion is surfaced as "drawn" — the trophy pile's rarity
+and "(drawn)" label (#62), the History skyline — drawn-ness reads
+`was_drawn AND NOT was_warmup` at query time. The completion row keeps both
+raw facts (the card WAS the persisted current draw, and it got there by
+deal), so a warm-up impact-5 completion mints no foil, exactly as it earns
+no ×1.5.
+*Rationale:* The invariant the multipliers encode: no completion ever
+exceeds ×1.5, and a warm-up caps at ×1.25 — strictly below the gamble — so
+the escape hatch can never out-earn playing the deck. Exclusion-not-
+dampening and deal-time consumption close the two farming loops a
+deterministic pick would otherwise open (re-dealing the same card, and
+discard-until-happy). Reusing the pool predicate and the staleness anchor
+keeps one definition of "eligible" and "stale"; reusing the current-draw
+machinery keeps one commitment lifecycle — the warm-up adds a marker and a
+rate limit, not a second draw system.

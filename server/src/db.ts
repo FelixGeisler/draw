@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 8;
+export const CURRENT_VERSION = 9;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -156,6 +156,14 @@ function migrate() {
         created_at TEXT NOT NULL
       )`);
     }
+    if (version < 9) {
+      // Warm-up draw (issue #57, ADR-30): completions record whether the task
+      // was completed as the dealt warm-up card (momentum derives from these
+      // rows), and the rate limit becomes a user setting. INSERT OR IGNORE:
+      // a restored backup may already carry the row.
+      db.exec("ALTER TABLE completions ADD COLUMN was_warmup INTEGER NOT NULL DEFAULT 0");
+      db.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('warmup_every_hours', '8')");
+    }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);
 }
@@ -182,6 +190,18 @@ export const API_KEY_SETTING = "anthropic_api_key";
 // session state — single-user app, one current draw — not a user setting, so
 // the generic settings endpoints exclude it.
 export const CURRENT_DRAW_SETTING = "current_draw_task_id";
+
+// Warm-up draw (#57, ADR-30) — internal session state next to the current
+// draw, excluded from the settings endpoints exactly like it.
+// WARMUP_DRAW_SETTING marks the current draw as a warm-up deal (JSON:
+// {taskId, dealtAt, windowMinutes}); it is cleared everywhere the current
+// draw is cleared, so it can never point at a card that is no longer the
+// current draw. WARMUP_LAST_DEALT_SETTING records the last deal (JSON:
+// {taskId, dealtAt}) and is never cleared: dealing consumes the one-per-
+// `warmup_every_hours` allowance irrevocably — discarding the card does not
+// refund it, so the warm-up cannot be fished for a better card.
+export const WARMUP_DRAW_SETTING = "warmup_current_draw";
+export const WARMUP_LAST_DEALT_SETTING = "warmup_last_dealt";
 
 export function getSetting(key: string, fallback: number): number {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
