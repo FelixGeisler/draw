@@ -42,8 +42,9 @@ export function roundSuggestion(minutes: number): number {
  * The passive TaskForm hint. Null (= render nothing) unless ALL preconditions
  * hold: a category history exists, it meets the minimum sample, the user has
  * entered a positive estimate, and history diverges from it by more than
- * DIVERGENCE. The returned suggestion is advice only — the field value and
- * the submitted payload stay exactly what the user typed.
+ * DIVERGENCE — in the ROUNDED suggestion, not merely in the raw ratio. The
+ * returned suggestion is advice only — the field value and the submitted
+ * payload stay exactly what the user typed.
  */
 export function estimateHint(
   bias: BiasSample | undefined,
@@ -53,10 +54,15 @@ export function estimateHint(
   if (enteredMinutes === null || !Number.isFinite(enteredMinutes) || enteredMinutes <= 0)
     return null;
   if (Math.abs(bias.ratio - 1) <= DIVERGENCE) return null;
-  return {
-    suggestedMinutes: roundSuggestion(enteredMinutes * bias.ratio),
-    ratio: bias.ratio,
-  };
+  const suggestedMinutes = roundSuggestion(enteredMinutes * bias.ratio);
+  // #103: the raw-ratio gate above is necessary but not sufficient. What the
+  // user reads is the ROUNDED suggestion, and rounding to 5 (with the floor
+  // at 5) can land it right back on what they typed: "5 min, and history
+  // suggests ~5 min" — advice that repeats the input, delivered in the voice
+  // of a correction. Tiny estimates hit this constantly, precisely where the
+  // divergence is least actionable. Gate on the number actually shown.
+  if (suggestedMinutes === enteredMinutes) return null;
+  return { suggestedMinutes, ratio: bias.ratio };
 }
 
 /** "history suggests ~45 min (you track 1.5× your Uni estimates)" */

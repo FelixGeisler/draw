@@ -13,10 +13,21 @@ import { goalMaterialsRouter, materialsRouter } from "./routes/materials.js";
 import { aiRouter } from "./routes/ai.js";
 import { backupRouter } from "./routes/backup.js";
 import { cardArtRouter } from "./routes/cardArt.js";
+import { sweepBackupTemp } from "./services/backupService.js";
 
 export function createApp() {
   const app = express();
   app.use(express.json());
+
+  // Boot hygiene (#103): drop temp artifacts a previous run was killed before
+  // it could clean up (see sweepBackupTemp). Here rather than in startServer()
+  // so it runs before the first request on every path that builds the app —
+  // and it must run AFTER the backup router's import, which is what creates
+  // the uploads directory the sweep empties.
+  const swept = sweepBackupTemp();
+  if (swept.length > 0) {
+    console.log(`[backup] swept ${swept.length} orphaned temp artifact(s): ${swept.join(", ")}`);
+  }
 
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, time: new Date().toISOString() });

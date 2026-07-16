@@ -47,8 +47,9 @@ function budgetError(value: unknown): string | null {
 /**
  * Validate + normalize streak_rest_weekdays (#58): a set of JS getDay
  * weekdays (0=Sun..6=Sat). All 7 is rejected — a streak needs at least one
- * required weekday, which also keeps the walk-back loop's rest-skipping
- * bounded. Returns the canonical stored value or an error string.
+ * required weekday, without which no day could ever be an uncoverable miss
+ * and a run would be unbreakable. Returns the canonical stored value or an
+ * error string.
  */
 function normalizeRestWeekdays(value: unknown): { value?: string; error?: string } {
   if (!Array.isArray(value) || value.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
@@ -59,6 +60,26 @@ function normalizeRestWeekdays(value: unknown): { value?: string; error?: string
     return { error: "at least one weekday must stay required — all 7 as rest days would leave nothing for the streak to count" };
   }
   return { value: JSON.stringify(unique) };
+}
+
+/**
+ * Validate warmup_every_hours (#103). Zero is kept as an INTENTIONAL
+ * off-switch rather than clamped away: "the warm-up is always available" is a
+ * coherent thing to want — the escape hatch stays a deliberate deal of the
+ * smallest card, never a re-roll (the route still refuses to deal while a
+ * card stands, ADR-30c), so an unlimited allowance loosens the pacing, not
+ * the commitment. What was actually broken is that ANY garbage got here: a
+ * negative silently disabled the limit while reading like a limit, and a
+ * non-numeric string fell back to the default 8 behind the user's back —
+ * both of them settings that lie about what they do. Integers only, >= 0,
+ * with 0 named.
+ */
+function warmupEveryHoursError(value: unknown): string | null {
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (!Number.isInteger(parsed) || (parsed as number) < 0) {
+    return "warmup_every_hours must be a non-negative integer (hours) — 0 turns the rate limit off";
+  }
+  return null;
 }
 
 settingsRouter.get("/", (_req, res) => {
@@ -77,6 +98,10 @@ settingsRouter.patch("/", (req, res) => {
   }
   if ("daily_hand_budget_minutes" in body) {
     const error = budgetError(body.daily_hand_budget_minutes);
+    if (error) return res.status(400).json({ error });
+  }
+  if ("warmup_every_hours" in body) {
+    const error = warmupEveryHoursError(body.warmup_every_hours);
     if (error) return res.status(400).json({ error });
   }
   const allowed = [

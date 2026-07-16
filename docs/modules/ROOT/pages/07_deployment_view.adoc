@@ -2,13 +2,43 @@
 
 There is no production deployment — the application runs on the owner's machine.
 
+[plantuml,deployment,svg]
 ....
-Windows 11 PC
-└── Node.js 22+ process tree (npm run dev → concurrently)
-    ├── tsx watch server/src/index.ts     Express on 127.0.0.1:3001 (API_PORT)
-    │     ├── server/data/app.db          SQLite (WAL mode)
-    │     └── server/data/files/          uploaded goal materials
-    └── vite                              client on :5173, /api proxied to :3001
+@startuml
+skinparam shadowing false
+skinparam wrapWidth 130
+skinparam defaultTextAlignment center
+skinparam componentStyle rectangle
+skinparam nodesep 12
+skinparam ranksep 18
+
+node "Windows 11 PC" as pc {
+  component "Browser\nlocalhost:5173" as browser
+  node "MCP client process\nClaude Code / Desktop" as mcpclient {
+    component "npm run mcp -w server\ntsx src/mcp.ts\n(committed .mcp.json)" as mcpsrv
+  }
+  node "Node.js 22+ — npm run dev (concurrently)" as devtree {
+    component "vite\nclient on :5173\n/api proxied to :3001" as vite
+    component "tsx watch server/src/index.ts\nExpress on 127.0.0.1:3001\n(API_PORT)" as express
+  }
+  folder "server/data/ (gitignored)" as data {
+    database "app.db\nSQLite, WAL" as db
+    folder "files/\ngoal materials" as files
+  }
+  artifact "server/.env\nAPI_PORT (default 3001)\nANTHROPIC_API_KEY — fallback\nonly: the Settings-UI key wins" as env
+}
+cloud "api.anthropic.com" as claude
+
+browser --> vite : HTTP :5173
+vite --> express : proxy /api → :3001
+mcpsrv --> express : HTTP 127.0.0.1:3001\n(DRAW_API_URL)
+env ..> express : dotenv
+express --> db
+express --> files
+express --> claude : HTTPS — only with\na key, on demand
+browser -[hidden]right-> mcpclient
+db -[hidden]right-> files
+@enduml
 ....
 
 [cols="1,3",options="header"]

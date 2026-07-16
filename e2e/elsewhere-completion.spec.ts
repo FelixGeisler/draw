@@ -68,6 +68,11 @@ test("completing the drawn card from the TimerBar dismisses it — no second ✓
   await expect(page.getByText("click to draw")).toBeVisible();
   // The focus overlay derives from the same facts — it must not resurrect.
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  // Celebration belongs to the ACTING surface (#110, #118): the TimerBar's
+  // ✓ Done dismisses the derived card without fanfare. canvas-confetti is the
+  // page's only <canvas>, so its absence is the assertion — the positive
+  // control is warmup-draw.spec.ts, where the page's own ✓ Done fires.
+  await expect(page.locator("canvas")).toHaveCount(0);
 
   // The acting surface was the TimerBar, but the drawn bonus still derives
   // from the server-persisted pointer (ADR-13): 10 × (3/3) × 1.5 = 15.

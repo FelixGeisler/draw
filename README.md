@@ -82,6 +82,8 @@ weight = impact² / effort × urgency × staleness
 Architecture documentation ([arc42](https://arc42.org/), AsciiDoc/[Antora](https://antora.org/))
 lives in [`docs/`](docs/modules/ROOT/pages) and is hosted at
 **https://felixgeisler.github.io/draw/**. Build locally with `npm run docs:build`.
+Diagrams are inline PlantUML rendered at build time by [Kroki](https://kroki.io/),
+so a docs build needs network access to kroki.io — but no local PlantUML or Java.
 Workflow conventions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Stack

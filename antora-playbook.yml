@@ -12,6 +12,19 @@ content:
 ui:
   bundle:
     url: ./docs-ui/ui-bundle.zip
+# Diagrams as code (#45): sources stay inline in the .adoc pages and are rendered
+# by the public kroki.io at BUILD time — no local Kroki/PlantUML/Java install and
+# no Docker (guardrail, section 2). kroki-fetch-diagram downloads every SVG into
+# the generated site, so published pages carry site-local images and never
+# hotlink kroki.io. Trade-off: docs builds now need outbound network access (the
+# UI bundle was vendored to avoid exactly that — this reintroduces it for docs
+# builds only), and a kroki.io outage fails the build (failure_level: warn).
+asciidoc:
+  attributes:
+    kroki-fetch-diagram: true
+    kroki-default-format: svg
+  extensions:
+    - asciidoctor-kroki
 output:
   dir: build/site
 runtime:

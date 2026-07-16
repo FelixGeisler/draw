@@ -16,6 +16,17 @@ npm install
 npm run dev        # Express :3001 + Vite :5173
 ```
 
+**Run `npm install` after every pull.** The workspaces are not self-healing: a
+`node_modules` left over from an older commit crashes the server on boot with a
+bare module-not-found (a missing runtime dependency looks nothing like "your
+tree is stale"), and there is no postinstall hook or CI check that catches it
+for you.
+
+Vite comes up in under a second while the server is still running migrations,
+so `npm run dev` waits for `GET /api/health` before proxying the first `/api`
+call — one `waiting for … to finish booting…` line at start is expected, not an
+error.
+
 Type checks: `npm run build -w server` and `npx tsc --noEmit -p client/tsconfig.json`.
 
 ## Tests — required for every PR
@@ -42,3 +53,15 @@ Architecture documentation follows [arc42](https://arc42.org/) and lives in
 the `Docs` workflow on every push to `main` that touches `docs/`. Keep it
 current: architectural decisions belong in section 9 (Architecture Decisions),
 new quality requirements in section 10.
+
+Diagrams are code: PlantUML sources live inline in the `.adoc` pages inside
+`[plantuml,<name>,svg]` blocks and are rendered at build time by the public
+[Kroki](https://kroki.io/) service via the `asciidoctor-kroki` extension. So
+`npm run docs:build` needs **outbound network access to kroki.io** — but no
+local Kroki, PlantUML or Java install (and no Docker, per the section 2
+guardrails). The build fetches each SVG into `build/site/` (`kroki-fetch-diagram`),
+so published pages serve site-local images and never hotlink kroki.io. Edit a
+diagram by editing its source in the page; never commit rendered SVGs. Note that
+Antora resolves `url: .` through git, so it builds the **committed** state of
+your branch — commit diagram edits before building, and build from a normal
+clone (Antora cannot read a `git worktree` checkout).

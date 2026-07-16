@@ -12,6 +12,8 @@ test.describe.configure({ mode: "serial" });
 const COACHED = "Coached cat";
 const UNCOACHED = "Uncoached cat";
 
+const SEED_TITLES = ["Coach seed A", "Coach seed B", "Coach seed C"];
+
 async function seedBiasHistory(request: APIRequestContext) {
   const coached = await (
     await request.post("/api/categories", { data: { name: COACHED, color: "#ff8c5f" } })
@@ -22,7 +24,7 @@ async function seedBiasHistory(request: APIRequestContext) {
 
   // Three qualifying tasks: estimated 60 min, tracked a few real seconds via
   // the timer routes, completed. Consistent bias, sample size 3 = MIN_SAMPLE.
-  for (const title of ["Coach seed A", "Coach seed B", "Coach seed C"]) {
+  for (const title of SEED_TITLES) {
     const task = await (
       await request.post("/api/tasks", {
         data: { title, categoryId: coached.id, effortMinutes: 60 },
@@ -34,6 +36,37 @@ async function seedBiasHistory(request: APIRequestContext) {
     await new Promise((r) => setTimeout(r, 300));
     await request.post("/api/timer/stop");
     await request.patch(`/api/tasks/${task.id}`, { data: { status: "done" } });
+  }
+}
+
+/**
+ * Shared-DB hygiene (#103). The seeds above are the heaviest residue any spec
+ * in this suite leaves: THREE completions in the serial database, which arm
+ * the momentum bonus (×1.25 for 30 wall-clock minutes) under every later
+ * exact-XP assert and add three cards to today's trophy pile — and the pile is
+ * a centered non-wrapping flex row, so every extra card shrinks ALL of them
+ * until the trophy specs' hover centers drift under their right neighbours
+ * (see elsewhere-completion.spec.ts). Deleting the tasks cascades their
+ * completions and time entries away; the now-empty categories follow, so the
+ * Tasks page sections and the draw filter chips read as before too.
+ *
+ * Called at the end of the last test rather than from an afterAll hook: the
+ * `request` fixture is test-scoped, and this file already cleans up in-test.
+ */
+async function cleanupBiasHistory(request: APIRequestContext) {
+  const tasks: { id: number; title: string }[] = await (
+    await request.get("/api/tasks?status=all")
+  ).json();
+  for (const title of SEED_TITLES) {
+    const task = tasks.find((t) => t.title === title);
+    if (task) await request.delete(`/api/tasks/${task.id}`);
+  }
+  const categories: { id: number; name: string }[] = await (
+    await request.get("/api/categories")
+  ).json();
+  for (const name of [COACHED, UNCOACHED]) {
+    const category = categories.find((c) => c.name === name);
+    if (category) await request.delete(`/api/categories/${category.id}`);
   }
 }
 
@@ -56,6 +89,18 @@ test("TaskForm shows the passive hint only while its preconditions hold", async 
   await expect(hint(page)).toHaveText(
     `history suggests ~5 min (you track 0× your ${COACHED} estimates)`,
   );
+  // Advice that appears silently under the field the user is typing in is
+  // advice a screen reader never mentions (#103). Polite, never assertive:
+  // it waits for a pause in typing, like the visual hint waits to be noticed.
+  await expect(hint(page)).toHaveAttribute("aria-live", "polite");
+
+  // …but it stays silent when the rounded suggestion IS what was typed
+  // (#103): at 5 the ratio-0 suggestion floors right back to 5, and "history
+  // suggests ~5 min" under a 5 corrects nothing.
+  await effortInput(page).fill("5");
+  await expect(hint(page)).toHaveCount(0);
+  await effortInput(page).fill("40");
+  await expect(hint(page)).toBeVisible();
 
   // Switching to a category without history removes it...
   await categorySelect(page).selectOption({ label: UNCOACHED });
@@ -111,4 +156,12 @@ test("the Stats page states the coached category's bias, threshold met", async (
   // No statement for any category below the minimum sample — the uncoached
   // category must not even appear as a placeholder.
   await expect(page.getByTestId("bias-statement").filter({ hasText: UNCOACHED })).toHaveCount(0);
+
+  // Last assertion of the file — the seeds have served their purpose, so the
+  // shared database gets them back clean (see cleanupBiasHistory). The reload
+  // proves it: the statement derives from completions, so it can only vanish
+  // if the history really did.
+  await cleanupBiasHistory(page.request);
+  await page.reload();
+  await expect(page.getByTestId("bias-statement").filter({ hasText: COACHED })).toHaveCount(0);
 });
