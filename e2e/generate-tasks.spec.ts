@@ -179,10 +179,16 @@ test("generate → review → commit: nothing written before commit, then one pa
   expect(taskWrites).toHaveLength(0);
 
   await goalCard.getByRole("button", { name: "Add 4 tasks" }).click();
-  await expect(goalCard.getByTitle("Umbrella task title")).not.toBeVisible();
 
-  // The goal now counts the umbrella + 4 leaves.
-  await expect(goalCard.getByText("0/5 tasks")).toBeVisible();
+  // Gate on the POSITIVE settled signal — the umbrella + 4 leaves counted on
+  // the goal — rather than a short negative wait for the panel to close (#131).
+  // The commit is TWO writes (parent, then the subtasks batch) plus a query
+  // refetch; under full-suite load that round-trip can exceed the default 5s
+  // expect timeout, so the old `panel not.toBeVisible` flaked at 5s. Waiting
+  // generously on the recount lets the writes land first; the panel is closed
+  // by the time the count renders, so the negative check below is then instant.
+  await expect(goalCard.getByText("0/5 tasks")).toBeVisible({ timeout: 15_000 });
+  await expect(goalCard.getByTitle("Umbrella task title")).not.toBeVisible();
   // Exactly two writes: the parent, then ONE transactional subtasks batch.
   expect(taskWrites).toHaveLength(2);
   expect(taskWrites[1]).toMatch(/\/api\/tasks\/\d+\/subtasks$/);
