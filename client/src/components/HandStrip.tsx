@@ -49,8 +49,11 @@ export function HandStrip({
   const batchArt = useCardArtBatch((hand.data?.tasks ?? []).map((t) => t.id));
   const art = artByTask(batchArt.data?.arts);
 
-  async function doDeal() {
-    setDealt(await deal.mutateAsync());
+  // mutate, not mutateAsync: onClick must not drop a rejecting promise. The
+  // hook's onError refetches ['hand'] so a lost deal race surfaces the server's
+  // hand instead of leaving the button re-enabled over a stale screen.
+  function doDeal() {
+    deal.mutate(undefined, { onSuccess: setDealt });
   }
 
   // Query not settled yet: render nothing rather than guess. Showing "Deal me

@@ -55,6 +55,13 @@ export interface DealResult {
 interface StoredHand {
   date: string;
   taskIds: number[];
+  /**
+   * The budget this hand was DEALT against — stored, not re-read from the live
+   * setting, because it is a historical fact of the deal, not derived state
+   * (ADR-34 (d)). A later PATCH of `daily_hand_budget_minutes` must not rewrite
+   * a standing hand's header.
+   */
+  budgetMinutes: number;
 }
 
 function budgetMinutes(): number {
@@ -78,6 +85,9 @@ function storedHand(now: Date): StoredHand | null {
     return null; // hand-edited DB — treat as absent rather than breaking the page
   }
   if (parsed?.date !== localDate(now) || !Array.isArray(parsed.taskIds)) return null;
+  // Legacy row from before the budget was stored with the deal: fall back to
+  // the live setting so an in-flight hand dealt under the old code still reads.
+  if (typeof parsed.budgetMinutes !== "number") parsed.budgetMinutes = budgetMinutes();
   return parsed;
 }
 
@@ -113,9 +123,9 @@ export function currentHand(): Hand | null {
 
   const survivingIds = tasks.map((t) => t.id as number);
   if (survivingIds.length !== stored.taskIds.length) {
-    writeHand({ date: stored.date, taskIds: survivingIds });
+    writeHand({ date: stored.date, taskIds: survivingIds, budgetMinutes: stored.budgetMinutes });
   }
-  return { date: stored.date, budgetMinutes: budgetMinutes(), tasks };
+  return { date: stored.date, budgetMinutes: stored.budgetMinutes, tasks };
 }
 
 /**
@@ -205,7 +215,7 @@ export function dealHand(): DealResult {
   }
 
   const taskIds = picked.map((c) => c.id);
-  writeHand({ date: localDate(now), taskIds });
+  writeHand({ date: localDate(now), taskIds, budgetMinutes: budget });
   return {
     hand: {
       date: localDate(now),
@@ -242,7 +252,11 @@ export function playHandCard(taskId: number): { task: Record<string, unknown> } 
   if (!payload || !isRestorable(payload as unknown as RestorableTask, maxEffort, now)) {
     // Stale member: prune it permanently, exactly like the GET would, and
     // report it as gone rather than dealing a card that left the deck.
-    writeHand({ date: stored.date, taskIds: stored.taskIds.filter((id) => id !== taskId) });
+    writeHand({
+      date: stored.date,
+      taskIds: stored.taskIds.filter((id) => id !== taskId),
+      budgetMinutes: stored.budgetMinutes,
+    });
     return "not_in_hand";
   }
 
@@ -271,7 +285,11 @@ export function playHandCard(taskId: number): { task: Record<string, unknown> } 
 export function removeFromHand(taskId: number) {
   const stored = storedHand(new Date());
   if (!stored || !stored.taskIds.includes(taskId)) return;
-  writeHand({ date: stored.date, taskIds: stored.taskIds.filter((id) => id !== taskId) });
+  writeHand({
+    date: stored.date,
+    taskIds: stored.taskIds.filter((id) => id !== taskId),
+    budgetMinutes: stored.budgetMinutes,
+  });
 }
 
 /**
@@ -288,6 +306,6 @@ export function pruneDanglingHand() {
   const exists = db.prepare("SELECT 1 FROM tasks WHERE id = ?");
   const surviving = stored.taskIds.filter((id) => exists.get(id));
   if (surviving.length !== stored.taskIds.length) {
-    writeHand({ date: stored.date, taskIds: surviving });
+    writeHand({ date: stored.date, taskIds: surviving, budgetMinutes: stored.budgetMinutes });
   }
 }

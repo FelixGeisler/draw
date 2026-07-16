@@ -1154,8 +1154,11 @@ language in the codebase, and the surviving pieces live where they are used
 
 *Context:* Drawing one card at a time answers "just start", but not the
 morning question "what does my day look like?" (#59). A hand of 3–5 cards
-dealt as today's plan answers it — and immediately raises the question the
-issue itself left open: "redeal allowed once/day (or costs something)?"
+dealt as today's plan answers it — and forces the redeal question. The issue's
+original draft DECIDED it one way ("one free redeal per day, then the hand
+stands"); this ADR OVERRULES that decision on the re-roll/ADR-5 grounds in (b),
+and the owner has since amended the issue to match. It is not a question the
+issue left open — it is a decision the implementation reversed.
 *Decision:* (a) *Dealing.* One hand per SERVER-LOCAL day (the streak's day
 convention, `services/localDay.ts`), effort-budgeted rather than fixed-size:
 `daily_hand_budget_minutes` (public setting, default 90) with a hard cap of
@@ -1174,7 +1177,8 @@ Dealing has NO side effects on the cards: no `last_drawn_at` stamp, no
 current draw, no achievement. Empty deals reuse the draw's honest reasons
 (`no_ready_tasks` / `all_too_big` / `all_outside_window`) plus
 `budget_too_small` — eligible cards exist, none fits the day.
-(b) *No redeal.* The issue proposed one free redeal per day. Rejected. #88
+(b) *No redeal.* The issue's original draft decided on one free redeal per
+day; this ADR overrules it. #88
 removed "Draw again" because re-rolling is fishing for a comfortable card;
 a hand redeal is that same re-roll, five cards at a time. The issue's own
 argument only establishes that a redeal cannot be PRICED — XP is derived
@@ -1191,6 +1195,17 @@ the freestyle draw below the strip is untouched and always available, so
 the hand is today's plan, never the only way to get a card. Playing a card
 while another is revealed is impossible for the same reason: `409`, exactly
 like the warm-up deal.
+The hand does permit CHERRY-PICKING within itself, and that is accepted. The
+3–5 cards are dealt face-up and `POST /api/hand/play` takes any `taskId` in the
+list, so a user can read the whole hand and play the most comfortable card at
+zero cost, without snoozing anything. This is bounded by construction and
+strictly WEAKER than the loop #88 already sanctions: the set is
+weighted-sampled ONCE, is closed, and can only SHRINK — nothing appends to
+`taskIds` outside `dealHand`, and `POST /api/hand/deal` answers `409` even on an
+emptied hand — so the most a user can do is choose among a fixed few, whereas
+the freestyle snooze-and-redraw escape can resample the whole deck without
+bound. Picking within a dealt hand IS the "plan my day" overview the feature
+exists to give; forbidding it would defeat the purpose. It is acceptable.
 (c) *Playing.* `POST /api/hand/play` makes the card the current draw with a
 real draw's side effects (ADR-13 pointer, `last_drawn_at`, `drew`
 achievement) — so reload-restore, the ×1.5 drawn bonus, the 5★ holo and the
@@ -1198,9 +1213,15 @@ snooze/edit/delete actions are the EXISTING ones, with no second code path.
 A played card is gambled (it was sampled out of the weighted pool), unlike
 the warm-up's handout, so it keeps the bonus and the shimmer.
 (d) *Persistence: no table.* The hand is one settings row (`daily_hand`,
-JSON `{date, taskIds}`) — ADR-13's pattern widened from one pointer to a
+JSON `{date, taskIds, budgetMinutes}`) — ADR-13's pattern widened from one
+pointer to a
 list, and internal session state excluded from `/api/settings` like the
-current draw and the warm-up marker. It is a pointer list validated on
+current draw and the warm-up marker. The budget is stored WITH the deal, not
+re-read from `daily_hand_budget_minutes` on every GET: the minutes a hand was
+dealt against are a historical FACT of that deal, not derived state, so a later
+PATCH of the setting must not rewrite a standing hand's header. This is the
+mirror of ADR-2, not a breach of it — ADR-2 forbids storing state that CAN be
+re-derived; the dealt budget cannot be. It is a pointer list validated on
 read, not a record: `GET /api/hand` re-validates every member with the same
 `isRestorable` the current draw uses (shared `taskWithDeckState` row shape)
 and prunes failures permanently. Three removals are EAGER because lazy

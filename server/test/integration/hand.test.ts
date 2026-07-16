@@ -52,7 +52,7 @@ function resetHandState() {
   ).run();
 }
 
-function storedHand(): { date: string; taskIds: number[] } | null {
+function storedHand(): { date: string; taskIds: number[]; budgetMinutes?: number } | null {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'daily_hand'").get() as
     | { value: string }
     | undefined;
@@ -150,6 +150,19 @@ describe("POST /api/hand/deal — dealing today's plan", () => {
     expect(await getHand()).toBeNull(); // the ritual reset
     const fresh = await deal(); // …and dealing is open again
     expect(fresh.hand.date).toBe(localDay(new Date()));
+  });
+
+  it("fixes the budget at deal time — a later settings PATCH does not rewrite a standing hand (ADR-34 (d))", async () => {
+    await seedTask("dealt under 90", 20);
+    expect((await deal()).hand.budgetMinutes).toBe(90);
+
+    // Lower the day's budget AFTER the hand stands. The minutes a hand was
+    // dealt against are a historical fact of that deal, not derived state, so
+    // the header keeps reading /90 — not the live /30.
+    await request(app).patch("/api/settings").send({ daily_hand_budget_minutes: 30 }).expect(200);
+    expect((await getHand()).budgetMinutes).toBe(90);
+    expect(storedHand()!.budgetMinutes).toBe(90); // stored with the deal, not re-read
+    await request(app).patch("/api/settings").send({ daily_hand_budget_minutes: 90 }).expect(200);
   });
 });
 

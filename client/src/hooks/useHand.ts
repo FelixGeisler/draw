@@ -42,6 +42,11 @@ export function useDealHand() {
       qc.setQueryData(["hand"], data.hand);
       qc.invalidateQueries({ queryKey: ["hand"] });
     },
+    // A deal can lose a race: another tab or an MCP deal writes today's hand
+    // while this tab still shows the CTA from a stale null cache, and the click
+    // takes the route's 409. Refetch so the strip snaps to the server's truth
+    // instead of re-enabling the button over a wrong screen.
+    onError: () => qc.invalidateQueries({ queryKey: ["hand"] }),
   });
 }
 
