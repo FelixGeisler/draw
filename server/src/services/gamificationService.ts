@@ -1,6 +1,8 @@
 import { db, getSetting, getSettingString } from "../db.js";
 import type { AchievementKey } from "../../../shared/achievementKeys.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
+import { removeFromHand } from "./handService.js";
+import { localDate } from "./localDay.js";
 import {
   computeStreak,
   FREEZE_BANK_CAP,
@@ -193,6 +195,15 @@ export function completeTask(
   // was this task (ADR-13). Recurring too — the task stays open, but the
   // drawn session just ended, matching how the client dismisses the card.
   clearCurrentDraw(task.id);
+  // …and it leaves today's hand (#59). Eager and REQUIRED, not a shortcut:
+  // a recurring task stays open (ADR-6) and would pass the hand's lazy
+  // isRestorable validation untouched, so a card the user just finished would
+  // sit in the strip offering to be played again. Unconditional — unlike the
+  // warm-up marker read above, which the zero-effort override skips for XP
+  // honesty: whatever the multiplier, a completed card is done for today, and
+  // that includes a parent auto-completed by its last subtask (#111), which
+  // may well have been dealt before it was broken down.
+  removeFromHand(task.id);
 
   // Freeze token earn (#58, ADR-28): the 7th/14th/... REAL completion day of
   // the unbroken run banks one token, capped at FREEZE_BANK_CAP unconsumed.
@@ -285,10 +296,6 @@ export function streakState(): StreakState {
 
 export function currentStreak(): number {
   return streakState().streak;
-}
-
-function localDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 // ---------------------------------------------------------------------------

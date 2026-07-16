@@ -1,0 +1,48 @@
+import { Link } from "react-router-dom";
+
+/**
+ * Why the candidate pool came up empty, in words. The three reasons the
+ * SERVER's shared `emptyPoolReason` can return (drawService) — so the
+ * freestyle draw (DrawPage) and the daily hand's deal (#59) explain an empty
+ * deck with one voice instead of two drifting copies of the same paragraph.
+ *
+ * Draw-only reasons (`cooling_down`, `warmup_unavailable`) stay at their call
+ * site: they describe the warm-up allowance, not the pool.
+ */
+export function EmptyPoolReason({
+  reason,
+}: {
+  reason?: "no_ready_tasks" | "all_too_big" | "all_outside_window";
+}) {
+  if (reason === "all_outside_window") {
+    return (
+      <p>
+        Everything left is scheduled for later — those cards come back on their own when their{" "}
+        <Link to="/capture" style={{ color: "var(--accent)" }}>
+          availability window
+        </Link>{" "}
+        opens.
+      </p>
+    );
+  }
+  if (reason === "all_too_big") {
+    return (
+      <p>
+        Everything left is too big or unestimated.{" "}
+        <Link to="/capture" style={{ color: "var(--accent)" }}>
+          Break something down
+        </Link>{" "}
+        to refill the deck.
+      </p>
+    );
+  }
+  return (
+    <p>
+      The deck is empty.{" "}
+      <Link to="/capture" style={{ color: "var(--accent)" }}>
+        Capture a task
+      </Link>{" "}
+      to get started.
+    </p>
+  );
+}

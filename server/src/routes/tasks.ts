@@ -16,6 +16,7 @@ import {
   type CompletionResult,
   type TaskRow,
 } from "../services/gamificationService.js";
+import { pruneDanglingHand, removeFromHand } from "../services/handService.js";
 import { AiError } from "../services/aiService.js";
 import { getOrCreateCardArt, regenerateCardArt } from "../services/cardArtService.js";
 import { startTimer } from "./timer.js";
@@ -1111,12 +1112,17 @@ tasksRouter.patch("/:id", (req, res) => {
   // isRestorable rejects hasOpenChildren on the next GET /api/draw/current,
   // which the client fires right after every task mutation (the tasks hooks
   // invalidate the current-draw query).
+  // The same wear-off reasoning covers today's hand (#59), so both eager
+  // removals share one condition — but neither is gated on the card being the
+  // current draw any more: a hand card is snoozable from the Tasks page
+  // without ever having been played. clearCurrentDraw(id) already no-ops
+  // unless the pointer IS this task, so it needs no guard of its own.
   if (
     ("deferredUntil" in body || "blocked" in body || "parentId" in body) &&
-    getCurrentDrawTaskId() === id &&
     !isRestorable(task as unknown as RestorableTask, getSetting("max_draw_effort", 30), new Date())
   ) {
     clearCurrentDraw(id);
+    removeFromHand(id);
   }
   res.json({
     task,
@@ -1178,8 +1184,10 @@ tasksRouter.delete("/:id", (req, res) => {
   // A deleted card leaves the deck — whether it was deleted directly or
   // cascade-deleted with its parent. Cleared on row absence, not id match:
   // a freed id (no AUTOINCREMENT) could be re-bound to the next captured
-  // task before the lazy restore validation ever runs.
+  // task before the lazy restore validation ever runs. Today's hand holds
+  // the same kind of id pointer and takes the same eager treatment (#59).
   clearDanglingDraw();
+  pruneDanglingHand();
   res.json({
     ok: true,
     // Same cascade surface as the completion paths (#111): XP, achievements

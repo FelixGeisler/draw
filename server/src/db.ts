@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 9;
+export const CURRENT_VERSION = 10;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -164,6 +164,19 @@ function migrate() {
       db.exec("ALTER TABLE completions ADD COLUMN was_warmup INTEGER NOT NULL DEFAULT 0");
       db.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('warmup_every_hours', '8')");
     }
+    if (version < 10) {
+      // Daily hand (issue #59, ADR-34): a PURE DATA migration — the hand
+      // itself needs no table (it is one settings row of JSON, ADR-13's
+      // pattern), so the version bump exists solely to seed the new public
+      // setting on existing databases. Without it `daily_hand_budget_minutes`
+      // would be absent from GET /api/settings until the first PATCH wrote
+      // it, and the Draw page's budget input would render empty on exactly
+      // the databases that predate the feature. INSERT OR IGNORE: a restored
+      // backup may already carry the row.
+      db.exec(
+        "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_hand_budget_minutes', '90')",
+      );
+    }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);
 }
@@ -202,6 +215,18 @@ export const CURRENT_DRAW_SETTING = "current_draw_task_id";
 // refund it, so the warm-up cannot be fished for a better card.
 export const WARMUP_DRAW_SETTING = "warmup_current_draw";
 export const WARMUP_LAST_DEALT_SETTING = "warmup_last_dealt";
+
+// Daily hand (#59, ADR-34) — today's dealt plan as internal session state
+// next to the current draw, excluded from the settings endpoints exactly like
+// it (GET /api/hand is its endpoint). JSON: {date, taskIds}, where `date` is
+// the SERVER-LOCAL day (the streak convention, services/localDay.ts). A row
+// from an earlier day counts as no hand at all: the ritual resets at local
+// midnight and unplayed cards simply return to the deck.
+//
+// Deliberately NO `redealt` field: there is no redeal (ADR-34). The hand is
+// dealt once per local day and only ever SHRINKS — re-dealing five cards
+// would be the card-fishing that #88 removed from the single draw.
+export const DAILY_HAND_SETTING = "daily_hand";
 
 export function getSetting(key: string, fallback: number): number {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as

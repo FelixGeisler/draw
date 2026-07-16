@@ -224,8 +224,13 @@ function filterConditions(filters: DrawFilters): { conditions: string[]; params:
  * express — so both callers share one predicate by construction.
  * `windowExcluded` counts the rows the window filter removed; drawTask's
  * empty-pool dispatch needs it to report `all_outside_window`.
+ *
+ * Exported for the daily hand (#59, ADR-34), which deals out of EXACTLY this
+ * pool: sharing the query — rather than copying the predicate — is what makes
+ * snooze/block (ADR-17), sequential hold-back (#23) and availability windows
+ * (#33) land in the hand for free and stay impossible to drift apart.
  */
-function queryCandidates(
+export function queryCandidates(
   filters: DrawFilters,
   maxEffort: number,
   now: Date,
@@ -310,7 +315,7 @@ export function drawPool(filters: DrawFilters): {
  * siblings surface by completing the step in front, never by being broken
  * down (#23), so neither triggers the break-something-down hint.
  */
-function emptyPoolReason(
+export function emptyPoolReason(
   filters: DrawFilters,
   windowExcluded: number,
   now: Date,
@@ -350,8 +355,9 @@ const TRACKED_MINUTES_SQL = `(SELECT CAST(COALESCE(SUM(
 
 /** Full payload row for a freshly dealt card — a pool candidate is an open
  *  leaf by construction (zero non-archived children, #111), so
- *  hasOpenChildren/hasNonArchivedChildren/heldBack are constant 0. */
-function dealtTaskRow(id: number): Record<string, unknown> {
+ *  hasOpenChildren/hasNonArchivedChildren/heldBack are constant 0. Shared
+ *  with the daily hand's deal (#59), whose cards come from the same pool. */
+export function dealtTaskRow(id: number): Record<string, unknown> {
   return db
     .prepare(
       `SELECT t.id, t.title, t.description,
@@ -505,17 +511,16 @@ export function clearDanglingDraw() {
 }
 
 /**
- * The persisted current draw, for restore after a reload. A pointer that went
- * stale sideways (task completed elsewhere, edited out of the deck, turned
- * into a container) is cleared lazily here and null is returned. When the
- * restored card was warm-up dealt (#57) the marker rides along, so the badge
- * and bonus-window hint survive a reload exactly like the card (ADR-13).
+ * A task row carrying the DERIVED deck-state columns isRestorable needs —
+ * unlike dealtTaskRow's constants, these are computed, because a pointer into
+ * the deck can go stale sideways (the card was broken down, or reparented
+ * behind a sequential sibling). The one home of the restore-validation row
+ * shape: the current draw (below) and every daily-hand member (#59) are
+ * validated against the identical payload, so the two can never drift into
+ * disagreeing about what is still in the deck. Undefined when the row is gone.
  */
-export function currentDraw(): { task: Record<string, unknown>; warmup?: WarmupMarker } | null {
-  const id = getCurrentDrawTaskId();
-  if (id == null) return null;
-
-  const task = db
+export function taskWithDeckState(id: number): Record<string, unknown> | undefined {
+  return db
     .prepare(
       `SELECT t.id, t.title, t.description,
               t.category_id AS categoryId, t.goal_id AS goalId, t.parent_id AS parentId,
@@ -532,7 +537,20 @@ export function currentDraw(): { task: Record<string, unknown>; warmup?: WarmupM
        FROM tasks t WHERE t.id = ?`,
     )
     .get(id) as Record<string, unknown> | undefined;
+}
 
+/**
+ * The persisted current draw, for restore after a reload. A pointer that went
+ * stale sideways (task completed elsewhere, edited out of the deck, turned
+ * into a container) is cleared lazily here and null is returned. When the
+ * restored card was warm-up dealt (#57) the marker rides along, so the badge
+ * and bonus-window hint survive a reload exactly like the card (ADR-13).
+ */
+export function currentDraw(): { task: Record<string, unknown>; warmup?: WarmupMarker } | null {
+  const id = getCurrentDrawTaskId();
+  if (id == null) return null;
+
+  const task = taskWithDeckState(id);
   const maxEffort = getSetting("max_draw_effort", 30);
   const payload = task && toTaskPayload(task); // parses windowDays for isRestorable
   if (!payload || !isRestorable(payload as unknown as RestorableTask, maxEffort, new Date())) {

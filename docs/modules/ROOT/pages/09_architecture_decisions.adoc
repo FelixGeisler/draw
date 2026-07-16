@@ -1149,3 +1149,87 @@ gradient. Deleting the frame component instead of hiding it keeps one card
 language in the codebase, and the surviving pieces live where they are used
 (pill in TaskBadges, ink+art helpers in `lib/cardVisuals`).
 
+
+== ADR-34: The daily hand is dealt once per local day, has no redeal, and lives in one settings row
+
+*Context:* Drawing one card at a time answers "just start", but not the
+morning question "what does my day look like?" (#59). A hand of 3–5 cards
+dealt as today's plan answers it — and immediately raises the question the
+issue itself left open: "redeal allowed once/day (or costs something)?"
+*Decision:* (a) *Dealing.* One hand per SERVER-LOCAL day (the streak's day
+convention, `services/localDay.ts`), effort-budgeted rather than fixed-size:
+`daily_hand_budget_minutes` (public setting, default 90) with a hard cap of
+5 cards. Eligibility is not a new predicate but literally the draw's own
+candidate query (`queryCandidates`, exported for this): snooze/block
+(ADR-17), sequential hold-back (#23), availability windows (#33) and the
+leaf rule (#111) land in the hand for free and cannot drift. Selection is
+weighted sampling WITHOUT replacement using the existing `poolWeights`
+(impact²/effort × urgency × staleness × ADR-25 sibling damping), a card
+being samplable only while its effort fits the REMAINING budget; the
+weights are recomputed each round over the still-affordable set, which is
+ADR-25's rule read faithfully (a sibling that cannot fit cannot flood the
+deal, so it must not dampen). Random, not top-N by weight: a top-N hand
+would be the same five cards every morning — a to-do list, not a deal.
+Dealing has NO side effects on the cards: no `last_drawn_at` stamp, no
+current draw, no achievement. Empty deals reuse the draw's honest reasons
+(`no_ready_tasks` / `all_too_big` / `all_outside_window`) plus
+`budget_too_small` — eligible cards exist, none fits the day.
+(b) *No redeal.* The issue proposed one free redeal per day. Rejected. #88
+removed "Draw again" because re-rolling is fishing for a comfortable card;
+a hand redeal is that same re-roll, five cards at a time. The issue's own
+argument only establishes that a redeal cannot be PRICED — XP is derived
+from the completions log (ADR-5), so charging it would mean fabricating or
+deleting completion facts, a lie in the ledger — which is an argument
+against pricing it, not for granting it free. The warm-up settles the shape
+of the tension (ADR-30): its allowance is consumed at deal time and never
+refunded, precisely so the deal cannot be fished for a better card; a
+once-per-day redeal is an allowance whose only purpose is to fish. The hand
+therefore only ever SHRINKS, and the escape from a card you do not want is
+the single draw's sanctioned one: resolve it (complete, snooze/block, edit,
+delete). This costs the user nothing, which is what makes it defensible —
+the freestyle draw below the strip is untouched and always available, so
+the hand is today's plan, never the only way to get a card. Playing a card
+while another is revealed is impossible for the same reason: `409`, exactly
+like the warm-up deal.
+(c) *Playing.* `POST /api/hand/play` makes the card the current draw with a
+real draw's side effects (ADR-13 pointer, `last_drawn_at`, `drew`
+achievement) — so reload-restore, the ×1.5 drawn bonus, the 5★ holo and the
+snooze/edit/delete actions are the EXISTING ones, with no second code path.
+A played card is gambled (it was sampled out of the weighted pool), unlike
+the warm-up's handout, so it keeps the bonus and the shimmer.
+(d) *Persistence: no table.* The hand is one settings row (`daily_hand`,
+JSON `{date, taskIds}`) — ADR-13's pattern widened from one pointer to a
+list, and internal session state excluded from `/api/settings` like the
+current draw and the warm-up marker. It is a pointer list validated on
+read, not a record: `GET /api/hand` re-validates every member with the same
+`isRestorable` the current draw uses (shared `taskWithDeckState` row shape)
+and prunes failures permanently. Three removals are EAGER because lazy
+validation provably cannot catch them in time: `completeTask()` (a
+recurring task stays open, ADR-6, and would sail straight through
+`isRestorable`), the snooze/block/reparent PATCH (a snooze wears off with
+no GET in between, and the once-valid card would resurrect in the hand the
+user sent it away from — ADR-17), and delete (`tasks.id` has no
+AUTOINCREMENT, so a freed id can be re-bound to a newcomer — the
+`clearDanglingDraw` reasoning). A row from an earlier day is not a hand: the
+ritual resets at local midnight, unplayed cards return to the deck, no
+carryover, no penalty.
+(e) *Migration v10 adds no schema* — it seeds `daily_hand_budget_minutes`
+on existing databases so the Draw page's budget input is not empty on
+exactly the databases that predate the feature.
+(f) *UI.* A strip above the draw scene (the morning entry point), sharing
+the page so the played card and the freestyle draw stay on ONE current-draw
+pointer and cannot diverge. Faces follow ADR-33 in miniature: full-bleed
+cached art (cache-only batch read, never a generation) under a scrim,
+subtle chips, holo on 5★ goal-linked cards. The card IS the play control —
+no per-card action row duplicating what the revealed card already offers —
+and the budget input lives beside the deal button rather than in Settings,
+because that is the one place the number is read.
+*Rationale:* The hand is a commitment or it is nothing: a plan you can
+re-roll until you like it is precisely the choice paralysis the app exists
+to remove, and it would quietly undo #88 one feature later. Reusing the
+draw's query, weights, restore-validation and current-draw pointer keeps
+the feature honest by construction rather than by discipline — there is no
+second eligibility path to keep in sync, and no second way to hold a card.
+Keeping the hand in settings-kv follows ADR-2/ADR-13: it is session state
+derived from the tasks it points at, so it needs validation on read, not a
+table with its own truth to defend.

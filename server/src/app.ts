@@ -3,6 +3,7 @@ import { tasksRouter } from "./routes/tasks.js";
 import { categoriesRouter } from "./routes/categories.js";
 import { settingsRouter } from "./routes/settings.js";
 import { drawRouter } from "./routes/draw.js";
+import { handRouter } from "./routes/hand.js";
 import { timerRouter } from "./routes/timer.js";
 import { statsRouter } from "./routes/stats.js";
 import { activityRouter } from "./routes/activity.js";
@@ -25,6 +26,10 @@ export function createApp() {
   app.use("/api/categories", categoriesRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/draw", drawRouter);
+  // The daily hand (#59) — its own resource, not a sub-route of /api/draw:
+  // dealing is not drawing (no last_drawn_at, no achievement), and only
+  // POST /api/hand/play crosses over into the current draw.
+  app.use("/api/hand", handRouter);
   app.use("/api/timer", timerRouter);
   app.use("/api/stats", statsRouter);
   app.use("/api/activity", activityRouter);

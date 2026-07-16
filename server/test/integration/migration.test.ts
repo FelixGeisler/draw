@@ -16,6 +16,7 @@ import { freshApp, testDb } from "../helpers.js";
 //   v6 → v7 re-parents pre-guard nested breakdowns     (issue #80)
 //   v7 → v8 creates the streak_freezes earn log        (issue #58)
 //   v8 → v9 adds completions.was_warmup + seeds warmup_every_hours (issue #57)
+//   v9 → v10 seeds daily_hand_budget_minutes                       (issue #59)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence.
@@ -49,7 +50,10 @@ beforeAll(async () => {
     .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
     // v9 (#57): strip the was_warmup column (and its comment block)…
     .replace(/,\r?\n  -- Warm-up draw[\s\S]*?was_warmup INTEGER NOT NULL DEFAULT 0/, "")
-    // …and the warmup_every_hours seed row.
+    // …and the warmup_every_hours seed row (v10's daily_hand_budget_minutes
+    // trails it, so the two strips must compose: drop the hand seed first,
+    // restoring the `warmup_every_hours` line as the statement terminator).
+    .replace(/,\r?\n  \('daily_hand_budget_minutes', '90'\)/, "")
     .replace(/,\r?\n  \('warmup_every_hours', '8'\)/, "");
   expect(v2Schema).not.toBe(current); // the strip actually removed the columns
   expect(v2Schema).not.toContain("deferred_until");
@@ -59,6 +63,7 @@ beforeAll(async () => {
   expect(v2Schema).not.toContain("streak_freezes");
   expect(v2Schema).not.toContain("was_warmup");
   expect(v2Schema).not.toContain("warmup_every_hours");
+  expect(v2Schema).not.toContain("daily_hand_budget_minutes");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v2Schema);
@@ -234,10 +239,31 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v9 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup)", () => {
-  it("bumps user_version to 9", async () => {
+describe("migration v2 → v10 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, daily_hand_budget_minutes)", () => {
+  it("bumps user_version to 10", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(9);
+    expect(db.pragma("user_version", { simple: true })).toBe(10);
+  });
+
+  it("seeds daily_hand_budget_minutes and needs no table for the hand itself (#59)", async () => {
+    const db = await testDb();
+    const seed = db
+      .prepare("SELECT value FROM settings WHERE key = 'daily_hand_budget_minutes'")
+      .get() as { value: string } | undefined;
+    expect(seed?.value).toBe("90");
+    // The migrated setting is public and editable like a fresh install's —
+    // the whole reason this version exists (the hand is a settings row, so
+    // v10 adds no schema at all).
+    const settings = await request(app).get("/api/settings").expect(200);
+    expect(settings.body.daily_hand_budget_minutes).toBe("90");
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'daily_hand'").get(),
+    ).toBeUndefined();
+  });
+
+  it("the migrated database can deal a hand (the hand row works without any seed)", async () => {
+    // GET answers "no hand today" on a database that has never seen one.
+    expect((await request(app).get("/api/hand").expect(200)).body).toBeNull();
   });
 
   it("adds completions.was_warmup with default 0 and seeds warmup_every_hours (#57)", async () => {
