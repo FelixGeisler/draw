@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="lm-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a2133"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="lm-glow" cx="50%" cy="48%" r="50%">
+      <stop offset="0" stop-color="#4f8cff" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="lm-shaft" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c9d6ef"/>
+      <stop offset="1" stop-color="#7d8aa6"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#lm-bg)"/>
+  <ellipse cx="150" cy="202" rx="140" ry="150" fill="url(#lm-glow)"/>
+
+  <!-- the target: rings of a week's hours, the middle band the one that pays -->
+  <g transform="translate(150 202)">
+    <circle r="118" fill="#171b26" stroke="#2c3040" stroke-width="2"/>
+    <circle r="96" fill="#1d2231" stroke="#333a4e" stroke-width="2"/>
+    <circle r="74" fill="#232a3d" stroke="#3b445e" stroke-width="2"/>
+    <circle r="52" fill="#2f3f66" stroke="#46598c" stroke-width="2"/>
+    <circle r="30" fill="#4f8cff" opacity=".85"/>
+    <circle r="13" fill="#ffb64f"/>
+  </g>
+
+  <!-- the 60% sector, the share of the week spent high -->
+  <path d="M150 202 L150 84 A118 118 0 1 1 47 260 Z" fill="#4f8cff" opacity=".13"/>
+
+  <!-- the arrow already home -->
+  <g>
+    <path d="M262 96 L166 192" stroke="url(#lm-shaft)" stroke-width="9" stroke-linecap="round"/>
+    <path d="M166 192 L150 202 L160 182 Z" fill="#eef3ff"/>
+    <!-- fletching -->
+    <path d="M266 92 L246 88 L252 108 Z" fill="#ff5f6b"/>
+    <path d="M266 92 L270 112 L250 106 Z" fill="#ff8c8f"/>
+    <path d="M244 114 L226 110 L232 130 Z" fill="#ff5f6b" opacity=".8"/>
+  </g>
+
+  <!-- impact spark at the bullseye -->
+  <g stroke="#ffe08a" stroke-width="3" stroke-linecap="round" opacity=".9">
+    <path d="M150 202 L128 180"/>
+    <path d="M150 202 L124 210"/>
+    <path d="M150 202 L142 228"/>
+  </g>
+</svg>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
+import { AchievementCard } from "../components/AchievementCard";
 import { ActivityHeatmap } from "../components/ActivityHeatmap";
 import { biasStatement } from "../lib/estimationCoach";
 
@@ -171,37 +172,29 @@ const GRADE_COLORS: Record<string, string> = {
   F: "#ff5f6b",
 };
 
+/**
+ * The achievement collection (#124): a card set, not a panel grid — earned
+ * cards face-up with their art and date, unearned ones face-down with the
+ * criteria still readable, so the shelf shows both what you have and what is
+ * left to collect. The count in the heading is the point of a collection; it
+ * is derived from the payload, never asserted on in E2E (counts break when
+ * tests re-order).
+ */
 function AchievementsGrid() {
   const { data } = useGamification();
   if (!data) return null;
+  const collected = data.achievements.filter((a) => a.unlockedAt).length;
   return (
     <section style={{ marginTop: 24 }}>
-      <h3>Achievements</h3>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
-          gap: 12,
-        }}
-      >
+      <h3>
+        Achievements{" "}
+        <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>
+          — {collected}/{data.achievements.length} collected
+        </span>
+      </h3>
+      <div className="ach-collection">
         {data.achievements.map((a) => (
-          <div
-            key={a.key}
-            className="panel"
-            style={{
-              opacity: a.unlockedAt ? 1 : 0.4,
-              borderColor: a.unlockedAt ? "var(--warn)" : "var(--border)",
-            }}
-          >
-            <div style={{ fontSize: 22 }}>{a.emoji}</div>
-            <div style={{ fontWeight: 600 }}>{a.title}</div>
-            <div style={{ color: "var(--text-dim)", fontSize: 13 }}>{a.description}</div>
-            {a.unlockedAt && (
-              <div style={{ color: "var(--warn)", fontSize: 12, marginTop: 4 }}>
-                unlocked {a.unlockedAt.slice(0, 10)}
-              </div>
-            )}
-          </div>
+          <AchievementCard key={a.key} achievement={a} />
         ))}
       </div>
     </section>

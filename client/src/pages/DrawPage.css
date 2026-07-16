@@ -198,21 +198,15 @@
    #107 rarity language graduated to the live card. An oversized rainbow
    band drifting diagonally, low opacities throughout: a glint you notice
    when you look, not a casino. Paints above face, art and text
-   (pointer-events: none), clipped by the face's border-radius. */
+   (pointer-events: none), clipped by the face's border-radius. The gradient
+   itself is --sheen-holo (index.css), shared verbatim with the trophy tiers
+   and the achievement collection's legendary cards (#124). */
 .draw-holo {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background-image: linear-gradient(
-    115deg,
-    transparent 20%,
-    rgba(255, 110, 199, 0.16) 34%,
-    rgba(255, 226, 130, 0.13) 44%,
-    rgba(120, 255, 214, 0.15) 54%,
-    rgba(120, 170, 255, 0.16) 64%,
-    transparent 78%
-  );
+  background-image: var(--sheen-holo);
   background-size: 250% 250%;
   background-position: 50% 50%;
 }

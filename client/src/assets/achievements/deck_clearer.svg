@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <!-- Composed inside y≈30..300: the caption band covers the foot of the face,
+       so the sun and the dune crests sit above it. -->
+  <defs>
+    <linearGradient id="dc-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d2136"/>
+      <stop offset=".42" stop-color="#4e3130"/>
+      <stop offset="1" stop-color="#1a1420"/>
+    </linearGradient>
+    <radialGradient id="dc-sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fff6d8"/>
+      <stop offset=".55" stop-color="#ffc65f"/>
+      <stop offset="1" stop-color="#ff8c3f"/>
+    </radialGradient>
+    <radialGradient id="dc-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffb64f" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#ffb64f" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#dc-bg)"/>
+
+  <!-- a low sun over an emptied table of sand -->
+  <ellipse cx="150" cy="176" rx="150" ry="120" fill="url(#dc-halo)"/>
+  <circle cx="150" cy="176" r="62" fill="url(#dc-sun)"/>
+
+  <!-- dunes: three ridges, each catching the light on its crest -->
+  <path d="M0 214 C 54 190 104 220 158 222 C 214 224 252 202 300 210 L300 420 L0 420 Z" fill="#6f4830"/>
+  <path d="M0 214 C 54 190 104 220 158 222 C 214 224 252 202 300 210 L300 224 C 250 216 214 238 158 236 C 104 234 54 204 0 228 Z" fill="#c98a52" opacity=".45"/>
+
+  <path d="M0 258 C 48 234 100 264 152 268 C 216 272 254 248 300 256 L300 420 L0 420 Z" fill="#8d5c3a"/>
+  <path d="M0 258 C 48 234 100 264 152 268 C 216 272 254 248 300 256 L300 268 C 252 260 216 284 152 280 C 100 276 48 248 0 270 Z" fill="#e0a86a" opacity=".4"/>
+
+  <path d="M0 312 C 66 282 122 316 180 320 C 236 324 268 300 300 306 L300 420 L0 420 Z" fill="#b9784a"/>
+
+  <!-- the last card, tumbling off the emptied deck -->
+  <g transform="rotate(-24 92 116)">
+    <rect x="64" y="72" width="58" height="82" rx="7" fill="#0d1017" opacity=".4" transform="translate(4 7)"/>
+    <rect x="64" y="72" width="58" height="82" rx="7" fill="#f4f7ff" stroke="#c8d4ea"/>
+    <rect x="71" y="79" width="44" height="68" rx="4" fill="none" stroke="#ff8c5f" stroke-opacity=".65"/>
+  </g>
+
+  <!-- where the deck stood: an empty outline left in the sand -->
+  <g transform="rotate(7 214 206)">
+    <rect x="182" y="158" width="62" height="88" rx="8" fill="#12141a" opacity=".22"/>
+    <rect x="182" y="158" width="62" height="88" rx="8" fill="none" stroke="#ffe6bf" stroke-opacity=".75"
+          stroke-width="2.5" stroke-dasharray="9 8"/>
+  </g>
+
+  <!-- grit on the wind -->
+  <g fill="#ffe6bf">
+    <circle cx="256" cy="96" r="2.5" opacity=".7"/>
+    <circle cx="274" cy="140" r="2" opacity=".5"/>
+    <circle cx="34" cy="88" r="2" opacity=".55"/>
+    <circle cx="22" cy="166" r="2.5" opacity=".4"/>
+    <circle cx="140" cy="52" r="2" opacity=".45"/>
+  </g>
+</svg>

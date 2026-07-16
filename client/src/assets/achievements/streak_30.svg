@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <!-- Composed inside y≈30..300: the card's caption band covers the foot of
+       the face, so the cone sits high and its base runs off under the text.
+       The cone is a DARK solid against a lit sky — a pale cone with long lava
+       lines down its flanks read as a circus tent at card size. The lava
+       overflows the lip and stops short; the fountain is the hero. -->
+  <defs>
+    <linearGradient id="s30-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#48213a"/>
+      <stop offset=".5" stop-color="#2a1c2e"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="s30-sky" cx="50%" cy="40%" r="54%">
+      <stop offset="0" stop-color="#ff6a3f" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ff5f6b" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s30-rock" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3a3348"/>
+      <stop offset=".45" stop-color="#241f30"/>
+      <stop offset="1" stop-color="#15121d"/>
+    </linearGradient>
+    <linearGradient id="s30-lava" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff4a2f"/>
+      <stop offset=".5" stop-color="#ff9a3c"/>
+      <stop offset="1" stop-color="#ffe08a"/>
+    </linearGradient>
+    <radialGradient id="s30-crater" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#fffaf0"/>
+      <stop offset=".55" stop-color="#ffc65f"/>
+      <stop offset="1" stop-color="#ff5f2f"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#s30-bg)"/>
+  <ellipse cx="150" cy="170" rx="168" ry="160" fill="url(#s30-sky)"/>
+
+  <!-- ash plume over the summit -->
+  <g fill="#6d5f7d" opacity=".45">
+    <circle cx="150" cy="42" r="40"/>
+    <circle cx="104" cy="60" r="29"/>
+    <circle cx="198" cy="56" r="32"/>
+    <circle cx="150" cy="74" r="34"/>
+    <circle cx="66" cy="82" r="18"/>
+    <circle cx="236" cy="80" r="21"/>
+  </g>
+
+  <!-- the fountain: billowing, the hero of the card -->
+  <path d="M150 58
+           C 132 96 122 124 116 158
+           C 128 150 138 148 150 148
+           C 162 148 172 150 184 158
+           C 178 124 168 96 150 58 Z"
+        fill="url(#s30-lava)"/>
+  <path d="M150 84 C 141 116 136 138 134 154 C 141 150 158 150 166 154
+           C 164 138 159 116 150 84 Z" fill="#fffaf0" opacity=".8"/>
+
+  <!-- the cone: a squat dark trapezoid, unmistakable against the lit sky -->
+  <path d="M0 320 L114 168 L186 168 L300 320 Z" fill="url(#s30-rock)"/>
+  <!-- rim light picking out the left edge only -->
+  <path d="M114 168 L0 320 L22 320 L128 182 Z" fill="#7e6f90" opacity=".4"/>
+
+  <!-- the crater lip, and lava spilling just over it -->
+  <ellipse cx="150" cy="169" rx="37" ry="9" fill="url(#s30-crater)"/>
+  <path d="M124 174 C 118 194 112 208 104 224 C 116 214 122 196 126 178 Z" fill="url(#s30-lava)"/>
+  <path d="M176 174 C 182 196 189 212 198 230 C 186 218 179 198 174 178 Z" fill="url(#s30-lava)"/>
+  <path d="M150 176 C 148 200 149 216 152 234 C 156 214 155 196 152 176 Z" fill="#ffd36b" opacity=".9"/>
+
+  <!-- bombs arcing clear of the cone -->
+  <g fill="#ff8c3f">
+    <circle cx="54" cy="126" r="5"/>
+    <circle cx="248" cy="114" r="4.5"/>
+    <circle cx="32" cy="196" r="3.5" opacity=".8"/>
+    <circle cx="270" cy="182" r="3" opacity=".75"/>
+    <circle cx="216" cy="86" r="3" opacity=".7"/>
+    <circle cx="82" cy="92" r="2.5" opacity=".6"/>
+  </g>
+</svg>

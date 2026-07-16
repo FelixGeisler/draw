@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="l10-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2340"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="l10-glow" cx="50%" cy="46%" r="52%">
+      <stop offset="0" stop-color="#ffe08a" stop-opacity=".42"/>
+      <stop offset=".5" stop-color="#4f8cff" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="l10-star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffefa"/>
+      <stop offset=".45" stop-color="#ffe08a"/>
+      <stop offset="1" stop-color="#ffb64f"/>
+    </linearGradient>
+    <linearGradient id="l10-ray" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe08a" stop-opacity="0"/>
+      <stop offset=".5" stop-color="#ffe08a" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#ffe08a" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#l10-bg)"/>
+  <ellipse cx="150" cy="194" rx="150" ry="160" fill="url(#l10-glow)"/>
+
+  <!-- deep field -->
+  <g fill="#8fb6ff">
+    <circle cx="40" cy="60" r="1.6" opacity=".7"/>
+    <circle cx="262" cy="72" r="2" opacity=".6"/>
+    <circle cx="76" cy="332" r="1.6" opacity=".5"/>
+    <circle cx="242" cy="356" r="1.8" opacity=".55"/>
+    <circle cx="30" cy="248" r="1.4" opacity=".45"/>
+    <circle cx="278" cy="284" r="1.4" opacity=".4"/>
+  </g>
+
+  <!-- the burst: eight rays -->
+  <g transform="translate(150 194)">
+    <g fill="url(#l10-ray)">
+      <rect x="-3.5" y="-176" width="7" height="352" rx="3.5"/>
+      <rect x="-3.5" y="-176" width="7" height="352" rx="3.5" transform="rotate(90)"/>
+      <rect x="-2.5" y="-150" width="5" height="300" rx="2.5" transform="rotate(45)" opacity=".7"/>
+      <rect x="-2.5" y="-150" width="5" height="300" rx="2.5" transform="rotate(-45)" opacity=".7"/>
+    </g>
+
+    <!-- the halo the grind earned -->
+    <circle r="112" fill="none" stroke="#ffe08a" stroke-opacity=".28" stroke-width="2"/>
+    <circle r="128" fill="none" stroke="#4f8cff" stroke-opacity=".3" stroke-width="1.5" stroke-dasharray="5 10"/>
+
+    <!-- the star itself -->
+    <path d="M0 -92 L27 -28.5 L94 -21.5 L44 23.5 L58 92 L0 57 L-58 92 L-44 23.5 L-94 -21.5 L-27 -28.5 Z"
+          fill="url(#l10-star)"/>
+    <path d="M0 -92 L27 -28.5 L94 -21.5 L44 23.5 L58 92 L0 57 Z" fill="#e0902c" opacity=".22"/>
+    <path d="M0 -58 L17 -19 L58 -14 L27 14 L36 57 L0 35 Z" fill="#fffdf5" opacity=".45"/>
+
+    <!-- two orbiting companions: the second decade -->
+    <circle cx="112" cy="-58" r="8" fill="#ffe08a"/>
+    <circle cx="-104" cy="70" r="6" fill="#8fb6ff"/>
+  </g>
+</svg>

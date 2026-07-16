@@ -1,0 +1,94 @@
+/* Achievement unlock toast (#124): the unlock deals the actual card and flips
+   it face-up — the same 3D flip the draw card uses (DrawPage.css), at toast
+   scale. Sits above the focus overlay (z-index 100, see FocusOverlay.css) so
+   an unlock stays visible mid-focus. */
+
+.ach-toast-stack {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 100;
+}
+
+.ach-toast {
+  border-color: var(--warn);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+  min-width: 260px;
+}
+
+.ach-toast-heading {
+  font-size: 13px;
+  color: var(--warn);
+  font-weight: 600;
+}
+
+.ach-toast-scene {
+  perspective: 900px;
+  width: 130px;
+  height: 182px; /* 5:7, the achievement card's ratio */
+  margin: 10px auto 2px;
+}
+
+.ach-toast-flip {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.ach-toast-flip.revealed {
+  transform: rotateY(180deg);
+}
+
+.ach-toast-face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  border-radius: 12px;
+}
+
+/* The card back: the app's weave, identical to .draw-face.front and a locked
+   collection card. */
+.ach-toast-face.back {
+  border: 1px solid var(--border);
+  background:
+    radial-gradient(circle at 30% 30%, rgba(79, 140, 255, 0.25), transparent 60%),
+    repeating-linear-gradient(45deg, #1b1e27 0 14px, #20242f 14px 28px);
+}
+
+.ach-toast-face.front {
+  transform: rotateY(180deg);
+}
+
+/* The card fills the scene: the shared .ach-card carries its own aspect-ratio
+   for the grid, which must not fight the fixed-size flip face here. */
+.ach-toast-face.front .ach-card {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+/* At 130px the grid's caption sizes are too big for the face. */
+.ach-toast-face.front .ach-card-inner {
+  padding: 9px;
+}
+
+.ach-toast-face.front .ach-name {
+  font-size: 12.5px;
+}
+
+.ach-toast-face.front .ach-date {
+  font-size: 10.5px;
+}
+
+/* The flip itself is motion: gated behind no-preference, so reduced motion
+   snaps straight to the face-up card — a static appear, no flip — while the
+   rarity sheen (AchievementCard.css) stays painted either way. */
+@media (prefers-reduced-motion: no-preference) {
+  .ach-toast-flip {
+    transition: transform 0.65s cubic-bezier(0.34, 1.3, 0.5, 1);
+  }
+}
