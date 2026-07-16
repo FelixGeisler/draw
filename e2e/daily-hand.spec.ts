@@ -120,6 +120,34 @@ test("deal a day, play a card, complete it — and the hand only shrinks", async
     await expect(strip.locator(".hand-card")).toHaveCount(1);
     await expect(strip.getByText(CARDS[1].title)).toHaveCount(0);
 
+    // Coexistence check (#59 × #118): a played hand card writes THROUGH to the
+    // persisted current draw, so completing it from another surface — the
+    // TimerBar here — must dismiss BOTH the standing card (the derived view,
+    // #110) and the strip card (the ['hand'] invalidation), with no second
+    // ✓ Done and nothing left held open. Same "resolved elsewhere" path the
+    // #118 residue fix hardened, now exercised through a hand card.
+    await strip.locator(".hand-card", { hasText: CARDS[2].title }).click();
+    await expect(page.locator(".draw-face.back h2")).toHaveText(CARDS[2].title);
+    // Start the timer from the card, Escape the focus overlay: the TimerBar
+    // now runs NEXT TO the still-revealed card.
+    await page.locator(".draw-actions").getByRole("button", { name: "▶ Start now" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page.locator(".draw-card")).toHaveClass(/flipped/);
+    // Complete from the TimerBar — the "elsewhere" surface, not the card's own
+    // ✓ Done.
+    await page.locator(".timer-bar").getByRole("button", { name: "✓ Done" }).click();
+    // The standing card leaves on its own — no reload, no click on the card.
+    await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
+    await expect(page.getByText("click to draw")).toBeVisible();
+    // ...and so does the strip card: the hand is spent, played out (ADR-34 —
+    // no redeal; a fresh one comes tomorrow).
+    await expect(strip.locator(".hand-card")).toHaveCount(0);
+    await expect(strip.getByText(/Today's hand is played out/)).toBeVisible();
+    // The pointer is truly gone server-side — nothing to resurrect on reload.
+    expect(await (await page.request.get("/api/draw/current")).json()).toBeNull();
+
   } finally {
     // Shared-DB hygiene. This spec seeds root tasks and completes one, so
     // without cleanup its cards would linger in every later spec's Tasks page,
