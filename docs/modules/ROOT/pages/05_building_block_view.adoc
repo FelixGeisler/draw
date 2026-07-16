@@ -18,72 +18,64 @@ it is a second client, not a second back end.
 @startuml
 skinparam componentStyle rectangle
 skinparam shadowing false
+skinparam wrapWidth 150
 skinparam defaultTextAlignment center
-skinparam ArrowColor #555555
-skinparam rectangleBorderColor #888888
 skinparam packageStyle rectangle
 hide stereotype
 
 actor "User" as user
-component "MCP client\n(Claude Code / Desktop)" as mcpClient
+component "MCP client\nClaude Code / Desktop" as mcpClient
 
 package "client/ — React SPA" {
-  component "pages\nDraw, Capture, Tasks,\nGoals, Stats, History, Settings" as pages
-  component "components\nTaskRow, SubtaskEditor, TimerBar,\nFocusOverlay, TrophyDeck, AiSuggestionPanel" as comps
-  component "lib/ — pure logic\ndrawable, focusView, drawnCard,\nheatmap, rarity (unit-tested)" as clib
-  component "hooks/ — TanStack Query\nuseTasks, useDraw, useTimer,\nuseGamification, useAi, useActivity" as hooks
+  component "pages + components\nDraw, Capture, Tasks, Goals,\nStats, History, Settings" as pages
+  component "lib/ — pure logic\ndrawable, focusView,\ndrawnCard, heatmap, rarity" as clib
+  component "hooks/ — TanStack Query\nuseTasks, useDraw, useTimer,\nuseGamification, useAi" as hooks
   component "api/client.ts\ntyped fetch wrapper" as apiClient
 }
 
 package "server/ — Express 5" {
-  component "tools/catalog.ts + httpApi.ts\nMCP tool catalog (no domain logic)" as mcpAdapter
-  component "app.ts — createApp()\nrouter mounting" as app
-  package "routes/ — HTTP layer" {
-    component "tasks, draw, timer, goals,\ncategories, materials, stats,\nactivity, gamification, ai,\nbackup, cardArt, settings" as routes
-  }
+  component "tools/ — MCP adapter\nno domain logic (ADR-19)" as mcpAdapter
+  component "routes/ — HTTP layer\ntasks, draw, timer, goals, stats,\nactivity, gamification, ai, backup" as routes
   package "services/ — domain logic" {
-    component "drawService\ndrawable predicate, weights,\nwarm-up deal, current draw" as drawSvc
-    component "gamificationService\ncompleteTask(): XP, streaks,\nachievements" as gamSvc
-    component "statsService / activityService\naggregations, leverage,\nskyline derivation" as statsSvc
-    component "aiService (+ aiPostprocess,\ncardArtService, svgSanitizer)" as aiSvc
-    component "backupService\nzip export / import" as backupSvc
+    component "drawService\ndrawability, weights,\nwarm-up, current draw" as drawSvc
+    component "gamificationService\ncompleteTask(): XP,\nstreaks, achievements" as gamSvc
+    component "statsService\nactivityService" as statsSvc
+    component "aiService\ncardArtService" as aiSvc
+    component "backupService" as backupSvc
   }
-  component "db.ts\nSQLite bootstrap,\nuser_version migrations" as dbmod
+  component "db.ts\nSQLite bootstrap, migrations" as dbmod
 }
 
-database "server/data/app.db\nSQLite (WAL)" as sqlite
-folder "server/data/files/\nuploaded materials" as files
-cloud "api.anthropic.com\nClaude API" as claude
+database "app.db\nSQLite (WAL)" as sqlite
+folder "data/files/" as files
+cloud "Claude API" as claude
 
-user --> pages : browser
-pages --> comps
-pages --> clib
-comps --> hooks
+user --> pages
 pages --> hooks
+pages --> clib
 hooks --> apiClient
-apiClient --> routes : "JSON REST /api/*\n(:5173 proxy → :3001)"
-
-mcpClient --> mcpAdapter : stdio (JSON-RPC)
-mcpAdapter --> routes : "HTTP 127.0.0.1:3001\n(DRAW_API_URL)"
-
-app --> routes
+apiClient --> routes : "JSON REST /api/*"
+mcpClient --> mcpAdapter : stdio
+mcpAdapter --> routes : "HTTP 127.0.0.1:3001"
 routes --> drawSvc
 routes --> gamSvc
 routes --> statsSvc
 routes --> aiSvc
 routes --> backupSvc
-drawSvc ..> gamSvc : "achievement check"
-gamSvc ..> drawSvc : "clear current draw"
-
+drawSvc -[hidden]-> gamSvc
+gamSvc -[hidden]-> statsSvc
+statsSvc -[hidden]-> aiSvc
+aiSvc -[hidden]-> backupSvc
 drawSvc --> dbmod
 gamSvc --> dbmod
 statsSvc --> dbmod
 aiSvc --> dbmod
 backupSvc --> dbmod
 dbmod --> sqlite
-routes --> files : multer upload / download
-backupSvc --> files
-aiSvc --> claude : "HTTPS, only with a key"
+routes --> files
+aiSvc --> claude
+pages -[hidden]-> clib
+clib -[hidden]-> hooks
 @enduml
 ....
 

@@ -6,60 +6,49 @@
 ....
 @startuml
 skinparam shadowing false
+skinparam maxMessageSize 150
 skinparam sequenceMessageAlign left
 autonumber
 
 actor User
-participant "DrawPage\n(+ useDraw / useCurrentDraw)" as UI
+participant "DrawPage" as UI
 participant "routes/draw.ts" as Route
 participant "drawService" as Draw
-participant "gamificationService" as Gam
 database "SQLite" as DB
 
-== Draw (the gamble) ==
+== Draw — the gamble ==
 User -> UI : click the deck
 UI -> Route : POST /api/draw {categoryId?, goalId?}
-activate Route
 Route -> Draw : drawTask(filters)
-activate Draw
-Draw -> DB : queryCandidates(): open leaf, estimated,\n<= max_draw_effort, not blocked/snoozed,\nnot held back behind a sequential sibling
-DB --> Draw : candidate rows
-Draw -> Draw : window filter (#33, local wall clock)
+Draw -> DB : candidates: open leaf, estimated, <= max_draw_effort, not blocked/snoozed, not held back behind a sequential sibling (#23)
+DB --> Draw : rows
+Draw -> Draw : availability-window filter (#33, local wall clock)
 alt pool empty
   Draw -> DB : clear current draw
-  Draw --> Route : {task: null, reason: no_ready_tasks |\nall_too_big | all_outside_window}
+  Draw --> Route : {task: null, reason: no_ready_tasks | all_too_big | all_outside_window}
 else candidates present
-  Draw -> Draw : poolWeights(): impact²/effort × urgency\n× staleness × cooldown × siblingDamping(√k)
+  Draw -> Draw : weight = impact²/effort × urgency × staleness × cooldown × siblingDamping(1/√k)
   Draw -> Draw : roulette pick
-  Draw -> DB : UPDATE tasks SET last_drawn_at
-  Draw -> DB : setSetting(current_draw = id),\ndrop any warm-up marker (ADR-13)
+  Draw -> DB : stamp last_drawn_at; persist current_draw = id; drop any warm-up marker (ADR-13)
   Draw --> Route : {task, poolSize, probability}
 end
-deactivate Draw
-Route -> Gam : checkAchievements({drew: true})
-Gam --> Route : newAchievements[]
+Route -> Route : checkAchievements({drew: true})
 Route --> UI : {task, poolSize, probability, newAchievements}
-deactivate Route
-UI -> UI : shuffle animation, then write-through\nqc.setQueryData(["draw","current"])
-UI --> User : card flips face up — no re-draw (#88)
+UI --> User : shuffle, then the card flips — no re-draw (#88): the draw is a commitment
 
-== Restore / dismiss (derived, #110) ==
-UI -> Route : GET /api/draw/current\n(on mount, every 60s, on window focus)
-activate Route
+== Restore / dismiss — the derived card (#110) ==
+UI -> Route : GET /api/draw/current (on mount, every 60s, on window focus)
 Route -> Draw : currentDraw()
-activate Draw
 Draw -> DB : read pointer + task row
-Draw -> Draw : isRestorable()? — same predicate as the pool
+Draw -> Draw : isRestorable()? — the same predicate as the pool
 alt still drawable
   Draw --> Route : {task, warmup?}
-else stale (completed/snoozed/edited out of the deck elsewhere)
-  Draw -> DB : clear pointer lazily
+else stale (resolved elsewhere: TimerBar, Tasks page, MCP, a 2nd tab)
+  Draw -> DB : clear the pointer lazily
   Draw --> Route : null
 end
-deactivate Draw
 Route --> UI : the standing card, or null
-deactivate Route
-UI --> User : reload restores the revealed card (no shuffle);\na pointer cleared elsewhere dismisses it
+UI --> User : a reload restores the revealed card (no shuffle); a pointer cleared elsewhere dismisses it
 @enduml
 ....
 
@@ -106,72 +95,64 @@ via `GET /api/draw/current`.
 ....
 @startuml
 skinparam shadowing false
+skinparam maxMessageSize 130
 skinparam sequenceMessageAlign left
 autonumber
 
-actor User
-participant "Client\n(card, TimerBar, Tasks page)\nor MCP client" as UI
+participant "Client (card, TimerBar,\nTasks page) or MCP client" as UI
 participant "routes/tasks.ts" as Route
 participant "gamificationService\ncompleteTask()" as Gam
-participant "drawService" as Draw
 database "SQLite" as DB
 
-User -> UI : ✓ Done
-UI -> Route : PATCH /api/tasks/:id {status: 'done'}
-activate Route
-Route -> DB : load task row
+UI -> Route : ✓ Done — PATCH /api/tasks/:id {status: 'done'}
+Route -> DB : load the task row
 alt open subtasks exist
   Route --> UI : 409 "complete all subtasks first"
 else
-  Route -> DB : hasNonArchivedSubtask(id)?
+  Route -> Route : zeroEffort := hasNonArchivedSubtask(id)
   note right of Route
-    zeroEffort (#111, ADR-32): a parent whose
-    subtasks already paid the effort XP completes
-    at effort 0 → the floor makes it a symbolic 1 XP.
-    It is never in the deck, so wasDrawn is forced false.
+    #111 / ADR-32: a parent whose subtasks
+    already paid the effort XP completes at
+    effort 0 — the floor lifts it to a symbolic
+    1 XP. It is never in the deck, so wasDrawn
+    is forced false with it.
   end note
-  Route -> Draw : getCurrentDrawTaskId() / wasRecentlyDrawn()
-  Draw --> Route : drawn := is the current draw, or\nlast_drawn_at < 6h — but NOT when that stamp\nis this task's own warm-up deal (ADR-30)
-
+  Route -> Route : drawn := is the current draw, or last_drawn_at < 6h — but never the card's own warm-up stamp (ADR-30): handed out, not gambled
   group transaction
     Route -> Gam : completeTask(task, drawn, {effortMinutes: 0}?)
-    activate Gam
-    Gam -> Draw : getWarmupMarker() (read before the pointer is cleared)
-    Gam -> Gam : multiplier (ADR-30):\nwarm-up? in window ×1.25 / late ×1.0 — never ×1.5\nelse min(drawn ×1.5 × momentum ×1.25, ×1.5)
-    Gam -> DB : INSERT completions\n(xp = max(1, round(round(effort × impact/3) × multiplier)),\nwas_drawn, was_warmup)
+    Gam -> Gam : multiplier (ADR-30): warm-up? in window ×1.25 / late ×1.0, never ×1.5 — else min(drawn ×1.5 × momentum ×1.25, ×1.5)
+    Gam -> DB : INSERT completions (xp = max(1, round(round(effort × impact/3) × multiplier)), was_drawn, was_warmup)
     Gam -> DB : close this task's running time_entry (ADR-12)
     alt recurring
-      Gam -> DB : push due_date += recur_every_days,\nclear snooze/block — task stays open
+      Gam -> DB : push due_date += recur_every_days, clear snooze/block — the task stays open
     else normal
-      Gam -> DB : status = 'done', completed_at,\nclear snooze/block
+      Gam -> DB : status = 'done', completed_at, clear snooze/block
     end
-    Gam -> Draw : clearCurrentDraw(task.id)
-    Draw -> DB : drop pointer + warm-up marker if it was this card
-    Gam -> DB : freeze-token earn on a 7th/14th/… day\n(INSERT OR IGNORE — idempotent, ADR-28)
+    Gam -> DB : clearCurrentDraw() — drops the pointer + warm-up marker if it was this card
+    Gam -> DB : freeze-token earn on a 7th/14th/… day — INSERT OR IGNORE, idempotent (ADR-28)
     Gam -> Gam : checkAchievements()
-    Gam --> Route : {xpAwarded, bonus, newAchievements,\nrecurring, levelUp}
-    deactivate Gam
-    Route -> Route : maybeAutoCompleteParent(parent_id) (#111, ADR-32)
+    Gam --> Route : {xpAwarded, bonus, newAchievements, recurring, levelUp}
+    Route -> Gam : maybeAutoCompleteParent(parent_id)
     note right of Route
-      Breakdown all-done (>= 1 done, 0 open, archived
-      ignored) and the parent open + non-recurring?
-      The parent completes through completeTask() in the
-      SAME transaction — effort 0, wasDrawn false.
+      #111 / ADR-32: breakdown all-done
+      (>= 1 done, 0 open, archived ignored)
+      and the parent open + non-recurring?
+      Then it completes through completeTask()
+      in the SAME transaction — effort 0.
     end note
   end
-  Route --> UI : {task, xpAwarded, bonus, newAchievements,\nlevelUp, parentCompletion?}
+  Route --> UI : {task, xpAwarded, bonus, newAchievements, levelUp, parentCompletion?}
 end
-deactivate Route
-UI --> User : confetti, XP/level bar, trophy deck,\nachievement toasts — all from this one response
+UI -> UI : confetti, XP/level bar, trophy deck, achievement toasts — all from this one response
 @enduml
 ....
+
+The client fires confetti, updates the trophy deck, and toasts new achievements
+from this single response.
 
 XP, levels, streaks and the trophy deck are never stored counters — they are
 derived from the `completions` log on every read (ADR-2, ADR-5), which is why
 reopening a task simply deletes its latest completion row.
-
-The client fires confetti, updates the trophy deck, and toasts new achievements
-from this single response.
 
 == 6.3 AI backward planning (with materials)
 
@@ -179,60 +160,49 @@ from this single response.
 ....
 @startuml
 skinparam shadowing false
+skinparam maxMessageSize 115
 skinparam sequenceMessageAlign left
 autonumber
 
 actor User
-participant "AiSuggestionPanel\n(+ useAi)" as UI
+participant "AiSuggestionPanel" as UI
 participant "routes/ai.ts" as Route
 participant "aiService" as AI
-database "SQLite" as DB
 participant "Claude API" as Claude
 
-== Token gate (cheap, before anything is paid for) ==
-User -> UI : pick goal + materials, write notes
-UI -> Route : POST /api/ai/estimate {goalId, materialIds, userNotes?}
-activate Route
-Route -> Route : request-shape 400s (#84), then\n503 if no key is configured
+== Token gate — before anything is paid for ==
+User -> UI : pick a goal + materials, add notes
+UI -> Route : POST /api/ai/estimate {goalId, materialIds}
+Route -> Route : request-shape 400s (#84); 503 if no key is configured
 Route -> AI : estimate({goalId, materialIds})
-activate AI
-AI -> AI : estimateMode() → "plan-goal"\n(an instruction would make it generate-tasks)
-AI -> DB : goal, tasks, materials (files from server/data/files/)
-AI -> AI : blocks = [materials (PDFs as document blocks,\ncache_control on the last), goalContext]
+AI -> AI : estimateMode() → "plan-goal" (an instruction would make it generate-tasks)
+AI -> AI : blocks = [materials — PDFs as document blocks, cache_control on the last] + goalContext
 AI -> Claude : messages.countTokens(model, system, blocks)
 Claude --> AI : {input_tokens}
 AI --> Route : {inputTokens, estimatedUsd}
-deactivate AI
 Route --> UI : the price tag
-deactivate Route
-UI --> User : "≈ N tokens, ≈ $X" — confirm or deselect materials
+UI --> User : "≈ N tokens, ≈ $X" — confirm, or deselect materials
 
 == The paid call ==
 User -> UI : confirm
 UI -> Route : POST /api/ai/plan-goal {goalId, materialIds, userNotes?}
-activate Route
-Route -> AI : planGoal(goalId, materialIds, userNotes)
-activate AI
-AI -> AI : guardTokens(): re-count and enforce the limit
+Route -> AI : planGoal(...)
+AI -> AI : guardTokens() — re-count and enforce the limit
 alt no API key
   AI --> Route : AiError 503 ai_not_configured
 else > 180K input tokens
   AI --> Route : AiError 400 "deselect some materials"
 else
-  AI -> Claude : messages.parse(model=claude-opus-4-8,\nthinking: adaptive,\noutput_config.format = zodOutputFormat(planGoalSchema))
+  AI -> Claude : messages.parse(model = claude-opus-4-8, thinking: adaptive, output_config.format = zodOutputFormat(planGoalSchema))
   Claude --> AI : parsed_output
   AI -> AI : clamp efforts to max_draw_effort
-  AI --> Route : {outcomeAnalysis,\ntasks[{title, effortMinutes, impact,\nrationale, phase: now|next|later}]}
+  AI --> Route : {outcomeAnalysis, tasks[{title, effortMinutes, impact, rationale, phase}]}
 end
-deactivate AI
 Route --> UI : the proposal — nothing is stored yet
-deactivate Route
 
 == Review before commit ==
-UI --> User : rendered proposal
 User -> UI : edit / deselect / accept
-UI -> Route : POST /api/tasks (one request per accepted task)
-Route -> DB : INSERT tasks
+UI -> Route : POST /api/tasks — one request per accepted task
 Route --> UI : 201 created
 @enduml
 ....
