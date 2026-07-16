@@ -78,22 +78,27 @@ test("adding a new subtask reopens the done parent; completing it closes the loo
   await page.getByLabel("show done").check();
   await expect(taskRow(page, PARENT_TITLE).getByRole("checkbox")).toBeChecked();
 
-  // A done root offers no Break down button — reopening is the lifecycle's
-  // job: add the new step through the API (MCP create_subtasks path) and
-  // watch the page reflect the reopen.
-  const tasks: { id: number; title: string }[] = await (
-    await page.request.get("/api/tasks?status=all")
-  ).json();
-  const parent = tasks.find((t) => t.title === PARENT_TITLE)!;
-  await page.request.post(`/api/tasks/${parent.id}/subtasks`, {
-    data: { subtasks: [{ title: STEP_THREE, effortMinutes: 10 }] },
-  });
+  // Rule 3 through the UI (#122): the done parent still offers Break down —
+  // the affordance used to hide on every done row, which left this rule
+  // reachable only from the API/MCP. Its title names the reopen up front.
+  const breakDown = taskRow(page, PARENT_TITLE).getByRole("button", { name: "Break down" });
+  await expect(breakDown).toHaveAttribute("title", /reopens the task/);
+  await breakDown.click();
+  await page.getByPlaceholder("Small, concrete step…").first().fill(STEP_THREE);
+  await page.getByPlaceholder("min").first().fill("10");
+  await page.getByRole("button", { name: /Add 1 subtask/ }).click();
 
-  await page.goto("/tasks");
-  await page.getByLabel("show done").check();
-  // The parent reopened server-side: unchecked again, new step underneath.
+  // No reload: the parent reopened server-side and the invalidated tasks
+  // query repaints it — unchecked again, with the new step underneath.
   await expect(taskRow(page, PARENT_TITLE).getByRole("checkbox")).not.toBeChecked();
   await expect(taskRow(page, STEP_THREE)).toBeVisible();
+
+  // The reopen undid the auto-completion (ADR-5): its +1 XP trophy is gone
+  // from today's pile, not merely hidden — XP === SUM(completions.xp_awarded).
+  await expect(async () => {
+    const g = await (await page.request.get("/api/gamification")).json();
+    expect(g.todayCompletions.some((c: { title: string }) => c.title === PARENT_TITLE)).toBe(false);
+  }).toPass();
 
   // Completing the late arrival flips the parent to done once more.
   await completeFromRow(page, STEP_THREE);

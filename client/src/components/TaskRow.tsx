@@ -237,8 +237,29 @@ export function TaskRow({
             {task.subtaskOrderMode === "sequential" ? "→ in order" : "⇄ any order"}
           </button>
         )}
-        {!done && task.parentId == null && (
-          <button onClick={() => setBreakingDown((b) => !b)} title="Split into small steps">
+        {/* Break down (#122): ONE control, one word, now also on done parents.
+            Rule 3 of the parent lifecycle (#111, ADR-32) — a new open subtask
+            reopens a done parent — was API/MCP-only, because this affordance
+            hid on every done row: the finished breakdown that turns out to
+            need one more step had no UI path at all. It keeps its label
+            rather than growing a done-only twin ("+ Step" is already the
+            editor's add-a-row button, and on an OPEN parent with subtasks
+            this same button already means "add more steps" — the #67
+            re-breakdown); only the title changes, to name the reopen before
+            the click rather than surprise the user with it. Scoped to actual
+            PARENTS: on a done leaf the checkbox already IS the reopen, and a
+            breakdown offered as a second way to reopen would duplicate it
+            with a stranger gesture. The row is dimmed to 0.5 throughout, so
+            the button is subtle by construction. */}
+        {task.parentId == null && (!done || hasSubtasks) && (
+          <button
+            onClick={() => setBreakingDown((b) => !b)}
+            title={
+              done
+                ? "Add another step — this reopens the task and undoes its completion"
+                : "Split into small steps"
+            }
+          >
             Break down
           </button>
         )}
