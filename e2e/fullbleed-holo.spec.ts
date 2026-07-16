@@ -330,6 +330,11 @@ test("long content stays INSIDE the fixed face — the content block scrolls, no
   expect(titleBox.y).toBeGreaterThanOrEqual(faceBox.y - 1);
   const pillBox = (await back.locator(".category-pill").boundingBox())!;
   expect(pillBox.y).toBeGreaterThanOrEqual(faceBox.y - 1);
+  // …and LEGIBLE, not just contained: without flex-shrink: 0 the pill's
+  // overflow: hidden zeroes its min-content floor and the scroll wrapper
+  // crushes it to a ~6px sliver with the text clipped away (PR #125
+  // review, second round). One intact text line is ~22px.
+  expect(pillBox.height).toBeGreaterThan(15);
 
   // Scrolled to the end, the badges and the odds line sit above the face's
   // bottom edge instead of on top of the ✓ Done / 💤 Not now buttons.

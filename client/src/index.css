@@ -156,6 +156,12 @@ textarea:focus {
 .category-pill {
   display: inline-block;
   max-width: 100%;
+  /* overflow: hidden (for the ellipsis below) zeroes the automatic
+     min-content minimum flex items otherwise keep, so in a tight column
+     flex parent (drawn card's scroll wrapper, focus overlay) default
+     flex-shrink: 1 would crush the pill to a sliver before anything else
+     gives (PR #125 review). Never shrink — the pill is one text line. */
+  flex-shrink: 0;
   padding: 3px 14px;
   border-radius: 999px;
   font-size: 12.5px;

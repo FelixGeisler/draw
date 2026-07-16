@@ -97,6 +97,17 @@
   overflow-y: auto;
 }
 
+/* The canonical companion of a scrollable flex column: once content
+   overflows, default flex-shrink: 1 compresses the children BEFORE the
+   scrollbar engages. Most children survive on their automatic min-content
+   minimum, but any child with overflow: hidden (the category pill's
+   ellipsis) has that minimum zeroed and gets crushed to a sliver (PR #125
+   review: a 6px pill with the text clipped away). Children keep their
+   natural height; the wrapper does the scrolling. */
+.draw-card-content > * {
+  flex-shrink: 0;
+}
+
 .draw-face.back h2 {
   margin: 0;
   font-size: 22px;
