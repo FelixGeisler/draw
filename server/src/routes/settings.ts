@@ -31,8 +31,9 @@ function publicSettings(): Record<string, string> {
 /**
  * Validate + normalize streak_rest_weekdays (#58): a set of JS getDay
  * weekdays (0=Sun..6=Sat). All 7 is rejected — a streak needs at least one
- * required weekday, which also keeps the walk-back loop's rest-skipping
- * bounded. Returns the canonical stored value or an error string.
+ * required weekday, without which no day could ever be an uncoverable miss
+ * and a run would be unbreakable. Returns the canonical stored value or an
+ * error string.
  */
 function normalizeRestWeekdays(value: unknown): { value?: string; error?: string } {
   if (!Array.isArray(value) || value.some((d) => !Number.isInteger(d) || d < 0 || d > 6)) {
