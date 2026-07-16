@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveDrawnCard } from "./drawnCard";
+import { heldCardResolved, resolveDrawnCard } from "./drawnCard";
 import { resolveDrawView } from "./focusView";
 
 // The standing drawn card is derived from the server-persisted current draw
@@ -72,6 +72,32 @@ describe("resolveDrawnCard", () => {
     ).toBeNull();
   });
 
+  it("the #118 bug: the hold releases once the held card is resolved elsewhere", () => {
+    // Deleted/completed from the TimerBar, the Tasks page, MCP or a second
+    // tab: the pointer was already forfeit by the edit, so ONLY this verdict
+    // can dismiss the card — without it the hold stood until a reload and
+    // every on-page resolution 404'd.
+    expect(
+      resolveDrawnCard({
+        shuffling: false,
+        serverTask: null,
+        sessionTask: card,
+        editedOutOfDeck: true,
+        heldCardResolved: true,
+      }),
+    ).toBeNull();
+    // The hold still outranks a stale pointer while the card is unresolved.
+    expect(
+      resolveDrawnCard({
+        shuffling: false,
+        serverTask: null,
+        sessionTask: card,
+        editedOutOfDeck: true,
+        heldCardResolved: false,
+      }),
+    ).toBe(card);
+  });
+
   it("composes with resolveDrawView: a card completed elsewhere collapses focus to idle", () => {
     // The overlay derives from the SAME resolved card — when the pointer
     // dies, the whole tower (card + focus) falls together, never a dead
@@ -83,5 +109,49 @@ describe("resolveDrawnCard", () => {
       editedOutOfDeck: false,
     });
     expect(resolveDrawView(shown?.id ?? null, card.id, false)).toBe("idle");
+  });
+});
+
+// Issue #118: the released-hold verdict. The held card forfeited its pointer,
+// so the tasks list is the only server view left that can speak for it.
+describe("heldCardResolved", () => {
+  const open = { id: 7, status: "open" };
+  const root = (subtasks: { id: number; status: string }[]) => ({
+    id: 99,
+    status: "open",
+    subtasks,
+  });
+
+  it("still open in the list: unresolved — the #88 hold stands", () => {
+    expect(heldCardResolved([open], 7)).toBe(false);
+    // Held cards are typically open-but-too-big (the everyday out-of-deck
+    // edit), so this is the case that must NOT release.
+    expect(heldCardResolved([{ id: 1, status: "open" }, open], 7)).toBe(false);
+  });
+
+  it("gone from the list: deleted elsewhere — the stuck-card bug (#118)", () => {
+    expect(heldCardResolved([], 7)).toBe(true);
+    expect(heldCardResolved([{ id: 1, status: "open" }], 7)).toBe(true);
+  });
+
+  it("present but no longer open: completed or archived elsewhere", () => {
+    expect(heldCardResolved([{ id: 7, status: "done" }], 7)).toBe(true);
+    expect(heldCardResolved([{ id: 7, status: "archived" }], 7)).toBe(true);
+  });
+
+  it("a held SUBTASK is judged by its own row, not its root's", () => {
+    // The drawn card can be a subtask: the list nests non-archived children
+    // under their root, so the search must descend. The root here is open —
+    // reading the root's status instead would never release.
+    expect(heldCardResolved([root([{ id: 7, status: "open" }])], 7)).toBe(false);
+    expect(heldCardResolved([root([{ id: 7, status: "done" }])], 7)).toBe(true);
+    // Archived subtasks drop out of the nested list entirely → resolved.
+    expect(heldCardResolved([root([{ id: 8, status: "open" }])], 7)).toBe(true);
+  });
+
+  it("query not settled: never a verdict — a hiccup must not drop the card", () => {
+    // Releasing on a missing answer would be exactly the hidden re-roll #88
+    // bans: the card would vanish on any transient fetch failure.
+    expect(heldCardResolved(undefined, 7)).toBe(false);
   });
 });

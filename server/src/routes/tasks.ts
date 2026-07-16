@@ -83,6 +83,23 @@ const PARENT_INTO_SUBTASK_ERROR =
   "a task with subtasks cannot become a subtask itself (ADR-16): its subtasks would nest two " +
   "levels deep — move the subtasks individually, or promote/delete them first";
 
+// Archived → done (#122): rejected, not routed. The generic field write at the
+// bottom of PATCH would set status = 'done' as a plain column write, skipping
+// BOTH the completion branch above it — so no completeTask(), which means a
+// done row with no `completions` row: zero XP, no achievements, no streak
+// count, invisible to every derived surface (ADR-5) — and the parent-lifecycle
+// hooks (#111, ADR-32), so a done parent would never notice its subtask
+// finished. Routing it through completeTask() instead would mint XP for a row
+// the user deliberately took off the board (split-in-place leftovers, ADR-21),
+// and archived rows are excluded from the all-done predicate on both sides by
+// design. The honest repair is the transition the router already supports:
+// un-archive (status 'open', which reopens a done parent), then complete —
+// that path pays out exactly once, through the one sanctioned door.
+const ARCHIVED_TO_DONE_ERROR =
+  "an archived task cannot be completed directly (ADR-5): reopen it first (status: 'open'), " +
+  "then complete it — completing an archived row would leave a done task with no completion, " +
+  "no XP and no parent lifecycle";
+
 // Recurring × sequential ban (#66, ADR-23): a recurring step never closes —
 // completing it advances its due date instead (ADR-6) — so under a
 // 'sequential' parent it would hold every later sibling back forever
@@ -888,6 +905,15 @@ tasksRouter.patch("/:id", (req, res) => {
         ? { parentCompletion: { task: getTask(raw.parent_id!), ...outcome.parentCompletion } }
         : {}),
     });
+  }
+
+  // The one status transition with no honest write path (#122) — see
+  // ARCHIVED_TO_DONE_ERROR. Judged AFTER the completion branch above, so a
+  // legitimate open → done is untouched, and before the generic write below,
+  // which is exactly what it must not reach. A no-op done → done resend still
+  // passes there (the resend tolerance the ADR-4/ADR-23 gates also grant).
+  if (body.status === "done" && raw.status === "archived") {
+    return res.status(400).json({ error: ARCHIVED_TO_DONE_ERROR });
   }
 
   // Reopening: undo the latest completion so XP stays honest. A reopened

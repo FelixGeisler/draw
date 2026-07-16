@@ -760,6 +760,29 @@ ordering the swap around a final atomic rename means a crash at any step
 boots either the complete old state or the complete new state. `adm-zip`
 handles both zip directions synchronously, fitting the no-framework
 guardrails; `multer` (already a dependency) receives the upload.
+*Accepted limitation (#103):* `adm-zip` inflates each entry fully in memory,
+so peak RSS during export/import scales with the largest entry — the DB
+snapshot, plus one material at a time. Accepted, not fixed: this is a local
+single-user app whose database is measured in megabytes, the alternative is
+a streaming zip layer (a new dependency and an async rewrite of a
+deliberately synchronous, non-interleavable swap), and the failure mode is a
+loud OOM on a machine that is not serving anyone else. Revisit if materials
+ever grow to gigabyte scale.
+*Amendment (#103) — the interrupted and contended paths:* (a) Temp artifacts
+(`backup-uploads/*`, `backup-import-*`, `backup-export-*`) are cleaned up in
+a `finally` on every path, but a hard kill skips those and nothing else ever
+collects them — each orphan being a whole snapshot or zip. `createApp()`
+sweeps them by name prefix at boot, the one moment none of them can belong to
+a live request; the uploads directory is emptied, never removed (multer
+creates it once, at module load). (b) Temp stems are `<ms>-<counter>`, not
+`Date.now()` alone: two exports in the same millisecond collided on one path,
+and `VACUUM INTO` refuses an existing file, so the second died as a raw 500.
+(c) The single-process assumption above is now verified instead of assumed:
+SQLite deletes `-wal`/`-shm` when the last connection closes, so if they
+survive our `close()` another connection is still attached — the import
+aborts with a 409 before the first destructive step rather than deleting a
+WAL that connection is still writing into and swapping a different file
+underneath it.
 
 == ADR-27: Estimation coaching is read-only advice — hints never mutate, weights stay on stated estimates
 
@@ -901,6 +924,28 @@ one session-local hold: a card edited out of the deck forfeits its pointer
 (cleared lazily, as before) but stays on screen with the resolve hint
 until resolved on-page — an edit must not become a hidden re-roll.
 
+*Amendment (#118):* Two consequences of deriving that were intended but
+undocumented. (1) The pointer's restore validation (`isRestorable`) is
+evaluated at GET time against `new Date()`, so forfeits are TIME-based, not
+only action-based: an availability window closing (ADR-20) or a sequential
+sibling change that holds the card back (ADR-18) invalidates the pointer
+with nobody touching anything, and the standing card then evaporates on the
+next refetch — mid-session, unprompted. Intended: a card the deck would no
+longer deal is not a commitment the user can honour right now, and the
+alternative (freezing a card the rules have retired) is the stored-state
+drift ADR-2 bans. (2) The 60s cadence is the FOCUSED-tab cadence: React
+Query pauses `refetchInterval` while the tab is in the background
+(`refetchIntervalInBackground` stays off), so a card resolved from MCP or a
+second tab is dismissed on the hidden tab's next window focus rather than
+within the minute — the accepted latency above is a foreground promise.
+The one hold releases the same way: while it stands, the pointer is already
+forfeit and cannot report the held card's fate, so the page watches the
+tasks list instead (`heldCardResolved`, gated on the hold, same 60s
+cadence) and drops the card once it is gone or no longer open — a card
+completed or deleted elsewhere used to stick until a reload, with every
+on-page resolution 404ing. A resolution that races the watch and 404s is
+read as the same dismissal arriving by the other door, not as an error.
+
 == ADR-30: The warm-up draw is a deterministic deal — cooldown as exclusion, XP capped below the drawn ×1.5
 
 *Context:* The main draw is a gamble: it can serve a 30-minute card when
@@ -928,7 +973,13 @@ minutes) is cleared everywhere the pointer is cleared and overwritten by
 every regular draw, so it can never describe a card that is not the current
 draw. (d) One deal per `warmup_every_hours` (public setting, default 8),
 consumed irrevocably AT DEAL TIME — discarding the card does not refund the
-allowance. (e) XP: a warm-up completion NEVER earns the drawn ×1.5 (it was
+allowance. The setting takes non-negative integers, and *0 is a documented
+off-switch* (#103): "always available" is a coherent choice — (c) still
+refuses to deal while a card stands, so an unlimited allowance loosens the
+pacing, never the commitment. Negatives and non-numeric values are rejected
+rather than silently doing the same thing (a negative disabled the limit
+while reading like one; a non-numeric string fell back to 8 unannounced).
+(e) XP: a warm-up completion NEVER earns the drawn ×1.5 (it was
 handed out, not gambled — the `last_drawn_at` stamp of the deal is also
 excluded from the 6-hour drawn heuristic by exact-timestamp match): inside
 its window (`max(effort at deal time, 15)` minutes) ×1.25, late ×1.0.

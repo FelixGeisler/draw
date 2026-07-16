@@ -418,4 +418,43 @@ describe("settings hygiene (#57)", () => {
     expect(patched.warmup_every_hours).toBe("12");
     await request(app).patch("/api/settings").send({ warmup_every_hours: 8 }).expect(200);
   });
+
+  // Issue #103: the setting had no validation at all — anything the body
+  // carried was String()-ed into the row.
+  it("rejects values that would lie about what the setting does (#103)", async () => {
+    for (const value of [-1, -8, 1.5, "abc", "", null, true, [8], {}]) {
+      const res = await request(app).patch("/api/settings").send({ warmup_every_hours: value });
+      expect(res.status, `warmup_every_hours: ${JSON.stringify(value)}`).toBe(400);
+      expect(res.body.error).toMatch(/non-negative integer/);
+    }
+    // A rejected key leaves the stored value alone — and takes no innocent
+    // co-passenger down with it (validate-everything-before-writing-anything).
+    const settings = (await request(app).get("/api/settings").expect(200)).body;
+    expect(settings.warmup_every_hours).toBe("8");
+
+    await request(app)
+      .patch("/api/settings")
+      .send({ warmup_every_hours: -1, max_draw_effort: 99 })
+      .expect(400);
+    expect((await request(app).get("/api/settings").expect(200)).body.max_draw_effort).not.toBe(
+      "99",
+    );
+  });
+
+  it("accepts 0 as the documented off-switch, and numeric strings (ADR-30d)", async () => {
+    // 0 = "always available": the deal still cannot happen while a card
+    // stands (ADR-30c), so this loosens the pacing, not the commitment. The
+    // E2E suite leans on it as the sanctioned allowance reset.
+    const off = (
+      await request(app).patch("/api/settings").send({ warmup_every_hours: 0 }).expect(200)
+    ).body;
+    expect(off.warmup_every_hours).toBe("0");
+    expect((await request(app).get("/api/draw/warmup").expect(200)).body.available).toBe(true);
+
+    // A raw-HTTP resend of a stored value arrives as a string — the settings
+    // rows are text, so this must not read as garbage.
+    await request(app).patch("/api/settings").send({ warmup_every_hours: "6" }).expect(200);
+    expect((await request(app).get("/api/settings").expect(200)).body.warmup_every_hours).toBe("6");
+    await request(app).patch("/api/settings").send({ warmup_every_hours: 8 }).expect(200);
+  });
 });

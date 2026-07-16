@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import confetti from "canvas-confetti";
-import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
+import { ApiError } from "../api/client";
+import { useCategories, useDeleteTask, useSettings, useTasks, useUpdateTask } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
 import {
   useCurrentDraw,
@@ -20,7 +21,7 @@ import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
 import { svgDataUri } from "../lib/cardVisuals";
 import { classifyTask } from "../lib/drawable";
-import { resolveDrawnCard } from "../lib/drawnCard";
+import { heldCardResolved, resolveDrawnCard } from "../lib/drawnCard";
 import { resolveDrawView } from "../lib/focusView";
 import type { NewTask } from "../api/types";
 import "./DrawPage.css";
@@ -56,7 +57,15 @@ export function DrawPage() {
   // draw is a commitment, an edit must not become a hidden re-roll. Sticky
   // across further edits (editing the card back into the deck cannot
   // resurrect the cleared pointer); reset by resolution and by a new draw.
-  const [editedOutOfDeck, setEditedOutOfDeck] = useState(false);
+  //
+  // Held as the MOMENT it began rather than a bare flag (#118): the watch
+  // that releases it may only be believed once it has actually looked since
+  // then. That query's key is shared with the Tasks page, and a disabled
+  // React Query still hands back whatever sits in the shared cache — a list
+  // fetched before this card was even captured would "prove" the card gone
+  // and blink it off the screen until the real refetch brought it back.
+  const [heldSince, setHeldSince] = useState<number | null>(null);
+  const editedOutOfDeck = heldSince !== null;
   const [snoozing, setSnoozing] = useState(false);
   // Escape peeked out of the focus view (issue #56). Session-local on
   // purpose: the view itself is DERIVED from timer + current draw (ADR-29),
@@ -74,11 +83,27 @@ export function DrawPage() {
   const currentDraw = useCurrentDraw();
   const setCurrentDraw = useCurrentDrawCache();
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
+  // Releasing #88's hold (#118): a held card forfeited its pointer, so the
+  // current-draw query can no longer tell whether it is still there — the
+  // tasks list can. Fetched ONLY while the hold stands, on the current-draw
+  // query's own 60s cadence, so the ordinary Draw page keeps its footprint
+  // and a card resolved from MCP or a second tab still leaves within a
+  // minute. Derived, never an effect: the release IS resolveDrawnCard's
+  // verdict, exactly like every other reason the card leaves (ADR-2).
+  const heldTasks = useTasks(
+    { status: "all" },
+    { enabled: editedOutOfDeck, refetchInterval: 60_000 },
+  );
   const task = resolveDrawnCard({
     shuffling,
     serverTask: currentDraw.data === undefined ? undefined : (currentDraw.data?.task ?? null),
     sessionTask: result?.task ?? null,
     editedOutOfDeck,
+    heldCardResolved:
+      heldSince != null &&
+      heldTasks.dataUpdatedAt >= heldSince &&
+      result?.task != null &&
+      heldCardResolved(heldTasks.data, result.task.id),
   });
   const phase: Phase = shuffling ? "shuffling" : task ? "revealed" : "idle";
   // The warm-up marker rides GET /api/draw/current (#57), so the badge and
@@ -98,19 +123,27 @@ export function DrawPage() {
     setResult(null);
     setEditing(false);
     setEdited(false);
-    setEditedOutOfDeck(false);
+    setHeldSince(null);
     setSnoozing(false);
     setFocusExited(false);
     setBonusNote(null);
-    const [response] = await Promise.all([
-      mutate(),
-      new Promise((r) => setTimeout(r, 450)), // let the shuffle play
-    ]);
-    // The reveal works off the mutation response: both draw hooks write it
-    // through to the current-draw cache on success, so ending the shuffle
-    // flips straight to the drawn card — no refetch race in the animation.
-    setResult(response);
-    setShuffling(false);
+    try {
+      const [response] = await Promise.all([
+        mutate(),
+        new Promise((r) => setTimeout(r, 450)), // let the shuffle play
+      ]);
+      // The reveal works off the mutation response: both draw hooks write it
+      // through to the current-draw cache on success, so ending the shuffle
+      // flips straight to the drawn card — no refetch race in the animation.
+      setResult(response);
+    } finally {
+      // #118: a rejected draw (server down, 409 from the warm-up route) used
+      // to leave "shuffling…" spinning forever — a dead deck that not even a
+      // second click could revive, because the front face only draws while
+      // idle. The phase belongs to the animation, not to the outcome: it ends
+      // either way, and a failed draw simply hands back the idle deck.
+      setShuffling(false);
+    }
   }
 
   const doDraw = () => reveal(() => draw.mutateAsync({ categoryId, goalId }));
@@ -130,7 +163,10 @@ export function DrawPage() {
     const patched = response.task;
     setResult({ task: patched });
     if (response.task.status !== "open" || classifyTask(response.task, maxEffort) !== "ready") {
-      setEditedOutOfDeck(true);
+      // Re-stamped on every out-of-deck edit, not just the first: the watch
+      // must have looked since the LATEST thing this page knows about the
+      // card, and re-stamping keeps the hold sticky either way.
+      setHeldSince(Date.now());
     } else if (!editedOutOfDeck) {
       // Keep the warm-up marker (#57) riding the cache: an in-deck edit
       // leaves the pointer — and thus the marker — intact server-side.
@@ -140,15 +176,43 @@ export function DrawPage() {
     setEditing(false);
   }
 
+  // Every on-page resolution ends here: the card leaves and #88's hold goes
+  // with it. Shared so the vanished-card path (#118) below cannot drift from
+  // the successful ones.
+  function dismissCard() {
+    setCurrentDraw(null);
+    setResult(null);
+    setHeldSince(null);
+  }
+
+  /**
+   * #118: the card is gone server-side. While #88's hold stands, the tasks
+   * watch normally releases it within a refetch — but a card deleted between
+   * two refetches is still on screen, and resolving it 404s. That 404 is not
+   * an error to show: it is the dismissal arriving by the other door, so the
+   * card leaves exactly as it would have. Anything else is a real failure and
+   * propagates.
+   */
+  function dismissIfGone(e: unknown): void {
+    if (e instanceof ApiError && e.status === 404) {
+      dismissCard();
+      setEditing(false);
+      return;
+    }
+    throw e;
+  }
+
   async function deleteDrawn() {
     if (!task) return;
     if (!confirm(`Delete "${task.title}"?`)) return;
-    await deleteTask.mutateAsync(task.id);
+    try {
+      await deleteTask.mutateAsync(task.id);
+    } catch (e) {
+      return dismissIfGone(e);
+    }
     // The delete cleared the pointer server-side; write that through so the
     // card flips back instantly instead of after the confirming refetch.
-    setCurrentDraw(null);
-    setResult(null);
-    setEditedOutOfDeck(false);
+    dismissCard();
     setEditing(false);
   }
 
@@ -156,7 +220,15 @@ export function DrawPage() {
     if (!task) return;
     // No wasDrawn flag: the server derives the drawn-card bonus from the
     // persisted current draw (ADR-13), so it survives reloads too.
-    const response = await updateTask.mutateAsync({ id: task.id, status: "done" });
+    let response;
+    try {
+      response = await updateTask.mutateAsync({ id: task.id, status: "done" });
+    } catch (e) {
+      // A card completed or deleted elsewhere pays no second celebration —
+      // dismissIfGone leaves the deck idle without confetti, matching #110's
+      // rule that the fanfare belongs to the acting surface.
+      return dismissIfGone(e);
+    }
     // Celebration belongs to the acting surface (#110): confetti fires for
     // the page's own ✓ Done only — a completion arriving from the TimerBar
     // or the Tasks page dismisses the derived card without fanfare.
@@ -164,9 +236,7 @@ export function DrawPage() {
     // Surface why the XP was higher (#57) alongside the confetti.
     if (response.bonus === "warmup") setBonusNote("🔰 Warm-up bonus: +25% XP");
     else if (response.bonus === "momentum") setBonusNote("⚡ Momentum bonus: +25% XP");
-    setCurrentDraw(null);
-    setResult(null);
-    setEditedOutOfDeck(false);
+    dismissCard();
   }
 
   // "Not now" (issue #19): snooze or block the drawn card. The card leaves
@@ -174,11 +244,14 @@ export function DrawPage() {
   // current-draw pointer (ADR-17), so a reload does not resurrect the card.
   async function snoozeDrawn(patch: { deferredUntil?: string; blocked?: boolean }) {
     if (!task) return;
-    await updateTask.mutateAsync({ id: task.id, ...patch });
-    setCurrentDraw(null);
+    try {
+      await updateTask.mutateAsync({ id: task.id, ...patch });
+    } catch (e) {
+      setSnoozing(false);
+      return dismissIfGone(e);
+    }
     setSnoozing(false);
-    setResult(null);
-    setEditedOutOfDeck(false);
+    dismissCard();
   }
 
   const category = task ? categories.data?.find((c) => c.id === task.categoryId) : null;

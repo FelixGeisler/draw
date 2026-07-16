@@ -51,6 +51,31 @@ describe("estimateHint", () => {
     // 10 × 0.2 = 2 → nearest-5 would be 0; a "~0 min" suggestion is nonsense.
     expect(estimateHint(bias(5, 0.2), 10)).toEqual({ suggestedMinutes: 5, ratio: 0.2 });
   });
+
+  it("stays silent when the ROUNDED suggestion IS the entered value (#103)", () => {
+    // A 5 in the field is the ONLY input this can happen to, and it is worth
+    // knowing why: roundSuggestion always returns a multiple of 5 that is at
+    // least 5, so it can only ever equal a multiple-of-5 input — and for 10
+    // and up, the ±25% divergence band already excludes every ratio that
+    // would round back (10 × 1.26 = 12.6 → 15). At 5 the floor swallows the
+    // whole low half instead, so both tails collapse onto the input:
+    // divergence the user can read, advice they cannot use.
+    expect(estimateHint(bias(5, 0.05), 5)).toBeNull(); // 0.25 → floored to 5
+    expect(estimateHint(bias(5, 0.5), 5)).toBeNull(); // 2.5 → floored to 5
+    expect(estimateHint(bias(5, 0.74), 5)).toBeNull(); // 3.7 → floored to 5
+    expect(estimateHint(bias(5, 1.26), 5)).toBeNull(); // 6.3 → rounds back to 5
+    expect(estimateHint(bias(5, 1.49), 5)).toBeNull(); // 7.45 → rounds back to 5
+  });
+
+  it("still fires wherever the rounded suggestion differs at all", () => {
+    // The gate is the number actually shown, not the size of the input — a 4
+    // that history says is really 5+ is still worth saying once…
+    expect(estimateHint(bias(5, 1.4), 4)).toEqual({ suggestedMinutes: 5, ratio: 1.4 });
+    // …and 5 itself starts advising again the moment the suggestion moves.
+    expect(estimateHint(bias(5, 1.5), 5)).toEqual({ suggestedMinutes: 10, ratio: 1.5 });
+    expect(estimateHint(bias(5, 1.5), 10)).toEqual({ suggestedMinutes: 15, ratio: 1.5 });
+    expect(estimateHint(bias(5, 0.5), 20)).toEqual({ suggestedMinutes: 10, ratio: 0.5 });
+  });
 });
 
 describe("roundSuggestion", () => {

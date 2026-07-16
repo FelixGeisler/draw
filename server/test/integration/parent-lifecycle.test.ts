@@ -60,6 +60,16 @@ async function listedTask(id: number) {
   return undefined;
 }
 
+/**
+ * Direct read — `listedTask` cannot see an archived SUBTASK by design (the
+ * child listing filters status != 'archived'), and the #122 guard is about
+ * exactly those rows.
+ */
+function statusOf(taskId: number) {
+  return (db.prepare("SELECT status FROM tasks WHERE id = ?").get(taskId) as { status: string })
+    .status;
+}
+
 function completionsOf(taskId: number) {
   return db
     .prepare(
@@ -218,6 +228,65 @@ describe("reopen triggers on every create/adopt/revive path", () => {
     db.prepare("DELETE FROM completions WHERE task_id = ?").run(parent.id); // hand-edited history
     await mkSubtasks(parent.id, [{ title: "legacy late step", effortMinutes: 5 }]);
     expect((await listedTask(parent.id)).status).toBe("open");
+  });
+});
+
+// Issue #122 item 2: archived → done was the one status transition that
+// reached the generic column write — no completeTask, no lifecycle hook.
+describe("archived → done is rejected, not silently written (#122)", () => {
+  it("a subtask cannot be completed straight out of the archive — no XP-less done row", async () => {
+    const parent = await mkTask({ title: "Archived-to-done parent", effortMinutes: 30 });
+    const [a, b] = await mkSubtasks(parent.id, [
+      { title: "a2d keeper", effortMinutes: 10 },
+      { title: "a2d archived", effortMinutes: 10 },
+    ]);
+    await patchTask(b.id, { status: "archived" });
+
+    const rejected = await patchTask(b.id, { status: "done" }, 400);
+    expect(rejected.error).toMatch(/archived task cannot be completed directly/);
+
+    // Nothing was written: the row is still archived, still without a
+    // completion — the XP-less done row the generic write used to mint.
+    expect(statusOf(b.id)).toBe("archived");
+    expect(completionsOf(b.id)).toEqual([]);
+    // …and the parent never saw a phantom lifecycle event either: `a` is
+    // still open, so the all-done predicate must not have fired.
+    expect(statusOf(parent.id)).toBe("open");
+    await patchTask(a.id, { status: "done" });
+    expect(statusOf(parent.id)).toBe("done");
+  });
+
+  it("the same guard covers root tasks — the bypass was never subtask-specific", async () => {
+    const root = await mkTask({ title: "Archived root", effortMinutes: 10 });
+    await patchTask(root.id, { status: "archived" });
+    await patchTask(root.id, { status: "done" }, 400);
+    expect(statusOf(root.id)).toBe("archived");
+    expect(completionsOf(root.id)).toEqual([]);
+  });
+
+  it("the prescribed repair works: un-archive, then complete — paying out exactly once", async () => {
+    const root = await mkTask({ title: "Archived then revived", effortMinutes: 10 });
+    await patchTask(root.id, { status: "archived" });
+    await patchTask(root.id, { status: "open" });
+    await patchTask(root.id, { status: "done" });
+    expect(statusOf(root.id)).toBe("done");
+    // One genuine completion through completeTask (ADR-5): 10 min × impact
+    // 3/3, no drawn bonus — the XP the direct transition silently skipped.
+    expect(completionsOf(root.id)).toHaveLength(1);
+  });
+
+  it("a no-op done → done resend still passes (the resend tolerance)", async () => {
+    const root = await mkTask({ title: "Done resend", effortMinutes: 10 });
+    await patchTask(root.id, { status: "done" });
+    await patchTask(root.id, { status: "done" }); // 200, and no second payout
+    expect(completionsOf(root.id)).toHaveLength(1);
+  });
+
+  it("archiving a DONE task stays legal — only the reverse direction is banned", async () => {
+    const root = await mkTask({ title: "Done then archived", effortMinutes: 10 });
+    await patchTask(root.id, { status: "done" });
+    await patchTask(root.id, { status: "archived" });
+    expect(statusOf(root.id)).toBe("archived");
   });
 });
 
