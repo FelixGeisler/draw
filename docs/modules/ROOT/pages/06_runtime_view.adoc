@@ -2,17 +2,54 @@
 
 == 6.1 Drawing a card
 
+[plantuml,runtime-draw,svg]
 ....
-User          Client (DrawPage)        Server (drawService)
- │ click card      │                        │
- │────────────────►│ POST /api/draw         │
- │                 │───────────────────────►│ select drawable candidates
- │                 │  (shuffle animation)   │ weight = impact²/effort
- │                 │                        │   × urgency × staleness × cooldown
- │                 │                        │ roulette pick, set last_drawn_at
- │                 │                        │ persist current_draw_task_id
- │                 │◄───────────────────────│ {task, poolSize, probability}
- │ card flips      │ + achievement check    │
+@startuml
+skinparam shadowing false
+skinparam maxMessageSize 150
+skinparam sequenceMessageAlign left
+autonumber
+
+actor User
+participant "DrawPage" as UI
+participant "routes/draw.ts" as Route
+participant "drawService" as Draw
+database "SQLite" as DB
+
+== Draw — the gamble ==
+User -> UI : click the deck
+UI -> Route : POST /api/draw {categoryId?, goalId?}
+Route -> Draw : drawTask(filters)
+Draw -> DB : candidates: open leaf, estimated, <= max_draw_effort, not blocked/snoozed, not held back behind a sequential sibling (#23)
+DB --> Draw : rows
+Draw -> Draw : availability-window filter (#33, local wall clock)
+alt pool empty
+  Draw -> DB : clear current draw
+  Draw --> Route : {task: null, reason: no_ready_tasks | all_too_big | all_outside_window}
+else candidates present
+  Draw -> Draw : weight = impact²/effort × urgency × staleness × cooldown × siblingDamping(1/√k)
+  Draw -> Draw : roulette pick
+  Draw -> DB : stamp last_drawn_at; persist current_draw = id; drop any warm-up marker (ADR-13)
+  Draw --> Route : {task, poolSize, probability}
+end
+Route -> Route : checkAchievements({drew: true}) — only when a card was actually dealt
+Route --> UI : {task, poolSize, probability, newAchievements}
+UI --> User : shuffle, then the card flips — no re-draw (#88): the draw is a commitment
+
+== Restore / dismiss — the derived card (#110) ==
+UI -> Route : GET /api/draw/current (on mount, every 60s, on window focus)
+Route -> Draw : currentDraw()
+Draw -> DB : read pointer + task row
+Draw -> Draw : isRestorable()? — the same predicate as the pool
+alt still drawable
+  Draw --> Route : {task, warmup?}
+else stale (resolved elsewhere: TimerBar, Tasks page, MCP, a 2nd tab)
+  Draw -> DB : clear the pointer lazily
+  Draw --> Route : null
+end
+Route --> UI : the standing card, or null
+UI --> User : a reload restores the revealed card (no shuffle); a pointer cleared elsewhere dismisses it
+@enduml
 ....
 
 Empty pool returns
@@ -54,39 +91,125 @@ via `GET /api/draw/current`.
 
 == 6.2 Completing a task (single transaction)
 
+[plantuml,runtime-completion,svg]
 ....
-PATCH /api/tasks/:id {status: 'done'}
-  ├─ reject 409 if open subtasks exist
-  ├─ drawn := task is the persisted current draw, or last_drawn_at within 6h
-  │           (a warm-up deal's own stamp is excluded — handed out, not gambled)
-  └─ transaction:
-       multiplier := warm-up card? in window ×1.25, late ×1.0 (never ×1.5)
-                     : (drawn ×1.5) × (momentum ×1.25), capped at ×1.5 (ADR-30)
-       insert completions row (xp = round(round(effort × impact/3) × multiplier))
-       recurring? push due_date forward : set status done
-       clear current draw (and warm-up marker) if it was this task
-       check achievements → response {task, xpAwarded, bonus, newAchievements, levelUp}
+@startuml
+skinparam shadowing false
+skinparam maxMessageSize 130
+skinparam sequenceMessageAlign left
+autonumber
+
+participant "Client (card, TimerBar,\nTasks page) or MCP client" as UI
+participant "routes/tasks.ts" as Route
+participant "gamificationService\ncompleteTask()" as Gam
+database "SQLite" as DB
+
+UI -> Route : ✓ Done — PATCH /api/tasks/:id {status: 'done'}
+Route -> DB : load the task row
+alt open subtasks exist
+  Route --> UI : 409 "complete all subtasks first"
+else
+  Route -> Route : zeroEffort := hasNonArchivedSubtask(id)
+  note right of Route
+    #111 / ADR-32: a parent whose subtasks
+    already paid the effort XP completes at
+    effort 0 — the floor lifts it to a symbolic
+    1 XP. It is never in the deck, so wasDrawn
+    is forced false with it.
+  end note
+  Route -> Route : drawn := is the current draw, or last_drawn_at < 6h — but never the card's own warm-up stamp (ADR-30): handed out, not gambled
+  group transaction
+    Route -> Gam : completeTask(task, drawn, {effortMinutes: 0}?)
+    Gam -> Gam : multiplier (ADR-30): warm-up? in window ×1.25 / late ×1.0, never ×1.5 — else min(drawn ×1.5 × momentum ×1.25, ×1.5)
+    Gam -> DB : INSERT completions (xp = max(1, round(round(effort × impact/3) × multiplier)), was_drawn, was_warmup)
+    Gam -> DB : close this task's running time_entry (ADR-12)
+    alt recurring
+      Gam -> DB : push due_date += recur_every_days, clear snooze/block — the task stays open
+    else normal
+      Gam -> DB : status = 'done', completed_at, clear snooze/block
+    end
+    Gam -> DB : clearCurrentDraw() — drops the pointer + warm-up marker if it was this card
+    Gam -> DB : freeze-token earn on a 7th/14th/… day — INSERT OR IGNORE, idempotent (ADR-28)
+    Gam -> Gam : checkAchievements()
+    Gam --> Route : {xpAwarded, bonus, newAchievements, recurring, levelUp}
+    Route -> Gam : maybeAutoCompleteParent(parent_id) → completeTask(parent, false, {effortMinutes: 0})
+    note right of Route
+      #111 / ADR-32: breakdown all-done
+      (>= 1 done, 0 open, archived ignored)
+      and the parent open + non-recurring?
+      Then it completes through completeTask()
+      in the SAME transaction — effort 0.
+    end note
+  end
+  Route --> UI : {task, xpAwarded, bonus, newAchievements, levelUp, parentCompletion?}
+end
+UI -> UI : confetti, XP/level bar, trophy deck, achievement toasts — all from this one response
+@enduml
 ....
 
 The client fires confetti, updates the trophy deck, and toasts new achievements
 from this single response.
 
+XP, levels, streaks and the trophy deck are never stored counters — they are
+derived from the `completions` log on every read (ADR-2, ADR-5), which is why
+reopening a task simply deletes its latest completion row.
+
 == 6.3 AI backward planning (with materials)
 
+[plantuml,runtime-plan-goal,svg]
 ....
-User picks materials → POST /api/ai/estimate
-                        └─ count_tokens on assembled request → {inputTokens, estimatedUsd}
-User confirms        → POST /api/ai/plan-goal {goalId, materialIds, userNotes?}
-                        ├─ 503 if no API key; 400 if > 180K input tokens
-                        ├─ blocks: [materials (PDFs as document blocks,
-                        │           cache_control on last), goal context + instructions]
-                        ├─ messages.parse(model=claude-opus-4-8, adaptive thinking,
-                        │                 output_config.format = zod schema)
-                        └─ {outcomeAnalysis, tasks[{title, effort, impact, phase}]}
-User reviews/edits/deselects → accepted tasks created via POST /api/tasks
+@startuml
+skinparam shadowing false
+skinparam maxMessageSize 115
+skinparam sequenceMessageAlign left
+autonumber
+
+actor User
+participant "AiSuggestionPanel" as UI
+participant "routes/ai.ts" as Route
+participant "aiService" as AI
+participant "Claude API" as Claude
+
+== Token gate — before anything is paid for ==
+User -> UI : pick a goal + materials, add notes
+UI -> Route : POST /api/ai/estimate {goalId, materialIds}
+Route -> Route : request-shape 400s (#84); 503 if no key is configured
+Route -> AI : estimate({goalId, materialIds})
+AI -> AI : estimateMode() → "plan-goal" (an instruction would make it generate-tasks)
+AI -> AI : blocks = [materials — PDFs as document blocks, cache_control on the last] + goalContext
+AI -> Claude : messages.countTokens(model, system, blocks)
+Claude --> AI : {input_tokens}
+AI --> Route : {inputTokens, estimatedUsd}
+Route --> UI : the price tag
+UI --> User : "≈ N tokens, ≈ $X" — confirm, or deselect materials
+
+== The paid call ==
+User -> UI : confirm
+UI -> Route : POST /api/ai/plan-goal {goalId, materialIds, userNotes?}
+Route -> AI : planGoal(...)
+AI -> AI : guardTokens() — re-count and enforce the limit
+alt no API key
+  AI --> Route : AiError 503 ai_not_configured
+else > 180K input tokens
+  AI --> Route : AiError 400 "deselect some materials"
+else
+  AI -> Claude : messages.parse(model = claude-opus-4-8, thinking: adaptive, output_config.format = zodOutputFormat(planGoalSchema))
+  Claude --> AI : parsed_output
+  AI -> AI : clamp efforts to max_draw_effort
+  AI --> Route : {outcomeAnalysis, tasks[{title, effortMinutes, impact, rationale, phase}]}
+end
+Route --> UI : the proposal — nothing is stored yet
+
+== Review before commit ==
+User -> UI : edit / deselect / accept
+UI -> Route : POST /api/tasks — one request per accepted task
+Route --> UI : 201 created
+@enduml
 ....
 
-Nothing is written to the database without explicit user confirmation.
+Nothing is written to the database without explicit user confirmation: the
+estimate is a read-only price tag, the plan is a proposal, and only the tasks
+the user keeps become rows.
 
 === Variant: generating tasks from materials (transcription mode)
 

@@ -8,6 +8,77 @@ F:\Project (npm workspaces)
 └── server/          Express 5 + better-sqlite3 + Claude API proxy
 ....
 
+The layering below is the one rule the whole server obeys: routes validate and
+map status codes, services own the domain, and only `db.ts` opens SQLite. The
+MCP adapter (ADR-19) enters through the same REST front door as the browser —
+it is a second client, not a second back end.
+
+[plantuml,building-blocks,svg]
+....
+@startuml
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam wrapWidth 150
+skinparam defaultTextAlignment center
+skinparam packageStyle rectangle
+hide stereotype
+
+actor "User" as user
+component "MCP client\nClaude Code / Desktop" as mcpClient
+
+package "client/ — React SPA" {
+  component "pages + components\nDraw, Capture, Tasks, Goals,\nStats, History, Settings" as pages
+  component "lib/ — pure logic\ndrawable, focusView,\ndrawnCard, heatmap, rarity" as clib
+  component "hooks/ — TanStack Query\nuseTasks, useDraw, useTimer,\nuseGamification, useAi" as hooks
+  component "api/client.ts\ntyped fetch wrapper" as apiClient
+}
+
+package "server/ — Express 5" {
+  component "tools/ — MCP adapter\nno domain logic (ADR-19)" as mcpAdapter
+  component "routes/ — HTTP layer\ntasks, draw, timer, goals, stats,\nactivity, gamification, ai, backup" as routes
+  package "services/ — domain logic" {
+    component "drawService\ndrawability, weights,\nwarm-up, current draw" as drawSvc
+    component "gamificationService\ncompleteTask(): XP,\nstreaks, achievements" as gamSvc
+    component "statsService\nactivityService" as statsSvc
+    component "aiService\ncardArtService" as aiSvc
+    component "backupService" as backupSvc
+  }
+  component "db.ts\nSQLite bootstrap, migrations" as dbmod
+}
+
+database "app.db\nSQLite (WAL)" as sqlite
+folder "data/files/" as files
+cloud "Claude API" as claude
+
+user --> pages
+pages --> hooks
+pages --> clib
+hooks --> apiClient
+apiClient --> routes : "JSON REST /api/*"
+mcpClient --> mcpAdapter : stdio
+mcpAdapter --> routes : "HTTP 127.0.0.1:3001"
+routes --> drawSvc
+routes --> gamSvc
+routes --> statsSvc
+routes --> aiSvc
+routes --> backupSvc
+drawSvc -[hidden]-> gamSvc
+gamSvc -[hidden]-> statsSvc
+statsSvc -[hidden]-> aiSvc
+aiSvc -[hidden]-> backupSvc
+drawSvc --> dbmod
+gamSvc --> dbmod
+statsSvc --> dbmod
+aiSvc --> dbmod
+backupSvc --> dbmod
+dbmod --> sqlite
+routes --> files
+aiSvc --> claude
+pages -[hidden]-> clib
+clib -[hidden]-> hooks
+@enduml
+....
+
 == 5.2 Whitebox: Server
 
 ....
@@ -31,13 +102,18 @@ server/src/
 │   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
 │   ├── gamification.ts      GET /api/gamification
 │   ├── settings.ts          key-value settings
-│   └── ai.ts                status, estimate, breakdown, plan-goal, generate-tasks
+│   ├── backup.ts            GET /api/backup/export, POST /api/backup/import (ADR-26)
+│   ├── cardArt.ts           GET /api/card-art — cache-only batch reads (#114),
+│   │                        deliberately not under /api/tasks/:id (never generates)
+│   └── ai.ts                status, key, estimate, breakdown, plan-goal, generate-tasks
 └── services/                Domain logic
     ├── drawService.ts       drawable predicate + weight formula + roulette selection + current draw
     ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation
     │                        accuracy + per-category bias (coaching input, ADR-27)
     ├── activityService.ts   per-day card derivation for the history skyline (pure core + SQL fetch)
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
+    ├── streak.ts            pure streak fold: rest days, freeze tokens (ADR-28)
+    ├── backupService.ts     zip export/import of app.db + files/ (ADR-26)
     ├── aiService.ts         Anthropic client, material blocks, prompts, token guard
     ├── aiPostprocess.ts     deterministic generate-tasks shaping (ADR-14): pure, SDK-/DB-free
     ├── svgSanitizer.ts      allowlist re-serializer for model-written SVG (ADR-22): pure

@@ -42,3 +42,15 @@ Architecture documentation follows [arc42](https://arc42.org/) and lives in
 the `Docs` workflow on every push to `main` that touches `docs/`. Keep it
 current: architectural decisions belong in section 9 (Architecture Decisions),
 new quality requirements in section 10.
+
+Diagrams are code: PlantUML sources live inline in the `.adoc` pages inside
+`[plantuml,<name>,svg]` blocks and are rendered at build time by the public
+[Kroki](https://kroki.io/) service via the `asciidoctor-kroki` extension. So
+`npm run docs:build` needs **outbound network access to kroki.io** — but no
+local Kroki, PlantUML or Java install (and no Docker, per the section 2
+guardrails). The build fetches each SVG into `build/site/` (`kroki-fetch-diagram`),
+so published pages serve site-local images and never hotlink kroki.io. Edit a
+diagram by editing its source in the page; never commit rendered SVGs. Note that
+Antora resolves `url: .` through git, so it builds the **committed** state of
+your branch — commit diagram edits before building, and build from a normal
+clone (Antora cannot read a `git worktree` checkout).
