@@ -101,6 +101,24 @@ const ARCHIVED_TO_DONE_ERROR =
   "then complete it — completing an archived row would leave a done task with no completion, " +
   "no XP and no parent lifecycle";
 
+// Archived parents take no children (#104 item 1). Every other path that puts
+// a child under a done root REOPENS the root (#111, ADR-32) — the root plainly
+// is not finished any more. The archived twin of that move must NOT auto-revive
+// its root: archiving means "deliberately off the board" (ADR-21), and #122
+// already settled that the system never lifts that state implicitly — an
+// archived row cannot even be completed directly, it must be un-archived first.
+// Leaving the adoption legal instead was the actual bug: an OPEN child under an
+// archived root is draw-eligible (the pool filters the CHILD's status, ADR-2)
+// while the Tasks page hides it with its root (status != 'archived') — a card
+// that can be dealt but never found. So the honest repair is the transition the
+// router already supports: un-archive the root (status: 'open'), then adopt.
+// Rejected regardless of the mover's status, matching ARCHIVED_TO_DONE_ERROR's
+// uniform shape: one rule per direction, no status matrix to remember.
+const ARCHIVED_PARENT_ERROR =
+  "an archived task cannot take subtasks (ADR-21): un-archive it first (status: 'open'), then " +
+  "add or move the subtask — an open child under an archived root would be drawable but hidden " +
+  "from the Tasks page with its root";
+
 // Recurring × sequential ban (#66, ADR-23): a recurring step never closes —
 // completing it advances its due date instead (ADR-6) — so under a
 // 'sequential' parent it would hold every later sibling back forever
@@ -300,9 +318,12 @@ function maybeAutoCompleteParent(parentId: number): CompletionResult | null {
  * or un-archived. Deletes the parent's latest completion row (ADR-5 — this
  * is exactly the auto-completion being undone; a harmless no-op on a legacy
  * done parent without one) and clears snooze/block like every other reopen
- * (ADR-17). Must run inside the caller's transaction. No-op unless the
- * parent is actually done — open and archived parents are untouched
- * (archived-root adoption policy stays open in #104).
+ * (ADR-17). Must run inside the caller's transaction. No-op unless the parent
+ * is actually done: an open parent needs no reopening, and an archived one is
+ * left alone on purpose — reviving it implicitly is what #104 item 1 declined
+ * (see ARCHIVED_PARENT_ERROR). Archived parents still reach here from the
+ * un-archive path — archiving a ROOT is a plain column write that does not
+ * cascade, so open children under an archived root remain reachable that way.
  */
 function reopenDoneParent(parentId: number): void {
   const parent = db.prepare("SELECT status FROM tasks WHERE id = ?").get(parentId) as
@@ -445,6 +466,11 @@ tasksRouter.post("/", (req, res) => {
     if (parent.grandparentId != null) {
       return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
     }
+    // #104 item 1 — the create-path twin of the reparent guard below. A new
+    // row is always open, so this one needs no status check on the child.
+    if (parent.status === "archived") {
+      return res.status(400).json({ error: ARCHIVED_PARENT_ERROR });
+    }
     // #66 (ADR-23): a NEW subtask may not bring a recurrence into a
     // sequential breakdown. (The batch endpoint needs no twin check — its
     // INSERT has no recurrence column at all.)
@@ -540,6 +566,11 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
   if (!parent) return res.status(404).json({ error: "task not found" });
   if (parent.parentId != null) {
     return res.status(400).json({ error: NESTED_BREAKDOWN_ERROR });
+  }
+  // #104 item 1: same guard as the single create — the batch rows are open by
+  // construction too (the INSERT below has no status column).
+  if (parent.status === "archived") {
+    return res.status(400).json({ error: ARCHIVED_PARENT_ERROR });
   }
 
   const subtasks = req.body?.subtasks;
@@ -818,13 +849,25 @@ tasksRouter.patch("/:id", (req, res) => {
     const target = db
       .prepare(
         `SELECT parent_id AS parentId, subtask_order_mode AS orderMode,
-                goal_id AS goalId, category_id AS categoryId
+                goal_id AS goalId, category_id AS categoryId, status
          FROM tasks WHERE id = ?`,
       )
       .get(body.parentId) as
-      | { parentId: number | null; orderMode: string; goalId: number | null; categoryId: number }
+      | {
+          parentId: number | null;
+          orderMode: string;
+          goalId: number | null;
+          categoryId: number;
+          status: string;
+        }
       | undefined;
     if (!target) return res.status(400).json({ error: "parent task not found" });
+    // #104 item 1 — the last hole in the matrix. A DONE target is legal and
+    // reopens below when an open child lands on it (#111, ADR-32); an ARCHIVED
+    // one is rejected outright, see ARCHIVED_PARENT_ERROR.
+    if (target.status === "archived") {
+      return res.status(400).json({ error: ARCHIVED_PARENT_ERROR });
+    }
     // One level deep, checked from BOTH directions (ADR-16): the target must
     // be a root, and the moved task must be childless — together these also
     // carry the acyclicity guarantee the v7 migration comment relies on
@@ -853,15 +896,17 @@ tasksRouter.patch("/:id", (req, res) => {
       return res.status(400).json({ error: SUBTASK_CATEGORY_ERROR });
     }
     // Adoption inheritance rides the ordinary field writes below: goal_id
-    // follows the new parent UNCONDITIONALLY; category_id only while the
-    // task is open — done/archived rows keep the category they were finished
-    // under (#44) — exactly like the parent-edit cascade and the v7
-    // migration's adopt step. Rewriting the body routes a wiped stored goal
-    // (goal-less parent) through the deliberate-unlink machinery below
-    // (ADR-4, #76): impact resets to the neutral 3, because the rating
-    // described leverage toward the goal adoption just removed. Adoption
-    // that SETS a goal keeps the stored rating — it now rates the inherited
-    // goal, and stays re-ratable.
+    // follows the new parent UNCONDITIONALLY — goal counts, progress and the
+    // goal-filtered draw key off each row's own goal_id, and a breakdown whose
+    // children disagreed with their root about the goal would miscount (#84) —
+    // while category_id follows only while the task is open, since done/
+    // archived rows keep the category they were finished under (#44), exactly
+    // like the parent-edit cascade and the v7 migration's adopt step.
+    // Rewriting the body routes a wiped stored goal (goal-less parent) through
+    // the deliberate-unlink machinery below (ADR-4, #76): impact resets to the
+    // neutral 3, because the rating described leverage toward the goal
+    // adoption just removed. Adoption that SETS a goal keeps the stored rating
+    // — it now rates the inherited goal, and stays re-ratable.
     body.goalId = target.goalId;
     if (raw.status === "open") body.categoryId = target.categoryId;
   }
@@ -920,6 +965,14 @@ tasksRouter.patch("/:id", (req, res) => {
   // Reopening: undo the latest completion so XP stays honest. A reopened
   // task starts fresh in the deck — leftover snooze/block state is cleared
   // (ADR-17), same as on completion.
+  //
+  // This early return also drops any OTHER field in the same body — notably a
+  // parentId move (#104 item 4): the adoption guards above validated it, but
+  // the generic write that would persist it sits below. Deliberate: reopen and
+  // reparent are two different intents, and doing both atomically here would
+  // duplicate the whole field-write path inside the reopen transaction for a
+  // combination the UI never emits. The MCP update_task description tells
+  // callers to reopen first, then reparent in a second call.
   if (body.status === "open" && raw.status === "done") {
     db.transaction(() => {
       undoLatestCompletion(id);
@@ -1004,7 +1057,25 @@ tasksRouter.patch("/:id", (req, res) => {
   // from the edit form's no-op resend of goalId: null on an already goal-less
   // task, which must not disturb grandfathered ratings. Also drives the
   // subtask cascade below (#76).
-  const unlinking = "goalId" in body && body.goalId == null && raw.goal_id != null;
+  //
+  // Open movers only on the ADOPTION path (#104 item 2). There the unlink is a
+  // side effect of the move, not a rating decision the user expressed: the
+  // rewrite above wipes the goal to follow the new root, and resetting impact
+  // with it would edit a HISTORICAL record — the done row's rating is what the
+  // stats buckets attribute the finished work by. That is the same open-only
+  // line #44 draws for the category (right above), #76 draws for the unlink
+  // cascade (below), and the v7 hoist draws for grandfathered grandchildren.
+  // The done mover keeps its rating while its goal still follows, landing in
+  // exactly the shape goal DELETION already grandfathers and ADR-4 tolerates:
+  // a non-neutral rating with no goal, re-rateable only back to the neutral 3.
+  // A DELIBERATE unlink (a sent goalId: null) still resets at any status — the
+  // user is editing that row's rating on purpose, not moving it.
+  const adopting = reparenting && body.parentId != null;
+  const unlinking =
+    "goalId" in body &&
+    body.goalId == null &&
+    raw.goal_id != null &&
+    !(adopting && raw.status !== "open");
   if (goalAfter == null) {
     if (unlinking) {
       if ("impact" in body && body.impact !== 3) {
@@ -1012,7 +1083,7 @@ tasksRouter.patch("/:id", (req, res) => {
         // there the unlink is a side effect of the move, not a sent goalId.
         return res.status(400).json({
           error:
-            reparenting && body.parentId != null
+            adopting
               ? "moving a task under a goal-less parent unlinks its goal and resets impact to " +
                 "the neutral default 3 (ADR-4) — omit impact when reparenting into a goal-less " +
                 "breakdown"
@@ -1078,10 +1149,12 @@ tasksRouter.patch("/:id", (req, res) => {
     let completion: CompletionResult | null = null;
     if (parentAfter != null) {
       if (statusAfter === "open" && (reparenting || raw.status === "archived")) {
-        // An open child arrived under the parent — by adoption (#104 item 1,
-        // done roots) or by un-archiving — so a done parent reopens, its
-        // auto-completion undone (ADR-5). Archived roots are untouched: that
-        // adoption policy stays open in #104.
+        // An open child arrived under the parent — by adoption or by
+        // un-archiving — so a done parent reopens, its auto-completion undone
+        // (ADR-5). Adoption can no longer deliver one to an ARCHIVED root
+        // (ARCHIVED_PARENT_ERROR, #104 item 1); un-archiving a child under a
+        // still-archived root can, and deliberately leaves the root alone —
+        // that root's own revival is the user's call, not a side effect.
         reopenDoneParent(parentAfter);
       } else if (statusAfter === "archived" && raw.status !== "archived") {
         // Archiving a subtask can finish the breakdown: with a done sibling

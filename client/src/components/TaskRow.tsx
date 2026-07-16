@@ -293,7 +293,11 @@ export function TaskRow({
           </button>
         )}
         {!done && task.parentId != null && (
-          <button onClick={() => reparent(null)} title="Promote to top-level">
+          <button
+            onClick={() => reparent(null)}
+            aria-label="Promote to top-level"
+            title="Promote to top-level"
+          >
             ⤴
           </button>
         )}
