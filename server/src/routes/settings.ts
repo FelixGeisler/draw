@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   API_KEY_SETTING,
   CURRENT_DRAW_SETTING,
+  DAILY_HAND_SETTING,
   db,
   setSetting,
   WARMUP_DRAW_SETTING,
@@ -13,19 +14,34 @@ export const settingsRouter = Router();
 
 // The stored Claude API key must never leak through the generic settings
 // endpoints — it is managed exclusively via PUT/DELETE /api/ai/key. The
-// current-draw pointer and the warm-up marker/rate-limit state (#57) are
-// internal session state (GET /api/draw/current, GET /api/draw/warmup),
-// not user settings.
+// current-draw pointer, the warm-up marker/rate-limit state (#57) and today's
+// dealt hand (#59) are internal session state (GET /api/draw/current,
+// GET /api/draw/warmup, GET /api/hand), not user settings.
 function publicSettings(): Record<string, string> {
   const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?)")
+    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?)")
     .all(
       API_KEY_SETTING,
       CURRENT_DRAW_SETTING,
       WARMUP_DRAW_SETTING,
       WARMUP_LAST_DEALT_SETTING,
+      DAILY_HAND_SETTING,
     ) as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
+/**
+ * Validate daily_hand_budget_minutes (#59): a positive integer. The other
+ * numeric keys are historically unvalidated (a PATCH stores whatever String()
+ * yields), but the budget is the one number a bad value silently breaks in a
+ * confusing way — "0" or "abc" would deal an empty hand and blame the deck
+ * (`budget_too_small`) instead of the input.
+ */
+function budgetError(value: unknown): string | null {
+  const n = typeof value === "number" || typeof value === "string" ? Number(value) : NaN;
+  return Number.isInteger(n) && n > 0
+    ? null
+    : "daily_hand_budget_minutes must be a positive integer (minutes)";
 }
 
 /**
@@ -80,6 +96,10 @@ settingsRouter.patch("/", (req, res) => {
     if (normalized.error) return res.status(400).json({ error: normalized.error });
     restWeekdays = normalized.value;
   }
+  if ("daily_hand_budget_minutes" in body) {
+    const error = budgetError(body.daily_hand_budget_minutes);
+    if (error) return res.status(400).json({ error });
+  }
   if ("warmup_every_hours" in body) {
     const error = warmupEveryHoursError(body.warmup_every_hours);
     if (error) return res.status(400).json({ error });
@@ -89,6 +109,7 @@ settingsRouter.patch("/", (req, res) => {
     "draw_cooldown_minutes",
     "daily_goal_completions",
     "warmup_every_hours",
+    "daily_hand_budget_minutes",
   ];
   for (const key of allowed) {
     if (key in body) setSetting(key, String(body[key]));

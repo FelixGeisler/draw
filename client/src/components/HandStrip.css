@@ -1,0 +1,238 @@
+/* The daily hand (#59, ADR-34): today's plan as a horizontal strip above the
+   draw scene — the morning entry point, sitting on the same page (and the
+   same current-draw pointer) as the freestyle draw below it.
+
+   Card faces speak the #123/ADR-33 language in miniature — full-bleed cached
+   art (batch, cache-only reads — #114) under a legibility scrim, subtle
+   chips, a category tint on the art-less gradient face, and the holo sheen
+   for a 5★ goal-linked card. No frame chrome: ADR-31 is gone. */
+
+.hand-strip {
+  margin: 8px auto 4px;
+  max-width: 720px;
+}
+
+.hand-strip h3 {
+  color: var(--text-dim);
+  font-weight: 500;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.hand-cta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.hand-budget {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.hand-budget-input {
+  width: 70px;
+}
+
+.hand-empty {
+  max-width: 420px;
+  margin: 10px auto 0;
+}
+
+.hand-note {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* The strip WRAPS rather than scrolling: at most five cards (#30 keeps the
+   deal small), so a wrapped second row is cheaper than an overflow container
+   — and overflow-x: auto would force overflow-y: auto too, clipping the
+   hover lift below. */
+.hand-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+.hand-card {
+  position: relative; /* anchors the art, scrim and holo layers */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  width: 132px;
+  min-height: 180px;
+  padding: 10px;
+  text-align: left;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--cat-color, var(--accent)) 35%, var(--border));
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--cat-color, var(--accent)) 12%, #232735),
+    #1b1e27
+  );
+  overflow: hidden;
+  cursor: pointer;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.hand-card:hover:not(:disabled),
+.hand-card:focus-visible:not(:disabled) {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.55);
+}
+
+/* Not playable — either this card is already on the table, or another one is.
+   Dimmed rather than hidden: the hand is still today's plan, you just cannot
+   play a second card over a standing one (#88). The in-play card keeps full
+   opacity below — it is the opposite of unavailable. */
+.hand-card:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.hand-card.in-play {
+  opacity: 1;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+/* Full-bleed art under the scrim, text and sheen — absolutely positioned
+   layers only, so nothing here changes the card's box (#123). */
+.hand-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.hand-art-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(18, 20, 26, 0.5),
+    rgba(18, 20, 26, 0.35) 40%,
+    rgba(18, 20, 26, 0.78)
+  );
+}
+
+/* In-flow content paints above the absolutely positioned art layers (a
+   positioned box with z-index: auto otherwise covers in-flow text). The holo
+   overlay is excluded — as the last positioned child it composes above all. */
+.hand-card > :not(.hand-art, .hand-art-scrim, .hand-holo) {
+  position: relative;
+}
+
+.hand-card-title {
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
+}
+
+.hand-card-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+}
+
+.hand-card-foot .category-pill {
+  font-size: 10px;
+  padding: 2px 8px;
+  max-width: 100%;
+}
+
+.hand-card-chips {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Over art, the see-through chip needs a solid backing to stay readable on
+   ANY artwork — the same rule the drawn card's face applies (#123). Without
+   art it blends into the gradient. */
+.hand-card .chip {
+  font-size: 10px;
+  padding: 1px 7px;
+  background-color: rgba(18, 20, 26, 0.66);
+}
+
+/* The affordance line: "play" on hover/focus, "▶ in play" always on the card
+   that is on the table. Not a separate button — the card IS the control, so
+   the strip adds no duplicate of the actions the revealed card already has. */
+.hand-card-state {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+
+.hand-card:hover:not(:disabled) .hand-card-state,
+.hand-card:focus-visible:not(:disabled) .hand-card-state {
+  opacity: 1;
+  color: var(--accent);
+}
+
+.hand-card.in-play .hand-card-state {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* Holo (#123): the same iridescent band as the drawn card and the trophy
+   tiers (--sheen-holo, index.css) — a 5★ goal-linked card shimmers. Paints
+   above face, art and text; clipped by the card's overflow: hidden. */
+.hand-holo {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: var(--sheen-holo);
+  background-size: 250% 250%;
+  background-position: 50% 50%;
+}
+
+/* Gated behind no-preference (never overridden in a reduce block) so
+   prefers-reduced-motion keeps the static sheen with no specificity contest
+   — the same pattern as the drawn card's holo and the trophy sheens. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes hand-holo-drift {
+    from {
+      background-position: 0% 0%;
+    }
+    to {
+      background-position: 100% 100%;
+    }
+  }
+
+  .hand-holo {
+    animation: hand-holo-drift 7s ease-in-out infinite alternate;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hand-card {
+    transition: none;
+  }
+}
