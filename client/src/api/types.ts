@@ -89,10 +89,11 @@ export interface Task {
    */
   remainingEffortMinutes?: number | null;
   /**
-   * DEF stat for the TCG frame (#115), derived at query time: whole minutes
+   * Minutes fought on the card (#115), derived at query time: whole minutes
    * over the task's CLOSED time entries. Present only on the draw payloads
-   * (POST /api/draw, GET /api/draw/current) — the client adds the running
-   * entry's elapsed minutes itself (lib/cardFrame.liveTrackedMinutes).
+   * (POST /api/draw, GET /api/draw/current). The UI stopped rendering it
+   * when the TCG frame's DEF stat died (#123); the payload field stays for
+   * API/MCP consumers.
    */
   trackedMinutes?: number;
   subtasks?: Task[];

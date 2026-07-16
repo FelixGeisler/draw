@@ -24,7 +24,8 @@ export interface GamificationState {
     taskId: number;
     title: string;
     categoryId: number;
-    /** Level stars on the mini-frame render only when goal-linked (ADR-4). */
+    /** Goal link (#115), kept on the payload through the #123 redesign —
+     *  currently unused by the pile UI. */
     goalId: number | null;
     impact: number;
   }[];

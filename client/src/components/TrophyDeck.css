@@ -11,11 +11,11 @@
    `min-height: 100%` so the lifted card can grow past the 126px flow box
    (full title + details) without clipping or reflow.
 
-   #115 turns each card into a TCG mini-frame: cached art (batch, cache-only
-   reads — #114) as the face, level stars for goal-linked completions, the
-   category type-line pill on lift, completion time + XP in an always-visible
-   footer, frame tint by category (--cf-cat), the #107 rarity sheens
-   composing above it all. */
+   Since #123 each card face is FULL-BLEED cached art (batch, cache-only
+   reads — #114) under a legibility scrim, with the category pill on lift,
+   completion time + XP in an always-visible footer, a subtle category tint
+   (--cat-color) for the art-less gradient face, and the #107 rarity sheens
+   composing above it all (holo for drawn 5★, silver for drawn 4★). */
 
 .trophy-deck {
   margin-top: 32px;
@@ -27,7 +27,7 @@
   font-size: 14px;
 }
 
-/* Pile overflow (#115, from PR #117's discovery): the row WRAPS. A
+/* Pile overflow (#115/#123 keep, from PR #117's discovery): the row WRAPS. A
    non-wrapping row shrank cards below hoverable size on heavy days (every
    hover center landed under the right neighbor); horizontal scrolling is out
    because overflow-x: auto forces overflow-y to auto too, and the container
@@ -63,10 +63,10 @@
   width: 100%;
   min-height: 100%;
   border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--cf-cat, var(--accent)) 35%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--cat-color, var(--accent)) 35%, var(--border));
   background: linear-gradient(
     160deg,
-    color-mix(in srgb, var(--cf-cat, var(--accent)) 12%, #232735),
+    color-mix(in srgb, var(--cat-color, var(--accent)) 12%, #232735),
     #1b1e27
   );
   padding: 8px;
@@ -106,25 +106,8 @@
   position: relative;
 }
 
-.trophy-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-}
-
 .trophy-card-glyph {
   font-size: 16px;
-}
-
-/* Level stars (goal-linked only, ADR-4) on a scrim chip, like the full
-   frame's — legible over any art. */
-.trophy-stars {
-  padding: 2px 5px;
-  border-radius: 999px;
-  background: rgba(18, 20, 26, 0.72);
-  line-height: 1;
-  white-space: nowrap;
 }
 
 .trophy-card-title {
@@ -141,17 +124,16 @@
   color: var(--text-dim);
 }
 
-/* The mini type line: the shared category pill (CardFrame.css), shrunk. */
-.trophy-details .cf-type-line {
+/* The shared category pill (index.css), shrunk for the 90px card. */
+.trophy-details .category-pill {
   font-size: 10px;
   padding: 2px 8px;
-  max-width: 100%;
 }
 
-/* Mini-frame footer (#115): completion time + XP, always visible — in the
-   collapsed pile too (#114), not lift-gated like the details above. Wraps as
-   a whole (XP drops below the chip) rather than breaking the time mid-chip
-   when a wide locale format ("08:52 PM") meets a 90px card. */
+/* Footer (#114): completion time + XP, always visible — in the collapsed
+   pile too, not lift-gated like the details above. Wraps as a whole (XP
+   drops below the chip) rather than breaking the time mid-chip when a wide
+   locale format ("08:52 PM") meets a 90px card. */
 .trophy-footer {
   margin-top: auto;
   padding-top: 4px;
@@ -166,7 +148,7 @@
   padding: 1px 5px;
   border-radius: 999px;
   background: rgba(18, 20, 26, 0.72);
-  border: 1px solid color-mix(in srgb, var(--cf-cat, var(--accent)) 30%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--cat-color, var(--accent)) 30%, var(--border));
   color: var(--text-dim);
   font-size: 8.5px;
   font-variant-numeric: tabular-nums;
@@ -216,17 +198,18 @@
   display: block;
 }
 
-/* Rarity sheens (issue #62): drawn impact-5 completions get a faint
-   iridescent foil, drawn impact-4 a faint monochrome silver — rare-card
-   aesthetics for exactly the behavior the app rewards with the XP bonus.
-   The sheen is a pure-CSS overlay pseudo-element stacked ABOVE the card face
-   (the #114 per-task art shows through beneath it unchanged, as the #62
-   comment promised), absolutely positioned inside the inner card — overlay
-   only, so the pile's no-layout-shift invariant holds. The inner's
+/* Rarity sheens (issue #62, tiers renamed in #123): drawn impact-5
+   completions get the iridescent HOLO shimmer — the same rainbow language
+   as the drawn card's .draw-holo — drawn impact-4 a faint monochrome
+   silver. Rare-card aesthetics for exactly the behavior the app rewards
+   with the XP bonus. The sheen is a pure-CSS overlay pseudo-element stacked
+   ABOVE the card face (the #114 per-task art shows through beneath it
+   unchanged), absolutely positioned inside the inner card — overlay only,
+   so the pile's no-layout-shift invariant holds. The inner's
    overflow:hidden clips it to the rounded corners. Opacities stay low so
    title, pill, time and XP remain readable through it. */
 
-.rarity-foil .trophy-card-inner::after,
+.rarity-holo .trophy-card-inner::after,
 .rarity-silver .trophy-card-inner::after {
   content: "";
   position: absolute;
@@ -238,15 +221,15 @@
   background-position: 50% 50%;
 }
 
-.rarity-foil .trophy-card-inner::after {
+.rarity-holo .trophy-card-inner::after {
   background-image: linear-gradient(
     115deg,
-    transparent 25%,
-    rgba(255, 110, 199, 0.13) 38%,
-    rgba(255, 226, 130, 0.11) 46%,
-    rgba(120, 255, 214, 0.12) 54%,
-    rgba(120, 170, 255, 0.13) 62%,
-    transparent 75%
+    transparent 20%,
+    rgba(255, 110, 199, 0.16) 34%,
+    rgba(255, 226, 130, 0.13) 44%,
+    rgba(120, 255, 214, 0.15) 54%,
+    rgba(120, 170, 255, 0.16) 64%,
+    transparent 78%
   );
 }
 
@@ -277,9 +260,9 @@
     }
   }
 
-  .rarity-foil:hover .trophy-card-inner::after,
-  .rarity-foil:focus-visible .trophy-card-inner::after,
-  .rarity-foil.lifted .trophy-card-inner::after,
+  .rarity-holo:hover .trophy-card-inner::after,
+  .rarity-holo:focus-visible .trophy-card-inner::after,
+  .rarity-holo.lifted .trophy-card-inner::after,
   .rarity-silver:hover .trophy-card-inner::after,
   .rarity-silver:focus-visible .trophy-card-inner::after,
   .rarity-silver.lifted .trophy-card-inner::after {

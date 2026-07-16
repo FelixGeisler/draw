@@ -362,7 +362,7 @@ describe("warm-up XP rules (#57): never ×1.5, window ×1.25, momentum ×1.25, c
     expect(current.warmup).toBeUndefined(); // marker died with the old pointer
   });
 
-  it("surfaces a warm-up completion as NOT drawn — an impact-5 deal mints no foil and no '(drawn)' label", async () => {
+  it("surfaces a warm-up completion as NOT drawn — an impact-5 deal mints no holo and no '(drawn)' label", async () => {
     resetWarmupState();
     disarmMomentum();
     const goalId = await seedGoal("warmup trophy plain");
@@ -380,7 +380,7 @@ describe("warm-up XP rules (#57): never ×1.5, window ×1.25, momentum ×1.25, c
     expect(row).toEqual({ wasDrawn: 1, wasWarmup: 1 });
 
     // …but the trophy pile derives drawn-ness as was_drawn AND NOT was_warmup
-    // (ADR-30): despite impact 5, trophyRarity mints no foil and the
+    // (ADR-30): despite impact 5, trophyRarity mints no holo and the
     // "(drawn)" label stays off — display agrees with the denied ×1.5.
     const gam = (await request(app).get("/api/gamification").expect(200)).body;
     const trophy = gam.todayCompletions.find((c: any) => c.taskId === five.id);
@@ -395,7 +395,7 @@ describe("warm-up XP rules (#57): never ×1.5, window ×1.25, momentum ×1.25, c
     expect(card?.wasDrawn).toBe(false);
 
     // Contrast: a genuinely GAMBLED impact-5 completion still reads drawn.
-    const soloGoal = await seedGoal("warmup trophy foil contrast");
+    const soloGoal = await seedGoal("warmup trophy holo contrast");
     const gambled = await seedTask("gambled five star", soloGoal, 20, { impact: 5 });
     await request(app).post("/api/draw").send({ goalId: soloGoal }).expect(200);
     await request(app).patch(`/api/tasks/${gambled.id}`).send({ status: "done" }).expect(200);

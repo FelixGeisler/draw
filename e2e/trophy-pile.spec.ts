@@ -65,13 +65,13 @@ test("hover lifts a middle pile card and reveals its full details", async ({ pag
 
   await middle.hover();
   await expect(details).toBeVisible();
-  // The category is the shared type-line pill (#114/#115): category color as
-  // background, ink computed for contrast (lib/cardFrame.ts — never eyeballed).
-  const pill = details.locator(".cf-type-line");
+  // The category is the shared pill (#114/#123): category color as
+  // background, ink computed for contrast (lib/cardVisuals — never eyeballed).
+  const pill = details.locator(".category-pill");
   await expect(pill).toHaveText(categoryName);
   await expect(pill).toHaveCSS("background-color", categoryRgb);
-  // Completion time moved into the mini-frame footer (#115) — asserted
-  // collapsed in its own test below; here it reads while lifted too.
+  // Completion time lives in the always-visible footer — asserted collapsed
+  // in its own test below; here it reads while lifted too.
   await expect(middle.locator(".trophy-time")).toHaveText(/\d{1,2}:\d{2}/);
   await expect(middle).toContainText("+10"); // 10 min × impact 3/3, not drawn
   await expect(title).toHaveCSS("-webkit-line-clamp", "none"); // full title
@@ -174,7 +174,7 @@ test("the completion-time footer reads in the collapsed pile — no lift require
   await expect(alpha.locator(".trophy-details")).toBeHidden(); // still lift-gated
 });
 
-test("pile overflow (#115): 20+ completions wrap — full-size, hoverable cards on every row", async ({
+test("pile overflow (#115, kept by #123): 20+ completions wrap — full-size, hoverable cards on every row", async ({
   page,
 }) => {
   // The pre-#115 failure mode (PR #117's discovery): a non-wrapping flex row

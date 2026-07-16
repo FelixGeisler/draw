@@ -4,7 +4,7 @@ import { drawFromGoal } from "./helpers.js";
 
 // Issue #62: deterministic rarity on trophy-pile cards. A completion that
 // happened while the task was on the drawn card gets rare-card aesthetics —
-// drawn impact-5 = foil, drawn impact-4 = silver, everything else exactly
+// drawn impact-5 = holo (#123, formerly foil), drawn impact-4 = silver, everything else exactly
 // today's plain card. Rarity is derived at render time from (wasDrawn,
 // impact); the drawn completions here flow through a REAL draw so was_drawn
 // is genuine (server-derived from the persisted current draw, ADR-13).
@@ -12,9 +12,9 @@ import { drawFromGoal } from "./helpers.js";
 // uniquely-titled cards.
 test.describe.configure({ mode: "serial" });
 
-const FOIL_GOAL = "Rarity foil goal";
+const HOLO_GOAL = "Rarity holo goal";
 const SILVER_GOAL = "Rarity silver goal";
-const FOIL_TITLE = "Rarity foil five star drawn";
+const HOLO_TITLE = "Rarity holo five star drawn";
 const SILVER_TITLE = "Rarity silver four star drawn";
 const PLAIN_TITLE = "Rarity plain five star not drawn";
 
@@ -53,16 +53,16 @@ async function sheenAnimation(card: ReturnType<typeof pileCard>) {
   });
 }
 
-test("a drawn impact-5 completion renders the foil sheen", async ({ page }) => {
-  await seedGoalTask(page.request, FOIL_GOAL, FOIL_TITLE, 5);
-  await drawAndComplete(page, FOIL_GOAL, FOIL_TITLE);
+test("a drawn impact-5 completion renders the holo sheen", async ({ page }) => {
+  await seedGoalTask(page.request, HOLO_GOAL, HOLO_TITLE, 5);
+  await drawAndComplete(page, HOLO_GOAL, HOLO_TITLE);
 
-  const foil = pileCard(page, FOIL_TITLE);
-  await expect(foil).toHaveClass(/rarity-foil/);
+  const holo = pileCard(page, HOLO_TITLE);
+  await expect(holo).toHaveClass(/rarity-holo/);
   // The tier is announced, not visual-only: appended after the (drawn) XP part.
-  await expect(foil).toHaveAttribute("aria-label", /XP \(drawn\), foil$/);
+  await expect(holo).toHaveAttribute("aria-label", /XP \(drawn\), holo$/);
   // The sheen is a real painted overlay on the inner card face.
-  const bg = await foil.evaluate((el) =>
+  const bg = await holo.evaluate((el) =>
     getComputedStyle(el.querySelector(".trophy-card-inner")!, "::after").backgroundImage,
   );
   expect(bg).toContain("linear-gradient");
@@ -104,26 +104,26 @@ test("a not-drawn five-star completion stays a plain card", async ({ page }) => 
 
 test("the shine sweep runs only while lifted, and reduced motion stills it", async ({ page }) => {
   await page.goto("/");
-  const foil = pileCard(page, FOIL_TITLE);
+  const holo = pileCard(page, HOLO_TITLE);
 
   // Collapsed in the pile: the sheen is static.
-  expect(await sheenAnimation(foil)).toBe("none");
+  expect(await sheenAnimation(holo)).toBe("none");
 
   // Lifted (hover): the slow sweep runs. The lift must not reflow the pile —
   // a sibling's box stays put (scoped scroll first; boundingBox is
   // viewport-relative).
-  await foil.scrollIntoViewIfNeeded();
+  await holo.scrollIntoViewIfNeeded();
   const sibling = pileCard(page, SILVER_TITLE);
   const before = await sibling.boundingBox();
-  await foil.hover();
-  expect(await sheenAnimation(foil)).toBe("trophy-sheen-sweep");
+  await holo.hover();
+  expect(await sheenAnimation(holo)).toBe("trophy-sheen-sweep");
   expect(await sibling.boundingBox()).toEqual(before);
 
   // prefers-reduced-motion: the sheen stays painted, the sweep does not.
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await foil.hover();
-  expect(await sheenAnimation(foil)).toBe("none");
-  const bg = await foil.evaluate((el) =>
+  await holo.hover();
+  expect(await sheenAnimation(holo)).toBe("none");
+  const bg = await holo.evaluate((el) =>
     getComputedStyle(el.querySelector(".trophy-card-inner")!, "::after").backgroundImage,
   );
   expect(bg).toContain("linear-gradient");
@@ -133,9 +133,9 @@ test("the history skyline reuses the tiers on its upright cards", async ({ page 
   await page.goto("/history");
 
   // Today's tower sits at the right end, where the skyline opens.
-  const foilSky = page.locator(`.hoc-card[aria-label*="${FOIL_TITLE}"]`);
-  await expect(foilSky).toHaveClass(/rarity-foil/);
-  await expect(foilSky).toHaveAttribute("aria-label", /foil$/);
+  const holoSky = page.locator(`.hoc-card[aria-label*="${HOLO_TITLE}"]`);
+  await expect(holoSky).toHaveClass(/rarity-holo/);
+  await expect(holoSky).toHaveAttribute("aria-label", /holo$/);
 
   const silverSky = page.locator(`.hoc-card[aria-label*="${SILVER_TITLE}"]`);
   await expect(silverSky).toHaveClass(/rarity-silver/);

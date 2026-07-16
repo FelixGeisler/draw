@@ -46,9 +46,10 @@ export function useStopTimer() {
       // The TimerBar is global: stopping while the Goals page is mounted must
       // refresh the feasibility chip's trackedMinutes14d pace (#60).
       qc.invalidateQueries({ queryKey: ["goals"] });
-      // The drawn card's DEF stat (#115) sums CLOSED entries server-side;
-      // the just-closed entry must fold into it as the client-side live
-      // tick for the running entry disappears with `["timer"]` -> null.
+      // The draw payloads carry trackedMinutes (sum of CLOSED entries,
+      // server-derived); fold the just-closed entry into the cached copy so
+      // the payload stays truthful for any consumer even though the on-card
+      // DEF stat died with the TCG frame (#123).
       qc.invalidateQueries({ queryKey: ["draw", "current"] });
     },
   });

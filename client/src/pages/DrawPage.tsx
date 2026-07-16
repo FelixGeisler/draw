@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import confetti from "canvas-confetti";
 import { useCategories, useDeleteTask, useSettings, useUpdateTask } from "../hooks/useTasks";
@@ -13,13 +13,12 @@ import {
 } from "../hooks/useDraw";
 import { useCardArt, useRegenerateCardArt } from "../hooks/useAi";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
-import { CardFrame } from "../components/CardFrame";
 import { FocusOverlay } from "../components/FocusOverlay";
 import { SnoozeMenu } from "../components/SnoozeMenu";
-import { TaskBadges } from "../components/TaskBadges";
+import { CategoryPill, TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
-import { liveTrackedMinutes } from "../lib/cardFrame";
+import { svgDataUri } from "../lib/cardVisuals";
 import { classifyTask } from "../lib/drawable";
 import { resolveDrawnCard } from "../lib/drawnCard";
 import { resolveDrawView } from "../lib/focusView";
@@ -127,10 +126,8 @@ export function DrawPage() {
     // The PATCH response settles the card's fate ahead of the confirming
     // refetch: still drawable → it IS the current draw (pointer intact
     // server-side); edited out of the deck → the pointer is forfeit and the
-    // sticky flag holds the session's card (#88, see above). The PATCH task
-    // shape has no trackedMinutes (draw payloads only) — carry the standing
-    // card's over so the DEF stat (#115) never blinks out across an edit.
-    const patched = { ...response.task, trackedMinutes: task.trackedMinutes };
+    // sticky flag holds the session's card (#88, see above).
+    const patched = response.task;
     setResult({ task: patched });
     if (response.task.status !== "open" || classifyTask(response.task, maxEffort) !== "ready") {
       setEditedOutOfDeck(true);
@@ -225,25 +222,12 @@ export function DrawPage() {
   const nonDrawable =
     task != null && (task.status !== "open" || classifyTask(task, maxEffort) !== "ready");
 
-  // DEF = tracked minutes (#115), live: the draw payload carries the CLOSED
-  // entries' sum; while the timer runs on THIS card the running entry's
-  // elapsed minutes are added client-side, re-read every 15s so the stat
-  // grows as you fight the card without refetching anything. Stopping the
-  // timer folds the entry into the server sum (useStopTimer invalidates the
-  // current draw).
-  const runningStartedAt =
-    task != null && timer.data?.task.id === task.id ? timer.data.entry.startedAt : null;
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    if (runningStartedAt == null) return;
-    setNowMs(Date.now());
-    const interval = setInterval(() => setNowMs(Date.now()), 15_000);
-    return () => clearInterval(interval);
-  }, [runningStartedAt]);
-  const defMinutes =
-    task?.trackedMinutes != null
-      ? liveTrackedMinutes(task.trackedMinutes, runningStartedAt, nowMs)
-      : null;
+  // Holo (#123): the shimmer marks a GAMBLED high-leverage card — impact 5,
+  // goal-linked (ADR-4: impact is a goal concept) and genuinely drawn. A
+  // warm-up deal was handed out, not gambled, so it stays plain here exactly
+  // as its completion mints no holo trophy (trophyRarity excludes warm-ups)
+  // — display and reward agree on what counts as drawn.
+  const holo = task != null && task.impact === 5 && task.goalId != null && warmupInfo == null;
 
   return (
     <div className="content" style={{ textAlign: "center" }}>
@@ -298,27 +282,41 @@ export function DrawPage() {
             </div>
           </div>
           <div className="draw-face back">
-            {/* TCG frame (#115): level stars = impact (goal-linked only,
-                ADR-4), type line = category, ATK = estimated minutes, DEF =
-                tracked minutes (live), flavor = description; the #113 art
-                fades into the portrait window, gradient placeholder without
-                it. The category chip and effort/star badges the face used to
-                carry are absorbed by the frame — no duplicated data. */}
+            {/* Full-bleed art (#123): the #113 artwork IS the card face —
+                a data-URI <img> (never dangerouslySetInnerHTML) under a
+                legibility scrim, fading in whenever it arrives; the flip
+                never waits for it. In degraded mode neither layer renders
+                and the face's own gradient stands alone, exactly as before
+                (#27). */}
+            {task && cardArt.data?.svg && (
+              <>
+                <img
+                  // dataUpdatedAt changes when a regenerate swaps the cache
+                  // entry — remounting replays the fade-in for the new art.
+                  key={cardArt.dataUpdatedAt}
+                  className="draw-art"
+                  alt=""
+                  aria-hidden="true"
+                  src={svgDataUri(cardArt.data.svg)}
+                />
+                <div className="draw-art-scrim" />
+              </>
+            )}
             {task && (
-              <CardFrame
-                title={task.title}
-                category={category ?? null}
-                impact={task.impact}
-                goalLinked={task.goalId != null}
-                artSvg={cardArt.data?.svg}
-                // dataUpdatedAt changes when a regenerate swaps the cache
-                // entry — remounting replays the fade-in for the new art.
-                artKey={cardArt.dataUpdatedAt}
-                atk={task.effortMinutes}
-                def={defMinutes}
-                flavor={task.description}
-              >
-                <TaskBadges task={task} showStars={false} showEffort={false} />
+              /* The scroll container keeps long content INSIDE the fixed
+                 300x420 face (the deleted CardFrame's cf-body contract):
+                 centered while it fits, scrolling once it doesn't — never
+                 painting over the filter chips above or the actions below. */
+              <div className="draw-card-content">
+                {/* Info stays subtle chips (#123): category pill (computed
+                    ink), title, description, and the TaskBadges row — effort,
+                    due/recur/window, impact stars for goal-linked cards. */}
+                {category && <CategoryPill category={category} />}
+                <h2>{task.title}</h2>
+                {task.description && (
+                  <p style={{ color: "var(--text-dim)", margin: 0 }}>{task.description}</p>
+                )}
+                <TaskBadges task={task} />
                 {/* Warm-up deal (#57): badge + bonus-window hint. No odds
                     line renders — a deal has no probability by construction. */}
                 {warmupInfo && (
@@ -344,8 +342,13 @@ export function DrawPage() {
                     {result.poolSize === 1 ? "" : "s"} in the deck
                   </div>
                 )}
-              </CardFrame>
+              </div>
             )}
+            {/* Holo (#123): a drawn 5★ goal-linked card shimmers — an
+                iridescent overlay painting ABOVE the face (last child,
+                pointer-events: none), slow and subtle; prefers-reduced-motion
+                keeps it static. */}
+            {holo && <div className="draw-holo" aria-hidden="true" />}
           </div>
         </div>
         {/* Regenerate (#113) overlays the scene INSTEAD of living inside the

@@ -104,8 +104,11 @@ export const DENSITIES: readonly StyleDirective[] = [
   },
 ];
 
-// All placements bias the interest upward: the TCG frame (#115) will present
-// this art through a portrait art window that favors the upper-center.
+// All placements bias the interest upward. Originally tuned for the #115
+// portrait art window; kept under the full-bleed face (#123) on purpose:
+// the upper canvas sits behind a dense band of the legibility scrim and is
+// where the title block lands once long content tops out, so the art's
+// busiest region gets tamed exactly where it would otherwise fight the text.
 export const FOCALS: readonly StyleDirective[] = [
   {
     name: "upper-center",

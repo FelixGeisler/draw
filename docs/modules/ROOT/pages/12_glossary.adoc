@@ -58,8 +58,8 @@
 |*Trophy deck*
 |Today's completed cards, fanned at the bottom of the Draw page
 
-|*Rarity (foil / silver)*
-|Deterministic sheen on completed-task cards (trophy pile and History skyline): drawn + impact 5 = foil, drawn + impact 4 = silver, else plain. Pure CSS, derived at render time from `(wasDrawn, impact)` — never stored (#62, ADR-2/ADR-5 pattern)
+|*Rarity (holo / silver)*
+|Deterministic sheen on completed-task cards (trophy pile and History skyline): drawn + impact 5 = holo (an iridescent shimmer, also on the standing drawn card — #123), drawn + impact 4 = silver, else plain. Pure CSS, derived at render time from `(wasDrawn, impact)` — never stored (#62, ADR-2/ADR-5 pattern)
 
 |*Streak*
 |Count of REAL completion days in an unbroken run of local calendar days; rest and frozen days keep the run alive but never increment it (ADR-28)

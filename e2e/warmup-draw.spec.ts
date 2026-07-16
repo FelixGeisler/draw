@@ -18,7 +18,7 @@ async function seed(request: APIRequestContext) {
   const categories: { id: number }[] = await (await request.get("/api/categories")).json();
   const ids: Record<string, number> = {};
   // The small card gets impact 5 on purpose: a drawn impact-5 completion
-  // mints a foil trophy (#62) — the deal below must NOT (ADR-30).
+  // mints a holo trophy (#62/#123) — the deal below must NOT (ADR-30).
   for (const [title, effortMinutes, impact] of [
     [SMALL_TASK, 5, 5],
     [BIG_TASK, 25, 3],
@@ -65,7 +65,7 @@ test("warm-up deals the smallest card with its badge; completing pays the bonus 
   await expect(page.getByText("🔰 Warm-up bonus: +25% XP")).toBeVisible();
 
   // The trophy stays PLAIN although the card is impact 5: it was handed out,
-  // not gambled, so no foil rarity and no "(drawn)" in the label (ADR-30).
+  // not gambled, so no holo rarity and no "(drawn)" in the label (ADR-30).
   const trophy = page.locator(".trophy-card", { hasText: SMALL_TASK });
   await expect(trophy).toBeVisible();
   await expect(trophy).not.toHaveClass(/rarity-/);

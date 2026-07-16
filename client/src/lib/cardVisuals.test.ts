@@ -5,12 +5,11 @@ import {
   artByTask,
   batchArtKey,
   contrastRatio,
-  liveTrackedMinutes,
   parseHexColor,
+  pillInk,
   relativeLuminance,
   svgDataUri,
-  typeLineInk,
-} from "./cardFrame";
+} from "./cardVisuals";
 
 describe("color parsing and WCAG math", () => {
   it("parses #rrggbb and #rgb, rejects everything else", () => {
@@ -31,59 +30,34 @@ describe("color parsing and WCAG math", () => {
   });
 });
 
-describe("typeLineInk — the deterministic pill-text choice (#114)", () => {
+describe("pillInk — the deterministic category-pill text choice (#114)", () => {
   it("pale category colors get dark ink", () => {
     // The app's warn orange, and pale pastels a user might pick.
     for (const pale of ["#ffb64f", "#ffe082", "#a5d6a7", "#e0e0e0", "#fff"]) {
-      expect(typeLineInk(pale)).toBe(DARK_INK);
+      expect(pillInk(pale)).toBe(DARK_INK);
     }
   });
 
   it("dark category colors get light ink", () => {
     for (const dark of ["#4a3aa7", "#1b1e27", "#8b0000", "#2c3040", "#000"]) {
-      expect(typeLineInk(dark)).toBe(LIGHT_INK);
+      expect(pillInk(dark)).toBe(LIGHT_INK);
     }
   });
 
   it("always picks the HIGHER-contrast ink — checked against the raw ratios", () => {
     // The three seeded category colors plus mid-tones where eyeballing fails.
     for (const color of ["#4f8cff", "#a06bff", "#3fbf7f", "#808080", "#e34948"]) {
-      const ink = typeLineInk(color);
+      const ink = pillInk(color);
       const other = ink === DARK_INK ? LIGHT_INK : DARK_INK;
       expect(contrastRatio(color, ink)).toBeGreaterThanOrEqual(contrastRatio(color, other));
       // Determinism: same input, same answer.
-      expect(typeLineInk(color)).toBe(ink);
+      expect(pillInk(color)).toBe(ink);
     }
   });
 
   it("falls back to light ink for malformed colors (hand-edited DB)", () => {
-    expect(typeLineInk("chartreuse")).toBe(LIGHT_INK);
-    expect(typeLineInk("")).toBe(LIGHT_INK);
-  });
-});
-
-describe("liveTrackedMinutes — the DEF stat's live tick (#115)", () => {
-  const NOW = Date.parse("2026-07-15T12:00:00Z");
-
-  it("returns the server base while no timer runs on the card", () => {
-    expect(liveTrackedMinutes(25, null, NOW)).toBe(25);
-    expect(liveTrackedMinutes(0, null, NOW)).toBe(0);
-  });
-
-  it("adds the running entry's elapsed WHOLE minutes on top of the base", () => {
-    const startedAt = new Date(NOW - 4.7 * 60_000).toISOString();
-    expect(liveTrackedMinutes(25, startedAt, NOW)).toBe(29); // floor(4.7) = 4
-    expect(liveTrackedMinutes(0, startedAt, NOW)).toBe(4);
-  });
-
-  it("a just-started timer adds nothing yet", () => {
-    expect(liveTrackedMinutes(10, new Date(NOW).toISOString(), NOW)).toBe(10);
-    expect(liveTrackedMinutes(10, new Date(NOW - 59_000).toISOString(), NOW)).toBe(10);
-  });
-
-  it("clamps clock skew (startedAt in the future) and garbage to the base", () => {
-    expect(liveTrackedMinutes(10, new Date(NOW + 60_000).toISOString(), NOW)).toBe(10);
-    expect(liveTrackedMinutes(10, "not a date", NOW)).toBe(10);
+    expect(pillInk("chartreuse")).toBe(LIGHT_INK);
+    expect(pillInk("")).toBe(LIGHT_INK);
   });
 });
 

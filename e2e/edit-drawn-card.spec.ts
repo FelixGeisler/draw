@@ -57,8 +57,11 @@ test("edit: saving updates the card in place, drawn state preserved", async ({ p
 
   await expect(page.locator(".draw-card")).toHaveClass(/flipped/);
   await expect(page.locator(".draw-face.back h2")).toHaveText(EDITED_TITLE);
-  // The estimate renders as the TCG frame's ATK stat (#115), not a chip.
-  await expect(page.locator(".draw-face.back .cf-atk")).toHaveText("ATK/15");
+  // The estimate renders as the effort chip again (#123 — the ATK stat died
+  // with the TCG frame).
+  await expect(
+    page.locator(".draw-face.back .chip", { hasText: "15 min" }),
+  ).toBeVisible();
   // Still drawable: no out-of-the-deck hint. The original draw odds are
   // stale after an edit, so they are hidden rather than shown wrong.
   await expect(page.locator(".draw-hint")).not.toBeVisible();
@@ -89,7 +92,9 @@ test("edit above max_draw_effort: card stays with the resolve hint, no draw-agai
   // Card stays revealed with the updated data plus a non-drawable hint.
   await expect(page.locator(".draw-card")).toHaveClass(/flipped/);
   await expect(page.locator(".draw-face.back h2")).toHaveText(EDITED_TITLE);
-  await expect(page.locator(".draw-face.back .cf-atk")).toHaveText("ATK/90");
+  await expect(
+    page.locator(".draw-face.back .chip", { hasText: "90 min" }),
+  ).toBeVisible();
   await expect(page.locator(".draw-hint")).toContainText("out of the deck");
   // The draw is a commitment (#88): no "Draw again" even for a card that was
   // edited out of the deck — the way forward is resolving it ("Not now").

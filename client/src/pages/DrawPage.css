@@ -71,29 +71,187 @@
   pointer-events: none;
 }
 
-/* The back face hosts the TCG frame (#115, CardFrame.css), which lays itself
-   out and paints the category-tinted frame — the face contributes only the
-   flip geometry, the border and a fallback background. Art layers and the
-   art-fade moved into the frame's portrait window. */
 .draw-face.back {
   background: linear-gradient(160deg, #232735, #1b1e27);
   transform: rotateY(180deg);
-  padding: 0;
-  display: block;
   text-align: center;
+  /* Nothing ever paints outside the fixed 300x420 card bounds — long
+     content scrolls INSIDE .draw-card-content below instead of blowing
+     the frame (the deleted CardFrame's cf-body contract, #115 → #123). */
+  overflow: hidden;
+}
+
+/* The in-flow card content, capped at the face's content box: centered by
+   the face while it fits, scrollable once it doesn't — a long title or
+   description can never push the pill off the face or paint the odds line
+   over the page's buttons. (min-height: 0 releases the flex item's
+   content-based floor so max-height can actually cap it.) */
+.draw-card-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+/* The canonical companion of a scrollable flex column: once content
+   overflows, default flex-shrink: 1 compresses the children BEFORE the
+   scrollbar engages. Most children survive on their automatic min-content
+   minimum, but any child with overflow: hidden (the category pill's
+   ellipsis) has that minimum zeroed and gets crushed to a sliver (PR #125
+   review: a 6px pill with the text clipped away). Children keep their
+   natural height; the wrapper does the scrolling. */
+.draw-card-content > * {
+  flex-shrink: 0;
+}
+
+.draw-face.back h2 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+/* Full-bleed AI card art (#27/#123): layered behind the card-back content as
+   a data-URI <img> (never injected as markup) covering the WHOLE face, fading
+   in whenever it arrives — the flip never waits for it. In degraded mode
+   neither layer renders and the gradient above stands alone, exactly as
+   before. */
+.draw-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: art-fade 0.8s ease both;
+}
+
+/* Legibility scrim between the art and the text. The content block huddles
+   mid-card (justify-content: center) and spans the whole face once long
+   content scrolls, so the middle band carries most of the text and must be
+   dense enough on its own; the edges go denser still for content that
+   reaches them. The #113 prompt contracts dark low-saturation art, but
+   nothing downstream enforces that palette — the scrim plus the per-element
+   backings below have to hold on worst-case bright art too. */
+.draw-art-scrim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(18, 20, 26, 0.72),
+    rgba(18, 20, 26, 0.6) 30%,
+    rgba(18, 20, 26, 0.6) 65%,
+    rgba(18, 20, 26, 0.78)
+  );
+}
+
+/* The face's in-flow content (the .draw-card-content wrapper) must PAINT
+   above the absolutely positioned art/scrim layers (positioned boxes with
+   z-index: auto otherwise cover in-flow text) — same pattern as the trophy
+   cards. The holo overlay is excluded: as the LAST positioned child it
+   composes above everything. */
+.draw-face.back > :not(.draw-art, .draw-art-scrim, .draw-holo) {
+  position: relative;
+}
+
+/* Over art, the see-through chips AND the bare 12–13px text lines (odds,
+   out-of-deck hint, warm-up window hint — the dimmest ink on the face) get
+   a solid backing so they stay readable on ANY artwork, including art that
+   defies the prompt's dark-palette contract; without art the backing blends
+   into the gradient. (The category pill needs none — its background IS the
+   solid category color, with the computed contrast ink on top.) Title and
+   description get a text-shadow for the same reason. */
+.draw-face.back .chip,
+.draw-face.back .draw-chance,
+.draw-face.back .draw-hint,
+.draw-face.back .warmup-window-hint {
+  background-color: rgba(18, 20, 26, 0.66);
+}
+
+.draw-face.back .draw-chance,
+.draw-face.back .draw-hint,
+.draw-face.back .warmup-window-hint {
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.draw-face.back h2,
+.draw-face.back p {
+  text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
+}
+
+@keyframes art-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Holo (#123): the iridescent shimmer on a drawn 5★ goal-linked card — the
+   #107 rarity language graduated to the live card. An oversized rainbow
+   band drifting diagonally, low opacities throughout: a glint you notice
+   when you look, not a casino. Paints above face, art and text
+   (pointer-events: none), clipped by the face's border-radius. */
+.draw-holo {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: linear-gradient(
+    115deg,
+    transparent 20%,
+    rgba(255, 110, 199, 0.16) 34%,
+    rgba(255, 226, 130, 0.13) 44%,
+    rgba(120, 255, 214, 0.15) 54%,
+    rgba(120, 170, 255, 0.16) 64%,
+    transparent 78%
+  );
+  background-size: 250% 250%;
+  background-position: 50% 50%;
+}
+
+/* The drift is gated behind no-preference (never overridden in a reduce
+   block) so prefers-reduced-motion keeps the static sheen with no
+   specificity contest — same pattern as the trophy sheens (#62). */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes holo-drift {
+    from {
+      background-position: 0% 0%;
+    }
+    to {
+      background-position: 100% 100%;
+    }
+  }
+
+  .draw-holo {
+    animation: holo-drift 7s ease-in-out infinite alternate;
+  }
+}
+
+/* Reduced motion: the art still appears, just without the fade (the holo
+   drift above is motion-gated and simply never runs — the static sheen
+   stays painted). */
+@media (prefers-reduced-motion: reduce) {
+  .draw-art {
+    animation: none;
+  }
 }
 
 /* Regenerate (#113): a quiet corner control on the art — it re-rolls the
    ARTWORK only, never the card (the draw stays a commitment, #88). Sits on
    .draw-scene (2D), NOT inside the 3D-flipped face, so it stays clickable.
-   Anchored to the frame's top-right corner (the name bar reserves the space
-   with padding, #115) because the art window's own edges move with the
-   title's line count. Rendered only when art exists, so degraded mode never
-   shows it. */
+   Rendered only when art exists, so degraded mode never shows it. */
 .draw-art-regen {
   position: absolute;
-  right: 14px;
-  top: 14px;
+  right: 10px;
+  bottom: 10px;
   width: 30px;
   height: 30px;
   padding: 0;

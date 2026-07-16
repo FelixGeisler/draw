@@ -115,11 +115,11 @@ describe("today via the real API routes", () => {
   });
 
   it("exposes the rarity facts (impact, wasDrawn) on every card (#62)", async () => {
-    // Contract guard: the skyline derives foil/silver at render time from
+    // Contract guard: the skyline derives holo/silver at render time from
     // exactly these two fields — impact rides the live tasks join (like
     // title), wasDrawn folds out of the completions log. Nothing is stored.
     const goal = (await request(app).post("/api/goals").send({ title: "rarity goal" })).body;
-    const task = await createTask("foil card", { goalId: goal.id, impact: 5 });
+    const task = await createTask("holo card", { goalId: goal.id, impact: 5 });
     seedCompletion(task.id, new Date(), 25, 1);
 
     const today = localDay(new Date());
