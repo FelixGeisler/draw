@@ -8,6 +8,85 @@ F:\Project (npm workspaces)
 └── server/          Express 5 + better-sqlite3 + Claude API proxy
 ....
 
+The layering below is the one rule the whole server obeys: routes validate and
+map status codes, services own the domain, and only `db.ts` opens SQLite. The
+MCP adapter (ADR-19) enters through the same REST front door as the browser —
+it is a second client, not a second back end.
+
+[plantuml,building-blocks,svg]
+....
+@startuml
+skinparam componentStyle rectangle
+skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam ArrowColor #555555
+skinparam rectangleBorderColor #888888
+skinparam packageStyle rectangle
+hide stereotype
+
+actor "User" as user
+component "MCP client\n(Claude Code / Desktop)" as mcpClient
+
+package "client/ — React SPA" {
+  component "pages\nDraw, Capture, Tasks,\nGoals, Stats, History, Settings" as pages
+  component "components\nTaskRow, SubtaskEditor, TimerBar,\nFocusOverlay, TrophyDeck, AiSuggestionPanel" as comps
+  component "lib/ — pure logic\ndrawable, focusView, drawnCard,\nheatmap, rarity (unit-tested)" as clib
+  component "hooks/ — TanStack Query\nuseTasks, useDraw, useTimer,\nuseGamification, useAi, useActivity" as hooks
+  component "api/client.ts\ntyped fetch wrapper" as apiClient
+}
+
+package "server/ — Express 5" {
+  component "tools/catalog.ts + httpApi.ts\nMCP tool catalog (no domain logic)" as mcpAdapter
+  component "app.ts — createApp()\nrouter mounting" as app
+  package "routes/ — HTTP layer" {
+    component "tasks, draw, timer, goals,\ncategories, materials, stats,\nactivity, gamification, ai,\nbackup, cardArt, settings" as routes
+  }
+  package "services/ — domain logic" {
+    component "drawService\ndrawable predicate, weights,\nwarm-up deal, current draw" as drawSvc
+    component "gamificationService\ncompleteTask(): XP, streaks,\nachievements" as gamSvc
+    component "statsService / activityService\naggregations, leverage,\nskyline derivation" as statsSvc
+    component "aiService (+ aiPostprocess,\ncardArtService, svgSanitizer)" as aiSvc
+    component "backupService\nzip export / import" as backupSvc
+  }
+  component "db.ts\nSQLite bootstrap,\nuser_version migrations" as dbmod
+}
+
+database "server/data/app.db\nSQLite (WAL)" as sqlite
+folder "server/data/files/\nuploaded materials" as files
+cloud "api.anthropic.com\nClaude API" as claude
+
+user --> pages : browser
+pages --> comps
+pages --> clib
+comps --> hooks
+pages --> hooks
+hooks --> apiClient
+apiClient --> routes : "JSON REST /api/*\n(:5173 proxy → :3001)"
+
+mcpClient --> mcpAdapter : stdio (JSON-RPC)
+mcpAdapter --> routes : "HTTP 127.0.0.1:3001\n(DRAW_API_URL)"
+
+app --> routes
+routes --> drawSvc
+routes --> gamSvc
+routes --> statsSvc
+routes --> aiSvc
+routes --> backupSvc
+drawSvc ..> gamSvc : "achievement check"
+gamSvc ..> drawSvc : "clear current draw"
+
+drawSvc --> dbmod
+gamSvc --> dbmod
+statsSvc --> dbmod
+aiSvc --> dbmod
+backupSvc --> dbmod
+dbmod --> sqlite
+routes --> files : multer upload / download
+backupSvc --> files
+aiSvc --> claude : "HTTPS, only with a key"
+@enduml
+....
+
 == 5.2 Whitebox: Server
 
 ....
@@ -31,13 +110,18 @@ server/src/
 │   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
 │   ├── gamification.ts      GET /api/gamification
 │   ├── settings.ts          key-value settings
-│   └── ai.ts                status, estimate, breakdown, plan-goal, generate-tasks
+│   ├── backup.ts            GET /api/backup/export, POST /api/backup/import (ADR-26)
+│   ├── cardArt.ts           GET /api/card-art — cache-only batch reads (#114),
+│   │                        deliberately not under /api/tasks/:id (never generates)
+│   └── ai.ts                status, key, estimate, breakdown, plan-goal, generate-tasks
 └── services/                Domain logic
     ├── drawService.ts       drawable predicate + weight formula + roulette selection + current draw
     ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation
     │                        accuracy + per-category bias (coaching input, ADR-27)
     ├── activityService.ts   per-day card derivation for the history skyline (pure core + SQL fetch)
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
+    ├── streak.ts            pure streak fold: rest days, freeze tokens (ADR-28)
+    ├── backupService.ts     zip export/import of app.db + files/ (ADR-26)
     ├── aiService.ts         Anthropic client, material blocks, prompts, token guard
     ├── aiPostprocess.ts     deterministic generate-tasks shaping (ADR-14): pure, SDK-/DB-free
     ├── svgSanitizer.ts      allowlist re-serializer for model-written SVG (ADR-22): pure

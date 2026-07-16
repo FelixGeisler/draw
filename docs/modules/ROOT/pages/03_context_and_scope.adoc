@@ -2,25 +2,34 @@
 
 == 3.1 Business Context
 
+[plantuml,c4-system-context,svg]
 ....
-                 ┌──────────────────────────────┐
-   uses browser  │            Draw              │   HTTPS (only when
-  ┌──────────┐   │  ┌────────┐    ┌──────────┐  │   AI is used)
-  │   User   │◄──┼─►│ Client │◄──►│  Server  │◄─┼──────────► Anthropic
-  └──────────┘   │  │ (Vite/ │    │(Express+ │  │            Claude API
-       ▲         │  │ React) │    │ SQLite)  │  │
-       │         │  └────────┘    └────▲─────┘  │
-       │         │                     │ HTTP   │
-       │         │              ┌──────┴─────┐  │
-       │         │              │ MCP server │  │
-       │         │              │  (stdio)   │  │
-       │         └──────────────┴──────▲─────┴──┘
-       │ converses,                    │ stdio (JSON-RPC),
-       │ approves tool calls           │ localhost only
-  ┌────┴──────────────────────────┐    │
-  │ MCP client                    │◄───┘
-  │ (Claude Code, Claude Desktop) │
-  └───────────────────────────────┘
+@startuml
+!include <C4/C4_Context>
+
+HIDE_STEREOTYPE()
+LAYOUT_WITH_LEGEND()
+
+Person(user, "User", "Plans work, draws cards, tracks time")
+System_Ext(mcpClient, "MCP client", "Claude Code / Claude Desktop —\nconverses, approves every write")
+
+System_Boundary(draw, "Draw (localhost only)") {
+  Container(client, "Client", "React 19 + Vite SPA", "Draw page, capture, tasks,\ngoals, stats, history")
+  Container(server, "Server", "Express 5 + better-sqlite3", "REST API, domain services,\nSQLite + uploaded files")
+  Container(mcpServer, "MCP server", "stdio JSON-RPC adapter", "Domain tools + resources;\nno domain logic, never opens the DB")
+}
+
+System_Ext(claude, "Anthropic Claude API", "Breakdown, backward planning,\ntask generation, card art")
+
+Rel(user, client, "Uses", "browser, HTTP :5173")
+Rel(client, server, "JSON REST /api/*", "HTTP :5173 → proxy → :3001")
+Rel(user, mcpClient, "Converses,\napproves tool calls")
+Rel(mcpClient, mcpServer, "Tool calls / resource reads", "stdio (JSON-RPC)")
+Rel(mcpServer, server, "The same REST the client uses", "HTTP 127.0.0.1:3001")
+Rel(server, claude, "Structured-output requests\n(only when a key is set)", "HTTPS")
+
+SHOW_LEGEND()
+@enduml
 ....
 
 [cols="1,2,2",options="header"]

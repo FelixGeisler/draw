@@ -2,13 +2,50 @@
 
 There is no production deployment — the application runs on the owner's machine.
 
+[plantuml,deployment,svg]
 ....
-Windows 11 PC
-└── Node.js 22+ process tree (npm run dev → concurrently)
-    ├── tsx watch server/src/index.ts     Express on 127.0.0.1:3001 (API_PORT)
-    │     ├── server/data/app.db          SQLite (WAL mode)
-    │     └── server/data/files/          uploaded goal materials
-    └── vite                              client on :5173, /api proxied to :3001
+@startuml
+skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam componentStyle rectangle
+
+node "Windows 11 PC" as pc {
+  component "Browser\nlocalhost:5173" as browser
+
+  node "Node.js 22+ — npm run dev (concurrently)" as devtree {
+    component "vite\nclient on :5173\n/api proxied to :3001" as vite
+    component "tsx watch server/src/index.ts\nExpress on 127.0.0.1:3001 (API_PORT)" as express
+  }
+
+  node "MCP client process\nClaude Code / Claude Desktop" as mcpclient {
+    component "npm run mcp -w server\n(tsx src/mcp.ts, committed .mcp.json)" as mcpsrv
+  }
+
+  folder "server/data/  (gitignored)" as data {
+    database "app.db\nSQLite, WAL mode" as db
+    folder "files/\nuploaded goal materials" as files
+  }
+
+  artifact "server/.env\nAPI_PORT (default 3001)\nANTHROPIC_API_KEY — fallback only:\nthe Settings-UI key in app.db wins" as env
+}
+
+cloud "api.anthropic.com\nClaude API" as claude
+
+browser --> vite : HTTP :5173
+vite --> express : proxy /api → :3001
+express --> db
+express --> files
+env ..> express : dotenv at startup
+mcpclient --> mcpsrv : stdio (JSON-RPC)
+mcpsrv --> express : HTTP 127.0.0.1:3001\n(DRAW_API_URL)
+express --> claude : HTTPS — only when an AI\nfeature is invoked with a key
+
+note bottom of pc
+  Nothing binds a public interface: Express binds 127.0.0.1
+  explicitly, and the MCP server is a second LOCAL consumer
+  of the same loopback API (ADR-19). No auth, no Docker.
+end note
+@enduml
 ....
 
 [cols="1,3",options="header"]
