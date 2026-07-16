@@ -1,4 +1,5 @@
 import { db, getSetting, getSettingString } from "../db.js";
+import type { AchievementKey } from "../../../shared/achievementKeys.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
 import {
   computeStreak,
@@ -294,7 +295,11 @@ function localDate(d: Date): string {
 // Achievements
 
 export interface AchievementDef {
-  key: string;
+  /* Typed against shared/achievementKeys.ts rather than `string` (#124): the
+     client tiers achievements by key for rarity, so a definition added here
+     with an unlisted key fails this typecheck — which in turn forces the key
+     into the shared list, which forces the client to give it a tier. */
+  key: AchievementKey;
   title: string;
   emoji: string;
   description: string;

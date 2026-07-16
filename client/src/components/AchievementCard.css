@@ -12,14 +12,15 @@
 
 .ach-collection {
   display: grid;
-  /* The card is portrait (5:7, the 300x420 draw card's ratio); the column
-     minimum plus that aspect-ratio drives the height — no fixed px height, so
-     a long hint line grows the row instead of spilling out of the face. */
+  /* The card is portrait (5:7, the 300x420 draw card's ratio): the column width
+     and that aspect-ratio FIX the height, and .ach-card-inner clips. The
+     descriptions are short — the tallest caption is ~52px at the narrowest
+     column this grid produces, against ~200px of headroom — but a long one
+     would clip silently rather than grow the row. */
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 14px;
   margin: 0;
   padding: 0;
-  list-style: none;
 }
 
 .ach-card {

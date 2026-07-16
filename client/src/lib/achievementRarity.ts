@@ -18,11 +18,18 @@
  * Kept as an explicit table rather than derived from the key (e.g. parsing
  * "streak_30"): difficulty is a design judgement per achievement, not a
  * function of its name — `level_5` and `level_10` differ by a grind, not by a
- * number. The distribution (2 common / 4 rare / 2 epic / 2 legendary) is
- * pinned in achievementRarity.test.ts, so adding a server-side achievement
- * without giving it a tier fails the unit suite rather than silently shipping
- * a plain card.
+ * number. The distribution (2 common / 4 rare / 2 epic / 2 legendary) is pinned
+ * in achievementRarity.test.ts.
+ *
+ * The table is keyed off shared/achievementKeys.ts, the same list the server's
+ * ACHIEVEMENTS definitions are typed against — so adding a server-side
+ * achievement without giving it a tier fails this typecheck (the `satisfies`
+ * below is exhaustive over AchievementKey) and the unit suite, rather than
+ * silently shipping a plain card. The import is type-only, so the shared list
+ * never reaches the bundle: the payload still drives the grid at runtime.
  */
+import type { AchievementKey } from "../../../shared/achievementKeys";
+
 export type AchievementRarity = "legendary" | "epic" | "rare" | "common";
 
 const RARITY = new Map<string, AchievementRarity>(Object.entries({
@@ -36,7 +43,9 @@ const RARITY = new Map<string, AchievementRarity>(Object.entries({
   leverage_master: "epic", // ≥60% of a week's tracked time on 4–5★ — sustained, not a single act
   streak_30: "legendary", // 30 completed days in ONE unbroken streak
   deck_clearer: "legendary", // empty the whole drawable deck by completing it
-} satisfies Record<string, AchievementRarity>));
+  // Exhaustive over AchievementKey, not Record<string, …>: a key added to the
+  // shared list without a tier here is a compile error, not a silent common.
+} satisfies Record<AchievementKey, AchievementRarity>));
 
 /**
  * Unknown key -> "common": the payload drives the grid, so a future

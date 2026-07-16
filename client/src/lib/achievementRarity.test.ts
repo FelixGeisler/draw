@@ -1,17 +1,24 @@
 import { describe, expect, it } from "vitest";
 import { achievementRarity, type AchievementRarity } from "./achievementRarity";
+import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys";
 
 // Pins the tier table of issue #124. Rarity is a pure function of the
 // achievement key — no randomness, nothing stored, no server involvement
 // (ADR-5: the gamification payload is untouched by this feature).
 //
-// The keys below MUST stay in sync with ACHIEVEMENTS in
-// server/src/services/gamificationService.ts. That list is server-side and
-// this is a client unit test, so it cannot import it — instead the full set is
-// spelled out here: adding an achievement server-side without giving it a tier
-// fails "every shipped achievement key has an explicit tier" below rather than
-// silently shipping a plain card.
-const SHIPPED: Record<string, AchievementRarity> = {
+// REVIEWED is the tier *judgement* — the part a human signed off on, which no
+// list can derive. The KEY SET it must cover is not hand-copied: it comes from
+// shared/achievementKeys.ts, the same list the server's ACHIEVEMENTS
+// definitions are typed against (a definition with an unlisted key fails the
+// server typecheck). So adding an achievement server-side forces a key into the
+// shared list, and "covers exactly the shipped achievement key set" below then
+// fails until someone makes a deliberate tier call here.
+//
+// The importable list is why this works: a client unit test cannot import
+// gamificationService (it pulls in db.js and better-sqlite3), which is what
+// made an earlier hand-copied version of this list unable to notice an
+// eleventh achievement. Same shape as shared/drawableVectors.ts (ADR-2).
+const REVIEWED: Record<AchievementKey, AchievementRarity> = {
   first_draw: "common",
   first_completion: "common",
   streak_7: "rare",
@@ -25,14 +32,20 @@ const SHIPPED: Record<string, AchievementRarity> = {
 };
 
 describe("achievementRarity", () => {
+  // The drift guard: an achievement added server-side lands in the shared key
+  // list, and this fails until it is given a tier above.
+  it("covers exactly the shipped achievement key set — no untiered achievement", () => {
+    expect(Object.keys(REVIEWED).sort()).toEqual([...ACHIEVEMENT_KEYS].sort());
+  });
+
   it("maps every shipped achievement key to its reviewed tier", () => {
-    for (const [key, tier] of Object.entries(SHIPPED)) {
-      expect(achievementRarity(key), key).toBe(tier);
+    for (const key of ACHIEVEMENT_KEYS) {
+      expect(achievementRarity(key), key).toBe(REVIEWED[key]);
     }
   });
 
   it("keeps the reviewed distribution: 2 common / 4 rare / 2 epic / 2 legendary", () => {
-    const counts = Object.keys(SHIPPED).reduce<Record<string, number>>((acc, key) => {
+    const counts = ACHIEVEMENT_KEYS.reduce<Record<string, number>>((acc, key) => {
       const tier = achievementRarity(key);
       acc[tier] = (acc[tier] ?? 0) + 1;
       return acc;
