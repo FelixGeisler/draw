@@ -5,10 +5,9 @@
 [plantuml,c4-system-context,svg]
 ....
 @startuml
-!include <C4/C4_Context>
-
-HIDE_STEREOTYPE()
-LAYOUT_WITH_LEGEND()
+' C4_Container, not C4_Context: the Container() macro lives there, and the
+' boundary below is drawn at container level (client / server / MCP adapter).
+!include <C4/C4_Container>
 
 Person(user, "User", "Plans work, draws cards, tracks time")
 System_Ext(mcpClient, "MCP client", "Claude Code / Claude Desktop —\nconverses, approves every write")

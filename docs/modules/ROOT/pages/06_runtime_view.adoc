@@ -187,7 +187,7 @@ participant "AiSuggestionPanel\n(+ useAi)" as UI
 participant "routes/ai.ts" as Route
 participant "aiService" as AI
 database "SQLite" as DB
-cloud "Claude API" as Claude
+participant "Claude API" as Claude
 
 == Token gate (cheap, before anything is paid for) ==
 User -> UI : pick goal + materials, write notes
