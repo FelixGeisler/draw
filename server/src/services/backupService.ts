@@ -90,6 +90,59 @@ export function fileEntryTarget(entryName: string, stagingDir: string): string |
   return target;
 }
 
+// Every temp artifact this module writes is named `backup-<phase>-<stem>` in
+// DATA_DIR, which is what makes the boot sweep below possible — keep the
+// prefixes and the helper in sync.
+const IMPORT_PREFIX = "backup-import-";
+const EXPORT_PREFIX = "backup-export-";
+/** Multer's upload target (routes/backup.ts) — swept, never removed. */
+const UPLOADS_DIR = "backup-uploads";
+
+let tempSeq = 0;
+
+/**
+ * A collision-free stem for the temp artifacts. `Date.now()` alone was not
+ * (#103): two exports started in the same millisecond produced the same
+ * `backup-export-<ms>.db`, and `VACUUM INTO` refuses to write an existing
+ * file — the second export died as a raw 500 for no reason the user could
+ * see or avoid. The counter makes it unique within the process (which is all
+ * a single-user local app has, ADR-26); the timestamp stays in front so an
+ * orphan left by a hard kill is still human-readable.
+ */
+function tempStem(): string {
+  return `${Date.now()}-${++tempSeq}`;
+}
+
+/**
+ * Sweep crash-orphaned temp artifacts. Every backup path already cleans up in
+ * a `finally`, but a hard kill (or a crash mid-swap) skips those — and nothing
+ * else ever would: the leftovers are a full DB snapshot and a full zip each,
+ * so a couple of interrupted exports quietly cost gigabytes in the user's data
+ * directory (#103). Boot is the one moment where NONE of these can belong to a
+ * live request, which is exactly why the sweep lives here and not on a timer.
+ * `app.db`, `app.db.bak`, `files/` and `files.bak/` are ordinary state and
+ * match no prefix. The uploads DIRECTORY is emptied rather than removed:
+ * multer creates it once at module load, so deleting it would ENOENT the next
+ * import instead of cleaning anything.
+ */
+export function sweepBackupTemp(): string[] {
+  const swept: string[] = [];
+  const uploads = path.join(dataDir, UPLOADS_DIR);
+  if (fs.existsSync(uploads)) {
+    for (const name of fs.readdirSync(uploads)) {
+      fs.rmSync(path.join(uploads, name), { recursive: true, force: true });
+      swept.push(`${UPLOADS_DIR}/${name}`);
+    }
+  }
+  for (const name of fs.readdirSync(dataDir)) {
+    if (name.startsWith(IMPORT_PREFIX) || name.startsWith(EXPORT_PREFIX)) {
+      fs.rmSync(path.join(dataDir, name), { recursive: true, force: true });
+      swept.push(name);
+    }
+  }
+  return swept;
+}
+
 function countRows(handle: Database.Database): ImportSummary {
   const count = (table: string) =>
     (handle.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
@@ -103,9 +156,9 @@ function countRows(handle: Database.Database): ImportSummary {
  * `app.db-wal`, so copying `app.db` itself would silently drop them.
  */
 export function createBackupArchive(): string {
-  const stamp = Date.now();
-  const snapshotPath = path.join(dataDir, `backup-export-${stamp}.db`);
-  const zipPath = path.join(dataDir, `backup-export-${stamp}.zip`);
+  const stem = tempStem();
+  const snapshotPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}.db`);
+  const zipPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}.zip`);
   db.prepare("VACUUM INTO ?").run(snapshotPath);
   try {
     // Privacy (ADR-11): backups get copied around, so the plaintext API key
@@ -149,9 +202,9 @@ export function exportFilename(now: Date): string {
  *     the atomic commit point, then reopen and migrate forward.
  */
 export function importBackupArchive(zipPath: string): ImportSummary {
-  const stamp = Date.now();
-  const stagedDbPath = path.join(dataDir, `backup-import-${stamp}.db`);
-  const stagedFilesDir = path.join(dataDir, `backup-import-files-${stamp}`);
+  const stem = tempStem();
+  const stagedDbPath = path.join(dataDir, `${IMPORT_PREFIX}${stem}.db`);
+  const stagedFilesDir = path.join(dataDir, `${IMPORT_PREFIX}files-${stem}`);
   try {
     stageAndValidate(zipPath, stagedDbPath, stagedFilesDir);
     swapIn(stagedDbPath, stagedFilesDir);
@@ -274,6 +327,14 @@ export function stageFileEntries(entries: AdmZip.IZipEntry[], stagedFilesDir: st
  *    would otherwise be replayed into the RESTORED database on reopen — the
  *    torn-DB hazard this ordering exists to prevent. After the checkpoint the
  *    WAL holds nothing, so deleting it loses nothing.
+ *  - …but only if ours was the LAST connection, which is the single-process
+ *    assumption ADR-26 makes and #103 stopped taking on faith: SQLite deletes
+ *    `-wal`/`-shm` when the last connection to a database closes, so their
+ *    survival past our close() is a direct read of "someone else is still
+ *    attached" (a second server on the same DATA_DIR, a sqlite3 shell). That
+ *    other connection would keep writing into a WAL we are about to delete
+ *    and then find a completely different file under it. Checked BEFORE the
+ *    first destructive step, so the abort costs nothing but the reopen.
  *  - `app.db` is COPIED to `app.db.bak` (not renamed): the live path never
  *    disappears, so a crash before the final rename still boots the complete
  *    old database instead of auto-creating a fresh empty one.
@@ -287,6 +348,14 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string) {
   db.pragma("wal_checkpoint(TRUNCATE)");
   db.close();
   try {
+    if (fs.existsSync(`${dbPath}-wal`) || fs.existsSync(`${dbPath}-shm`)) {
+      throw new BackupError(
+        409,
+        "another process still has the database open — the restore was cancelled before " +
+          "anything changed. Close every other instance of the app (and any sqlite shell on " +
+          "data/app.db), then try again",
+      );
+    }
     fs.rmSync(`${dbPath}-wal`, { force: true });
     fs.rmSync(`${dbPath}-shm`, { force: true });
     fs.copyFileSync(dbPath, bakPath);

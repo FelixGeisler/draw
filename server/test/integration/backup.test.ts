@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import AdmZip from "adm-zip";
 import Database from "better-sqlite3";
@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
 import { CURRENT_VERSION } from "../../src/db.js";
-import { MANIFEST_APP } from "../../src/services/backupService.js";
+import { createBackupArchive, MANIFEST_APP } from "../../src/services/backupService.js";
 
 // Backup export/import (#61, ADR-26). User-data-critical: the round trip
 // must reproduce EVERYTHING, including a material file on disk, and every
@@ -468,5 +468,102 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     } finally {
       bak.close();
     }
+  });
+});
+
+// Issue #103: the temp artifacts around export/import. All three items share a
+// theme — the happy path was fine, the interrupted/contended paths were not.
+// Last describe in the file: these tests create and destroy their own
+// artifacts, and the boot sweep would otherwise run under the earlier ones.
+describe("temp-artifact hygiene (#103)", () => {
+  const orphans = () =>
+    fs
+      .readdirSync(dataDir())
+      .filter((n) => n.startsWith("backup-export-") || n.startsWith("backup-import-"));
+
+  it("two exports in the same millisecond both succeed", async () => {
+    // The stem was `Date.now()` alone, so a same-millisecond pair collided on
+    // one path — and `VACUUM INTO` refuses an existing file, so the second
+    // export died as a raw 500. Freezing the clock makes that deterministic
+    // instead of a race nobody can reproduce on demand.
+    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    let first: string;
+    let second: string;
+    try {
+      first = createBackupArchive();
+      second = createBackupArchive();
+    } finally {
+      now.mockRestore();
+    }
+    expect(second).not.toBe(first);
+    expect(fs.existsSync(first)).toBe(true);
+    expect(fs.existsSync(second)).toBe(true);
+    // Both are real archives, not one truncated over the other.
+    for (const zipPath of [first, second]) {
+      expect(new AdmZip(zipPath).getEntries().map((e) => e.entryName)).toContain("app.db");
+      fs.rmSync(zipPath, { force: true });
+    }
+  });
+
+  it("sweeps crash-orphaned temp artifacts at boot, keeping real state and the uploads dir", async () => {
+    const uploads = path.join(dataDir(), "backup-uploads");
+    fs.mkdirSync(uploads, { recursive: true });
+    // Exactly what a `kill -9` mid-export/-import/-upload leaves behind.
+    fs.writeFileSync(path.join(uploads, "a1b2c3d4"), "half-received upload");
+    fs.writeFileSync(path.join(dataDir(), "backup-export-1700000000000-1.zip"), "orphan zip");
+    fs.writeFileSync(path.join(dataDir(), "backup-export-1700000000000-1.db"), "orphan snapshot");
+    fs.writeFileSync(path.join(dataDir(), "backup-import-1700000000000-1.db"), "orphan staged db");
+    fs.mkdirSync(path.join(dataDir(), "backup-import-files-1700000000000-1"), { recursive: true });
+    expect(orphans()).toHaveLength(4);
+
+    await freshApp(); // the boot path — createApp() sweeps before serving
+
+    expect(orphans()).toEqual([]);
+    expect(fs.readdirSync(uploads)).toEqual([]);
+    // Emptied, never removed: multer creates this once at module load, so
+    // deleting it would ENOENT the next import instead of cleaning anything.
+    expect(fs.existsSync(uploads)).toBe(true);
+    // Real state is not "temp" and must survive — including the swap's own
+    // safety copies, which look adjacent but are the user's last resort.
+    expect(fs.existsSync(path.join(dataDir(), "app.db"))).toBe(true);
+    expect(fs.existsSync(filesDir())).toBe(true);
+    expect(fs.existsSync(path.join(dataDir(), "app.db.bak"))).toBe(true);
+    expect(fs.existsSync(path.join(dataDir(), "files.bak"))).toBe(true);
+    // Still serving from the swept directory.
+    await request(app).get("/api/tasks").expect(200);
+  });
+
+  it("aborts the swap when another connection still holds the database open", async () => {
+    const archive = (await exportArchive()).body;
+    const before = await apiSnapshot();
+
+    // SQLite deletes -wal/-shm when the LAST connection closes, so a second
+    // one surviving our close() is the tell. This is the single-process
+    // assumption ADR-26 used to take on faith: without the check the import
+    // deletes a WAL this connection is still writing into, then swaps a
+    // different file underneath it.
+    const squatter = new Database(path.join(dataDir(), "app.db"));
+    let res;
+    try {
+      squatter.pragma("journal_mode = WAL");
+      squatter.prepare("SELECT COUNT(*) AS n FROM tasks").get();
+      res = await importArchive(archive);
+    } finally {
+      squatter.close();
+    }
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toMatch(/another process still has the database open/);
+    // Aborted BEFORE the first destructive step: nothing moved, and the live
+    // handle was reopened, so the app is still serving.
+    expect(await apiSnapshot()).toEqual(before);
+  });
+
+  it("…and the very same archive imports fine once the other connection is gone", async () => {
+    // Proves the 409 above was the squatter, not a broken archive — and that
+    // the abort left the import path fully working.
+    const archive = (await exportArchive()).body;
+    const res = await importArchive(archive);
+    expect(res.status).toBe(200);
   });
 });

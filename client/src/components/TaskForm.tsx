@@ -240,8 +240,17 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
       {hint && (
         // Dim, non-interactive, own row: appearing/disappearing while the
         // user types must never shift the input they are typing into.
+        // aria-live polite (#103): the hint is advice that appears silently
+        // BELOW the field being typed in — a sighted user catches it in
+        // passing, a screen-reader user would never learn it existed. Polite,
+        // never assertive: it must wait for a pause in typing, exactly like
+        // the visual version waits to be noticed. Kept conditional (matching
+        // the role="alert" errors elsewhere in this form) rather than an
+        // always-mounted region: a permanent flex-basis 100% row would add
+        // the empty line this layout exists to avoid.
         <div
           data-testid="estimate-hint"
+          aria-live="polite"
           style={{ flexBasis: "100%", color: "var(--text-dim)", fontSize: 12 }}
         >
           {hintText(hint, categories.find((c) => c.id === categoryId)?.name ?? "")}

@@ -16,6 +16,17 @@ npm install
 npm run dev        # Express :3001 + Vite :5173
 ```
 
+**Run `npm install` after every pull.** The workspaces are not self-healing: a
+`node_modules` left over from an older commit crashes the server on boot with a
+bare module-not-found (a missing runtime dependency looks nothing like "your
+tree is stale"), and there is no postinstall hook or CI check that catches it
+for you.
+
+Vite comes up in under a second while the server is still running migrations,
+so `npm run dev` waits for `GET /api/health` before proxying the first `/api`
+call — one `waiting for … to finish booting…` line at start is expected, not an
+error.
+
 Type checks: `npm run build -w server` and `npx tsc --noEmit -p client/tsconfig.json`.
 
 ## Tests — required for every PR

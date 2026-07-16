@@ -45,6 +45,26 @@ function normalizeRestWeekdays(value: unknown): { value?: string; error?: string
   return { value: JSON.stringify(unique) };
 }
 
+/**
+ * Validate warmup_every_hours (#103). Zero is kept as an INTENTIONAL
+ * off-switch rather than clamped away: "the warm-up is always available" is a
+ * coherent thing to want — the escape hatch stays a deliberate deal of the
+ * smallest card, never a re-roll (the route still refuses to deal while a
+ * card stands, ADR-30c), so an unlimited allowance loosens the pacing, not
+ * the commitment. What was actually broken is that ANY garbage got here: a
+ * negative silently disabled the limit while reading like a limit, and a
+ * non-numeric string fell back to the default 8 behind the user's back —
+ * both of them settings that lie about what they do. Integers only, >= 0,
+ * with 0 named.
+ */
+function warmupEveryHoursError(value: unknown): string | null {
+  const parsed = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+  if (!Number.isInteger(parsed) || (parsed as number) < 0) {
+    return "warmup_every_hours must be a non-negative integer (hours) — 0 turns the rate limit off";
+  }
+  return null;
+}
+
 settingsRouter.get("/", (_req, res) => {
   res.json(publicSettings());
 });
@@ -58,6 +78,10 @@ settingsRouter.patch("/", (req, res) => {
     const normalized = normalizeRestWeekdays(body[REST_WEEKDAYS_SETTING]);
     if (normalized.error) return res.status(400).json({ error: normalized.error });
     restWeekdays = normalized.value;
+  }
+  if ("warmup_every_hours" in body) {
+    const error = warmupEveryHoursError(body.warmup_every_hours);
+    if (error) return res.status(400).json({ error });
   }
   const allowed = [
     "max_draw_effort",
