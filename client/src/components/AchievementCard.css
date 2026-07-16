@@ -1,0 +1,233 @@
+/* Achievement collection (issue #124). Achievements read as collectible cards
+   in the #123 language (ADR-33): full-bleed committed art under a legibility
+   scrim, the name, the earned date, and a rarity sheen — nothing else. The
+   rejected TCG furniture (ATK/DEF box, type line, star row) appears nowhere.
+
+   Rarity is a GRADATION of the two shipped sheens, never a third language:
+     legendary  --sheen-holo, drifting on its own (the drawn 5★ card's treat)
+     epic       --sheen-holo at reduced opacity, sweep on hover/focus
+     rare       --sheen-silver, sweep on hover/focus
+     common     no sheen at all — plain is the absence of one
+   Only EARNED cards shimmer: an unearned reward must not glitter. */
+
+.ach-collection {
+  display: grid;
+  /* The card is portrait (5:7, the 300x420 draw card's ratio): the column width
+     and that aspect-ratio FIX the height, and .ach-card-inner clips. The
+     descriptions are short — the tallest caption is ~52px at the narrowest
+     column this grid produces, against ~200px of headroom — but a long one
+     would clip silently rather than grow the row. */
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+}
+
+.ach-card {
+  aspect-ratio: 5 / 7;
+}
+
+.ach-card-inner {
+  position: relative; /* anchors art, scrim and the ::after sheen */
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end; /* the caption sits at the foot of the art */
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(160deg, #232735, #1b1e27);
+  padding: 12px;
+  overflow: hidden; /* clips art and sheen to the rounded corners */
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+.ach-art {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* Light over the art, dense under the caption band — the committed art is
+   authored dark, but the text still never sits raw on it. */
+.ach-art-scrim {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    rgba(18, 20, 26, 0.25),
+    rgba(18, 20, 26, 0.15) 42%,
+    rgba(18, 20, 26, 0.82)
+  );
+}
+
+/* The caption paints above the absolutely positioned art layers (positioned
+   boxes with z-index: auto otherwise cover in-flow content) — the ::after
+   sheen still composes above it in turn. Same paint-order pattern as the drawn
+   card and the trophy pile, but named rather than expressed as a :not() over
+   the inner's children: a :not(.a, .b) selector carries a class's specificity
+   (0,2,0 with the parent), which would out-rank and silently un-position the
+   absolutely positioned .ach-glyph and .ach-sr below. */
+.ach-card-inner > .ach-card-body {
+  position: relative;
+}
+
+/* Degraded face: no art for this key -> the emoji carries it. */
+.ach-glyph {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 44px;
+  opacity: 0.9;
+}
+
+.ach-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ach-name {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.25;
+  text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
+}
+
+.ach-date {
+  color: var(--warn);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
+}
+
+.ach-hint {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
+}
+
+/* Rarity and locked-state are paint; this is the same fact as text, for
+   screen readers only (the visible name/date/hint are real DOM already). */
+.ach-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- Locked: the card is face-DOWN ------------------------------------- */
+
+/* The app's own card back (the .draw-face.front weave), so a locked
+   achievement reads as an undrawn card rather than a broken tile. */
+.ach-card.locked .ach-card-inner {
+  background:
+    radial-gradient(circle at 30% 30%, rgba(79, 140, 255, 0.25), transparent 60%),
+    repeating-linear-gradient(45deg, #1b1e27 0 14px, #20242f 14px 28px);
+  box-shadow: none;
+}
+
+/* The art survives as a grey silhouette behind the weave: the shape teases
+   what is behind the card without spending the reveal. Tuned against the real
+   ten — darker than this and the volcano, the dunes and the bird flattened
+   into featureless blocks, which reads as a broken tile rather than a card
+   waiting to be turned. */
+.ach-card.locked .ach-art {
+  filter: grayscale(1) brightness(0.62) contrast(1.15);
+  opacity: 0.5;
+}
+
+.ach-card.locked .ach-art-scrim {
+  background: linear-gradient(
+    rgba(18, 20, 26, 0.45),
+    rgba(18, 20, 26, 0.35) 42%,
+    rgba(18, 20, 26, 0.86)
+  );
+}
+
+.ach-card.locked .ach-name {
+  color: var(--text-dim);
+}
+
+/* ---- Rarity sheens ------------------------------------------------------ */
+
+/* Overlay pseudo-element above the whole face (art included), clipped by the
+   inner's overflow: hidden. Oversized so the sweep can move the band without
+   ever changing the element's box. */
+.ach-card.unlocked.rarity-legendary .ach-card-inner::after,
+.ach-card.unlocked.rarity-epic .ach-card-inner::after,
+.ach-card.unlocked.rarity-rare .ach-card-inner::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-size: 250% 250%;
+  background-position: 50% 50%;
+}
+
+.ach-card.unlocked.rarity-legendary .ach-card-inner::after {
+  background-image: var(--sheen-holo);
+}
+
+/* Epic: the same iridescent band, dialed down — a tier below legendary in
+   intensity, not a competing language (#123 shipped exactly two sheens). */
+.ach-card.unlocked.rarity-epic .ach-card-inner::after {
+  background-image: var(--sheen-holo);
+  opacity: 0.5;
+}
+
+.ach-card.unlocked.rarity-rare .ach-card-inner::after {
+  background-image: var(--sheen-silver);
+}
+
+/* Borders grade with the tier too: the sheen alone is easy to miss on a
+   150px card, and this stays paint — no furniture added to the face. */
+.ach-card.unlocked.rarity-legendary .ach-card-inner {
+  border-color: rgba(255, 190, 120, 0.55);
+}
+
+.ach-card.unlocked.rarity-epic .ach-card-inner {
+  border-color: rgba(150, 170, 255, 0.45);
+}
+
+.ach-card.unlocked.rarity-rare .ach-card-inner {
+  border-color: rgba(214, 224, 240, 0.3);
+}
+
+/* Motion, gated behind no-preference (never overridden in a reduce block) so
+   prefers-reduced-motion keeps every sheen painted but STATIC, with no
+   specificity contest — the #62/#123 pattern.
+
+   Legendary drifts unprompted: the top tier is the one card on the shelf that
+   moves by itself, exactly like the standing drawn 5★ card. Epic and rare
+   sweep only on hover/focus — a grid of ten shimmering cards would be a
+   casino. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes ach-sheen-drift {
+    from {
+      background-position: 0% 0%;
+    }
+    to {
+      background-position: 100% 100%;
+    }
+  }
+
+  .ach-card.unlocked.rarity-legendary .ach-card-inner::after {
+    animation: ach-sheen-drift 7s ease-in-out infinite alternate;
+  }
+
+  .ach-card.unlocked.rarity-epic:hover .ach-card-inner::after,
+  .ach-card.unlocked.rarity-epic:focus-within .ach-card-inner::after,
+  .ach-card.unlocked.rarity-rare:hover .ach-card-inner::after,
+  .ach-card.unlocked.rarity-rare:focus-within .ach-card-inner::after {
+    animation: ach-sheen-drift 3.5s ease-in-out infinite alternate;
+  }
+}

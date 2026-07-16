@@ -3,6 +3,7 @@ import request from "supertest";
 import type express from "express";
 import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
+import { ACHIEVEMENT_KEYS } from "../../../shared/achievementKeys.js";
 
 let app: express.Express;
 let db: Database.Database;
@@ -19,6 +20,24 @@ describe("gamification", () => {
     expect(g.achievements.every((a: { unlockedAt: string | null }) => a.unlockedAt === null)).toBe(
       true,
     );
+  });
+
+  // The server half of the shared achievement-key contract (#124). The client
+  // half is client/src/lib/achievementRarity.test.ts, which pins that every key
+  // in the SAME shared list has an explicit rarity tier — so an achievement
+  // added here cannot silently ship as an untiered plain card.
+  //
+  // AchievementDef.key is typed as AchievementKey, so a definition with an
+  // unlisted key already fails the server typecheck. This pins the direction a
+  // type cannot express from an array literal: no key in the shared list is
+  // missing a definition, and none is defined twice. Asserted against the real
+  // payload rather than the ACHIEVEMENTS constant — the shared list is a claim
+  // about what the API actually ships.
+  it("ships exactly the shared achievement key set, each once", async () => {
+    const g = (await request(app).get("/api/gamification")).body;
+    const keys = g.achievements.map((a: { key: string }) => a.key);
+    expect([...keys].sort()).toEqual([...ACHIEVEMENT_KEYS].sort());
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it("pays the 1.5x bonus for drawn completions and unlocks first_completion", async () => {

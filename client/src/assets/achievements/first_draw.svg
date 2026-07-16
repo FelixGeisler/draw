@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="fd-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a2130"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="fd-glow" cx="50%" cy="40%" r="52%">
+      <stop offset="0" stop-color="#4f8cff" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fd-face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2f6ff"/>
+      <stop offset="1" stop-color="#a9c0ea"/>
+    </linearGradient>
+    <linearGradient id="fd-back" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b3348"/>
+      <stop offset="1" stop-color="#1d2331"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#fd-bg)"/>
+  <ellipse cx="150" cy="168" rx="150" ry="160" fill="url(#fd-glow)"/>
+
+  <!-- the deck still on the table -->
+  <g opacity=".95">
+    <rect x="88" y="266" width="118" height="118" rx="10" fill="url(#fd-back)" stroke="#39435e" transform="rotate(-9 147 325)"/>
+    <rect x="94" y="272" width="118" height="118" rx="10" fill="url(#fd-back)" stroke="#39435e" transform="rotate(-3 153 331)"/>
+    <rect x="98" y="278" width="118" height="118" rx="10" fill="url(#fd-back)" stroke="#4f8cff" stroke-opacity=".45"/>
+  </g>
+
+  <!-- the card coming out, tilted and lit -->
+  <g transform="rotate(-11 150 176)">
+    <rect x="98" y="96" width="104" height="150" rx="11" fill="#0d1017" opacity=".55" transform="translate(4 8)"/>
+    <rect x="98" y="96" width="104" height="150" rx="11" fill="url(#fd-face)" stroke="#dce7fb"/>
+    <rect x="106" y="104" width="88" height="134" rx="7" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+    <!-- pip: the app's suit is a lightning-quick decision -->
+    <path d="M158 124 L128 178 h20 l-8 44 32 -56 h-21 z" fill="#3b6fd8"/>
+  </g>
+
+  <!-- sparks of the pull -->
+  <g fill="#8fb6ff">
+    <circle cx="212" cy="150" r="3.5" opacity=".9"/>
+    <circle cx="228" cy="196" r="2.5" opacity=".7"/>
+    <circle cx="84" cy="176" r="3" opacity=".8"/>
+    <circle cx="70" cy="226" r="2" opacity=".55"/>
+    <circle cx="222" cy="112" r="2" opacity=".5"/>
+  </g>
+</svg>

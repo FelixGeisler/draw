@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="l5-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c1d2c"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="l5-glow" cx="50%" cy="40%" r="46%">
+      <stop offset="0" stop-color="#ffb64f" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#ffb64f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="l5-star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9a8"/>
+      <stop offset=".55" stop-color="#ffb64f"/>
+      <stop offset="1" stop-color="#e07f2c"/>
+    </linearGradient>
+    <linearGradient id="l5-trail" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb64f" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ffb64f" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#l5-bg)"/>
+  <ellipse cx="150" cy="168" rx="130" ry="140" fill="url(#l5-glow)"/>
+
+  <!-- the climb: five rungs of altitude already behind it -->
+  <g stroke="#2c3040" stroke-width="3" stroke-linecap="round">
+    <path d="M96 396 H204" opacity=".9"/>
+    <path d="M104 366 H196" opacity=".75"/>
+    <path d="M112 336 H188" opacity=".6"/>
+    <path d="M120 306 H180" opacity=".45"/>
+    <path d="M128 276 H172" opacity=".3"/>
+  </g>
+
+  <!-- ascent trail -->
+  <path d="M138 296 L150 246 L162 296 Z" fill="url(#l5-trail)"/>
+
+  <!-- one solid star, risen -->
+  <g transform="translate(150 162)">
+    <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z"
+          fill="#0d1017" opacity=".5" transform="translate(4 9)"/>
+    <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z"
+          fill="url(#l5-star)"/>
+    <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 Z" fill="#000" opacity=".12"/>
+    <path d="M0 -54 L15 -18 L54 -13 L25 13 L33 53 L0 33 Z" fill="#fff6dc" opacity=".3"/>
+  </g>
+
+  <!-- attendant sparks -->
+  <g fill="#ffe08a">
+    <circle cx="66" cy="106" r="3" opacity=".8"/>
+    <circle cx="238" cy="130" r="2.5" opacity=".7"/>
+    <circle cx="52" cy="196" r="2" opacity=".5"/>
+    <circle cx="252" cy="216" r="2.5" opacity=".55"/>
+  </g>
+</svg>

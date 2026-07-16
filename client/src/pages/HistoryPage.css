@@ -140,27 +140,19 @@
   pointer-events: none;
 }
 
+/* The gradients themselves live in index.css (--sheen-holo-dense /
+   --sheen-silver-dense, hoisted in #124). The DENSE pair, not the default one
+   the drawn card / trophy pile / achievement collection paint: these towers are
+   52px wide and can be 20px tall, and they paint the band at its natural size
+   rather than oversizing it for a sweep — the card-tuned band goes
+   near-invisible at that scale. Same language, small-surface scale; index.css
+   carries the two-scale rationale. */
 .hoc-card.rarity-holo .hoc-card-face::after {
-  background-image: linear-gradient(
-    115deg,
-    transparent 25%,
-    rgba(255, 110, 199, 0.22) 38%,
-    rgba(255, 226, 130, 0.18) 46%,
-    rgba(120, 255, 214, 0.2) 54%,
-    rgba(120, 170, 255, 0.22) 62%,
-    transparent 75%
-  );
+  background-image: var(--sheen-holo-dense);
 }
 
 .hoc-card.rarity-silver .hoc-card-face::after {
-  background-image: linear-gradient(
-    115deg,
-    transparent 30%,
-    rgba(220, 228, 244, 0.16) 42%,
-    rgba(255, 255, 255, 0.24) 50%,
-    rgba(220, 228, 244, 0.16) 58%,
-    transparent 70%
-  );
+  background-image: var(--sheen-silver-dense);
 }
 
 /* The details panel sits above the card, inside its DOM but absolutely

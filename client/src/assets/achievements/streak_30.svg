@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <!-- Composed inside y≈30..300: the caption band covers the foot of the face.
+
+       NOT a cone with a bright plume above it — that read as a rocket (crater
+       lip = engine bell, jets = exhaust, ash column = launch smoke). Nothing
+       bright stands above the summit on the centre line, and the mountain, not
+       the lava, is the subject: molten rock stays inside the caldera and never
+       crosses a rim into the sky, or the fire becomes the object and the rock
+       its backdrop. Rims are blunt and near-level (a sharp apex reads as
+       horns); the low one is on the left, so fire runs down that flank only.
+
+       Redrawing traps, one draft each: flows must be WIDE (the card scales this
+       viewBox x0.56, so 8 units lands as a 4px hairline = draped wire), must
+       CURVE along the flank (straight = an easel's legs), and must be ONE (two
+       of a length = matchsticks).
+
+       Escalation from streak_7 (🔥, one flame): same fire, same gradient stops,
+       now loose on a mountain. More fire, not liftoff. -->
+  <defs>
+    <linearGradient id="s30-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2e1a18"/>
+      <stop offset=".5" stop-color="#1a1420"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="s30-sky" cx="50%" cy="42%" r="56%">
+      <stop offset="0" stop-color="#ff6a3f" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#ff5f6b" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s30-rock" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3d3242"/>
+      <stop offset=".45" stop-color="#262029"/>
+      <stop offset="1" stop-color="#14121a"/>
+    </linearGradient>
+    <!-- bottom -> top: brightest at the crater, cooling as it runs down the
+         flank. Same stops as streak_7's flame. -->
+    <linearGradient id="s30-lava" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff5f3b"/>
+      <stop offset=".55" stop-color="#ff9a3c"/>
+      <stop offset="1" stop-color="#ffd36b"/>
+    </linearGradient>
+    <radialGradient id="s30-heat" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffb64f" stop-opacity=".6"/>
+      <stop offset="1" stop-color="#ff8c3f" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#s30-bg)"/>
+  <ellipse cx="150" cy="190" rx="172" ry="156" fill="url(#s30-sky)"/>
+
+  <!-- ash: wispy, drifting up and off to the right on the wind, never a column -->
+  <g fill="#6d5f7d" opacity=".3">
+    <circle cx="160" cy="134" r="18"/>
+    <circle cx="182" cy="110" r="23"/>
+    <circle cx="210" cy="86" r="20"/>
+    <circle cx="238" cy="68" r="14"/>
+    <circle cx="260" cy="56" r="9"/>
+    <circle cx="144" cy="112" r="11"/>
+    <circle cx="168" cy="82" r="10"/>
+  </g>
+
+  <!-- the crater's glow, sitting ON the notch: this carries the fire, so the
+       molten rock below does not have to be big enough to hijack the read -->
+  <ellipse cx="157" cy="176" rx="46" ry="24" fill="url(#s30-heat)"/>
+
+  <!-- The mountain: squat, wide, asymmetric; base runs off both edges. Left
+       flank long with ridge breaks, right flank steeper with a shoulder. Summit
+       truncated: blunt rims at y≈167 (left, LOW = the breach) and y≈163.5
+       (right, HIGH), caldera floor y≈180. -->
+  <path d="M -20 340
+           L 24 296
+           L 50 262
+           L 74 232
+           L 100 196
+           L 116 172
+           Q 124 162 134 172
+           Q 146 182 158 182
+           Q 172 181 182 168
+           Q 190 158 198 170
+           L 214 190
+           L 232 210
+           L 252 236
+           L 272 262
+           L 298 300
+           L 322 340 Z"
+        fill="url(#s30-rock)"/>
+
+  <!-- thin rim light along the right outline, separating rock from lit sky -->
+  <path d="M 198 170 L 214 190 L 232 210 L 252 236 L 272 262 L 298 300"
+        fill="none" stroke="#8a7590" stroke-width="2" opacity=".28"/>
+
+  <!-- Molten rock in the caldera: a lens between the notch's own surface (top
+       edge, traced exactly) and a sagging floor below it. Entirely inside the
+       rock — it never crosses a rim into the sky, which is what turned earlier
+       drafts into a bright hinged object. -->
+  <path d="M 134 172
+           Q 146 182 158 182
+           Q 172 181 182 168
+           L 180 178
+           Q 170 194 158 194
+           Q 145 193 136 180 Z"
+        fill="url(#s30-lava)"/>
+
+  <!-- Lava over the LOW left rim and down the outside. ONE flow, not a pair:
+       two flows of similar length side by side read as matchsticks lying on the
+       slope. It leaves the rim narrow and WIDENS into a lobe as the ground
+       flattens, which is both what a flow does and a silhouette that cannot be
+       mistaken for a rod. Its head touches the caldera lens, so the fire is
+       visibly one system. No mirror on the right flank. -->
+  <path d="M 122 166
+           C 112 186, 98 206, 84 228
+           C 79 238, 83 248, 93 249
+           C 104 250, 112 243, 110 231
+           C 108 218, 120 196, 138 175 Z"
+        fill="url(#s30-lava)"/>
+
+  <!-- cooling crust: breaks the flow so it reads as rock rather than a smooth
+       blade, and breaks the lobe's outline so the flow does not read as a
+       spoon (a narrow handle plus a round bowl) -->
+  <g fill="#2a2230" opacity=".45">
+    <ellipse cx="105" cy="201" rx="5.5" ry="2.4" transform="rotate(-56 105 201)"/>
+    <ellipse cx="97" cy="237" rx="8" ry="3" transform="rotate(-16 97 237)"/>
+    <ellipse cx="89" cy="225" rx="4" ry="2" transform="rotate(-40 89 225)"/>
+  </g>
+
+  <!-- bombs thrown clear, scattered off the wind side -->
+  <g fill="#ffb64f">
+    <circle cx="230" cy="134" r="4.5" opacity=".85"/>
+    <circle cx="72" cy="152" r="4" opacity=".8"/>
+    <circle cx="260" cy="170" r="3" opacity=".7"/>
+    <circle cx="46" cy="204" r="3.5" opacity=".75"/>
+    <circle cx="214" cy="112" r="3" opacity=".65"/>
+    <circle cx="104" cy="118" r="2.5" opacity=".6"/>
+  </g>
+</svg>

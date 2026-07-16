@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="s7-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#241a15"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="s7-glow" cx="50%" cy="62%" r="48%">
+      <stop offset="0" stop-color="#ff8c3f" stop-opacity=".4"/>
+      <stop offset="1" stop-color="#ff8c3f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s7-outer" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff5f3b"/>
+      <stop offset=".55" stop-color="#ff9a3c"/>
+      <stop offset="1" stop-color="#ffd36b"/>
+    </linearGradient>
+    <linearGradient id="s7-inner" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ffd36b"/>
+      <stop offset="1" stop-color="#fff3c4"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#s7-bg)"/>
+  <ellipse cx="150" cy="262" rx="130" ry="150" fill="url(#s7-glow)"/>
+
+  <!-- one tall flame, unbroken from the base -->
+  <path d="M150 62
+           C 190 132 214 158 214 216
+           C 214 276 186 320 150 320
+           C 114 320 86 276 86 216
+           C 86 176 104 158 118 138
+           C 124 168 138 178 146 186
+           C 140 152 138 108 150 62 Z"
+        fill="url(#s7-outer)"/>
+  <path d="M150 148
+           C 172 190 184 208 184 238
+           C 184 272 170 296 150 296
+           C 130 296 116 272 116 238
+           C 116 216 126 202 136 188
+           C 140 208 146 214 152 220
+           C 148 196 144 172 150 148 Z"
+        fill="url(#s7-inner)"/>
+  <path d="M150 218 C 162 242 166 252 166 264 C 166 280 159 288 150 288
+           C 141 288 134 280 134 264 C 134 248 144 238 150 218 Z"
+        fill="#fffaf0" opacity=".85"/>
+
+  <!-- seven embers: one per completed day -->
+  <g fill="#ffb64f">
+    <circle cx="86" cy="118" r="4" opacity=".9"/>
+    <circle cx="212" cy="102" r="3.5" opacity=".85"/>
+    <circle cx="64" cy="200" r="3" opacity=".75"/>
+    <circle cx="238" cy="176" r="4" opacity=".8"/>
+    <circle cx="74" cy="288" r="3.5" opacity=".7"/>
+    <circle cx="232" cy="268" r="3" opacity=".65"/>
+    <circle cx="150" cy="52" r="4.5" opacity=".95"/>
+  </g>
+</svg>

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="fc-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#152219"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="fc-glow" cx="50%" cy="46%" r="50%">
+      <stop offset="0" stop-color="#3fbf7f" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#3fbf7f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fc-check" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7fe3ae"/>
+      <stop offset="1" stop-color="#2e9a63"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#fc-bg)"/>
+  <ellipse cx="150" cy="194" rx="140" ry="150" fill="url(#fc-glow)"/>
+
+  <!-- the starting line left behind -->
+  <g opacity=".5">
+    <path d="M22 336 H278" stroke="#2c3040" stroke-width="3"/>
+    <g fill="#2c3040">
+      <rect x="22" y="340" width="18" height="10"/>
+      <rect x="58" y="340" width="18" height="10"/>
+      <rect x="94" y="340" width="18" height="10"/>
+      <rect x="130" y="340" width="18" height="10"/>
+      <rect x="166" y="340" width="18" height="10"/>
+      <rect x="202" y="340" width="18" height="10"/>
+      <rect x="238" y="340" width="18" height="10"/>
+    </g>
+  </g>
+
+  <!-- the mark: one decisive stroke -->
+  <g transform="translate(0 -6)">
+    <path d="M74 216 L124 268 L232 130" fill="none" stroke="#0d1017" stroke-opacity=".6"
+          stroke-width="30" stroke-linecap="round" stroke-linejoin="round" transform="translate(3 8)"/>
+    <path d="M74 216 L124 268 L232 130" fill="none" stroke="url(#fc-check)"
+          stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M74 216 L124 268 L232 130" fill="none" stroke="#d6ffe9" stroke-opacity=".55"
+          stroke-width="5" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -7)"/>
+  </g>
+
+  <!-- the flick of momentum off the tip -->
+  <g fill="#8fe8b8">
+    <circle cx="248" cy="112" r="4" opacity=".9"/>
+    <circle cx="262" cy="142" r="2.5" opacity=".65"/>
+    <circle cx="228" cy="92" r="2.5" opacity=".6"/>
+    <circle cx="60" cy="188" r="2" opacity=".45"/>
+  </g>
+</svg>
