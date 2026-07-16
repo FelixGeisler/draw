@@ -24,7 +24,17 @@ export function useSettings() {
   });
 }
 
-export function useTasks(filters?: { status?: string; categoryId?: number; goalId?: number }) {
+/**
+ * `options` exists for the DrawPage's held-card watch (#118), which needs the
+ * list only WHILE #88's hold stands and wants it on the same 60s cadence the
+ * current-draw query uses — so a card resolved from MCP or a second tab
+ * releases the hold within the minute ADR-29's amendment already accepts.
+ * Every other caller takes the plain, always-on query.
+ */
+export function useTasks(
+  filters?: { status?: string; categoryId?: number; goalId?: number },
+  options?: { enabled?: boolean; refetchInterval?: number },
+) {
   const params = new URLSearchParams();
   if (filters?.status) params.set("status", filters.status);
   if (filters?.categoryId) params.set("categoryId", String(filters.categoryId));
@@ -33,6 +43,7 @@ export function useTasks(filters?: { status?: string; categoryId?: number; goalI
   return useQuery({
     queryKey: ["tasks", qs],
     queryFn: () => api.get<Task[]>(`/api/tasks${qs ? `?${qs}` : ""}`),
+    ...options,
   });
 }
 

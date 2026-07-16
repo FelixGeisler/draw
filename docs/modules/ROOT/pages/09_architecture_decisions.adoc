@@ -901,6 +901,28 @@ one session-local hold: a card edited out of the deck forfeits its pointer
 (cleared lazily, as before) but stays on screen with the resolve hint
 until resolved on-page — an edit must not become a hidden re-roll.
 
+*Amendment (#118):* Two consequences of deriving that were intended but
+undocumented. (1) The pointer's restore validation (`isRestorable`) is
+evaluated at GET time against `new Date()`, so forfeits are TIME-based, not
+only action-based: an availability window closing (ADR-20) or a sequential
+sibling change that holds the card back (ADR-18) invalidates the pointer
+with nobody touching anything, and the standing card then evaporates on the
+next refetch — mid-session, unprompted. Intended: a card the deck would no
+longer deal is not a commitment the user can honour right now, and the
+alternative (freezing a card the rules have retired) is the stored-state
+drift ADR-2 bans. (2) The 60s cadence is the FOCUSED-tab cadence: React
+Query pauses `refetchInterval` while the tab is in the background
+(`refetchIntervalInBackground` stays off), so a card resolved from MCP or a
+second tab is dismissed on the hidden tab's next window focus rather than
+within the minute — the accepted latency above is a foreground promise.
+The one hold releases the same way: while it stands, the pointer is already
+forfeit and cannot report the held card's fate, so the page watches the
+tasks list instead (`heldCardResolved`, gated on the hold, same 60s
+cadence) and drops the card once it is gone or no longer open — a card
+completed or deleted elsewhere used to stick until a reload, with every
+on-page resolution 404ing. A resolution that races the watch and 404s is
+read as the same dismissal arriving by the other door, not as an error.
+
 == ADR-30: The warm-up draw is a deterministic deal — cooldown as exclusion, XP capped below the drawn ×1.5
 
 *Context:* The main draw is a gamble: it can serve a 30-minute card when

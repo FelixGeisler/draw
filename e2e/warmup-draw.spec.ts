@@ -62,6 +62,12 @@ test("warm-up deals the smallest card with its badge; completing pays the bonus 
 
   // Complete it: XP bonus feedback appears with the confetti…
   await page.getByRole("button", { name: "✓ Done" }).click();
+  // The page's OWN ✓ Done celebrates (#110) — canvas-confetti mounts its
+  // canvas, the only one in the app. This is the positive control for
+  // elsewhere-completion.spec.ts's "no confetti" assert (#118): without it,
+  // that count-0 could pass vacuously if the celebration ever stopped
+  // rendering a <canvas> at all.
+  await expect(page.locator("canvas")).toHaveCount(1);
   await expect(page.getByText("🔰 Warm-up bonus: +25% XP")).toBeVisible();
 
   // The trophy stays PLAIN although the card is impact 5: it was handed out,
