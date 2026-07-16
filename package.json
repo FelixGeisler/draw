@@ -17,7 +17,7 @@
     "@antora/cli": "^3.1.15",
     "@antora/site-generator": "^3.1.15",
     "@playwright/test": "^1.61.1",
-    "asciidoctor-kroki": "^1.0.1",
+    "asciidoctor-kroki": "^0.18.1",
     "concurrently": "^9.1.0"
   }
 }
