@@ -32,7 +32,7 @@ else candidates present
   Draw -> DB : stamp last_drawn_at; persist current_draw = id; drop any warm-up marker (ADR-13)
   Draw --> Route : {task, poolSize, probability}
 end
-Route -> Route : checkAchievements({drew: true})
+Route -> Route : checkAchievements({drew: true}) — only when a card was actually dealt
 Route --> UI : {task, poolSize, probability, newAchievements}
 UI --> User : shuffle, then the card flips — no re-draw (#88): the draw is a commitment
 
@@ -132,7 +132,7 @@ else
     Gam -> DB : freeze-token earn on a 7th/14th/… day — INSERT OR IGNORE, idempotent (ADR-28)
     Gam -> Gam : checkAchievements()
     Gam --> Route : {xpAwarded, bonus, newAchievements, recurring, levelUp}
-    Route -> Gam : maybeAutoCompleteParent(parent_id)
+    Route -> Gam : maybeAutoCompleteParent(parent_id) → completeTask(parent, false, {effortMinutes: 0})
     note right of Route
       #111 / ADR-32: breakdown all-done
       (>= 1 done, 0 open, archived ignored)
