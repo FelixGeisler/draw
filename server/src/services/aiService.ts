@@ -165,6 +165,44 @@ interface MaterialRow {
   anthropic_file_id: string | null;
 }
 
+// Windows-1252 differs from Latin-1 only in 0x80–0x9F, where it puts
+// printable punctuation (€ „ “ ” – — …) instead of C1 control codes — and
+// those are exactly the bytes legacy-encoded German text uses. Node's
+// TextDecoder cannot do this mapping: it fast-paths every latin1-family
+// label, "windows-1252" included, through a raw byte→codepoint latin1 decode
+// (verified on the installed runtime: 0x97 comes back as U+0097, not the
+// em-dash U+2014), so the table is hand-owned. Bytes cp1252 leaves undefined
+// (0x81, 0x8D, 0x8F, 0x90, 0x9D) fall through as-is — the same passthrough
+// the WHATWG encoding spec prescribes.
+const CP1252_C1 = new Map<number, string>([
+  [0x80, "€"], [0x82, "‚"], [0x83, "ƒ"], [0x84, "„"], [0x85, "…"], [0x86, "†"],
+  [0x87, "‡"], [0x88, "ˆ"], [0x89, "‰"], [0x8a, "Š"], [0x8b, "‹"], [0x8c, "Œ"],
+  [0x8e, "Ž"], [0x91, "‘"], [0x92, "’"], [0x93, "“"], [0x94, "”"],
+  [0x95, "•"], [0x96, "–"], [0x97, "—"], [0x98, "˜"], [0x99, "™"], [0x9a, "š"],
+  [0x9b, "›"], [0x9c, "œ"], [0x9e, "ž"], [0x9f, "Ÿ"],
+]);
+
+/**
+ * Decode a text material's bytes for prompt assembly (#134). Uploads are
+ * usually UTF-8, but Windows editors still save Latin-1/Windows-1252 — and a
+ * lenient utf-8 read replaces every invalid byte with U+FFFD, silently
+ * injecting `�` into the prompt for the model to echo back into its answers
+ * (the em-dash sighting in #91's plan-goal analysis). Strict-decode UTF-8
+ * first; only when the bytes are NOT valid UTF-8, decode as Windows-1252 (the
+ * superset of Latin-1 that browsers assume), which maps every byte — so a
+ * valid UTF-8 file round-trips byte-identically and a legacy-encoded one is
+ * transcoded instead of corrupted.
+ */
+export function decodeTextMaterial(bytes: Buffer): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return bytes
+      .toString("latin1")
+      .replace(/[\x80-\x9f]/g, (ch) => CP1252_C1.get(ch.charCodeAt(0)) ?? ch);
+  }
+}
+
 async function materialBlocks(materialIds: number[], goalId: number | null): Promise<ContentBlock[]> {
   if (materialIds.length === 0) return [];
   const placeholders = materialIds.map(() => "?").join(",");
@@ -195,7 +233,7 @@ async function materialBlocks(materialIds: number[], goalId: number | null): Pro
         // block keeps the assembled prompt readable. The win is PDFs.
         blocks.push({
           type: "text",
-          text: `<material name="${m.filename}">\n${fs.readFileSync(full, "utf-8")}\n</material>`,
+          text: `<material name="${m.filename}">\n${decodeTextMaterial(fs.readFileSync(full))}\n</material>`,
         });
       }
     }
@@ -570,7 +608,22 @@ async function runStructured<T>(
   const system = opts.system ?? PLANNING_SYSTEM_PROMPT;
   await guardTokens(blocks, system);
   try {
-    const response = await c.beta.messages.parse({
+    // Streaming is required, not a preference (#133, ADR-36): the SDK refuses
+    // any NON-streaming request whose max_tokens implies a possible
+    // >10-minute run ("Streaming is required for operations that may take
+    // longer than 10 minutes"), and generate-tasks' 32K cap trips that guard
+    // on real calls — the flagship exam import 500'd live (#91) while every
+    // mocked test stayed green. ALL structured calls stream, not just the 32K
+    // one, so no future cap raise can silently reintroduce the failure class.
+    // Semantics are unchanged: the stream helper accumulates the SSE deltas
+    // and applies the same beta parser (zod validation via
+    // output_config.format) to the final message, so parsed_output behaves
+    // exactly as messages.parse() did; request-level API errors reject
+    // finalMessage() with the same typed SDK errors mapSdkError already
+    // handles; and the request shape (cache_control breakpoints, betas,
+    // count_tokens preflight) is byte-identical apart from stream mode, so
+    // prompt caching and the token guard are unaffected.
+    const stream = c.beta.messages.stream({
       model: MODEL,
       max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       thinking: { type: "adaptive" },
@@ -579,6 +632,7 @@ async function runStructured<T>(
       output_config: { format: betaZodOutputFormat(schema) },
       betas: betasFor(blocks),
     });
+    const response = await stream.finalMessage();
     if (!response.parsed_output) {
       throw new AiError(502, "Claude returned an unparseable response — try again");
     }

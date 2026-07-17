@@ -12,11 +12,23 @@ import { freshApp, testDb } from "../helpers.js";
 // The mock is the SDK client, NOT aiService — unlike card-art.test.ts, which
 // stubs the whole generateCardArt function. Here the logic under test lives
 // inside aiService, so only Anthropic itself is replaced.
-const mocks = vi.hoisted(() => ({
-  upload: vi.fn(),
-  parse: vi.fn(),
-  countTokens: vi.fn(),
-}));
+//
+// Since #133 the paid call is `messages.stream()` (the SDK refuses 32K
+// non-streaming requests), so the mock mirrors the streaming contract:
+// stream() returns synchronously; results AND errors arrive via
+// finalMessage(). `streamResolve`/`streamReject` are the per-test knobs.
+const mocks = vi.hoisted(() => {
+  const stream = vi.fn();
+  return {
+    upload: vi.fn(),
+    stream,
+    countTokens: vi.fn(),
+    streamResolve: (message: unknown) =>
+      stream.mockImplementation(() => ({ finalMessage: () => Promise.resolve(message) })),
+    streamRejectOnce: (error: unknown) =>
+      stream.mockImplementationOnce(() => ({ finalMessage: () => Promise.reject(error) })),
+  };
+});
 
 vi.mock("@anthropic-ai/sdk", () => {
   class APIError extends Error {
@@ -32,7 +44,7 @@ vi.mock("@anthropic-ai/sdk", () => {
   class Anthropic {
     beta = {
       files: { upload: mocks.upload },
-      messages: { parse: mocks.parse, countTokens: mocks.countTokens },
+      messages: { stream: mocks.stream, countTokens: mocks.countTokens },
     };
     constructor(_opts?: unknown) {}
     static APIError = APIError;
@@ -54,17 +66,17 @@ let db: Awaited<ReturnType<typeof testDb>>;
 let goalId: number;
 let pdfMaterialId: number;
 
-/** The document block for the PDF material inside the last parse call. */
+/** The document block for the PDF material inside the last stream call. */
 function lastPdfSource(): { type: string; file_id?: string } {
-  const params = mocks.parse.mock.calls.at(-1)![0] as {
+  const params = mocks.stream.mock.calls.at(-1)![0] as {
     messages: { content: { type: string; source?: { type: string; file_id?: string } }[] }[];
   };
   const doc = params.messages[0].content.find((b) => b.type === "document");
   return doc!.source!;
 }
 
-function lastParseBetas(): string[] | undefined {
-  return (mocks.parse.mock.calls.at(-1)![0] as { betas?: string[] }).betas;
+function lastStreamBetas(): string[] | undefined {
+  return (mocks.stream.mock.calls.at(-1)![0] as { betas?: string[] }).betas;
 }
 
 function storedFileId(): string | null {
@@ -98,11 +110,11 @@ beforeAll(async () => {
 
 beforeEach(() => {
   mocks.upload.mockReset();
-  mocks.parse.mockReset();
+  mocks.stream.mockReset();
   mocks.countTokens.mockReset();
   // Sensible defaults; individual tests override.
   mocks.countTokens.mockResolvedValue({ input_tokens: 500 });
-  mocks.parse.mockResolvedValue({ parsed_output: PLAN_OUTPUT });
+  mocks.streamResolve({ parsed_output: PLAN_OUTPUT });
   mocks.upload.mockResolvedValue({ id: "file_first" });
   // Each test starts with no cached id so upload behaviour is deterministic.
   db.prepare("UPDATE materials SET anthropic_file_id = NULL WHERE id = ?").run(pdfMaterialId);
@@ -118,7 +130,7 @@ describe("first AI use uploads the PDF once and references it by file_id", () =>
     expect(mocks.upload).toHaveBeenCalledTimes(1);
     expect(storedFileId()).toBe("file_first");
     expect(lastPdfSource()).toEqual({ type: "file", file_id: "file_first" });
-    expect(lastParseBetas()).toContain(FILES_BETA);
+    expect(lastStreamBetas()).toContain(FILES_BETA);
     // The token guard that gates the paid call rides the same beta.
     expect((mocks.countTokens.mock.calls.at(-1)![0] as { betas?: string[] }).betas).toContain(FILES_BETA);
   });
@@ -140,13 +152,13 @@ describe("first AI use uploads the PDF once and references it by file_id", () =>
 describe("a rejected file id self-heals with a single re-upload", () => {
   it("clears the dead id, re-uploads from disk, and retries the call once", async () => {
     db.prepare("UPDATE materials SET anthropic_file_id = 'file_dead' WHERE id = ?").run(pdfMaterialId);
-    // The paid call rejects the stale id once, then accepts the re-uploaded one.
+    // The paid call rejects the stale id once, then accepts the re-uploaded
+    // one. With streaming, the rejection arrives via finalMessage() — exactly
+    // where the SDK surfaces request-level errors on a stream.
     const { default: Anthropic } = (await import("@anthropic-ai/sdk")) as unknown as {
       default: { APIError: new (s?: number, m?: string) => Error };
     };
-    mocks.parse
-      .mockRejectedValueOnce(new Anthropic.APIError(404, "file_dead not found"))
-      .mockResolvedValueOnce({ parsed_output: PLAN_OUTPUT });
+    mocks.streamRejectOnce(new Anthropic.APIError(404, "file_dead not found"));
     mocks.upload.mockResolvedValue({ id: "file_reuploaded" });
 
     await request(app)
@@ -154,7 +166,7 @@ describe("a rejected file id self-heals with a single re-upload", () => {
       .send({ goalId, materialIds: [pdfMaterialId] })
       .expect(200);
 
-    expect(mocks.parse).toHaveBeenCalledTimes(2); // rejected, then retried
+    expect(mocks.stream).toHaveBeenCalledTimes(2); // rejected, then retried
     expect(mocks.upload).toHaveBeenCalledTimes(1); // re-upload during the rebuild
     expect(storedFileId()).toBe("file_reuploaded");
     expect(lastPdfSource()).toEqual({ type: "file", file_id: "file_reuploaded" });
@@ -164,13 +176,14 @@ describe("a rejected file id self-heals with a single re-upload", () => {
     const { default: Anthropic } = (await import("@anthropic-ai/sdk")) as unknown as {
       default: { RateLimitError: new (s?: number, m?: string) => Error };
     };
-    mocks.parse.mockRejectedValue(new Anthropic.RateLimitError(429, "slow down"));
+    const rateLimited = new Anthropic.RateLimitError(429, "slow down");
+    mocks.stream.mockImplementation(() => ({ finalMessage: () => Promise.reject(rateLimited) }));
 
     await request(app)
       .post("/api/ai/plan-goal")
       .send({ goalId, materialIds: [pdfMaterialId] })
       .expect(429);
-    expect(mocks.parse).toHaveBeenCalledTimes(1); // no retry
+    expect(mocks.stream).toHaveBeenCalledTimes(1); // no retry
   });
 });
 
@@ -184,7 +197,7 @@ describe("upload failure falls back to base64 for that call", () => {
       .expect(200);
 
     expect(lastPdfSource().type).toBe("base64");
-    expect(lastParseBetas()).toBeUndefined();
+    expect(lastStreamBetas()).toBeUndefined();
     expect(storedFileId()).toBeNull(); // a failed upload is not remembered
   });
 });

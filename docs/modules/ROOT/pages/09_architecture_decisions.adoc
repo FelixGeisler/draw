@@ -1365,3 +1365,40 @@ state this app cannot observe can wedge an AI feature: the worst a stale or
 missing id can do is cost one extra upload. Degraded mode is byte-for-byte
 unchanged — the uploader is null without a key, so assembly produces exactly
 the base64 blocks it did before, and the 503 still comes from the same guard.
+
+== ADR-36: Every structured AI call streams — amends ADR-8
+
+*Context:* ADR-8's structured outputs rode the SDK's non-streaming
+`messages.parse()`. The first-ever real API calls (#91) exposed a guard the
+mocks could never trip: the SDK refuses any non-streaming request whose
+`max_tokens` implies a possible run of more than ten minutes ("Streaming is
+required for operations that may take longer than 10 minutes"). Three of the
+four AI calls stayed under it (16K default, 8K card art) — generate-tasks'
+deliberately raised 32K cap (#28, a 40-item transcription plus rationales)
+tripped it, and the flagship exam-import feature answered a plain 500 on
+every live call while CI stayed green (#133).
+
+*Decision:* `runStructured` sends every structured call through
+`messages.stream()` and reads the accumulated final message via
+`finalMessage()` — all four callers, not just the one over the threshold.
+Streaming here is transport, not behavior: the SDK's stream helper applies
+the same beta parser to the accumulated message that `parse()` applied to the
+buffered response, so `parsed_output` (zod-validated, ADR-8) is unchanged;
+request-level SDK errors reject `finalMessage()` with the same typed error
+classes the existing mapping handles; and the request shape — `cache_control`
+breakpoints (ADR-11), the `files-api` beta header (ADR-35), the
+`count_tokens` preflight — is untouched apart from stream mode, so prompt
+caching and the token guard see nothing new. The SDK boundary in the
+integration suites mocks `stream()`/`finalMessage()` accordingly, and the
+request shape is pinned so a silent fall-back to `parse()` fails in CI.
+
+*Rationale:* Streaming only the 32K call would leave a tripwire armed: the
+guard is a function of `max_tokens`, so the next cap raise (a bigger deck, a
+denser card) would re-break a feature in the exact way mocks cannot catch —
+live only. Streaming everywhere removes the failure class for the cost of
+nothing: no request field changes, no parse semantics change, and the paid
+calls were already long-running (card art measured ~39s live). What streaming
+does NOT buy here is incremental UI — the server still hands the client one
+complete JSON result; per-token delivery to the browser stays out of scope
+until a feature needs it. The live 32K path itself still cannot run in CI (no
+key); its re-verification is a #91 checklist item.

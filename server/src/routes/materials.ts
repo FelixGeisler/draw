@@ -24,6 +24,12 @@ const upload = multer({
     },
   }),
   limits: { fileSize: MAX_FILE_MB * 1024 * 1024 },
+  // Browsers send the multipart filename as raw UTF-8 bytes, but busboy's
+  // default decodes those header bytes as latin1 — "Prüfung.pdf" arrives as
+  // "PrÃ¼fung.pdf" and rides mojibake'd into the DB, the UI and the AI
+  // request's <material name>/document title (#134). Declare what browsers
+  // actually send.
+  defParamCharset: "utf8",
 });
 
 const MATERIAL_SELECT = `
