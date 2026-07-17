@@ -98,6 +98,25 @@ describe("resolveDrawnCard", () => {
     ).toBe(card);
   });
 
+  it("released hold + unsettled pointer query: the card survives (#130)", () => {
+    // Pins the precedence between the two exits, which every other case
+    // leaves free (they all pass serverTask: null): an unsettled query is
+    // never a verdict, in EITHER direction — releasing the hold hands the
+    // decision back to the pointer, and a pointer that has not answered
+    // keeps the session's card exactly as it does outside a hold. A "fix"
+    // that dismisses on the released verdict alone would blink the card off
+    // on any transient refetch failure.
+    expect(
+      resolveDrawnCard({
+        shuffling: false,
+        serverTask: undefined,
+        sessionTask: card,
+        editedOutOfDeck: true,
+        heldCardResolved: true,
+      }),
+    ).toBe(card);
+  });
+
   it("composes with resolveDrawView: a card completed elsewhere collapses focus to idle", () => {
     // The overlay derives from the SAME resolved card — when the pointer
     // dies, the whole tower (card + focus) falls together, never a dead

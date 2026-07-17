@@ -41,6 +41,12 @@ export function resolveDrawnCard<T>(input: {
   }
   // Query not settled (first fetch, or errored): the session's own draw is
   // the only truth available — never blank out a card the user just drew.
+  // Deliberately ranked ABOVE a released hold (#130): with heldCardResolved
+  // true and serverTask undefined the card survives, because an unsettled
+  // query is never a verdict — symmetric with heldCardResolved(undefined, …)
+  // === false. (Believed unreachable: the hold only exists post-edit, by
+  // which time ["draw","current"] has settled, and its data survives refetch
+  // errors — but the precedence is a decision, not an accident.)
   if (input.serverTask === undefined) return input.sessionTask;
   return input.serverTask;
 }
