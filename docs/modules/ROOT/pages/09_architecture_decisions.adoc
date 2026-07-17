@@ -1477,10 +1477,28 @@ cache breakpoint, so material-less iterations reuse the tools+system prefix.
 PDF blocks must not round-trip through the browser) — deliberately NOT
 persisted, so `user_version` stays 11: a conversation is scratch state, and
 the accepted limitation is that a `tsx watch` restart drops it (the client
-surfaces the 404 as "start a new conversation"; apply stays stateless and
-unaffected). Both endpoints answer 503 `ai_not_configured` without a key —
-apply included, although it never calls the SDK: the whole surface is hidden
-in degraded mode, and a reachable apply would be a write path no UI owns.
+surfaces the 404 as "start a new conversation"). Both endpoints answer 503
+`ai_not_configured` without a key — apply included, although it never calls
+the SDK: the whole surface is hidden in degraded mode, and a reachable apply
+would be a write path no UI owns.
+(e) Apply CONSUMES the changeset (+#143+, amending this ADR's original
+"apply stays stateless and unaffected" wording — the live verification round
+showed the same `{sessionId, operations}` POSTed twice returned 201 twice
+and created every task again, reachable through a timeout-after-commit HTTP
+retry or a double-click race). Each session carries a monotonically
+increasing *changeset version*: every message turn returns it alongside the
+ops, apply sends it back, and a successful apply clears the staged ops,
+bumps the version and keeps the created mapping. A re-apply of a consumed
+version answers `409` carrying the ORIGINAL `created` mapping, which the
+client treats as success — an honest retry reconciles instead of
+duplicating; a version-less re-apply (API-level caller) reconciles
+best-effort when the session has nothing pending. The key is the VERSION,
+never a deep-equal of operations: the apply body carries the REVIEWED ops
+(title/effort edits, exclusions), which legitimately differ from the staged
+ops of the very changeset they belong to. A NEW changeset staged later in
+the same session gets the bumped version and applies normally. When the
+session itself is gone (restart, eviction) apply still proceeds statelessly
+— the accepted limitation above, now scoped to exactly that case.
 
 *Rationale:* One review table beats forty confirmations and preserves the
 app's review-before-accept contract; staging in memory keeps the "never

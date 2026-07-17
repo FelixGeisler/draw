@@ -2,6 +2,12 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /**
+     * The parsed JSON error body when there was one — some errors carry data
+     * beyond the message (#143: the 409 "already applied" reply carries the
+     * original created mapping so a retry can reconcile).
+     */
+    public body?: unknown,
   ) {
     super(message);
   }
@@ -10,13 +16,15 @@ export class ApiError extends Error {
 async function handle<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let message = res.statusText;
+    let body: unknown;
     try {
-      const body = await res.json();
-      if (body?.error) message = body.error;
+      body = await res.json();
+      const error = (body as { error?: unknown } | null)?.error;
+      if (typeof error === "string") message = error;
     } catch {
       // non-JSON error body
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
   return res.json() as Promise<T>;
 }

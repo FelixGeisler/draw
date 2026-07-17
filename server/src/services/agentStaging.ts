@@ -83,6 +83,15 @@ export const stagedOpSchema = z.discriminatedUnion("kind", [
 /** POST /api/ai/agent/apply body: the reviewed (possibly edited) operations. */
 export const applyBodySchema = z.object({
   sessionId: z.string().optional(),
+  /**
+   * The changeset version the message turn handed out (#143). Apply consumes
+   * that version; a retry carrying a consumed version answers 409 with the
+   * original mapping instead of duplicating. Keyed by version on purpose:
+   * the operations here are the REVIEWED ops (edits, exclusions) and may
+   * legitimately differ from what was staged, so equality of operations can
+   * never identify "the same changeset".
+   */
+  changesetVersion: z.number().int().positive().optional(),
   operations: z.array(stagedOpSchema).min(1),
 });
 

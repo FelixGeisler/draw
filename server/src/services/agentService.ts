@@ -66,6 +66,16 @@ interface AgentSession {
   id: string;
   messages: LoopMessage[];
   changeset: Changeset;
+  /**
+   * Identifies the PENDING changeset for apply idempotency (#143): handed to
+   * the client with every turn, sent back on apply, bumped when an apply
+   * consumes the changeset. Versioned instead of comparing operations —
+   * apply carries the REVIEWED ops (edits, exclusions), which legitimately
+   * differ from what was staged.
+   */
+  changesetVersion: number;
+  /** The consumed changeset's outcome, kept so an honest retry reconciles (409 + original mapping). */
+  lastApplied?: { version: number; created: AppliedOp[] };
   lastUsedAt: number;
 }
 
@@ -353,7 +363,7 @@ export interface AgentTurnUsage extends AgentUsage {
 export interface AgentTurnResult {
   sessionId: string;
   reply: string;
-  changeset: { ops: StagedOp[] };
+  changeset: { version: number; ops: StagedOp[] };
   usage: AgentTurnUsage;
   stopped?: LoopStopReason;
 }
@@ -384,7 +394,13 @@ export async function runAgentTurn(input: {
   }
   const isNew = !session;
   if (!session) {
-    session = { id: randomUUID(), messages: [], changeset: createChangeset(), lastUsedAt: Date.now() };
+    session = {
+      id: randomUUID(),
+      messages: [],
+      changeset: createChangeset(),
+      changesetVersion: 1,
+      lastUsedAt: Date.now(),
+    };
     sessions.set(session.id, session);
     evictOldSessions();
   }
@@ -405,7 +421,7 @@ export async function runAgentTurn(input: {
     return {
       sessionId: s.id,
       reply,
-      changeset: { ops: s.changeset.ops },
+      changeset: { version: s.changesetVersion, ops: s.changeset.ops },
       usage: {
         ...result.usage,
         costUsd: Math.round(usageUsd(result.usage) * 1000) / 1000,
@@ -488,6 +504,17 @@ export interface AppliedOp {
   taskIds: number[];
 }
 
+export interface ApplyOutcome {
+  created: AppliedOp[];
+  /**
+   * True when this apply targeted an ALREADY CONSUMED changeset (#143):
+   * nothing was written and `created` is the original apply's mapping, so an
+   * honest retry (timeout after commit, HTTP-level replay) reconciles instead
+   * of duplicating. The route answers it as 409 + mapping.
+   */
+  alreadyApplied?: boolean;
+}
+
 /**
  * Apply the reviewed operations atomically. Draft parents resolve to real
  * ids in list order; any rejection (the route cores' own 400s — ADR-4 impact
@@ -496,10 +523,54 @@ export interface AppliedOp {
  * transactions as savepoints under this one). Oversized subtask efforts are
  * split, never clamped (#28's policy) — re-run here because the reviewer can
  * edit efforts after staging.
+ *
+ * A successful apply CONSUMES the session's changeset (#143): the ops clear,
+ * the version bumps, and the created mapping is kept so a re-apply of the
+ * consumed version reconciles (alreadyApplied above) instead of creating
+ * every task again. Sessions may legitimately be gone (restart) — then apply
+ * proceeds stateless, the pre-existing accepted limitation (ADR-37).
  */
-export function applyOperations(operations: StagedOp[], sessionId?: string): { created: AppliedOp[] } {
+export function applyOperations(
+  operations: StagedOp[],
+  sessionId?: string,
+  changesetVersion?: number,
+): ApplyOutcome {
   const planError = applyPlanError(operations);
   if (planError) throw new AiError(400, planError);
+
+  // The idempotency gate runs BEFORE any write. Keyed per-changeset by
+  // version, never by comparing operations — the body carries the REVIEWED
+  // ops (title/effort edits, exclusions), which may differ from the staged
+  // ops of the very changeset they came from.
+  const session = sessionId ? sessions.get(sessionId) : undefined;
+  if (session) {
+    if (changesetVersion != null) {
+      if (changesetVersion > session.changesetVersion) {
+        throw new AiError(
+          400,
+          `unknown changeset version ${changesetVersion} — this session's pending changeset is version ${session.changesetVersion}`,
+        );
+      }
+      if (changesetVersion < session.changesetVersion) {
+        if (session.lastApplied?.version === changesetVersion) {
+          return { created: session.lastApplied.created, alreadyApplied: true };
+        }
+        // Only the LAST consumed changeset's mapping is kept; an older
+        // version cannot reconcile, but it must never re-create tasks.
+        throw new AiError(
+          409,
+          "this changeset was already applied and its result is no longer available — check the Tasks page",
+        );
+      }
+      // changesetVersion === current: a fresh apply of the pending changeset.
+    } else if (session.changeset.ops.length === 0 && session.lastApplied) {
+      // Version-less caller (the #143 live repro: the same {sessionId,
+      // operations} POSTed twice): nothing is pending and something was
+      // applied — best-effort reconciliation with the last mapping.
+      return { created: session.lastApplied.created, alreadyApplied: true };
+    }
+  }
+
   const maxEffort = getSetting("max_draw_effort", 30);
 
   const created = db.transaction((): AppliedOp[] => {
@@ -543,13 +614,14 @@ export function applyOperations(operations: StagedOp[], sessionId?: string): { c
     return results;
   })();
 
-  // A continued conversation must not re-propose applied ops: clear the
-  // session's staged changeset (the draft counter keeps running so ids never
-  // collide). Sessions may legitimately be gone (restart) — apply is
-  // stateless about them by design (ADR-37).
-  if (sessionId) {
-    const session = sessions.get(sessionId);
-    if (session) session.changeset.ops = [];
+  // Consume the changeset (#143): a continued conversation must not
+  // re-propose applied ops (the draft counter keeps running so ids never
+  // collide), and a retry of THIS apply must reconcile, not duplicate — the
+  // version bump plus the kept mapping is what the gate above checks.
+  if (session) {
+    session.lastApplied = { version: session.changesetVersion, created };
+    session.changeset.ops = [];
+    session.changesetVersion += 1;
   }
   return { created };
 }

@@ -192,7 +192,10 @@ aiRouter.post("/agent/estimate", async (req, res) => {
 // path, ADR-14: included rows and the user's title/effort edits travel in
 // the body) in one transaction — any rejected row rolls back everything.
 // 503-gated like its siblings even though it never calls the SDK: the whole
-// assistant surface is hidden in degraded mode.
+// assistant surface is hidden in degraded mode. A successful apply consumes
+// the session's changeset (#143); a re-apply of a consumed changeset answers
+// 409 carrying the ORIGINAL created mapping, so an honest retry (timeout
+// after commit, HTTP replay) reconciles instead of duplicating every task.
 aiRouter.post("/agent/apply", (req, res) => {
   const parsed = applyBodySchema.safeParse(req.body ?? {});
   if (!parsed.success) {
@@ -200,7 +203,14 @@ aiRouter.post("/agent/apply", (req, res) => {
   }
   if (!isConfigured()) return res.status(503).json({ error: "ai_not_configured" });
   try {
-    res.status(201).json(applyOperations(parsed.data.operations, parsed.data.sessionId));
+    const { operations, sessionId, changesetVersion } = parsed.data;
+    const outcome = applyOperations(operations, sessionId, changesetVersion);
+    if (outcome.alreadyApplied) {
+      return res
+        .status(409)
+        .json({ error: "changeset already applied — returning the original result", created: outcome.created });
+    }
+    res.status(201).json({ created: outcome.created });
   } catch (e) {
     handle(res, e);
   }
