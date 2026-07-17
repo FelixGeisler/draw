@@ -46,6 +46,15 @@ function apiBootGate(): Plugin {
       }
       await new Promise((r) => setTimeout(r, 200));
     }
+    // The deadline expiring is a different fact from the gate opening (#130):
+    // without this line a dead boot reads as a normal one — "waiting for … to
+    // finish booting…" and then half a minute of silence — where it used to
+    // fail instantly and loudly. Say which of the two happened.
+    if (Date.now() >= deadline) {
+      console.log(
+        `  ➜  API:     ${apiOrigin} did not answer in 30s — letting the proxy error through`,
+      );
+    }
     ready = true;
   }
 
