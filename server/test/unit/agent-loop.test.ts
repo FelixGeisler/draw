@@ -132,6 +132,68 @@ describe("runAgentLoop", () => {
     expect(result.usage.inputTokens).toBe(200);
     expect(result.usage.outputTokens).toBe(100);
   });
+
+  it("answers a truncated turn's tool calls with synthetic error results instead of executing them", async () => {
+    // stop_reason "max_tokens" with tool_use blocks still present: the 16K
+    // budget is shared with adaptive thinking, so a live turn can be cut off
+    // mid-tool-call. Executing possibly-truncated inputs is forbidden; every
+    // dangling tool_use must still get a tool_result or the session is dead.
+    const messages: LoopMessage[] = [{ role: "user", content: [{ type: "text", text: "go" }] }];
+    const truncated: ModelTurn = {
+      content: [
+        { type: "text", text: "partial reply" },
+        { type: "tool_use", id: "cut-1", name: "create_task", input: {} },
+        { type: "tool_use", id: "cut-2", name: "create_task", input: {} },
+      ],
+      stopReason: "max_tokens",
+      usage: usage(),
+    };
+    const { deps: d, toolCalls } = deps([truncated]);
+    const result = await runAgentLoop(messages, d);
+
+    expect(result.stopped).toBe("truncated");
+    expect(result.reply).toBe("partial reply");
+    expect(toolCalls).toHaveLength(0); // nothing executed
+    // ALL dangling tool_use ids answered, in ONE user message, as errors.
+    const last = messages[messages.length - 1];
+    expect(last.role).toBe("user");
+    const blocks = last.content as { type: string; tool_use_id: string; is_error?: boolean; content: string }[];
+    expect(blocks.map((b) => [b.type, b.tool_use_id, b.is_error])).toEqual([
+      ["tool_result", "cut-1", true],
+      ["tool_result", "cut-2", true],
+    ]);
+    expect(blocks[0].content).toMatch(/max_tokens/);
+  });
+
+  it("leaves an API-legal history after truncation — the next send succeeds", async () => {
+    const messages: LoopMessage[] = [{ role: "user", content: [{ type: "text", text: "go" }] }];
+    const truncated: ModelTurn = {
+      content: [{ type: "tool_use", id: "cut", name: "list_tasks", input: {} }],
+      stopReason: "max_tokens",
+      usage: usage(),
+    };
+    const { deps: d1 } = deps([truncated]);
+    await runAgentLoop(messages, d1);
+
+    // Follow-up send on the same session history.
+    messages.push({ role: "user", content: [{ type: "text", text: "continue" }] });
+    const { deps: d2 } = deps([textTurn("resumed")]);
+    const result = await runAgentLoop(messages, d2);
+    expect(result.reply).toBe("resumed");
+
+    // The structural invariant the API enforces: every tool_use id in an
+    // assistant turn has a matching tool_result in the following user turn.
+    const useIds: string[] = [];
+    const resultIds: string[] = [];
+    for (const m of messages) {
+      if (!Array.isArray(m.content)) continue;
+      for (const block of m.content as { type: string; id?: string; tool_use_id?: string }[]) {
+        if (block.type === "tool_use") useIds.push(block.id!);
+        if (block.type === "tool_result") resultIds.push(block.tool_use_id!);
+      }
+    }
+    expect(resultIds.sort()).toEqual(useIds.sort());
+  });
 });
 
 describe("usage accounting", () => {

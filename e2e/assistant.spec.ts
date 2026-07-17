@@ -42,7 +42,7 @@ const USAGE = {
   outputTokens: 340,
   cacheReadInputTokens: 0,
   cacheCreationInputTokens: 0,
-  estimatedUsd: 0.015,
+  costUsd: 0.015, // ACTUAL turn cost — the estimate endpoint keeps estimatedUsd
 };
 
 async function stubAgentLoop(page: Page) {
@@ -120,6 +120,13 @@ test("deselecting the draft parent deselects its staged subtasks", async ({ page
   await page.getByRole("button", { name: "Estimate & send" }).click();
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(page.getByText("Staged changes — review before anything is written")).toBeVisible();
+
+  // Clearing the parent's TITLE drops it and its subtasks from the plan too
+  // (same skip semantics as unchecking) — Apply disables instead of 400ing.
+  await page.getByTitle("Title draft-1").fill("");
+  await expect(page.getByRole("button", { name: /^Apply/ })).toBeDisabled();
+  await page.getByTitle("Title draft-1").fill("E2E assistant umbrella");
+  await expect(page.getByRole("button", { name: /^Apply/ })).toBeEnabled();
 
   await page.locator('input[title="Include draft-1"]').uncheck();
   // The subtasks cascade off with their parent; nothing is left to apply.

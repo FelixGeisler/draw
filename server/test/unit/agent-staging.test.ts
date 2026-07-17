@@ -115,6 +115,63 @@ describe("stageCreateTask", () => {
     // The estimate is staged VERBATIM — never clamped.
     expect(cs.ops[0]).toMatchObject({ task: { effortMinutes: 120 } });
   });
+
+  it("splits an oversized PARENTED create into sibling parts — same policy as create_subtasks", () => {
+    // A create_task with a parentId stages a LEAF: staged verbatim it would
+    // be undrawable and unfixable (ADR-16 — a subtask draft takes no
+    // breakdown), so it takes the create_subtasks split instead.
+    const cs = createChangeset();
+    const outcome = stageCreateTask(
+      cs,
+      { title: "Solve the sheet", categoryId: 1, parentId: 10, effortMinutes: 75 },
+      ctx(),
+    );
+    expect(outcome.isError).toBeUndefined();
+    const parsed = JSON.parse(outcome.text);
+    expect(parsed.parts).toHaveLength(3); // ceil(75/30)
+    expect(parsed.warnings?.[0]).toMatch(/split, never clamp/);
+    // The old advice would be illegal here: a subtask draft takes no create_subtasks.
+    expect(parsed.warnings?.[0]).not.toMatch(/create_subtasks under this draft/i);
+
+    expect(cs.ops).toHaveLength(3);
+    for (const op of cs.ops) {
+      expect(op).toMatchObject({ kind: "create_task", task: { parentId: 10, categoryId: 1 } });
+    }
+    const minutes = cs.ops.map((op) => (op.kind === "create_task" ? op.task.effortMinutes! : 0));
+    expect(minutes.reduce((a, b) => a + b, 0)).toBe(75); // total preserved
+    expect(Math.max(...minutes)).toBeLessThanOrEqual(30); // every part drawable
+    expect(cs.ops[0]).toMatchObject({ task: { title: "Solve the sheet (part 1/3)" } });
+  });
+
+  it("splits an oversized create under a DRAFT parent and the resulting plan applies cleanly", () => {
+    const cs = createChangeset();
+    stageCreateTask(cs, { title: "root", categoryId: 1 }, ctx()); // draft-1
+    const outcome = stageCreateTask(
+      cs,
+      { title: "Long proof", categoryId: 1, parentId: "draft-1", effortMinutes: 61 },
+      ctx(),
+    );
+    expect(outcome.isError).toBeUndefined();
+    expect(cs.ops).toHaveLength(4); // root + ceil(61/30) parts
+    for (const op of cs.ops.slice(1)) {
+      expect(op).toMatchObject({ kind: "create_task", task: { parentId: "draft-1" } });
+    }
+    // The parts reference an earlier create_task op — apply's plan check passes.
+    expect(applyPlanError(cs.ops)).toBeNull();
+  });
+
+  it("stages a parented create within the limit as one verbatim draft — no split", () => {
+    const cs = createChangeset();
+    const outcome = stageCreateTask(
+      cs,
+      { title: "Small step", categoryId: 1, parentId: 10, effortMinutes: 30 },
+      ctx(),
+    );
+    const parsed = JSON.parse(outcome.text);
+    expect(parsed.draftId).toBe("draft-1");
+    expect(parsed.parts).toBeUndefined();
+    expect(cs.ops).toHaveLength(1);
+  });
 });
 
 describe("stageCreateSubtasks", () => {

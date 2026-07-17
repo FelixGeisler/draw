@@ -12,11 +12,13 @@ import { evenSplit, MAX_PARTS_PER_ITEM } from "./aiPostprocess.js";
  *
  * Split-don't-clamp (#28's policy, reused): a staged SUBTASK whose effort
  * exceeds max_draw_effort is split into near-equal parts that preserve the
- * total — at stage time, so the review shows the rows that will actually be
- * created, and again defensively at apply time (the reviewer can edit
- * efforts). A ROOT task is never split (an unestimated or oversized root is
- * a legal container-to-be); the tool result tells the model to stage a
- * breakdown under its draft id instead.
+ * total — whether it was staged via create_subtasks (at stage time, so the
+ * review shows the rows that will actually be created, and again defensively
+ * at apply time because the reviewer can edit efforts) or via create_task
+ * with a parentId (at stage time; apply then creates the parts verbatim like
+ * POST /api/tasks would). A ROOT task is never split (an unestimated or
+ * oversized root is a legal container-to-be); the tool result tells the
+ * model to stage a breakdown under its draft id instead.
  */
 
 // ---------------------------------------------------------------------------
@@ -197,6 +199,35 @@ export function stageCreateTask(
         "a non-neutral impact, or omit impact",
     };
   }
+  // Split-don't-clamp for PARENTED creates (#28's policy, aligned with
+  // create_subtasks): a create_task with a parentId stages a LEAF — an
+  // oversized one would be undrawable, and it cannot be fixed by a breakdown
+  // because subtask drafts take no children (ADR-16). Split it into sibling
+  // part rows under the same parent, preserving the stated total. A ROOT
+  // task is never split — an oversized root is a legal container-to-be
+  // (warned below, pointing at create_subtasks).
+  if (args.parentId != null && args.effortMinutes != null && args.effortMinutes > ctx.maxDrawEffort) {
+    const { rows } = expandOversizedSubtasks([args], ctx.maxDrawEffort);
+    const parts = rows.map(({ splitFrom: _s, ...task }) => {
+      const draftId = mintDraftId(cs);
+      cs.ops.push({ kind: "create_task", draftId, task });
+      return { draftId, title: task.title, effortMinutes: task.effortMinutes };
+    });
+    return {
+      text: JSON.stringify({
+        staged: true,
+        parts,
+        note: "DRAFT ONLY — nothing is saved until the user reviews and applies the changeset.",
+        warnings: [
+          `effortMinutes ${args.effortMinutes} exceeds max_draw_effort (${ctx.maxDrawEffort} min) and ` +
+            "this draft has a parent: it was split into sibling steps under that parent, preserving " +
+            "the stated total (split, never clamp). Subtask drafts cannot take their own breakdowns " +
+            "(ADR-16) — stage any further steps under the root parent.",
+        ],
+      }),
+    };
+  }
+
   const draftId = mintDraftId(cs);
   cs.ops.push({ kind: "create_task", draftId, task: args });
   const warnings: string[] = [];

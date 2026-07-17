@@ -83,7 +83,7 @@ export function usageUsd(u: AgentUsage): number {
   );
 }
 
-export type LoopStopReason = "max_iterations" | "token_budget";
+export type LoopStopReason = "max_iterations" | "token_budget" | "truncated";
 
 // Per-user-message caps (the issue's guardrails): at most 8 model round
 // trips, and a hard cost ceiling summed from per-iteration usage. An abort
@@ -122,9 +122,11 @@ function textOf(content: LoopBlock[]): string {
 /**
  * Run the loop over `messages`, which is MUTATED in place (it is the
  * session's history: assistant turns and tool results must survive the turn
- * so the conversation can continue). Tool results are always appended before
- * an abort, so the history is never left with a dangling tool_use — the next
- * user message continues a valid conversation.
+ * so the conversation can continue). EVERY tool_use is answered with a
+ * tool_result before the loop returns — the loop's own aborts append the real
+ * results, and a model-side truncation gets synthetic error results — so the
+ * history is never left with a dangling tool_use and the next user message
+ * continues a valid conversation.
  */
 export async function runAgentLoop(messages: LoopMessage[], deps: LoopDeps): Promise<LoopResult> {
   const usage = zeroUsage();
@@ -143,8 +145,26 @@ export async function runAgentLoop(messages: LoopMessage[], deps: LoopDeps): Pro
     lastText = textOf(turn.content) || lastText;
 
     const toolUses = turn.content.filter((b): b is ToolUseBlock => b.type === "tool_use");
-    if (turn.stopReason !== "tool_use" || toolUses.length === 0) {
+    if (toolUses.length === 0) {
       return { reply: textOf(turn.content), usage, iterations };
+    }
+
+    if (turn.stopReason !== "tool_use") {
+      // A model-side truncation (stop_reason "max_tokens" — the 16K cap is
+      // shared with adaptive thinking) can cut a turn off while it still
+      // carries tool_use blocks. Executing them would act on possibly
+      // incomplete arguments, and dropping them would leave dangling
+      // tool_use ids the API rejects on EVERY further send in this session.
+      // Synthetic error results keep the history API-legal and the model's
+      // context honest: the next turn sees that nothing ran, and why.
+      const aborted: LoopBlock[] = toolUses.map((use) => ({
+        type: "tool_result",
+        tool_use_id: use.id,
+        content: `not executed — the turn was cut off (stop_reason: ${turn.stopReason})`,
+        is_error: true,
+      }));
+      messages.push({ role: "user", content: aborted });
+      return { reply: lastText, usage, iterations, stopped: "truncated" };
     }
 
     // All results go back in ONE user message (parallel tool-use contract).

@@ -39,7 +39,8 @@ export interface AgentTurnUsage {
   outputTokens: number;
   cacheReadInputTokens: number;
   cacheCreationInputTokens: number;
-  estimatedUsd: number;
+  /** ACTUAL cost of the turn (output priced in) — the estimate endpoint's estimatedUsd is input-only. */
+  costUsd: number;
 }
 
 export interface AgentTurnResult {
@@ -47,7 +48,7 @@ export interface AgentTurnResult {
   reply: string;
   changeset: { ops: StagedOp[] };
   usage: AgentTurnUsage;
-  stopped?: "max_iterations" | "token_budget";
+  stopped?: "max_iterations" | "token_budget" | "truncated";
 }
 
 export interface AppliedOp {

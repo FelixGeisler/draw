@@ -96,7 +96,7 @@ interface StreamParams {
   model: string;
   max_tokens: number;
   thinking: { type: string };
-  system: string;
+  system: { type: string; text: string; cache_control?: { type: string } }[];
   tools: { name: string }[];
   messages: { role: string; content: unknown }[];
 }
@@ -106,10 +106,19 @@ function streamParams(call: number): StreamParams {
 }
 
 /** The first tool_result block in a request's history. */
-function findToolResult(params: StreamParams): { is_error?: boolean; content: string } {
+function findToolResult(params: StreamParams): {
+  tool_use_id?: string;
+  is_error?: boolean;
+  content: string;
+} {
   for (const msg of params.messages) {
     if (msg.role !== "user" || !Array.isArray(msg.content)) continue;
-    for (const block of msg.content as { type: string; is_error?: boolean; content: string }[]) {
+    for (const block of msg.content as {
+      type: string;
+      tool_use_id?: string;
+      is_error?: boolean;
+      content: string;
+    }[]) {
       if (block.type === "tool_result") return block;
     }
   }
@@ -155,7 +164,13 @@ describe("the agent message loop", () => {
     const params = streamParams(0);
     expect(params.model).toBe("claude-opus-4-8");
     expect(params.thinking).toEqual({ type: "adaptive" });
-    expect(params.system).toMatch(/stage DRAFTS/);
+    // System prompt as a block array carrying the cache breakpoint: render
+    // order is tools → system → messages, so this one breakpoint caches the
+    // tool list too — material-less conversations stop re-paying the prefix
+    // on every loop iteration.
+    expect(params.system).toHaveLength(1);
+    expect(params.system[0].cache_control).toEqual({ type: "ephemeral" });
+    expect(params.system[0].text).toMatch(/stage DRAFTS/);
     expect(params.tools.map((t) => t.name).sort()).toEqual([
       "create_subtasks",
       "create_task",
@@ -235,7 +250,45 @@ describe("the agent message loop", () => {
     expect(res.body.stopped).toBe("token_budget");
     expect(mocks.stream).toHaveBeenCalledTimes(1);
     expect(res.body.usage).toMatchObject({ inputTokens: 40_000, outputTokens: 55_000 });
-    expect(res.body.usage.estimatedUsd).toBeCloseTo(1.575, 3);
+    // costUsd, not estimatedUsd: the message path reports ACTUAL turn cost.
+    expect(res.body.usage.costUsd).toBeCloseTo(1.575, 3);
+  });
+
+  it("survives a max_tokens truncation mid-tool-call — the next send in the session succeeds", async () => {
+    // The model's turn is cut off by max_tokens while it still carries a
+    // tool_use block. The loop must answer it with a synthetic error result
+    // (never execute possibly-truncated arguments), or the NEXT send would be
+    // rejected by the API for the dangling tool_use id.
+    mocks.turn(
+      [
+        { type: "text", text: "let me stage that" },
+        {
+          type: "tool_use",
+          id: "t-cut",
+          name: "create_task",
+          input: { title: "cut off mid-args", categoryId: 1 },
+        },
+      ],
+      "max_tokens",
+    );
+    const first = await request(app).post("/api/ai/agent/message").send({ message: "go" }).expect(200);
+    expect(first.body.stopped).toBe("truncated");
+    expect(first.body.reply).toMatch(/cut off/);
+    expect(first.body.changeset.ops).toHaveLength(0); // the cut-off call staged nothing
+    expect(mocks.stream).toHaveBeenCalledTimes(1); // and the loop did not continue
+
+    mocks.turn([{ type: "text", text: "resumed" }]);
+    const second = await request(app)
+      .post("/api/ai/agent/message")
+      .send({ sessionId: first.body.sessionId, message: "continue" })
+      .expect(200);
+    expect(second.body.reply).toBe("resumed");
+
+    // The follow-up request's history answers the dangling id as an error.
+    const result = findToolResult(streamParams(1));
+    expect(result.tool_use_id).toBe("t-cut");
+    expect(result.is_error).toBe(true);
+    expect(result.content).toMatch(/max_tokens/);
   });
 
   it("continues a session by id and 404s an unknown one", async () => {

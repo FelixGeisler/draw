@@ -1453,7 +1453,9 @@ home; better-sqlite3 nests the cores' inner transactions as savepoints, and
 any rejected row rolls back the whole changeset. Draft parents resolve to
 real ids in list order. Oversized subtask efforts are split, never clamped
 (#28's `evenSplit` policy) — at stage time so the review shows the real rows,
-and again at apply because the reviewer can edit efforts.
+and again at apply because the reviewer can edit efforts; a `create_task`
+staged WITH a `parentId` is a leaf too and takes the same stage-time split
+into sibling parts (ADR-16 leaves it no breakdown to fix itself with).
 (c) The loop itself (`services/agentLoop.ts`, pure; transport injected by
 `agentService.ts`) is a manual while-`stop_reason=tool_use` loop over
 `beta.messages.stream()` + `finalMessage()` — the ADR-36 seam the whole suite
@@ -1462,10 +1464,15 @@ issue's budgets need is exactly what the runner abstracts away. Caps per user
 message: 8 iterations and a cost ceiling summed from per-iteration usage with
 OUTPUT tokens priced at $25/MTok (the pre-existing estimate() prices input
 only and would understate agent runs ~5×); an abort returns the partial
-changeset plus a `stopped` reason, never an error. Materials enter as
-document blocks in the first user message via `materialBlocks()` (ADR-7/
-ADR-35, `count_tokens` guard with the #138 base64 substitution, file-id
-retry); the system prompt is static so the prefix stays cacheable.
+changeset plus a `stopped` reason, never an error. A model-side truncation
+(`stop_reason` `max_tokens` with tool calls still pending) answers every
+dangling `tool_use` with a synthetic error result instead of executing
+possibly-cut-off arguments — the session history stays API-legal (the next
+send would otherwise be rejected) and the model's context stays honest.
+Materials enter as document blocks in the first user message via
+`materialBlocks()` (ADR-7/ADR-35, `count_tokens` guard with the #138 base64
+substitution, file-id retry); the system prompt is static and carries a
+cache breakpoint, so material-less iterations reuse the tools+system prefix.
 (d) Sessions live in an in-memory `Map` (single-user local app; the multi-MB
 PDF blocks must not round-trip through the browser) — deliberately NOT
 persisted, so `user_version` stays 11: a conversation is scratch state, and

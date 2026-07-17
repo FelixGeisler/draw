@@ -9,11 +9,20 @@ import {
   type AgentTurnUsage,
 } from "../hooks/useAssistant";
 import { MaterialPicker } from "../components/AiSuggestionPanel";
+import {
+  buildOperations,
+  cascadeExclusions,
+  countChanges,
+  seedEdits,
+  type RowEdit,
+} from "../lib/assistantReview";
 
 // The Assistant page (#31, ADR-37): a conversation whose write tools stage a
 // DRAFT changeset — the review card below the transcript is the sole write
 // path (ADR-14). Conversation state lives in this component on purpose: it is
 // scratch, a reload starts fresh (matching the server's in-memory sessions).
+// The review-state model (inclusion cascade, apply plan) is pure and lives in
+// lib/assistantReview.ts.
 
 interface TranscriptEntry {
   role: "user" | "assistant" | "notice";
@@ -21,106 +30,9 @@ interface TranscriptEntry {
   usage?: AgentTurnUsage;
 }
 
-/** Per-draft review state: inclusion plus the two editable fields. */
-interface RowEdit {
-  included: boolean;
-  title: string;
-  effortMinutes: number | null;
-}
-
-function seedEdits(ops: StagedOp[], prev: Record<string, RowEdit>): Record<string, RowEdit> {
-  const next = { ...prev };
-  for (const op of ops) {
-    if (op.kind === "create_task") {
-      next[op.draftId] ??= {
-        included: true,
-        title: op.task.title,
-        effortMinutes: op.task.effortMinutes ?? null,
-      };
-    } else {
-      for (const s of op.subtasks) {
-        next[s.draftId] ??= { included: true, title: s.title, effortMinutes: s.effortMinutes ?? null };
-      }
-    }
-  }
-  return next;
-}
-
-/** Deselecting a parent draft deselects everything staged under it. */
-function cascadeExclusions(ops: StagedOp[], edits: Record<string, RowEdit>): Record<string, RowEdit> {
-  const next = { ...edits };
-  const excludedParents = new Set(
-    ops
-      .filter((op) => op.kind === "create_task" && !next[op.draftId]?.included)
-      .map((op) => op.draftId),
-  );
-  for (const op of ops) {
-    const parentRef = op.kind === "create_task" ? op.task.parentId : op.parentId;
-    if (typeof parentRef !== "string" || !excludedParents.has(parentRef)) continue;
-    if (op.kind === "create_task") {
-      if (next[op.draftId]?.included) next[op.draftId] = { ...next[op.draftId], included: false };
-      excludedParents.add(op.draftId); // one level deep, but stay safe
-    } else {
-      for (const s of op.subtasks) {
-        if (next[s.draftId]?.included) next[s.draftId] = { ...next[s.draftId], included: false };
-      }
-    }
-  }
-  return next;
-}
-
-/** The reviewed (edited, included) operations — exactly what apply commits. */
-function buildOperations(ops: StagedOp[], edits: Record<string, RowEdit>): StagedOp[] {
-  const included = (draftId: string) => edits[draftId]?.included ?? true;
-  const result: StagedOp[] = [];
-  for (const op of ops) {
-    if (op.kind === "create_task") {
-      if (!included(op.draftId) || !edits[op.draftId]?.title.trim()) continue;
-      const e = edits[op.draftId];
-      result.push({
-        ...op,
-        task: {
-          ...op.task,
-          title: e.title.trim(),
-          // The minutes input can be cleared (null) — omit, don't send 0 (#84).
-          effortMinutes:
-            e.effortMinutes != null && e.effortMinutes > 0
-              ? Math.round(e.effortMinutes)
-              : undefined,
-        },
-      });
-    } else {
-      const parentIncluded = typeof op.parentId !== "string" || included(op.parentId);
-      if (!parentIncluded) continue;
-      const subtasks = op.subtasks
-        .filter((s) => included(s.draftId) && edits[s.draftId]?.title.trim())
-        .map((s) => {
-          const e = edits[s.draftId];
-          return {
-            ...s,
-            title: e.title.trim(),
-            effortMinutes:
-              e.effortMinutes != null && e.effortMinutes > 0
-                ? Math.round(e.effortMinutes)
-                : undefined,
-          };
-        });
-      if (subtasks.length > 0) result.push({ ...op, subtasks });
-    }
-  }
-  return result;
-}
-
-function countChanges(operations: StagedOp[]): number {
-  return operations.reduce(
-    (n, op) => n + (op.kind === "create_task" ? 1 : op.subtasks.length),
-    0,
-  );
-}
-
 function costLine(usage: AgentTurnUsage): string {
   const tokens = usage.inputTokens + usage.outputTokens + usage.cacheReadInputTokens;
-  return `${tokens.toLocaleString()} tokens (${usage.outputTokens.toLocaleString()} out) ≈ $${usage.estimatedUsd.toFixed(3)}`;
+  return `${tokens.toLocaleString()} tokens (${usage.outputTokens.toLocaleString()} out) ≈ $${usage.costUsd.toFixed(3)}`;
 }
 
 function aiErrorMessage(e: unknown): string {
@@ -419,7 +331,8 @@ export function AssistantPage() {
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <span style={{ flex: 1, fontSize: 12, color: "var(--text-dim)" }}>
-              Unchecked rows are skipped; unchecking a draft parent skips its subtasks.
+              Unchecked rows and rows with an empty title are skipped; dropping a draft parent
+              drops its subtasks.
             </span>
             <button
               className="primary"

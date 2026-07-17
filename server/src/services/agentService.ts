@@ -243,6 +243,17 @@ You cannot draw cards, start timers, or complete/edit existing tasks: drawing is
 
 export const AGENT_MAX_TOKENS = 16_000;
 
+// The system prompt carries a cache breakpoint (render order is tools →
+// system → messages, so this one breakpoint caches the tool list too):
+// material-less conversations would otherwise re-send the full prefix
+// uncached on each of the loop's up-to-8 iterations and every follow-up
+// turn. With materials selected, materialBlocks() adds a second, later
+// breakpoint on the last document block — 2 of the 4 allowed per request.
+// Below the model's minimum cacheable prefix this is a silent no-op.
+const AGENT_SYSTEM_BLOCKS: Anthropic.Beta.Messages.BetaTextBlockParam[] = [
+  { type: "text", text: AGENT_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+];
+
 interface SessionLike {
   messages: LoopMessage[];
 }
@@ -267,7 +278,7 @@ async function callModel(
       model: MODEL,
       max_tokens: AGENT_MAX_TOKENS,
       thinking: { type: "adaptive" },
-      system: AGENT_SYSTEM_PROMPT,
+      system: AGENT_SYSTEM_BLOCKS,
       messages: messages as unknown as Anthropic.Beta.Messages.BetaMessageParam[],
       tools: API_TOOLS as unknown as Anthropic.Beta.Messages.BetaToolUnion[],
       betas: filesBeta ? [FILES_BETA] : undefined,
@@ -294,7 +305,8 @@ async function guardAgentTokens(client: Anthropic, messages: LoopMessage[]): Pro
     );
     const count = await client.beta.messages.countTokens({
       model: MODEL,
-      system: AGENT_SYSTEM_PROMPT,
+      // Same block shape as the paid call so the counted prefix mirrors it.
+      system: AGENT_SYSTEM_BLOCKS,
       messages: counting as unknown as Anthropic.Beta.Messages.BetaMessageParam[],
       tools: API_TOOLS as unknown as Anthropic.Beta.Messages.BetaToolUnion[],
     });
@@ -334,7 +346,8 @@ function firstTurnText(input: { goalId?: number; materialIds?: number[]; message
 // The message turn
 
 export interface AgentTurnUsage extends AgentUsage {
-  estimatedUsd: number;
+  /** ACTUAL cost of the turn from per-iteration usage — unlike the estimate endpoint's input-only estimatedUsd. */
+  costUsd: number;
 }
 
 export interface AgentTurnResult {
@@ -350,6 +363,8 @@ const STOP_EXPLANATIONS: Record<LoopStopReason, string> = {
     "Stopped: the assistant hit its per-message iteration cap. The changes staged so far are shown for review — send another message to continue.",
   token_budget:
     "Stopped: this message hit its token budget. The changes staged so far are shown for review — send another message to continue.",
+  truncated:
+    "Stopped: the reply was cut off mid-tool-call by the output limit; the cut-off calls were not executed. The changes staged so far are shown for review — send another message to continue.",
 };
 
 export async function runAgentTurn(input: {
@@ -393,7 +408,7 @@ export async function runAgentTurn(input: {
       changeset: { ops: s.changeset.ops },
       usage: {
         ...result.usage,
-        estimatedUsd: Math.round(usageUsd(result.usage) * 1000) / 1000,
+        costUsd: Math.round(usageUsd(result.usage) * 1000) / 1000,
       },
       ...(result.stopped ? { stopped: result.stopped } : {}),
     };
