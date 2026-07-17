@@ -1,9 +1,16 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
 import type { ZodType } from "zod";
 import fs from "node:fs";
 import path from "node:path";
 import { API_KEY_SETTING, db, filesDir, getSetting, getSettingString } from "../db.js";
+import {
+  ensureFileId,
+  FILES_BETA,
+  invalidateFileIds,
+  sdkUploader,
+  type PdfUploader,
+} from "./materialFiles.js";
 import {
   breakdownSchema,
   cardArtSchema,
@@ -103,6 +110,15 @@ export class AiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /**
+     * The status the Claude API itself returned, when this wraps an SDK
+     * error. Distinct from `status`, which is what WE answer our client with
+     * — an Anthropic 404 is a 502 to the browser. Kept because the file-id
+     * cache (#92) has to tell "that file_id is gone" apart from every other
+     * upstream failure, and doing that by string-matching the message would
+     * be a guess dressed up as a check.
+     */
+    public sdkStatus?: number,
   ) {
     super(message);
   }
@@ -120,7 +136,7 @@ function mapSdkError(e: unknown): AiError {
     return new AiError(502, "Could not reach the Claude API — check your internet connection");
   }
   if (e instanceof Anthropic.APIError) {
-    return new AiError(502, `Claude API error: ${e.message}`);
+    return new AiError(502, `Claude API error: ${e.message}`, e.status);
   }
   return new AiError(500, e instanceof Error ? e.message : "unknown AI error");
 }
@@ -128,8 +144,15 @@ function mapSdkError(e: unknown): AiError {
 // ---------------------------------------------------------------------------
 // Materials → content blocks (materials first, cache breakpoint on the last one)
 
-// Only text and document blocks carry materials/context (both support cache_control).
-type ContentBlock = Anthropic.Messages.TextBlockParam | Anthropic.Messages.DocumentBlockParam;
+// Only text and document blocks carry materials/context (both support
+// cache_control). These are the BETA variants, and not by preference: the
+// `{type: "file", file_id}` document source #92 needs exists only there (the
+// GA DocumentBlockParam takes base64/text/content/url — checked against the
+// installed SDK, see materialFiles.FILES_BETA). Hence beta blocks, and hence
+// `client.beta.messages.*` below.
+export type ContentBlock =
+  | Anthropic.Beta.Messages.BetaTextBlockParam
+  | Anthropic.Beta.Messages.BetaRequestDocumentBlock;
 
 interface MaterialRow {
   id: number;
@@ -139,14 +162,23 @@ interface MaterialRow {
   stored_name: string | null;
   mime_type: string | null;
   note_text: string | null;
+  anthropic_file_id: string | null;
 }
 
-function materialBlocks(materialIds: number[], goalId: number | null): ContentBlock[] {
+async function materialBlocks(materialIds: number[], goalId: number | null): Promise<ContentBlock[]> {
   if (materialIds.length === 0) return [];
   const placeholders = materialIds.map(() => "?").join(",");
   const rows = db
     .prepare(`SELECT * FROM materials WHERE id IN (${placeholders})`)
     .all(...materialIds) as MaterialRow[];
+
+  // One uploader for the whole assembly; null without a key. Degraded mode
+  // therefore assembles exactly the blocks it did before #92 (base64), and
+  // the 503 still comes from guardTokens further down — never from here.
+  const resolved = resolveApiKey();
+  const upload: PdfUploader | null = resolved
+    ? sdkUploader(new Anthropic({ apiKey: resolved.key }))
+    : null;
 
   const blocks: ContentBlock[] = [];
   for (const m of rows) {
@@ -157,16 +189,10 @@ function materialBlocks(materialIds: number[], goalId: number | null): ContentBl
       const full = path.resolve(filesDir, m.stored_name);
       if (!full.startsWith(path.resolve(filesDir)) || !fs.existsSync(full)) continue;
       if (m.mime_type === "application/pdf") {
-        blocks.push({
-          type: "document",
-          source: {
-            type: "base64",
-            media_type: "application/pdf",
-            data: fs.readFileSync(full).toString("base64"),
-          },
-          title: m.filename ?? "document",
-        });
+        blocks.push(await pdfBlock(m, full, upload));
       } else {
+        // .txt/.md stay inline (#92 scope): they are cheap, and an inline
+        // block keeps the assembled prompt readable. The win is PDFs.
         blocks.push({
           type: "text",
           text: `<material name="${m.filename}">\n${fs.readFileSync(full, "utf-8")}\n</material>`,
@@ -176,10 +202,108 @@ function materialBlocks(materialIds: number[], goalId: number | null): ContentBl
   }
 
   // Cache breakpoint on the last material block: repeated calls against the
-  // same materials within the TTL read the prefix at ~10% cost.
+  // same materials within the TTL read the prefix at ~10% cost. A file-source
+  // document block carries cache_control exactly like a base64 one — and its
+  // bytes are now tiny AND stable across calls, so the prefix stays identical
+  // where a re-read base64 payload only happened to.
   const last = blocks[blocks.length - 1];
   if (last) last.cache_control = { type: "ephemeral" };
   return blocks;
+}
+
+/**
+ * A PDF material as a document block: by file id once uploaded (#92), else
+ * the pre-#92 base64 payload. The fallback is load-bearing, not tidiness —
+ * `ensureFileId` returns null whenever an id cannot be had (no key, upload
+ * failed), and an AI feature must not break because an upload path is
+ * unavailable.
+ */
+async function pdfBlock(
+  m: MaterialRow,
+  full: string,
+  upload: PdfUploader | null,
+): Promise<Anthropic.Beta.Messages.BetaRequestDocumentBlock> {
+  const title = m.filename ?? "document";
+  const fileId = await ensureFileId(m, full, upload);
+  if (fileId) return { type: "document", source: { type: "file", file_id: fileId }, title };
+  return {
+    type: "document",
+    source: {
+      type: "base64",
+      media_type: "application/pdf",
+      data: fs.readFileSync(full).toString("base64"),
+    },
+    title,
+  };
+}
+
+/** Does this block reference a Files-API id rather than carrying its bytes? */
+export function usesFileSource(block: ContentBlock): boolean {
+  return block.type === "document" && block.source.type === "file";
+}
+
+/**
+ * The beta header a request carrying these blocks needs — sent only when a
+ * file id is actually referenced, so calls without materials (card art, a
+ * task with none) keep exactly the request shape they had before #92.
+ */
+function betasFor(blocks: ContentBlock[]): Anthropic.AnthropicBeta[] | undefined {
+  return blocks.some(usesFileSource) ? [FILES_BETA] : undefined;
+}
+
+/**
+ * Did Anthropic reject the request because a file id we cached is gone —
+ * expired, uploaded by a different account, or restored from a backup made on
+ * another machine (#61)?
+ *
+ * Scoped to requests that actually reference a file id, so an unrelated 404
+ * (a bad model id is one) can never trigger a pointless re-upload. The 400 arm
+ * is deliberate slack: this repo has no key, so the exact rejection shape for
+ * a dead id cannot be observed here (#91 verifies it live). Guessing wrong
+ * costs one wasted re-upload; guessing too narrow costs a broken feature.
+ */
+export function isStaleFileIdError(e: unknown, blocks: ContentBlock[]): boolean {
+  if (!(e instanceof AiError) || !blocks.some(usesFileSource)) return false;
+  if (e.sdkStatus === 404) return true;
+  return e.sdkStatus === 400 && /file/i.test(e.message);
+}
+
+/**
+ * Run an AI call against freshly assembled blocks; if Anthropic rejects a
+ * cached file id, drop the ids and rebuild ONCE from disk (#92, ADR-35).
+ *
+ * Exactly one retry: the rebuild re-uploads, so a second rejection is a real
+ * failure and must surface rather than loop. This is the whole cache-coherence
+ * policy in one place — and, being free of the DB and the SDK, the one part of
+ * it that can be pinned by a test without a key.
+ */
+export async function withFileIdRetry<T>(
+  build: () => Promise<ContentBlock[]>,
+  run: (blocks: ContentBlock[]) => Promise<T>,
+  invalidate: () => void,
+): Promise<T> {
+  const blocks = await build();
+  try {
+    return await run(blocks);
+  } catch (e) {
+    if (!isStaleFileIdError(e, blocks)) throw e;
+    invalidate();
+    return await run(await build());
+  }
+}
+
+/** Assemble `materials ++ rest` and run `run` under the file-id retry policy. */
+function withMaterials<T>(
+  materialIds: number[],
+  goalId: number | null,
+  rest: ContentBlock[],
+  run: (blocks: ContentBlock[]) => Promise<T>,
+): Promise<T> {
+  return withFileIdRetry(
+    async () => [...(await materialBlocks(materialIds, goalId)), ...rest],
+    run,
+    () => invalidateFileIds(materialIds),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -349,10 +473,15 @@ function requireClient(): Anthropic {
 async function guardTokens(blocks: ContentBlock[], system: string): Promise<number> {
   const c = requireClient();
   try {
-    const count = await c.messages.countTokens({
+    // The estimate stays honest with file ids in play: count_tokens resolves
+    // the referenced file server-side and counts the PDF's real tokens, the
+    // same content base64 would have inlined. What shrinks is the request, not
+    // the number — so the MAX_INPUT_TOKENS guard still gates the same thing.
+    const count = await c.beta.messages.countTokens({
       model: MODEL,
       system,
       messages: [{ role: "user", content: blocks }],
+      betas: betasFor(blocks),
     });
     if (count.input_tokens > MAX_INPUT_TOKENS) {
       throw new AiError(
@@ -399,22 +528,29 @@ export async function estimate(input: {
 }): Promise<{ inputTokens: number; estimatedUsd: number }> {
   const materialIds = input.materialIds ?? [];
   const mode = estimateMode(input);
-  let blocks: ContentBlock[];
+  let rest: ContentBlock[];
   let system = PLANNING_SYSTEM_PROMPT;
+  let goalId: number | null;
   if (mode === "breakdown") {
     const ctx = taskContext(input.taskId!);
-    blocks = [...materialBlocks(materialIds, ctx.goalId), ...ctx.blocks];
+    rest = ctx.blocks;
+    goalId = ctx.goalId;
   } else if (mode === "plan-goal") {
-    blocks = [...materialBlocks(materialIds, input.goalId!), ...goalContext(input.goalId!)];
+    rest = goalContext(input.goalId!);
+    goalId = input.goalId!;
   } else {
-    blocks = [
-      ...materialBlocks(materialIds, input.goalId!),
-      ...generateTasksContext(input.goalId!, input.instruction!.trim()),
-    ];
+    rest = generateTasksContext(input.goalId!, input.instruction!.trim());
+    goalId = input.goalId!;
     system = TRANSCRIPTION_SYSTEM_PROMPT;
   }
-  const inputTokens = await guardTokens(blocks, system).catch((e: AiError) => {
-    // Even over-limit estimates should report the number, not fail.
+  // The estimate self-heals a stale file id exactly like the paid call it
+  // gates — a count_tokens 404 would otherwise surface as a raw 502.
+  const inputTokens = await withMaterials(materialIds, goalId, rest, (blocks) =>
+    guardTokens(blocks, system),
+  ).catch((e: AiError) => {
+    // Even over-limit estimates should report the number, not fail. (This is
+    // an AiError(400) thrown by guardTokens itself, not a stale-file error —
+    // it carries no sdkStatus, so the retry wrapper let it through.)
     const match = /\(([\d,.]+) tokens/.exec(e.message);
     if (e.status === 400 && match) return Number(match[1].replace(/[,.]/g, ""));
     throw e;
@@ -434,13 +570,14 @@ async function runStructured<T>(
   const system = opts.system ?? PLANNING_SYSTEM_PROMPT;
   await guardTokens(blocks, system);
   try {
-    const response = await c.messages.parse({
+    const response = await c.beta.messages.parse({
       model: MODEL,
       max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       thinking: { type: "adaptive" },
       system,
       messages: [{ role: "user", content: blocks }],
-      output_config: { format: zodOutputFormat(schema) },
+      output_config: { format: betaZodOutputFormat(schema) },
+      betas: betasFor(blocks),
     });
     if (!response.parsed_output) {
       throw new AiError(502, "Claude returned an unparseable response — try again");
@@ -453,8 +590,9 @@ async function runStructured<T>(
 
 export async function breakdown(taskId: number, materialIds: number[] = []): Promise<BreakdownResult> {
   const ctx = taskContext(taskId);
-  const blocks = [...materialBlocks(materialIds, ctx.goalId), ...ctx.blocks];
-  const result = await runStructured(blocks, breakdownSchema);
+  const result = await withMaterials(materialIds, ctx.goalId, ctx.blocks, (blocks) =>
+    runStructured(blocks, breakdownSchema),
+  );
   const maxEffort = getSetting("max_draw_effort", 30);
   // Belt and braces: clamp efforts to the drawable limit.
   result.subtasks = result.subtasks.map((s) => ({
@@ -469,8 +607,9 @@ export async function planGoal(
   materialIds: number[] = [],
   userNotes?: string,
 ): Promise<PlanGoalResult> {
-  const blocks = [...materialBlocks(materialIds, goalId), ...goalContext(goalId, userNotes)];
-  const result = await runStructured(blocks, planGoalSchema);
+  const result = await withMaterials(materialIds, goalId, goalContext(goalId, userNotes), (blocks) =>
+    runStructured(blocks, planGoalSchema),
+  );
   const maxEffort = getSetting("max_draw_effort", 30);
   result.tasks = result.tasks.map((t) => ({
     ...t,
@@ -484,11 +623,16 @@ export async function generateTasks(
   materialIds: number[] = [],
   instruction: string,
 ): Promise<GenerateTasksProcessed> {
-  const blocks = [...materialBlocks(materialIds, goalId), ...generateTasksContext(goalId, instruction)];
-  const result = await runStructured(blocks, generateTasksSchema, {
-    maxTokens: GENERATE_TASKS_MAX_TOKENS,
-    system: TRANSCRIPTION_SYSTEM_PROMPT,
-  });
+  const result = await withMaterials(
+    materialIds,
+    goalId,
+    generateTasksContext(goalId, instruction),
+    (blocks) =>
+      runStructured(blocks, generateTasksSchema, {
+        maxTokens: GENERATE_TASKS_MAX_TOKENS,
+        system: TRANSCRIPTION_SYSTEM_PROMPT,
+      }),
+  );
   // Deterministic post-processing (ADR-14): points → impact quintiles, and
   // split-don't-clamp for oversized items. The Math.min clamp above would
   // corrupt the material's own time data here.

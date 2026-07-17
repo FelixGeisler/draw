@@ -82,6 +82,14 @@ CREATE TABLE materials (
   mime_type TEXT,
   size_bytes INTEGER,
   note_text TEXT,
+  -- Anthropic Files API id for this material's PDF (#92, ADR-35). A CACHE of
+  -- remote state, never identity: the file lives in the Anthropic account
+  -- behind the current API key, so a restored backup, a key swap or a
+  -- server-side expiry can leave this dangling. Every reader must tolerate a
+  -- stale value (aiService clears it and re-uploads on rejection); the file
+  -- under files/ stays the source of truth. NULL = not uploaded yet — the id
+  -- is filled lazily on first AI use, never at material upload time.
+  anthropic_file_id TEXT,
   created_at TEXT NOT NULL
 );
 

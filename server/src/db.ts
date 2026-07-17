@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 10;
+export const CURRENT_VERSION = 11;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -176,6 +176,18 @@ function migrate() {
       db.exec(
         "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_hand_budget_minutes', '90')",
       );
+    }
+    if (version < 11) {
+      // Anthropic Files API for goal materials (issue #92, ADR-35): PDFs are
+      // uploaded once and referenced by file id instead of re-sending base64
+      // on every AI call. Nullable with no default and no backfill BECAUSE
+      // the column is a CACHE of Anthropic-side state, not data we own: NULL
+      // simply means "not uploaded under the current key yet", which is the
+      // truth for every pre-#92 row, and the first AI use fills it in. There
+      // is deliberately nothing to migrate — the PDFs under files/ remain the
+      // source of truth, so a database that never gets an id keeps working on
+      // the base64 fallback path.
+      db.exec("ALTER TABLE materials ADD COLUMN anthropic_file_id TEXT");
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);

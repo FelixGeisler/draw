@@ -53,7 +53,11 @@ beforeAll(async () => {
     .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
     // …nor the v9 warm-up column and setting seed (#57).
     .replace(/,\r?\n  -- Warm-up draw[\s\S]*?was_warmup INTEGER NOT NULL DEFAULT 0/, "")
-    .replace(/,\r?\n  \('warmup_every_hours', '8'\)/, "");
+    .replace(/,\r?\n  \('warmup_every_hours', '8'\)/, "")
+    // …nor the v11 materials.anthropic_file_id column (#92) — the v6 → v11
+    // boot re-adds it, and leaving it in the seed would make that ALTER fail
+    // with a duplicate column.
+    .replace(/  -- Anthropic Files API id[\s\S]*?anthropic_file_id TEXT,\r?\n/, "");
   // Sanity: unlike migration.test.ts's v2 file, this file CAN express the
   // collision — sequential mode and recurrence both exist at v6.
   expect(schema).toContain("subtask_order_mode");
@@ -62,6 +66,7 @@ beforeAll(async () => {
   expect(schema).not.toContain("streak_freezes"); // the strip really ran
   expect(schema).not.toContain("was_warmup");
   expect(schema).not.toContain("warmup_every_hours");
+  expect(schema).not.toContain("anthropic_file_id");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(schema);
