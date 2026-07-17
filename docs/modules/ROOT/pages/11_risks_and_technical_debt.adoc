@@ -25,9 +25,9 @@
 |Deliberate: reinforces the draw habit; revisit if XP feels inflated
 
 |R5
-|*PDF materials are re-uploaded as base64 per AI call*
-|Large PDFs inflate request size and latency (cache only saves cost, not upload bandwidth)
-|Fine for personal use; adopting the Anthropic Files API is the upgrade path, tracked in https://github.com/FelixGeisler/draw/issues/92[#92]
+|[.line-through]#PDF materials are re-uploaded as base64 per AI call# *Resolved:* PDFs upload once to the Anthropic Files API and are referenced by `file_id` thereafter (xref:09_architecture_decisions.adoc[ADR-35]), so a repeat call sends a tiny stable reference instead of the whole payload; the id is a cache that transparently re-uploads on rejection, and the base64 path stays as the fallback
+|—
+|Delivered in https://github.com/FelixGeisler/draw/issues/92[#92]; live upgrade (faster/smaller second call) is on the R1 verification checklist (https://github.com/FelixGeisler/draw/issues/91[#91])
 
 |R6
 |*Single-user assumptions everywhere* (one running timer, no auth, localhost binding)

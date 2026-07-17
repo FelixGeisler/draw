@@ -107,14 +107,26 @@ costs the user nothing except the fishing.
 == 8.4 AI usage rules
 
 Server-side only. `claude-opus-4-8` with adaptive thinking and structured outputs
-(`messages.parse` + `zodOutputFormat`; impact as literal union 1|2|3|4|5 because
-numeric min/max is unsupported). Materials precede instructions in the prompt with a
-`cache_control` breakpoint on the last material block (prompt caching). Token
+(`beta.messages.parse` + `betaZodOutputFormat`; impact as literal union 1|2|3|4|5
+because numeric min/max is unsupported). Materials precede instructions in the prompt
+with a `cache_control` breakpoint on the last material block (prompt caching). Token
 counting gates every call (estimate endpoint + 180K hard limit); the estimate
 mirrors the exact prompt shape of the call it gates — a goal estimate carrying an
 `instruction` counts the generate-tasks context under the transcription system
 prompt, not plan-goal's (`estimateMode` in `aiService.ts`). No `temperature`,
 `budget_tokens`, or assistant prefill — all rejected by this model family.
+
+Goal PDFs upload once to the Anthropic Files API and are referenced by `file_id`
+thereafter, instead of re-sending base64 on every call (xref:09_architecture_decisions.adoc[ADR-35],
+#92). The id is a cache of Anthropic-side state, not identity: it is lazily filled on
+first AI use (`materials.anthropic_file_id`, migration v11), cleared and re-uploaded
+once when Anthropic rejects it (a stale id after a key swap or a restored backup), and
+falls back to base64 whenever an upload cannot be made — so no AI feature breaks on the
+upgrade path, and degraded mode without a key is unchanged. The `file_id` document
+source is a beta surface, so these four calls use `client.beta.messages.*` with the
+`files-api-2025-04-14` header, sent only when a request actually references an id. `.txt`/`.md`
+materials stay inline as text blocks. `count_tokens` resolves the referenced file and
+counts its real tokens, so the estimate and the 180K guard stay honest.
 
 == 8.5 Security
 
@@ -192,3 +204,10 @@ Every rejected import (foreign zip, corrupt or newer-versioned database,
 unsafe paths) is a `400` with the live data untouched: validation runs
 against staged temp copies before anything is swapped. The Settings page
 gates the restore behind an explicit warning plus typing `REPLACE`.
+
+A restored `app.db` carries each material's `anthropic_file_id` (section 8.4),
+which is Anthropic-side state that does not travel with the archive — on another
+machine or account it is dangling. This needs no special handling here: the id
+is treated as a cache everywhere (xref:09_architecture_decisions.adoc[ADR-35]),
+so the first AI call after a cross-account restore is rejected, drops the id and
+re-uploads the PDF (which the archive does carry) transparently.

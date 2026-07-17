@@ -1305,3 +1305,63 @@ second eligibility path to keep in sync, and no second way to hold a card.
 Keeping the hand in settings-kv follows ADR-2/ADR-13: it is session state
 derived from the tasks it points at, so it needs validation on read, not a
 table with its own truth to defend.
+
+
+== ADR-35: A goal PDF uploads once to the Anthropic Files API; its file_id is a cache, not identity
+
+*Context:* Every AI call embedded each selected PDF as a fresh base64
+`document` block, re-sending the whole payload on every request (section 11
+R5, #92). Prompt caching (ADR-11's `cache_control` breakpoint) discounts the
+*token cost* of that prefix on a repeat call but not the *bandwidth*: the
+base64 still travels the wire each time, and a re-read of the file can produce
+a different byte string that quietly breaks the cache prefix anyway. The
+Anthropic Files API is the documented fix — upload a file once, reference it by
+`file_id` thereafter — but it introduces a piece of state this app does not
+own: the id names a file living in the Anthropic account behind the *current*
+API key.
+
+*Decision:* (a) *Upload lazily, once, on first AI use.* A new nullable
+`materials.anthropic_file_id` column (migration v11, no default, no backfill)
+caches the id. It is filled the first time a material reaches an AI call, not
+when the user uploads the material: most materials never reach an AI call, and
+at upload time there may be no key at all (degraded mode is a fresh install's
+default state). `.txt`/`.md` materials stay inline as text blocks — they are
+cheap and inlining keeps the assembled prompt debuggable; the win is PDFs.
+(b) *The id is a CACHE of remote state, never identity.* It is valid only
+under the key that created it, so it can go stale for reasons this app cannot
+observe: the key was swapped for another account's, a backup was restored on a
+different machine (#61 — the archive carries the material rows AND the PDFs,
+but Anthropic-side state cannot travel with them), or the file expired
+server-side. The PDF under `files/` remains the source of truth and can always
+rebuild the request. Nothing treats a stored id as proof the file exists.
+(c) *Self-heal transparently.* If Anthropic rejects a request that referenced
+a cached id (a 404, or a file-mentioning 400), the ids for that call are
+dropped and the blocks are rebuilt from disk exactly once — the rebuild
+re-uploads, so a second rejection is a real failure and surfaces rather than
+loops. This is the whole cache-coherence policy, isolated in
+`withFileIdRetry` so it can be pinned by a test without a key. On a key change
+(`PUT`/`DELETE /api/ai/key`) every cached id is cleared eagerly, because the
+old key's ids can never be valid again.
+(d) *Never break a feature on the upgrade path.* If an upload fails (no key,
+quota, outage, the beta being withdrawn) the call falls back to the base64
+block it used before #92. The Files API can cost bandwidth, never function.
+(e) *Honesty of the token estimate is preserved.* `count_tokens` resolves the
+referenced file server-side and counts the PDF's real tokens — the same
+content base64 would have inlined — so the `MAX_INPUT_TOKENS` guard still gates
+the same thing; only the request shrinks, not the number.
+(f) *Beta surface.* The `{type: "file", file_id}` document source exists only
+in the SDK's beta namespace (the GA `DocumentBlockParam` source is
+base64/text/content/url — verified against the installed `@anthropic-ai/sdk`),
+so the four AI calls move to `client.beta.messages.*` and send the
+`files-api-2025-04-14` header — but only when a request actually references an
+id, so material-less calls (card art, a task with none) keep their exact
+pre-#92 shape.
+
+*Rationale:* Modelling the id as a cache rather than a stored fact is what
+makes the change safe against the one thing that would otherwise corrupt it —
+a dangling id surviving a backup restore onto another account (#61). Because
+the file on disk is always the fallback and the retry always re-uploads, no
+state this app cannot observe can wedge an AI feature: the worst a stale or
+missing id can do is cost one extra upload. Degraded mode is byte-for-byte
+unchanged — the uploader is null without a key, so assembly produces exactly
+the base64 blocks it did before, and the 503 still comes from the same guard.
