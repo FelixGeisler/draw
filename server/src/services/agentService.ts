@@ -527,8 +527,11 @@ export interface ApplyOutcome {
  * A successful apply CONSUMES the session's changeset (#143): the ops clear,
  * the version bumps, and the created mapping is kept so a re-apply of the
  * consumed version reconciles (alreadyApplied above) instead of creating
- * every task again. Sessions may legitimately be gone (restart) — then apply
- * proceeds stateless, the pre-existing accepted limitation (ADR-37).
+ * every task again. A version-less apply reconciles best-effort only while
+ * nothing is pending; with a pending changeset AND a consumed one it is
+ * ambiguous and refused (409, no mapping). Sessions may legitimately be gone
+ * (restart) — then apply proceeds stateless, the pre-existing accepted
+ * limitation (ADR-37).
  */
 export function applyOperations(
   operations: StagedOp[],
@@ -563,13 +566,30 @@ export function applyOperations(
         );
       }
       // changesetVersion === current: a fresh apply of the pending changeset.
-    } else if (session.changeset.ops.length === 0 && session.lastApplied) {
-      // Version-less caller (the #143 live repro: the same {sessionId,
-      // operations} POSTed twice): nothing is pending and something was
-      // applied — best-effort reconciliation with the last mapping.
-      return { created: session.lastApplied.created, alreadyApplied: true };
+    } else if (session.lastApplied) {
+      if (session.changeset.ops.length === 0) {
+        // Version-less caller (the #143 live repro: the same {sessionId,
+        // operations} POSTed twice): nothing is pending and something was
+        // applied — best-effort reconciliation with the last mapping.
+        return { created: session.lastApplied.created, alreadyApplied: true };
+      }
+      // Pending ops AND a consumed changeset: ambiguous by construction — a
+      // stray version-less retry of the consumed changeset falling through
+      // here would re-create its tasks, and the consumption below would
+      // swallow the pending changeset without applying it. 409 WITHOUT a
+      // mapping; the shipped client always sends the version and never
+      // lands here.
+      throw new AiError(
+        409,
+        "ambiguous version-less apply: this session has a pending changeset and an already-applied one — resend with changesetVersion",
+      );
     }
   }
+
+  // Captured before the write so consumption below can tell an apply that
+  // drained the staged changeset from a version-less one that never touched
+  // it (nothing pending, nothing previously applied).
+  const hadPendingOps = session != null && session.changeset.ops.length > 0;
 
   const maxEffort = getSetting("max_draw_effort", 30);
 
@@ -619,9 +639,20 @@ export function applyOperations(
   // collide), and a retry of THIS apply must reconcile, not duplicate — the
   // version bump plus the kept mapping is what the gate above checks.
   if (session) {
-    session.lastApplied = { version: session.changesetVersion, created };
-    session.changeset.ops = [];
-    session.changesetVersion += 1;
+    // Applying is session activity: without this refresh a session whose
+    // only recent use is review + apply stays the coldest candidate in
+    // evictOldSessions(), and eviction drops lastApplied — the very marker
+    // the retry reconciliation depends on.
+    session.lastUsedAt = Date.now();
+    // Only consume what this apply plausibly applied: it was keyed to this
+    // changeset by version, or it drained the pending ops. A version-less
+    // apply that found nothing staged must not stamp a fabricated marker
+    // (and bump the version) over a changeset it never applied.
+    if (changesetVersion != null || hadPendingOps) {
+      session.lastApplied = { version: session.changesetVersion, created };
+      session.changeset.ops = [];
+      session.changesetVersion += 1;
+    }
   }
   return { created };
 }

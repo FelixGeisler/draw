@@ -1492,13 +1492,21 @@ bumps the version and keeps the created mapping. A re-apply of a consumed
 version answers `409` carrying the ORIGINAL `created` mapping, which the
 client treats as success — an honest retry reconciles instead of
 duplicating; a version-less re-apply (API-level caller) reconciles
-best-effort when the session has nothing pending. The key is the VERSION,
+best-effort when the session has nothing pending, and is refused (`409`, no
+mapping) when a pending changeset and a consumed one coexist — ambiguous by
+construction, and acting on it could consume the pending changeset without
+applying it. The key is the VERSION,
 never a deep-equal of operations: the apply body carries the REVIEWED ops
 (title/effort edits, exclusions), which legitimately differ from the staged
 ops of the very changeset they belong to. A NEW changeset staged later in
 the same session gets the bumped version and applies normally. When the
 session itself is gone (restart, eviction) apply still proceeds statelessly
-— the accepted limitation above, now scoped to exactly that case.
+— a retry that crosses a server restart cannot be detected: it answers
+`201` and re-creates every task, and the client reports it as a fresh
+success with no hint of duplication. Closing that window would take a
+persisted idempotency ledger (a schema migration), which (d)'s
+no-persistence stance deliberately declines — the accepted limitation
+above, now scoped to exactly that case.
 
 *Rationale:* One review table beats forty confirmations and preserves the
 app's review-before-accept contract; staging in memory keeps the "never
