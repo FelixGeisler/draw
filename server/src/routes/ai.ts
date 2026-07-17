@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import {
   AiError,
   breakdown,
@@ -9,6 +10,8 @@ import {
   planGoal,
   resolveApiKey,
 } from "../services/aiService.js";
+import { agentEstimate, applyOperations, runAgentTurn } from "../services/agentService.js";
+import { applyBodySchema } from "../services/agentStaging.js";
 import { invalidateAllFileIds } from "../services/materialFiles.js";
 import { API_KEY_SETTING, deleteSetting, setSetting } from "../db.js";
 
@@ -121,6 +124,83 @@ aiRouter.post("/plan-goal", async (req, res) => {
   if (!isConfigured()) return res.status(503).json({ error: "ai_not_configured" });
   try {
     res.json(await planGoal(goalId, materialIds ?? [], userNotes));
+  } catch (e) {
+    handle(res, e);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Conversational assistant (#31, ADR-37). One shared shape gate: the message
+// endpoints take { sessionId?, goalId?, materialIds?, message }; malformed
+// requests 400 before the isConfigured check, like every AI route (#84).
+
+function agentShapeError(body: Record<string, unknown>): string | null {
+  if (typeof body.message !== "string" || !body.message.trim()) {
+    return "message is required";
+  }
+  if (body.sessionId != null && typeof body.sessionId !== "string") {
+    return "sessionId must be a string";
+  }
+  return (
+    (body.goalId != null ? idShapeError(body.goalId, "goalId") : null) ??
+    materialIdsShapeError(body.materialIds)
+  );
+}
+
+aiRouter.post("/agent/message", async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const shapeError = agentShapeError(body);
+  if (shapeError) return res.status(400).json({ error: shapeError });
+  if (!isConfigured()) return res.status(503).json({ error: "ai_not_configured" });
+  try {
+    res.json(
+      await runAgentTurn({
+        sessionId: body.sessionId as string | undefined,
+        goalId: body.goalId as number | undefined,
+        materialIds: body.materialIds as number[] | undefined,
+        message: (body.message as string).trim(),
+      }),
+    );
+  } catch (e) {
+    handle(res, e);
+  }
+});
+
+// Prices the FIRST send (system + tools + materials + message) before it
+// runs — the estimate-gate pattern of the other panels, minus their
+// taskId/goalId requirement (a plain chat needs no goal). Input-only by
+// nature; the per-turn usage line reports the actual cost including output.
+aiRouter.post("/agent/estimate", async (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const shapeError = agentShapeError(body);
+  if (shapeError) return res.status(400).json({ error: shapeError });
+  if (!isConfigured()) return res.status(503).json({ error: "ai_not_configured" });
+  try {
+    res.json(
+      await agentEstimate({
+        goalId: body.goalId as number | undefined,
+        materialIds: body.materialIds as number[] | undefined,
+        message: (body.message as string).trim(),
+      }),
+    );
+  } catch (e) {
+    handle(res, e);
+  }
+});
+
+// Applies the REVIEWED operations (the checkbox review is the sole write
+// path, ADR-14: included rows and the user's title/effort edits travel in
+// the body) in one transaction — any rejected row rolls back everything.
+// 503-gated like its siblings even though it never calls the SDK: the whole
+// assistant surface is hidden in degraded mode.
+aiRouter.post("/agent/apply", (req, res) => {
+  const parsed = applyBodySchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    return res.status(400).json({ error: `invalid operations: ${z.prettifyError(parsed.error)}` });
+  }
+  if (!isConfigured()) return res.status(503).json({ error: "ai_not_configured" });
+  try {
+    res.status(201).json(applyOperations(parsed.data.operations, parsed.data.sessionId));
   } catch (e) {
     handle(res, e);
   }

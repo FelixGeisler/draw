@@ -14,6 +14,8 @@ import { aiRouter } from "./routes/ai.js";
 import { backupRouter } from "./routes/backup.js";
 import { cardArtRouter } from "./routes/cardArt.js";
 import { sweepBackupTemp } from "./services/backupService.js";
+import { bindAgentToolApi } from "./services/agentService.js";
+import { InProcessApiClient } from "./tools/inProcessApi.js";
 
 export function createApp() {
   const app = express();
@@ -53,6 +55,12 @@ export function createApp() {
   // Cache-only batch art reads for the trophy pile (#114) — deliberately NOT
   // under /api/tasks/:id: the per-task route generates on miss, this never.
   app.use("/api/card-art", cardArtRouter);
+
+  // The assistant's READ tools (#31, ADR-37) execute through the app's own
+  // HTTP surface — a lazy private loopback listener on THIS app instance, so
+  // every domain invariant and derived payload holds by construction (the
+  // ADR-19 argument), with or without a public listener (supertest).
+  bindAgentToolApi(new InProcessApiClient(app));
 
   return app;
 }
