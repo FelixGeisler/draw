@@ -5,9 +5,9 @@
 |# |Risk / Debt |Impact |Mitigation / Status
 
 |R1
-|[.line-through]#AI live path never verified# *Resolved:* the full live checklist in https://github.com/FelixGeisler/draw/issues/91[#91] was executed against the real API across three rounds
+|[.line-through]#AI live path never verified# *Resolved:* the live checklist in https://github.com/FelixGeisler/draw/issues/91[#91] was executed against the real API across four rounds; every item is live-verified or explicitly dispositioned on the issue
 |—
-|All endpoints verified live: estimates, breakdown, plan-goal with real PDF grounding, generate-tasks end to end, Files API round trip, prompt cache hit (`cache_read_input_tokens > 0`), card-art generation/cache/sanitization, degraded fallback. Three live-only bugs were found and fixed on the way (https://github.com/FelixGeisler/draw/issues/133[#133] streaming, https://github.com/FelixGeisler/draw/issues/134[#134] UTF-8, https://github.com/FelixGeisler/draw/issues/138[#138] count_tokens file sources) — a reminder that mocked suites cannot replace one live pass after SDK-facing changes
+|Verified live: estimates, breakdown, plan-goal with real PDF grounding, generate-tasks end to end, Files API round trip incl. the stale-id self-heal, oversized-materials 400 guard at the paid boundary, prompt cache hit (`cache_read_input_tokens > 0`), Windows-1252 text decode, card-art generation/cache/sanitization, degraded fallback. Two dispositions recorded on the issue: the upload-failure base64 fallback is integration-tested only (not force-testable live), and the card-art variety/regenerate visual pass rests with the owner by design. Three live-only bugs were found and fixed on the way (https://github.com/FelixGeisler/draw/issues/133[#133] streaming, https://github.com/FelixGeisler/draw/issues/134[#134] UTF-8, https://github.com/FelixGeisler/draw/issues/138[#138] count_tokens file sources) — a reminder that mocked suites cannot replace one live pass after SDK-facing changes
 
 |R2
 |[.line-through]#No automated tests# *Resolved:* unit (Vitest), integration (Supertest + temp SQLite), and E2E (Playwright) suites exist and run in CI on every PR
@@ -27,7 +27,7 @@
 |R5
 |[.line-through]#PDF materials are re-uploaded as base64 per AI call# *Resolved:* PDFs upload once to the Anthropic Files API and are referenced by `file_id` thereafter (xref:09_architecture_decisions.adoc[ADR-35]), so a repeat call sends a tiny stable reference instead of the whole payload; the id is a cache that transparently re-uploads on rejection, and the base64 path stays as the fallback
 |—
-|Delivered in https://github.com/FelixGeisler/draw/issues/92[#92]; live upgrade (faster/smaller second call) is on the R1 verification checklist (https://github.com/FelixGeisler/draw/issues/91[#91])
+|Delivered in https://github.com/FelixGeisler/draw/issues/92[#92]; live-verified in the https://github.com/FelixGeisler/draw/issues/91[#91] sessions (round trip, no re-upload on repeat calls, stale-id self-heal)
 
 |R6
 |*Single-user assumptions everywhere* (one running timer, no auth, localhost binding)
