@@ -19,6 +19,7 @@ test.afterAll(async ({}, testInfo) => {
 });
 
 const CHANGESET = {
+  version: 1, // identifies the pending changeset — apply must echo it (#143)
   ops: [
     {
       kind: "create_task",
@@ -138,5 +139,49 @@ test("deselecting the draft parent deselects its staged subtasks", async ({ page
   const tasks = await (await request.get("/api/tasks?status=all")).json();
   const parent = tasks.find((t: { title: string }) => t.title === "E2E assistant umbrella");
   if (parent) await request.delete(`/api/tasks/${parent.id}`);
+  await request.delete("/api/ai/key");
+});
+
+test("an apply retry answered 409 with the original mapping reads as success (#143)", async ({
+  page,
+  request,
+}) => {
+  await request.put("/api/ai/key", { data: { key: FAKE_KEY } });
+  await stubAgentLoop(page);
+  // The server consumed this changeset on a first apply whose response was
+  // lost (timeout after commit): the retry gets 409 + the ORIGINAL mapping.
+  // Stubbed at the browser boundary — the server-side consumption itself is
+  // integration-tested; this test pins the CLIENT's 409-as-success handling.
+  let applyBody: Record<string, unknown> | undefined;
+  await page.route("**/api/ai/agent/apply", (route) => {
+    applyBody = route.request().postDataJSON() as Record<string, unknown>;
+    return route.fulfill({
+      status: 409,
+      json: {
+        error: "changeset already applied — returning the original result",
+        created: [
+          { draftId: "draft-1", taskIds: [901] },
+          { draftId: "draft-3", taskIds: [902] },
+          { draftId: "draft-4", taskIds: [903] },
+        ],
+      },
+    });
+  });
+
+  await page.goto("/assistant");
+  await page.getByTitle("Message to the assistant").fill("Import my mock exam as tasks");
+  await page.getByRole("button", { name: "Estimate & send" }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.getByText("Staged changes — review before anything is written")).toBeVisible();
+
+  await page.getByRole("button", { name: "Apply 3 changes" }).click();
+  // Success, not an error: the tasks exist from the first apply.
+  await expect(page.getByText(/Already applied — 3 tasks were created earlier/)).toBeVisible();
+  await expect(page.getByText("Staged changes — review before anything is written")).toHaveCount(0);
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  // The apply carried the changeset version the message turn handed out —
+  // the key the server consumes changesets by.
+  expect(applyBody?.changesetVersion).toBe(1);
+
   await request.delete("/api/ai/key");
 });

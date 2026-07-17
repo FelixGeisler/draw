@@ -53,6 +53,9 @@ export function AssistantPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  // Identifies the pending changeset (#143): sent back with apply so the
+  // server can consume it and a retried apply reconciles instead of duplicating.
+  const [changesetVersion, setChangesetVersion] = useState<number | null>(null);
   const [ops, setOps] = useState<StagedOp[]>([]);
   const [edits, setEdits] = useState<Record<string, RowEdit>>({});
   const [input, setInput] = useState("");
@@ -103,6 +106,7 @@ export function AssistantPage() {
         message,
       });
       setSessionId(result.sessionId);
+      setChangesetVersion(result.changeset.version);
       setOps(result.changeset.ops);
       setEdits((prev) => seedEdits(result.changeset.ops, prev));
       pushEntries({
@@ -153,13 +157,22 @@ export function AssistantPage() {
     if (changeCount === 0 || apply.isPending) return;
     setError(null);
     try {
-      const result = await apply.mutateAsync({ sessionId: sessionId ?? undefined, operations });
+      const result = await apply.mutateAsync({
+        sessionId: sessionId ?? undefined,
+        changesetVersion: changesetVersion ?? undefined,
+        operations,
+      });
       const createdCount = result.created.reduce((n, c) => n + c.taskIds.length, 0);
       setOps([]);
       setEdits({});
+      // alreadyApplied: the server reconciled a retry of a consumed changeset
+      // (#143) — the tasks exist from the first apply, so this IS success;
+      // only the wording tells the truth about when they were created.
       pushEntries({
         role: "notice",
-        text: `✅ Applied — ${createdCount} task${createdCount === 1 ? "" : "s"} created. Find them on the Tasks page.`,
+        text: result.alreadyApplied
+          ? `✅ Already applied — ${createdCount} task${createdCount === 1 ? " was" : "s were"} created earlier. Find them on the Tasks page.`
+          : `✅ Applied — ${createdCount} task${createdCount === 1 ? "" : "s"} created. Find them on the Tasks page.`,
       });
     } catch (e) {
       setError(aiErrorMessage(e));

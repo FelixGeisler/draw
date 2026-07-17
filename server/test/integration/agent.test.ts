@@ -443,6 +443,186 @@ describe("the apply step", () => {
     expect(res.body.error).toMatch(/draft-1/);
   });
 
+  it("consumes the changeset (#143): a re-apply of the same version answers 409 with the ORIGINAL mapping", async () => {
+    mocks.turn(
+      [{ type: "tool_use", id: "t1", name: "create_task", input: { title: "Only once", categoryId: 1 } }],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "staged" }]);
+    const turn = await request(app).post("/api/ai/agent/message").send({ message: "go" }).expect(200);
+    expect(turn.body.changeset.version).toBe(1);
+
+    // The REVIEWED ops differ from the staged ops (the user edited the title
+    // in the review card) — consumption must key on the version regardless.
+    const reviewed = structuredClone(turn.body.changeset.ops) as { task: { title: string } }[];
+    reviewed[0].task.title = "Only once (edited in review)";
+    const body = { sessionId: turn.body.sessionId, changesetVersion: 1, operations: reviewed };
+
+    const before = await taskCount();
+    const first = await request(app).post("/api/ai/agent/apply").send(body).expect(201);
+    expect(await taskCount()).toBe(before + 1);
+
+    // Retry-after-timeout semantics: the exact same request again — 409, the
+    // body carries the FIRST apply's mapping verbatim, and nothing is written.
+    const retry = await request(app).post("/api/ai/agent/apply").send(body).expect(409);
+    expect(retry.body.error).toMatch(/already applied/);
+    expect(retry.body.created).toEqual(first.body.created);
+    expect(await taskCount()).toBe(before + 1);
+  });
+
+  it("reconciles a version-less retry of the same {sessionId, operations} (the live #143 repro)", async () => {
+    mocks.turn(
+      [{ type: "tool_use", id: "t1", name: "create_task", input: { title: "Legacy retry", categoryId: 1 } }],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "staged" }]);
+    const turn = await request(app).post("/api/ai/agent/message").send({ message: "go" }).expect(200);
+    const body = { sessionId: turn.body.sessionId, operations: turn.body.changeset.ops };
+
+    const before = await taskCount();
+    const first = await request(app).post("/api/ai/agent/apply").send(body).expect(201);
+    const retry = await request(app).post("/api/ai/agent/apply").send(body).expect(409);
+    expect(retry.body.created).toEqual(first.body.created);
+    expect(await taskCount()).toBe(before + 1);
+  });
+
+  it("refuses a version-less retry while a NEW changeset is pending — it must not consume what it didn't apply", async () => {
+    mocks.turn(
+      [{ type: "tool_use", id: "t1", name: "create_task", input: { title: "Wave one", categoryId: 1 } }],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "staged" }]);
+    const turn1 = await request(app).post("/api/ai/agent/message").send({ message: "go" }).expect(200);
+    const sessionId = turn1.body.sessionId;
+    const v1Body = { sessionId, operations: turn1.body.changeset.ops };
+    await request(app).post("/api/ai/agent/apply").send(v1Body).expect(201);
+
+    // The conversation continues: changeset 2 is staged but not yet applied.
+    mocks.turn(
+      [{ type: "tool_use", id: "t2", name: "create_task", input: { title: "Wave two", categoryId: 1 } }],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "staged more" }]);
+    const turn2 = await request(app)
+      .post("/api/ai/agent/message")
+      .send({ sessionId, message: "another" })
+      .expect(200);
+    expect(turn2.body.changeset.version).toBe(2);
+
+    // A stray version-less retry of the v1 body lands while v2 is pending:
+    // ambiguous by construction. It must neither re-create v1's tasks nor
+    // stamp v2 consumed — 409 WITHOUT a mapping.
+    const before = await taskCount();
+    const stray = await request(app).post("/api/ai/agent/apply").send(v1Body).expect(409);
+    expect(stray.body.error).toMatch(/ambiguous/);
+    expect(stray.body.created).toBeUndefined();
+    expect(await taskCount()).toBe(before);
+
+    // v2 was NOT swallowed: its honest keyed apply still creates its task.
+    const apply2 = await request(app)
+      .post("/api/ai/agent/apply")
+      .send({ sessionId, changesetVersion: 2, operations: turn2.body.changeset.ops })
+      .expect(201);
+    expect(apply2.body.created).toHaveLength(1);
+    expect(await taskCount()).toBe(before + 1);
+  });
+
+  it("keeps an applied session warm: eviction under MAX_SESSIONS pressure spares the reconciliation marker", async () => {
+    mocks.turn(
+      [{ type: "tool_use", id: "t1", name: "create_task", input: { title: "Survivor", categoryId: 1 } }],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "staged" }]);
+    const turn = await request(app).post("/api/ai/agent/message").send({ message: "go" }).expect(200);
+    const body = {
+      sessionId: turn.body.sessionId,
+      changesetVersion: 1,
+      operations: turn.body.changeset.ops,
+    };
+
+    // Fill the table to MAX_SESSIONS (20): 19 fresh sessions, all created
+    // after the first one — which is now the coldest by creation time.
+    for (let i = 0; i < 19; i++) {
+      mocks.turn([{ type: "text", text: "hi" }]);
+      await request(app).post("/api/ai/agent/message").send({ message: "hi" }).expect(200);
+    }
+
+    // Applying must refresh lastUsedAt — review + apply is session activity.
+    const first = await request(app).post("/api/ai/agent/apply").send(body).expect(201);
+
+    // The 21st session evicts the coldest — no longer the applied session.
+    mocks.turn([{ type: "text", text: "hi" }]);
+    await request(app).post("/api/ai/agent/message").send({ message: "hi" }).expect(200);
+
+    // The retry still reconciles. Without the refresh the applied session
+    // was the eviction victim and this retry answered 201, duplicating.
+    const before = await taskCount();
+    const retry = await request(app).post("/api/ai/agent/apply").send(body).expect(409);
+    expect(retry.body.created).toEqual(first.body.created);
+    expect(await taskCount()).toBe(before);
+  });
+
+  it("applies a NEW changeset in the same session normally, while a stale retry still reconciles", async () => {
+    mocks.turn(
+      [{ type: "tool_use", id: "t1", name: "create_task", input: { title: "First wave", categoryId: 1 } }],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "staged one" }]);
+    const turn1 = await request(app).post("/api/ai/agent/message").send({ message: "go" }).expect(200);
+    const sessionId = turn1.body.sessionId;
+    const apply1 = await request(app)
+      .post("/api/ai/agent/apply")
+      .send({ sessionId, changesetVersion: 1, operations: turn1.body.changeset.ops })
+      .expect(201);
+
+    // The conversation continues: a NEW changeset gets the bumped version.
+    mocks.turn(
+      [{ type: "tool_use", id: "t2", name: "create_task", input: { title: "Second wave", categoryId: 1 } }],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "staged another" }]);
+    const turn2 = await request(app)
+      .post("/api/ai/agent/message")
+      .send({ sessionId, message: "one more" })
+      .expect(200);
+    expect(turn2.body.changeset.version).toBe(2);
+    expect(turn2.body.changeset.ops).toHaveLength(1);
+
+    // A stale retry of changeset 1 lands WHILE changeset 2 is pending: it
+    // must reconcile against changeset 1 — never apply its ops as if they
+    // were the pending changeset (the trap a deep-equal or an "ops pending?"
+    // heuristic would fall into).
+    const before = await taskCount();
+    const stale = await request(app)
+      .post("/api/ai/agent/apply")
+      .send({ sessionId, changesetVersion: 1, operations: turn1.body.changeset.ops })
+      .expect(409);
+    expect(stale.body.created).toEqual(apply1.body.created);
+    expect(await taskCount()).toBe(before);
+
+    // The new changeset itself applies cleanly.
+    const apply2 = await request(app)
+      .post("/api/ai/agent/apply")
+      .send({ sessionId, changesetVersion: 2, operations: turn2.body.changeset.ops })
+      .expect(201);
+    expect(apply2.body.created).toHaveLength(1);
+    expect(await taskCount()).toBe(before + 1);
+  });
+
+  it("rejects an apply for a changeset version the session never handed out", async () => {
+    mocks.turn([{ type: "text", text: "nothing staged" }]);
+    const turn = await request(app).post("/api/ai/agent/message").send({ message: "hi" }).expect(200);
+    const res = await request(app)
+      .post("/api/ai/agent/apply")
+      .send({
+        sessionId: turn.body.sessionId,
+        changesetVersion: 5,
+        operations: [{ kind: "create_task", draftId: "draft-1", task: { title: "x", categoryId: 1 } }],
+      })
+      .expect(400);
+    expect(res.body.error).toMatch(/unknown changeset version/);
+  });
+
   it("clears the session's staged changeset after an apply that names the session", async () => {
     mocks.turn(
       [{ type: "tool_use", id: "t1", name: "create_task", input: { title: "Staged row", categoryId: 1 } }],
