@@ -1415,3 +1415,71 @@ does NOT buy here is incremental UI — the server still hands the client one
 complete JSON result; per-token delivery to the browser stays out of scope
 until a feature needs it. The live 32K path itself still cannot run in CI (no
 key); its re-verification is a #91 checklist item.
+
+== ADR-37: The assistant stages a draft changeset; apply is one transaction through the route cores
+
+*Context:* Issue #31's conversational assistant gives the model free-form,
+multi-turn control ("import this exam, make the first 10 due this week").
+ADR-19 settled the tool vocabulary (`server/src/tools/catalog.ts`) and why the
+MCP surface may write live — the MCP client's per-call approval conversation
+IS its review. The in-app chat has no such gate, and forty mid-loop confirm
+dialogs would be worse than none. ADR-14's contract stands: the AI proposes,
+checkbox review remains the sole write path.
+
+*Decision:* (a) The agent's WRITE tools never touch the database during the
+loop. `create_task`/`create_subtasks` — the catalog's own definitions, with
+`parentId` widened to draft references — validate against an in-memory draft
+changeset (`services/agentStaging.ts`, pure) and return synthetic
+`draft-N` ids the model can chain into breakdowns. READ tools (`list_tasks`,
+`list_goals`, `list_categories`, `get_settings`, `get_stats`) execute live
+through `executeTool` against an in-process `ApiClient`
+(`tools/inProcessApi.ts`): a lazy private loopback listener on the app's own
+Express instance, so the derived read payloads and every invariant hold by
+construction (the ADR-19 argument) — with or without a public listener
+(supertest). `draw_card`, the timer tools, `complete_task` and `update_task`
+are absent from this surface: the draw is a commitment device (ADR-13/ADR-30,
++#88+ removed re-rolls) and a chat assistant that draws on request would be a
+re-roll machine; update/complete staging (before→after diffs) is the issue's
+declared out-of-scope.
+(b) `POST /api/ai/agent/apply` carries the REVIEWED operations in the body —
+included rows plus the user's title/effort edits, exactly what the review
+card shows (ADR-14: the review is authoritative, so its state must travel;
+`{sessionId, acceptedDraftIds}` alone could not carry an edit). Apply runs in
+ONE `db.transaction` and calls the same creation cores the task routes run —
+extracted honestly to `services/taskWrites.ts` (`createTaskWrite`,
+`createSubtasksWrite`), so the ADR-4 impact gate, ADR-16 one-level rule,
+ADR-23 recurring×sequential ban and the #111 lifecycle hooks have exactly one
+home; better-sqlite3 nests the cores' inner transactions as savepoints, and
+any rejected row rolls back the whole changeset. Draft parents resolve to
+real ids in list order. Oversized subtask efforts are split, never clamped
+(#28's `evenSplit` policy) — at stage time so the review shows the real rows,
+and again at apply because the reviewer can edit efforts.
+(c) The loop itself (`services/agentLoop.ts`, pure; transport injected by
+`agentService.ts`) is a manual while-`stop_reason=tool_use` loop over
+`beta.messages.stream()` + `finalMessage()` — the ADR-36 seam the whole suite
+already pins — NOT the SDK's beta `toolRunner`: the per-iteration `usage` the
+issue's budgets need is exactly what the runner abstracts away. Caps per user
+message: 8 iterations and a cost ceiling summed from per-iteration usage with
+OUTPUT tokens priced at $25/MTok (the pre-existing estimate() prices input
+only and would understate agent runs ~5×); an abort returns the partial
+changeset plus a `stopped` reason, never an error. Materials enter as
+document blocks in the first user message via `materialBlocks()` (ADR-7/
+ADR-35, `count_tokens` guard with the #138 base64 substitution, file-id
+retry); the system prompt is static so the prefix stays cacheable.
+(d) Sessions live in an in-memory `Map` (single-user local app; the multi-MB
+PDF blocks must not round-trip through the browser) — deliberately NOT
+persisted, so `user_version` stays 11: a conversation is scratch state, and
+the accepted limitation is that a `tsx watch` restart drops it (the client
+surfaces the 404 as "start a new conversation"; apply stays stateless and
+unaffected). Both endpoints answer 503 `ai_not_configured` without a key —
+apply included, although it never calls the SDK: the whole surface is hidden
+in degraded mode, and a reachable apply would be a write path no UI owns.
+
+*Rationale:* One review table beats forty confirmations and preserves the
+app's review-before-accept contract; staging in memory keeps the "never
+writes mid-loop" property testable as a pure function (the suite never mocks
+Anthropic — degraded 503s plus pure staging/loop coverage plus a mocked
+stream seam, the #136 convention). Routing apply through the extracted cores
+is the only way "same validation as the routes" stays true by construction
+instead of by diligence. The live loop cannot run in CI (no key); its
+verification on a real key is a follow-up checklist item like #91's.
