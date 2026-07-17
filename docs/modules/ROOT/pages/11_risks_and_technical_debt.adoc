@@ -5,9 +5,9 @@
 |# |Risk / Debt |Impact |Mitigation / Status
 
 |R1
-|*AI live path never verified* — no API key was available during initial development
-|Breakdown/plan-goal/generate-tasks could fail on first real use
-|Degraded mode fully tested (client panels run against mocked AI responses in E2E); code follows current SDK docs; verification checklist for first key setup tracked in https://github.com/FelixGeisler/draw/issues/91[#91] (see also Q4/Q10 scenarios)
+|[.line-through]#AI live path never verified# *Resolved:* the full live checklist in https://github.com/FelixGeisler/draw/issues/91[#91] was executed against the real API across three rounds
+|—
+|All endpoints verified live: estimates, breakdown, plan-goal with real PDF grounding, generate-tasks end to end, Files API round trip, prompt cache hit (`cache_read_input_tokens > 0`), card-art generation/cache/sanitization, degraded fallback. Three live-only bugs were found and fixed on the way (https://github.com/FelixGeisler/draw/issues/133[#133] streaming, https://github.com/FelixGeisler/draw/issues/134[#134] UTF-8, https://github.com/FelixGeisler/draw/issues/138[#138] count_tokens file sources) — a reminder that mocked suites cannot replace one live pass after SDK-facing changes
 
 |R2
 |[.line-through]#No automated tests# *Resolved:* unit (Vitest), integration (Supertest + temp SQLite), and E2E (Playwright) suites exist and run in CI on every PR
