@@ -9,6 +9,7 @@ import {
   planGoal,
   resolveApiKey,
 } from "../services/aiService.js";
+import { invalidateAllFileIds } from "../services/materialFiles.js";
 import { API_KEY_SETTING, deleteSetting, setSetting } from "../db.js";
 
 export const aiRouter = Router();
@@ -61,11 +62,19 @@ aiRouter.put("/key", (req, res) => {
   const key = typeof req.body?.key === "string" ? req.body.key.trim() : "";
   if (!key) return res.status(400).json({ error: "key is required" });
   setSetting(API_KEY_SETTING, key);
+  // Cached Anthropic file ids (#92) belong to whatever account the OLD key
+  // pointed at; under a new key they are useless at best. Drop them so the
+  // next AI call re-uploads under the current key, instead of leaning on the
+  // lazy 404 path to notice one material at a time.
+  invalidateAllFileIds();
   res.json(status());
 });
 
 aiRouter.delete("/key", (_req, res) => {
   deleteSetting(API_KEY_SETTING);
+  // Same reasoning as PUT: the removed key's file ids can never be valid
+  // again (a re-added key is a fresh upload target), so don't keep them.
+  invalidateAllFileIds();
   res.json(status());
 });
 
