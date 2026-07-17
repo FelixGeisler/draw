@@ -263,7 +263,16 @@ async function pdfBlock(
 ): Promise<Anthropic.Beta.Messages.BetaRequestDocumentBlock> {
   const title = m.filename ?? "document";
   const fileId = await ensureFileId(m, full, upload);
-  if (fileId) return { type: "document", source: { type: "file", file_id: fileId }, title };
+  if (fileId) {
+    const block: Anthropic.Beta.Messages.BetaRequestDocumentBlock = {
+      type: "document",
+      source: { type: "file", file_id: fileId },
+      title,
+    };
+    // Token counting cannot use the id (#138) — remember where the bytes live.
+    fileSourceLocalPath.set(block, full);
+    return block;
+  }
   return {
     type: "document",
     source: {
@@ -273,6 +282,51 @@ async function pdfBlock(
     },
     title,
   };
+}
+
+/**
+ * The on-disk PDF behind each file-source block of the CURRENT assembly.
+ * A WeakMap keyed on the block object itself (not the file id) so the mapping
+ * dies with the request that built it — it can never leak across requests or
+ * outlive an invalidated id. Only `pdfBlock` writes it; only `countingBlocks`
+ * reads it.
+ */
+const fileSourceLocalPath = new WeakMap<ContentBlock, string>();
+
+/**
+ * The blocks to COUNT, as opposed to the blocks to SEND (#138).
+ *
+ * The real `count_tokens` endpoint rejects `{type: "file"}` document sources
+ * outright ("File sources are not supported in the token counting endpoint"),
+ * so the token guard substitutes the locally-read base64 bytes for each
+ * file-source block — the exact content the id references, so the count stays
+ * exact — while the paid call keeps the small file_id reference. Counting
+ * therefore still pays the base64 bandwidth; only the paid call sheds it.
+ * `cache_control` is carried over so the counted shape mirrors the sent one.
+ */
+export function countingBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  return blocks.map((block) => {
+    if (!usesFileSource(block)) return block;
+    const full = fileSourceLocalPath.get(block);
+    if (!full) {
+      // Only pdfBlock creates file sources and it always registers the path —
+      // reaching this is a bug here, not a bad request. Fail loudly instead of
+      // letting the live endpoint 400.
+      throw new AiError(500, "internal: file-source document has no local path for token counting");
+    }
+    const doc = block as Anthropic.Beta.Messages.BetaRequestDocumentBlock;
+    const substitute: Anthropic.Beta.Messages.BetaRequestDocumentBlock = {
+      type: "document",
+      source: {
+        type: "base64",
+        media_type: "application/pdf",
+        data: fs.readFileSync(full).toString("base64"),
+      },
+      title: doc.title,
+    };
+    if (block.cache_control) substitute.cache_control = block.cache_control;
+    return substitute;
+  });
 }
 
 /** Does this block reference a Files-API id rather than carrying its bytes? */
@@ -299,10 +353,18 @@ function betasFor(blocks: ContentBlock[]): Anthropic.AnthropicBeta[] | undefined
  * is deliberate slack: this repo has no key, so the exact rejection shape for
  * a dead id cannot be observed here (#91 verifies it live). Guessing wrong
  * costs one wasted re-upload; guessing too narrow costs a broken feature.
+ *
+ * One class of 400 is excluded from that slack (#138): a capability rejection
+ * — the API refusing the REQUEST SHAPE, phrased "... not supported ..." — says
+ * nothing about the id's liveness, and re-uploading can never fix it. Before
+ * the exclusion, count_tokens' "File sources are not supported in the token
+ * counting endpoint" matched the /file/i slack and every material-backed call
+ * invalidated a perfectly good id and burned a re-upload before failing again.
  */
 export function isStaleFileIdError(e: unknown, blocks: ContentBlock[]): boolean {
   if (!(e instanceof AiError) || !blocks.some(usesFileSource)) return false;
   if (e.sdkStatus === 404) return true;
+  if (/not supported/i.test(e.message)) return false;
   return e.sdkStatus === 400 && /file/i.test(e.message);
 }
 
@@ -511,15 +573,16 @@ function requireClient(): Anthropic {
 async function guardTokens(blocks: ContentBlock[], system: string): Promise<number> {
   const c = requireClient();
   try {
-    // The estimate stays honest with file ids in play: count_tokens resolves
-    // the referenced file server-side and counts the PDF's real tokens, the
-    // same content base64 would have inlined. What shrinks is the request, not
-    // the number — so the MAX_INPUT_TOKENS guard still gates the same thing.
+    // count_tokens REJECTS file-source blocks (#138), so the guard counts the
+    // substituted base64 view of the same content — exact count, no upload —
+    // while the paid call keeps the file_id. The counted request carries no
+    // file source, hence no files beta: it has exactly the pre-#92 shape.
+    const counted = countingBlocks(blocks);
     const count = await c.beta.messages.countTokens({
       model: MODEL,
       system,
-      messages: [{ role: "user", content: blocks }],
-      betas: betasFor(blocks),
+      messages: [{ role: "user", content: counted }],
+      betas: betasFor(counted),
     });
     if (count.input_tokens > MAX_INPUT_TOKENS) {
       throw new AiError(

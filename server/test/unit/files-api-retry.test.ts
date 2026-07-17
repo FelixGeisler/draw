@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   AiError,
+  countingBlocks,
   isStaleFileIdError,
   usesFileSource,
   withFileIdRetry,
@@ -55,6 +56,18 @@ describe("isStaleFileIdError — telling 'that file_id is gone' from every other
     expect(isStaleFileIdError(other, withFile)).toBe(false);
   });
 
+  it("never treats a capability 'not supported' 400 as stale (#138)", () => {
+    // The live count_tokens rejection: it mentions files, but it is the API
+    // refusing the REQUEST SHAPE — a re-upload can never fix it. Before #138
+    // this matched the /file/i slack and burned an upload per call.
+    const capability = new AiError(
+      502,
+      'Claude API error: 400 {"type":"invalid_request_error","message":"File sources are not supported in the token counting endpoint."}',
+      400,
+    );
+    expect(isStaleFileIdError(capability, withFile)).toBe(false);
+  });
+
   it("ignores rate limits, connection errors and our own over-limit 400", () => {
     expect(isStaleFileIdError(new AiError(429, "rate limit", 429), withFile)).toBe(false);
     expect(isStaleFileIdError(new AiError(502, "no connection", undefined), withFile)).toBe(false);
@@ -65,6 +78,24 @@ describe("isStaleFileIdError — telling 'that file_id is gone' from every other
   it("ignores non-AiError throwables", () => {
     expect(isStaleFileIdError(new Error("boom"), withFile)).toBe(false);
     expect(isStaleFileIdError("nope", withFile)).toBe(false);
+  });
+});
+
+describe("countingBlocks — the token guard's view of the assembly (#138)", () => {
+  it("passes text and base64 blocks through untouched, same references", () => {
+    const out = countingBlocks([textBlock, base64Block]);
+    expect(out[0]).toBe(textBlock);
+    expect(out[1]).toBe(base64Block);
+  });
+
+  it("fails loudly on a file-source block no assembly registered", () => {
+    // Only materialBlocks/pdfBlock creates file sources, and it always records
+    // the on-disk path for the counting substitution. A foreign file-source
+    // block reaching the guard is a bug in THIS codebase — better an explicit
+    // 500 here than the live endpoint's capability 400. (The substitution
+    // itself is pinned end to end in integration/files-api.test.ts, where the
+    // registration really happens.)
+    expect(() => countingBlocks([fileBlock])).toThrow(/no local path/);
   });
 });
 
