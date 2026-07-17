@@ -37,14 +37,29 @@ function apiBootGate(): Plugin {
   async function waitForApi(): Promise<void> {
     console.log(`  ➜  API:     waiting for ${apiOrigin} to finish booting…`);
     const deadline = Date.now() + 30_000;
+    let answered = false;
     while (Date.now() < deadline) {
       try {
         const res = await fetch(`${apiOrigin}/api/health`, { signal: AbortSignal.timeout(1_000) });
-        if (res.ok) break;
+        if (res.ok) {
+          answered = true;
+          break;
+        }
       } catch {
         // Still booting — the entire point of the gate.
       }
       await new Promise((r) => setTimeout(r, 200));
+    }
+    // The deadline expiring is a different fact from the gate opening (#130):
+    // without this line a dead boot reads as a normal one — "waiting for … to
+    // finish booting…" and then half a minute of silence — where it used to
+    // fail instantly and loudly. Announce the OUTCOME, not the clock: a check
+    // that started before the deadline and resolved ok just after it is a
+    // successful boot, not a failure.
+    if (!answered) {
+      console.log(
+        `  ➜  API:     ${apiOrigin} did not answer in 30s — letting the proxy error through`,
+      );
     }
     ready = true;
   }

@@ -25,7 +25,7 @@ import { svgDataUri } from "../lib/cardVisuals";
 import { classifyTask } from "../lib/drawable";
 import { heldCardResolved, resolveDrawnCard } from "../lib/drawnCard";
 import { resolveDrawView } from "../lib/focusView";
-import type { NewTask } from "../api/types";
+import type { NewTask, Task } from "../api/types";
 import "./DrawPage.css";
 
 type Phase = "idle" | "shuffling" | "revealed";
@@ -88,25 +88,47 @@ export function DrawPage() {
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
   // Releasing #88's hold (#118): a held card forfeited its pointer, so the
   // current-draw query can no longer tell whether it is still there — the
-  // tasks list can. Fetched ONLY while the hold stands, on the current-draw
-  // query's own 60s cadence, so the ordinary Draw page keeps its footprint
-  // and a card resolved from MCP or a second tab still leaves within a
-  // minute. Derived, never an effect: the release IS resolveDrawnCard's
-  // verdict, exactly like every other reason the card leaves (ADR-2).
+  // tasks list can. Fetched ONLY while the hold stands unreleased (#130), on
+  // the current-draw query's own 60s cadence, so the ordinary Draw page keeps
+  // its footprint and a card resolved from MCP or a second tab still leaves
+  // within a minute. Derived, never an effect: the release IS
+  // resolveDrawnCard's verdict, exactly like every other reason the card
+  // leaves (ADR-2).
+  //
+  // The verdict: released means the watch has actually looked since the hold
+  // began (#118's dataUpdatedAt guard against the shared, possibly pre-hold
+  // cache) and the list proved the held card resolved. ONE function feeds
+  // both the watch's own gate and resolveDrawnCard below — the watch must
+  // not outlive the hold it watches (#130), and two hand-rolled copies of a
+  // four-clause condition would drift.
+  const releasedVerdict = (list: { data?: Task[]; dataUpdatedAt: number }) =>
+    heldSince != null &&
+    list.dataUpdatedAt >= heldSince &&
+    result?.task != null &&
+    heldCardResolved(list.data, result.task.id);
   const heldTasks = useTasks(
     { status: "all" },
-    { enabled: editedOutOfDeck, refetchInterval: 60_000 },
+    {
+      // The verdict cannot be a boolean here — it is a fact about the query
+      // this very call returns — so the gate takes React Query's callback
+      // form, which query-core re-resolves against the query's own state on
+      // every change: the 60s poll stops the moment the releasing refetch
+      // lands (pinned in useTasks.test.ts). Once stopped, the cache entry
+      // keeps its data and timestamp, so the verdict cannot flip back;
+      // re-stamping heldSince on the next out-of-deck edit re-arms the watch.
+      enabled: (query) => editedOutOfDeck && !releasedVerdict(query.state),
+      refetchInterval: 60_000,
+    },
   );
   const task = resolveDrawnCard({
     shuffling,
     serverTask: currentDraw.data === undefined ? undefined : (currentDraw.data?.task ?? null),
     sessionTask: result?.task ?? null,
     editedOutOfDeck,
-    heldCardResolved:
-      heldSince != null &&
-      heldTasks.dataUpdatedAt >= heldSince &&
-      result?.task != null &&
-      heldCardResolved(heldTasks.data, result.task.id),
+    // The gate's verdict again, now on the hook's SUBSCRIBED result: the
+    // value is identical, and reading data/dataUpdatedAt here is what makes
+    // React Query notify this component when the watch's refetch lands.
+    heldCardResolved: releasedVerdict(heldTasks),
   });
   const phase: Phase = shuffling ? "shuffling" : task ? "revealed" : "idle";
   // The warm-up marker rides GET /api/draw/current (#57), so the badge and
@@ -169,7 +191,17 @@ export function DrawPage() {
 
   async function saveEdit(patch: NewTask) {
     if (!task) return;
-    const response = await updateTask.mutateAsync({ id: task.id, ...patch });
+    let response;
+    try {
+      response = await updateTask.mutateAsync({ id: task.id, ...patch });
+    } catch (e) {
+      // #130: the last on-page resolution that still met the vanished card
+      // the old way — the 404 would land in TaskForm's error line and the
+      // card stood, editor open, until the watch's next refetch. It is the
+      // same dismissal-by-the-other-door as Done/Not now/Delete above;
+      // dismissIfGone also closes the editor with the card.
+      return dismissIfGone(e);
+    }
     // The PATCH response settles the card's fate ahead of the confirming
     // refetch: still drawable → it IS the current draw (pointer intact
     // server-side); edited out of the deck → the pointer is forfeit and the

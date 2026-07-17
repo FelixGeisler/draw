@@ -301,7 +301,10 @@ export function TaskRow({
             ⤴
           </button>
         )}
-        {/* Done rows are not editable — reopen first (matches the checkbox flow). */}
+        {/* Done rows are not editable — reopen first (matches the checkbox
+            flow). Break down above is the deliberate exception: adding a step
+            IS the reopen (#111 rule 3, ADR-32), not an edit that needs one
+            first. */}
         {!done && (
           <button
             onClick={() => {

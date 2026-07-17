@@ -18,6 +18,7 @@ test.describe.configure({ mode: "serial" });
 const GOAL_TITLE = "E2E card-residue goal";
 const TIMER_HELD_TASK = "Residue e2e held-then-finished card";
 const DELETED_HELD_TASK = "Residue e2e held-then-deleted card";
+const EDITED_HELD_TASK = "Residue e2e held-then-deleted edited card";
 const REDRAW_TASK = "Residue e2e redraw card";
 
 async function seed(request: APIRequestContext, title: string) {
@@ -103,6 +104,34 @@ test("a held card deleted elsewhere: resolving it dismisses instead of 404ing", 
   await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
   await expect(page.getByText("click to draw")).toBeVisible();
   // A card that was never completed here pays no celebration.
+  await expect(page.locator("canvas")).toHaveCount(0);
+});
+
+test("saving an edit on a held card deleted elsewhere dismisses — never a form error", async ({ page }) => {
+  const task = await seed(page.request, EDITED_HELD_TASK);
+  await drawFromGoal(page, GOAL_TITLE);
+  await expect(page.locator(".draw-face.back h2")).toHaveText(EDITED_HELD_TASK);
+  await editOutOfDeck(page);
+
+  // Deleted out of band while held — the same window as the spec above…
+  await page.request.delete(`/api/tasks/${task.id}`);
+  await expect(page.locator(".draw-face.back h2")).toHaveText(EDITED_HELD_TASK);
+
+  // …but this time the user resolves it through the EDITOR. Before #130,
+  // saveEdit was the one on-page path that still met the vanished card the
+  // old way: the raw 404 landed in the form's error line and the card stood,
+  // editor open, until the watch's next refetch.
+  await page.getByRole("button", { name: "✎ Edit" }).click();
+  await page.getByTitle("Effort estimate in minutes").fill("15");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+
+  // The 404 is the dismissal arriving by the other door: the card leaves and
+  // the editor closes with it — no error line, and no celebration for a card
+  // that was never completed here.
+  await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
+  await expect(page.getByText("click to draw")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
   await expect(page.locator("canvas")).toHaveCount(0);
 });
 

@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseQueryOptions,
+} from "@tanstack/react-query";
 import { api } from "../api/client";
 import { announceAchievements } from "./useGamification";
 import type {
@@ -30,10 +35,16 @@ export function useSettings() {
  * current-draw query uses — so a card resolved from MCP or a second tab
  * releases the hold within the minute ADR-29's amendment already accepts.
  * Every other caller takes the plain, always-on query.
+ *
+ * `enabled` also takes React Query's callback form (#130): the watch's gate
+ * is a verdict over this query's OWN data, so it cannot be a boolean derived
+ * from the hook's not-yet-returned result — query-core re-resolves the
+ * callback against the query on every state change (and stops the interval
+ * on false), which is exactly the gate the DrawPage needs.
  */
 export function useTasks(
   filters?: { status?: string; categoryId?: number; goalId?: number },
-  options?: { enabled?: boolean; refetchInterval?: number },
+  options?: Pick<UseQueryOptions<Task[]>, "enabled" | "refetchInterval">,
 ) {
   const params = new URLSearchParams();
   if (filters?.status) params.set("status", filters.status);
