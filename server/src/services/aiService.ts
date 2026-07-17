@@ -28,7 +28,9 @@ import {
 import { buildCardArtPrompt } from "./cardArtStyle.js";
 
 export const MODEL = "claude-opus-4-8";
-const MAX_INPUT_TOKENS = 180_000;
+// Exported for the assistant's token guard (#31): one input ceiling for
+// every AI surface.
+export const MAX_INPUT_TOKENS = 180_000;
 const INPUT_USD_PER_MTOK = 5;
 // Adaptive thinking shares max_tokens with the output. A 40-item transcription
 // plus rationales does not fit the default 16K budget, so generate-tasks runs
@@ -203,7 +205,10 @@ export function decodeTextMaterial(bytes: Buffer): string {
   }
 }
 
-async function materialBlocks(materialIds: number[], goalId: number | null): Promise<ContentBlock[]> {
+// Exported for the assistant (#31): materials enter its FIRST user message
+// through exactly this assembly (ADR-7 — whole documents, explicit selection,
+// cache breakpoint on the last block), never through a tool.
+export async function materialBlocks(materialIds: number[], goalId: number | null): Promise<ContentBlock[]> {
   if (materialIds.length === 0) return [];
   const placeholders = materialIds.map(() => "?").join(",");
   const rows = db
@@ -564,11 +569,17 @@ function cardArtContext(taskId: number): ContentBlock[] {
 // ---------------------------------------------------------------------------
 // API calls
 
-function requireClient(): Anthropic {
+// Exported for the assistant (#31) — same 503 degraded contract everywhere.
+export function requireClient(): Anthropic {
   const resolved = resolveApiKey();
   if (!resolved) throw new AiError(503, "ai_not_configured");
   return new Anthropic({ apiKey: resolved.key });
 }
+
+// mapSdkError is exported for the assistant's loop (#31): its streamed calls
+// hit the same SDK error classes runStructured's do, and the mapping to
+// client-facing statuses must not fork.
+export { mapSdkError };
 
 async function guardTokens(blocks: ContentBlock[], system: string): Promise<number> {
   const c = requireClient();

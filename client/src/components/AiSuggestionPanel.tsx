@@ -27,7 +27,9 @@ import { seedInOrder } from "../lib/orderMode";
 // ---------------------------------------------------------------------------
 // Shared pieces
 
-function MaterialPicker({
+// Exported for the Assistant page (#31) — the one material-selection control
+// every AI surface shares (ADR-7: explicit selection).
+export function MaterialPicker({
   materials,
   selected,
   onToggle,
