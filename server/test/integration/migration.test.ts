@@ -17,6 +17,7 @@ import { freshApp, testDb } from "../helpers.js";
 //   v7 → v8 creates the streak_freezes earn log        (issue #58)
 //   v8 → v9 adds completions.was_warmup + seeds warmup_every_hours (issue #57)
 //   v9 → v10 seeds daily_hand_budget_minutes                       (issue #59)
+//   v10 → v11 adds materials.anthropic_file_id                     (issue #92)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence.
@@ -48,6 +49,11 @@ beforeAll(async () => {
     )
     .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "")
     .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
+    // v11 (#92): strip materials.anthropic_file_id (comment block + column),
+    // restoring note_text as the last column before created_at. Without this
+    // the reconstructed "v2" table would already carry the column and the
+    // v10 → v11 ALTER would fail with a duplicate-column error.
+    .replace(/  -- Anthropic Files API id[\s\S]*?anthropic_file_id TEXT,\r?\n/, "")
     // v9 (#57): strip the was_warmup column (and its comment block)…
     .replace(/,\r?\n  -- Warm-up draw[\s\S]*?was_warmup INTEGER NOT NULL DEFAULT 0/, "")
     // …and the warmup_every_hours seed row (v10's daily_hand_budget_minutes
@@ -64,6 +70,7 @@ beforeAll(async () => {
   expect(v2Schema).not.toContain("was_warmup");
   expect(v2Schema).not.toContain("warmup_every_hours");
   expect(v2Schema).not.toContain("daily_hand_budget_minutes");
+  expect(v2Schema).not.toContain("anthropic_file_id");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v2Schema);
@@ -239,10 +246,37 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v10 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, daily_hand_budget_minutes)", () => {
-  it("bumps user_version to 10", async () => {
+describe("migration v2 → v11 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, daily_hand_budget_minutes, anthropic_file_id)", () => {
+  it("bumps user_version to 11", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(10);
+    expect(db.pragma("user_version", { simple: true })).toBe(11);
+  });
+
+  it("adds materials.anthropic_file_id, nullable with no default (#92)", async () => {
+    const db = await testDb();
+    const columns = db.prepare("PRAGMA table_info(materials)").all() as {
+      name: string;
+      dflt_value: string | null;
+      notnull: number;
+    }[];
+    const col = columns.find((c) => c.name === "anthropic_file_id");
+    expect(col).toBeTruthy();
+    // A cache of remote state, not data we own: nullable, no default, so every
+    // pre-#92 row reads as "not uploaded under the current key yet".
+    expect(col!.notnull).toBe(0);
+    expect(col!.dflt_value).toBeNull();
+
+    // The column exists but is not exposed by the materials API (internal
+    // state, like the API key) — a migrated goal's materials list omits it.
+    const goal = db
+      .prepare("INSERT INTO goals (title, created_at) VALUES (?, ?)")
+      .run("file-id probe", new Date().toISOString());
+    db.prepare(
+      "INSERT INTO materials (goal_id, kind, filename, stored_name, mime_type, created_at) VALUES (?, 'file', ?, ?, 'application/pdf', ?)",
+    ).run(goal.lastInsertRowid, "x.pdf", "stored.pdf", new Date().toISOString());
+    const listed = await request(app).get(`/api/goals/${goal.lastInsertRowid}/materials`).expect(200);
+    expect(listed.body[0]).not.toHaveProperty("anthropicFileId");
+    expect(listed.body[0]).not.toHaveProperty("anthropic_file_id");
   });
 
   it("seeds daily_hand_budget_minutes and needs no table for the hand itself (#59)", async () => {

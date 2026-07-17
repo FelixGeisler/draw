@@ -393,12 +393,17 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
       .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "")
       .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
       .replace(/,\r?\n  -- Warm-up draw[\s\S]*?was_warmup INTEGER NOT NULL DEFAULT 0/, "")
-      .replace(/,\r?\n  \('warmup_every_hours', '8'\)/, "");
+      .replace(/,\r?\n  \('warmup_every_hours', '8'\)/, "")
+      // v11 (#92): a genuine v2 backup has no anthropic_file_id column, so the
+      // forward-migration on import re-adds it. Leaving it in would make the
+      // import's ALTER fail with a duplicate column (a raw 500).
+      .replace(/  -- Anthropic Files API id[\s\S]*?anthropic_file_id TEXT,\r?\n/, "");
     expect(v2Schema).not.toContain("deferred_until");
     expect(v2Schema).not.toContain("card_art");
     expect(v2Schema).not.toContain("streak_freezes");
     expect(v2Schema).not.toContain("was_warmup");
     expect(v2Schema).not.toContain("warmup_every_hours");
+    expect(v2Schema).not.toContain("anthropic_file_id");
 
     const legacyDbPath = path.join(dataDir(), "legacy-backup.db");
     const legacy = new Database(legacyDbPath);
