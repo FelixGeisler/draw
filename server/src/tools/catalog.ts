@@ -243,7 +243,8 @@ const createTask = defineTool({
           "a divergent goalId or categoryId is rejected. Omitted impact defaults to the " +
           "parent's rating, like create_subtasks. Creating a subtask under a DONE parent " +
           "reopens it, exactly like create_subtasks (its latest completion is undone so XP " +
-          "stays honest). " +
+          "stays honest); creating one under an ARCHIVED parent is rejected — un-archive it " +
+          "first. " +
           "Breakdowns are one level deep: nesting under a task that is itself a subtask is rejected",
       ),
   },
@@ -273,7 +274,8 @@ const updateTask = defineTool({
     "it runs the XP/achievements/recurrence path. impact follows ADR-4: non-neutral impact (≠3) " +
     "requires a task that has (or receives) a goalId — the neutral 3 and a no-op resend of the " +
     "stored value are always accepted — and unlinking the goal (goalId: null) resets impact to " +
-    "the neutral default 3 on the task and its open subtasks; omit impact when unlinking.",
+    "the neutral default 3 on the task and its open subtasks; omit impact when unlinking. An " +
+    "archived task cannot take subtasks (adopting one under it is rejected): un-archive it first.",
   inputSchema: {
     id: idSchema,
     title: z.string().min(1).optional(),
@@ -311,11 +313,15 @@ const updateTask = defineTool({
       .describe(
         "Reparent the task. An id adopts it as a subtask of that ROOT task — one level deep " +
           "(ADR-16): the target must not itself be a subtask and a task with subtasks cannot " +
-          "move; a recurring task cannot join a 'do in order' breakdown (ADR-23). Adoption " +
-          "inherits the parent's goal and category; moving under a goal-less parent resets " +
-          "impact to the neutral 3; adopting an OPEN task under a done root reopens the root " +
-          "(its completion is undone). null promotes a subtask back to a top-level task, keeping " +
-          "goal, category and impact unchanged",
+          "move; the target must not be archived (un-archive it first); a recurring task cannot " +
+          "join a 'do in order' breakdown (ADR-23). Adoption inherits the parent's goal and " +
+          "category; moving an OPEN task under a goal-less parent resets impact to the neutral 3, " +
+          "while a done/archived mover keeps the rating it was finished under; adopting an OPEN " +
+          "task under a done root reopens the root (its completion is undone). null promotes a " +
+          "subtask back to a top-level task, keeping goal, category and impact unchanged. " +
+          "Reopening and reparenting in ONE call is not supported: a body that sets status 'open' " +
+          "on a done task reopens it and ignores parentId — reopen first, then reparent in a " +
+          "second update_task call",
       ),
     status: z
       .enum(["open", "archived"])
@@ -362,7 +368,8 @@ const createSubtasks = defineTool({
   description:
     "Break a task down: create several subtasks under a parent in one atomic batch. Subtasks " +
     "inherit the parent's category and goal. Adding subtasks to a DONE parent reopens it (its " +
-    "latest completion is undone so XP stays honest). Breakdowns are one level deep: the parent must be " +
+    "latest completion is undone so XP stays honest); an ARCHIVED parent is rejected — " +
+    "un-archive it first. Breakdowns are one level deep: the parent must be " +
     "a root task — a subtask cannot be broken down further (the API rejects nesting); split it " +
     "into more sibling subtasks under the same root parent instead. The breakdown rule: every " +
     "leaf must have effortMinutes of at most max_draw_effort (see get_settings) to be drawable " +

@@ -220,6 +220,50 @@ describe("adoption inheritance — overwrite semantics (#84 parity for SENT valu
     expect(res.task).toMatchObject({ parentId: parent.id, goalId: null, impact: 3 });
   });
 
+  it("keeps a DONE mover's rating when adoption into a goal-less parent wipes the goal (#104 item 2)", async () => {
+    // The impact reset is an unlink SIDE EFFECT, scoped to open movers — a done
+    // row is a historical record whose rating the stats buckets attribute the
+    // finished work by (#44/#76 draw the same open-only line). The goal still
+    // follows the new root; the rating is grandfathered exactly like a goal
+    // deletion leaves it.
+    const goal = await mkGoal("done-mover goal");
+    const parent = await mkTask({ title: "goal-less done-adopt parent" });
+    const mover = await mkTask({
+      title: "rated done mover",
+      goalId: goal.id,
+      impact: 5,
+      effortMinutes: 10,
+    });
+    await patchTask(mover.id, { status: "done" });
+
+    const res = await patchTask(mover.id, { parentId: parent.id });
+    expect(res.task).toMatchObject({ parentId: parent.id, goalId: null, impact: 5 });
+
+    // Grandfathered, not re-rateable to a new non-neutral value (ADR-4): only
+    // a no-op resend or the neutral 3 is accepted afterwards.
+    const bumped = await patchTask(mover.id, { impact: 4 }, 400);
+    expect(bumped.error).toContain("goal");
+    const neutral = await patchTask(mover.id, { impact: 3 });
+    expect(neutral.task.impact).toBe(3);
+  });
+
+  it("still resets a done mover's impact when the unlink is a DELIBERATE sent goalId: null, not a move (#104 item 2)", async () => {
+    // Scoping is about the move, not the status: unlinking a done task's goal
+    // by hand is an explicit rating decision and resets to the neutral 3, the
+    // same as the open path — no reparent is involved here.
+    const goal = await mkGoal("deliberate done unlink goal");
+    const mover = await mkTask({
+      title: "deliberate done unlink mover",
+      goalId: goal.id,
+      impact: 5,
+      effortMinutes: 10,
+    });
+    await patchTask(mover.id, { status: "done" });
+
+    const res = await patchTask(mover.id, { goalId: null });
+    expect(res.task).toMatchObject({ goalId: null, impact: 3 });
+  });
+
   it("rejects keeping a rating while adoption wipes the goal — the unlink contradiction", async () => {
     const goal = await mkGoal("contradiction goal");
     const parent = await mkTask({ title: "contradiction parent" });
@@ -459,5 +503,108 @@ describe("current draw pointer (ADR-13/ADR-17)", () => {
     // hasOpenChildren) clears it.
     expect(await currentDraw()).toBeNull();
     expect(persistedDrawId()).toBeUndefined();
+  });
+});
+
+// #104 item 1: an archived task cannot take subtasks on ANY path — adoption via
+// PATCH, single create, or the batch. Leaving it legal left an open child
+// drawable from the pool (which filters the CHILD's status, ADR-2) yet hidden
+// on the Tasks page with its archived root. The prescribed repair is to
+// un-archive the root first, matching #122's archived→done shape: the system
+// never lifts the archived state implicitly.
+describe("archived parents take no children (#104 item 1)", () => {
+  async function archivedRoot(title: string) {
+    const root = await mkTask({ title, effortMinutes: 10 });
+    await patchTask(root.id, { status: "archived" });
+    return root;
+  }
+
+  it("rejects adopting an OPEN task under an archived root, writing nothing", async () => {
+    const root = await archivedRoot("archived adopt root");
+    const mover = await mkTask({ title: "open archived-adopt mover", effortMinutes: 5 });
+
+    const res = await patchTask(mover.id, { parentId: root.id }, 400);
+    expect(res.error).toContain("archived");
+    expect(res.error).toContain("un-archive");
+
+    // The mover is untouched — still a root, still parentless.
+    expect((await listedTask(mover.id)).parentId).toBeNull();
+    // And the root stays archived (no implicit revival).
+    const root400 = db.prepare("SELECT status FROM tasks WHERE id = ?").get(root.id) as {
+      status: string;
+    };
+    expect(root400.status).toBe("archived");
+  });
+
+  it("rejects adopting a DONE task under an archived root too — the guard is status-blind on the mover", async () => {
+    const root = await archivedRoot("archived done-adopt root");
+    const mover = await mkTask({ title: "done archived-adopt mover", effortMinutes: 5 });
+    await patchTask(mover.id, { status: "done" });
+
+    const res = await patchTask(mover.id, { parentId: root.id }, 400);
+    expect(res.error).toContain("archived");
+  });
+
+  it("rejects a single create under an archived parent", async () => {
+    const root = await archivedRoot("archived single-create root");
+    const res = await request(app)
+      .post("/api/tasks")
+      .send({ title: "archived single child", categoryId: 1, parentId: root.id })
+      .expect(400);
+    expect(res.body.error).toContain("archived");
+  });
+
+  it("rejects a batch breakdown under an archived parent", async () => {
+    const root = await archivedRoot("archived batch root");
+    const res = await request(app)
+      .post(`/api/tasks/${root.id}/subtasks`)
+      .send({ subtasks: [{ title: "archived batch child", effortMinutes: 5 }] })
+      .expect(400);
+    expect(res.body.error).toContain("archived");
+  });
+
+  it("the prescribed repair works: un-archive the root, then adopt", async () => {
+    const root = await archivedRoot("archived-then-revived root");
+    const mover = await mkTask({ title: "repair mover", effortMinutes: 5 });
+
+    await patchTask(root.id, { status: "open" });
+    const ok = await patchTask(mover.id, { parentId: root.id });
+    expect(ok.task.parentId).toBe(root.id);
+  });
+
+  it("a DONE root still adopts and reopens — only archived is barred (#111 vs #104)", async () => {
+    // Guards the boundary: the fix must not have broadened to done roots, whose
+    // adoption-reopen (#111) is deliberately kept.
+    const root = await mkTask({ title: "done adopt-reopen root", effortMinutes: 10 });
+    await patchTask(root.id, { status: "done" });
+    const mover = await mkTask({ title: "reopen-trigger mover", effortMinutes: 5 });
+
+    const ok = await patchTask(mover.id, { parentId: root.id });
+    expect(ok.task.parentId).toBe(root.id);
+    const rootAfter = db.prepare("SELECT status FROM tasks WHERE id = ?").get(root.id) as {
+      status: string;
+    };
+    expect(rootAfter.status).toBe("open"); // reopened, its completion undone
+  });
+});
+
+// #104 item 4: a body that reopens a DONE task (status: 'open') AND carries a
+// parentId reopens it but drops the move — the reopen branch returns before the
+// generic field write. Deliberate and now documented in the MCP update_task
+// description; this pins the behavior so the docs stay true.
+describe("reopen + reparent in one body drops the move (#104 item 4)", () => {
+  it("reopens the task but leaves it under its original parent", async () => {
+    const oldParent = await mkTask({ title: "reopen-move old parent" });
+    const [child] = await subtasksOf(oldParent.id, [
+      { title: "reopen-move child", effortMinutes: 10 },
+    ]);
+    await patchTask(child.id, { status: "done" });
+    const newParent = await mkTask({ title: "reopen-move new parent" });
+
+    const res = await patchTask(child.id, { status: "open", parentId: newParent.id });
+    // Reopened…
+    expect(res.task.status).toBe("open");
+    // …but NOT moved: still under the original parent.
+    expect(res.task.parentId).toBe(oldParent.id);
   });
 });

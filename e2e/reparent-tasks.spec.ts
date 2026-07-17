@@ -61,7 +61,12 @@ test("move a root task under another via the Move under… menu", async ({ page 
 test("promote the subtask back to top-level — via the keyboard", async ({ page }) => {
   await page.goto("/tasks");
 
-  const promote = row(page, LOOSE_TITLE).getByTitle("Promote to top-level");
+  // The promote control is a glyph-only button (⤴): its accessible name must
+  // come from an aria-label, not the glyph, so it is announceable and reachable
+  // by role+name (#104 item 3). getByRole resolves by accessible name, so this
+  // would fail if the label were still the bare glyph.
+  const promote = row(page, LOOSE_TITLE).getByRole("button", { name: "Promote to top-level" });
+  await expect(promote).toBeVisible();
   await promote.focus();
   await page.keyboard.press("Enter");
 

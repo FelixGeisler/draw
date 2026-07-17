@@ -29,6 +29,38 @@ error.
 
 Type checks: `npm run build -w server` and `npx tsc --noEmit -p client/tsconfig.json`.
 
+### Known dependency warnings (accepted — do not act on them)
+
+`npm install` prints two deprecation warnings and `npm audit` reports six
+moderate findings. All are **docs-toolchain-only** — neither the server nor the
+client ships any of the packages involved — and none is currently actionable.
+They are recorded here so the setup output does not look alarming and so this
+analysis is not re-run each time someone notices it (issue #132).
+
+- **`inflight@1.0.6` (memory leak) and `glob@8.1.0` (old, known CVEs)** arrive
+  through `asciidoctor-kroki` → `@asciidoctor/core` → `@asciidoctor/opal-runtime`
+  → `glob` → `inflight`. They cannot be overridden from our `package.json`
+  without an `overrides` hack against a transitive Ruby-runtime shim; the fix has
+  to come from upstream. `inflight`'s leak is irrelevant to a process that runs
+  for a few seconds during `npm run docs:build` and then exits.
+- **`js-yaml@4.1.1` — [GHSA-h67p-54hq-rp68](https://github.com/advisories/GHSA-h67p-54hq-rp68)**
+  (quadratic-complexity DoS in merge-key handling) accounts for all six audit
+  findings, reached via `@antora/cli` and `@antora/site-generator`. npm's only
+  offered remedy is downgrading `@antora/cli` 3.1.15 → 2.3.4 — a semver-major
+  downgrade that would break the docs site (ADR-10) to avoid a DoS in a build
+  tool that parses exactly one YAML file we author ourselves
+  (`antora-playbook.yml`). No untrusted YAML enters the docs build, so the
+  attack surface is none.
+
+**Decision:** accept both, change no dependencies. Revisit when any of these holds:
+
+- `asciidoctor-kroki` / `@asciidoctor/core` ship a release that drops the old
+  `glob` chain → drop the `inflight`/`glob` note.
+- Antora releases a version depending on a patched `js-yaml` (> 4.1.1) → upgrade
+  and drop the advisory note.
+- The advisory's severity is raised, or any of these packages enters the server
+  or client runtime → act immediately.
+
 ## Tests — required for every PR
 
 Three levels; all must be green before a PR is merged (CI enforces this):

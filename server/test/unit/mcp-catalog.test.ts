@@ -165,6 +165,32 @@ describe("parent-lifecycle wording in tool descriptions (issue #111, ADR-32)", (
   });
 });
 
+describe("reparent follow-up wording in tool descriptions (issue #104)", () => {
+  // Schema-guided clients plan around these too: without the archived-parent
+  // clause an agent would attempt an adoption the API rejects, and without the
+  // reopen-vs-reparent clause it would send one body expecting both to apply.
+  it("names the archived-parent guard on every subtask-creating tool (#104 item 1)", () => {
+    expect(tool("update_task").description).toContain("archived task cannot take subtasks");
+    const parentId = (tool("update_task").inputSchema.parentId as z.ZodType).description ?? "";
+    expect(parentId).toContain("must not be archived");
+    expect(tool("create_task").inputSchema.parentId as z.ZodType).toBeDefined();
+    const createParent = (tool("create_task").inputSchema.parentId as z.ZodType).description ?? "";
+    expect(createParent).toContain("ARCHIVED");
+    expect(tool("create_subtasks").description).toContain("ARCHIVED parent is rejected");
+  });
+
+  it("warns that reopen and reparent cannot combine in one call (#104 item 4)", () => {
+    const parentId = (tool("update_task").inputSchema.parentId as z.ZodType).description ?? "";
+    expect(parentId).toContain("Reopening and reparenting in ONE call is not supported");
+    expect(parentId).toContain("ignores parentId");
+  });
+
+  it("scopes the adoption impact reset to open movers in the wording (#104 item 2)", () => {
+    const parentId = (tool("update_task").inputSchema.parentId as z.ZodType).description ?? "";
+    expect(parentId).toContain("done/archived mover keeps the rating");
+  });
+});
+
 describe("ADR-4 wording in tool descriptions (issue #76)", () => {
   // The enforced rule has exceptions (neutral 3, no-op resends of a stored
   // value, subtask batches) — the descriptions must not overstate it, or a
