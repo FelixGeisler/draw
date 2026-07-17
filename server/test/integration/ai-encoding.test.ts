@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import type express from "express";
-import { freshApp } from "../helpers.js";
+import { COUNT_TOKENS_FILE_SOURCE_ERROR, findFileSource, freshApp } from "../helpers.js";
 
 // #134: the #91 live session saw an em-dash come back as U+FFFD (�) in a
 // plan-goal analysis. The server never decodes PDF text itself (PDF bytes
@@ -16,16 +16,8 @@ import { freshApp } from "../helpers.js";
 //   3. the model's response text → HTTP response (must round-trip
 //      byte-clean).
 const mocks = vi.hoisted(() => {
-  const stream = vi.fn();
-  return {
-    stream,
-    countTokens: vi.fn(),
-    streamResolve: (message: unknown) =>
-      stream.mockImplementation(() => ({ finalMessage: () => Promise.resolve(message) })),
-  };
-});
-
-vi.mock("@anthropic-ai/sdk", () => {
+  // APIError lives here (not in the factory) so beforeEach can construct the
+  // strict count_tokens rejection (#138) that mapSdkError recognizes.
   class APIError extends Error {
     status?: number;
     constructor(status?: number, message?: string) {
@@ -36,16 +28,30 @@ vi.mock("@anthropic-ai/sdk", () => {
   class AuthenticationError extends APIError {}
   class RateLimitError extends APIError {}
   class APIConnectionError extends APIError {}
+  const stream = vi.fn();
+  return {
+    APIError,
+    AuthenticationError,
+    RateLimitError,
+    APIConnectionError,
+    stream,
+    countTokens: vi.fn(),
+    streamResolve: (message: unknown) =>
+      stream.mockImplementation(() => ({ finalMessage: () => Promise.resolve(message) })),
+  };
+});
+
+vi.mock("@anthropic-ai/sdk", () => {
   class Anthropic {
     beta = {
       files: { upload: vi.fn() },
       messages: { stream: mocks.stream, countTokens: mocks.countTokens },
     };
     constructor(_opts?: unknown) {}
-    static APIError = APIError;
-    static AuthenticationError = AuthenticationError;
-    static RateLimitError = RateLimitError;
-    static APIConnectionError = APIConnectionError;
+    static APIError = mocks.APIError;
+    static AuthenticationError = mocks.AuthenticationError;
+    static RateLimitError = mocks.RateLimitError;
+    static APIConnectionError = mocks.APIConnectionError;
   }
   return { default: Anthropic, toFile: vi.fn(async () => ({ mock: "file" })) };
 });
@@ -94,7 +100,12 @@ beforeAll(async () => {
 beforeEach(() => {
   mocks.stream.mockReset();
   mocks.countTokens.mockReset();
-  mocks.countTokens.mockResolvedValue({ input_tokens: 500 });
+  // Strict like the live endpoint (#138): file sources are rejected. No test
+  // here assembles one today; the tripwire exists so one can never pass.
+  mocks.countTokens.mockImplementation(async (params: unknown) => {
+    if (findFileSource(params)) throw new mocks.APIError(400, COUNT_TOKENS_FILE_SOURCE_ERROR);
+    return { input_tokens: 500 };
+  });
   mocks.streamResolve({ parsed_output: PLAN_OUTPUT });
 });
 
