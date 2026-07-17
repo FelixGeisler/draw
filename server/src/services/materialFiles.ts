@@ -22,7 +22,9 @@ import { db } from "../db.js";
 
 /**
  * Beta header gating the Files API. Required on BOTH the upload and every
- * messages / count-tokens call that references a returned id.
+ * messages call that references a returned id. count_tokens never references
+ * one: the endpoint REJECTS file sources outright (#138), so the token guard
+ * counts a base64 substitute and needs no beta.
  *
  * Verified against the installed @anthropic-ai/sdk (0.111), not assumed: the
  * GA `DocumentBlockParam.source` union is base64/text/content/url only — the

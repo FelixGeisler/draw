@@ -1338,17 +1338,30 @@ rebuild the request. Nothing treats a stored id as proof the file exists.
 a cached id (a 404, or a file-mentioning 400), the ids for that call are
 dropped and the blocks are rebuilt from disk exactly once — the rebuild
 re-uploads, so a second rejection is a real failure and surfaces rather than
-loops. This is the whole cache-coherence policy, isolated in
+loops. One 400 class is excluded from the file-mentioning slack (#138): a
+capability rejection ("... not supported ...") is the API refusing the request
+*shape*, not reporting a dead id — re-uploading cannot fix it, so it must
+surface instead of invalidating a live id and burning an upload. This is the
+whole cache-coherence policy, isolated in
 `withFileIdRetry` so it can be pinned by a test without a key. On a key change
 (`PUT`/`DELETE /api/ai/key`) every cached id is cleared eagerly, because the
 old key's ids can never be valid again.
 (d) *Never break a feature on the upgrade path.* If an upload fails (no key,
 quota, outage, the beta being withdrawn) the call falls back to the base64
 block it used before #92. The Files API can cost bandwidth, never function.
-(e) *Honesty of the token estimate is preserved.* `count_tokens` resolves the
-referenced file server-side and counts the PDF's real tokens — the same
-content base64 would have inlined — so the `MAX_INPUT_TOKENS` guard still gates
-the same thing; only the request shrinks, not the number.
+(e) *Token counting substitutes the bytes — corrected by #138.* This ADR
+originally claimed `count_tokens` resolves the referenced file server-side.
+That claim was false: the real endpoint rejects `{type: "file"}` sources
+outright (`400 — "File sources are not supported in the token counting
+endpoint"`, observed live), and because the mocked SDK accepted them CI stayed
+green while every material-backed call died at the estimate gate. The guard
+now counts a *base64 substitute* read from the local PDF for each file-source
+block — the exact content the id references, so the count is exact and the
+`MAX_INPUT_TOKENS` guard gates the same thing — while the paid call keeps the
+`file_id`. Counting therefore still pays the base64 bandwidth; only the paid
+call sheds it. The mocked `count_tokens` now rejects file sources exactly like
+the live endpoint, so a regression re-fails in CI instead of only in
+production.
 (f) *Beta surface.* The `{type: "file", file_id}` document source exists only
 in the SDK's beta namespace (the GA `DocumentBlockParam` source is
 base64/text/content/url — verified against the installed `@anthropic-ai/sdk`),
