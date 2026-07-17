@@ -570,7 +570,22 @@ async function runStructured<T>(
   const system = opts.system ?? PLANNING_SYSTEM_PROMPT;
   await guardTokens(blocks, system);
   try {
-    const response = await c.beta.messages.parse({
+    // Streaming is required, not a preference (#133, ADR-36): the SDK refuses
+    // any NON-streaming request whose max_tokens implies a possible
+    // >10-minute run ("Streaming is required for operations that may take
+    // longer than 10 minutes"), and generate-tasks' 32K cap trips that guard
+    // on real calls — the flagship exam import 500'd live (#91) while every
+    // mocked test stayed green. ALL structured calls stream, not just the 32K
+    // one, so no future cap raise can silently reintroduce the failure class.
+    // Semantics are unchanged: the stream helper accumulates the SSE deltas
+    // and applies the same beta parser (zod validation via
+    // output_config.format) to the final message, so parsed_output behaves
+    // exactly as messages.parse() did; request-level API errors reject
+    // finalMessage() with the same typed SDK errors mapSdkError already
+    // handles; and the request shape (cache_control breakpoints, betas,
+    // count_tokens preflight) is byte-identical apart from stream mode, so
+    // prompt caching and the token guard are unaffected.
+    const stream = c.beta.messages.stream({
       model: MODEL,
       max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
       thinking: { type: "adaptive" },
@@ -579,6 +594,7 @@ async function runStructured<T>(
       output_config: { format: betaZodOutputFormat(schema) },
       betas: betasFor(blocks),
     });
+    const response = await stream.finalMessage();
     if (!response.parsed_output) {
       throw new AiError(502, "Claude returned an unparseable response — try again");
     }
