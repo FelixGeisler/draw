@@ -6,18 +6,11 @@ import { StatsPage } from "./pages/StatsPage";
 import { HistoryPage } from "./pages/HistoryPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { AssistantPage } from "./pages/AssistantPage";
 import { TimerBar } from "./components/TimerBar";
 import { GamificationHeader } from "./components/GamificationHeader";
 import { AchievementToast } from "./components/AchievementToast";
-
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div className="content">
-      <h1>{title}</h1>
-      <p style={{ color: "var(--text-dim)" }}>Coming soon.</p>
-    </div>
-  );
-}
+import { useAiStatus } from "./hooks/useAi";
 
 const NAV = [
   { to: "/", label: "Draw" },
@@ -29,12 +22,20 @@ const NAV = [
   { to: "/settings", label: "Settings" },
 ];
 
+// The Assistant (#31) is an AI surface: its nav entry exists only while a key
+// is configured (degraded mode hides the feature, like every AI affordance).
+// The ROUTE stays registered either way — a direct visit in degraded mode
+// gets the page's own Settings hint instead of a dead link.
+const ASSISTANT = { to: "/assistant", label: "✨ Assistant" };
+
 export default function App() {
+  const aiStatus = useAiStatus();
+  const nav = aiStatus.data?.configured ? [...NAV.slice(0, 4), ASSISTANT, ...NAV.slice(4)] : NAV;
   return (
     <div className="layout">
       <nav className="sidenav">
         <div className="brand">🃏 Draw</div>
-        {NAV.map((item) => (
+        {nav.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.to === "/"}>
             {item.label}
           </NavLink>
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="/capture" element={<CapturePage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/goals" element={<GoalsPage />} />
+          <Route path="/assistant" element={<AssistantPage />} />
           <Route path="/stats" element={<StatsPage />} />
           <Route path="/history" element={<HistoryPage />} />
           <Route path="/settings" element={<SettingsPage />} />
