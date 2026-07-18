@@ -1,10 +1,9 @@
 import { Link } from "react-router-dom";
 
 /**
- * Why the candidate pool came up empty, in words. The three reasons the
- * SERVER's shared `emptyPoolReason` can return (drawService) — so the
- * freestyle draw (DrawPage) and the daily hand's deal (#59) explain an empty
- * deck with one voice instead of two drifting copies of the same paragraph.
+ * Why the candidate pool came up empty, in words — the three reasons the
+ * SERVER's shared `emptyPoolReason` can return (drawService), kept as one
+ * voice for one server-side predicate.
  *
  * Draw-only reasons (`cooling_down`, `warmup_unavailable`) stay at their call
  * site: they describe the warm-up allowance, not the pool.

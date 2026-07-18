@@ -67,9 +67,11 @@ beforeAll(async () => {
 });
 
 describe("migration v11 → v12 rebuilds goals without firing FK actions (#145, ADR-38)", () => {
-  it("bumps user_version to 12 and leaves no scratch table", async () => {
+  it("runs the chain to the current version and leaves no scratch table", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(12);
+    // 13, not 12: the boot always migrates to CURRENT_VERSION — v13 (#147)
+    // only deletes daily-hand settings rows this fixture never seeds.
+    expect(db.pragma("user_version", { simple: true })).toBe(13);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'goals_new'").get(),
     ).toBeUndefined();

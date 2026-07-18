@@ -24,7 +24,7 @@ export function useUpdateGoal() {
   return useMutation({
     // The PATCH response optionally carries newAchievements (#145): achieving
     // the first goal ever unlocks first_goal server-side, delivered on the
-    // same additive response field as the draw/hand/tasks routes.
+    // same additive response field as the draw/tasks routes.
     mutationFn: ({ id, ...patch }: { id: number } & Record<string, unknown>) =>
       api.patch<Goal & { newAchievements?: string[] }>(`/api/goals/${id}`, patch),
     onSuccess: (data) => {
