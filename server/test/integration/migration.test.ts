@@ -19,6 +19,7 @@ import { freshApp, testDb } from "../helpers.js";
 //   v9 → v10 seeds daily_hand_budget_minutes                       (issue #59)
 //   v10 → v11 adds materials.anthropic_file_id                     (issue #92)
 //   v11 → v12 rebuilds goals: 'missed' status + resolved_at       (issue #145)
+//   v12 → v13 deletes the daily-hand settings rows                (issue #147)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence. (The v12 rebuild's own
@@ -67,10 +68,9 @@ beforeAll(async () => {
     .replace(/  -- Anthropic Files API id[\s\S]*?anthropic_file_id TEXT,\r?\n/, "")
     // v9 (#57): strip the was_warmup column (and its comment block)…
     .replace(/,\r?\n  -- Warm-up draw[\s\S]*?was_warmup INTEGER NOT NULL DEFAULT 0/, "")
-    // …and the warmup_every_hours seed row (v10's daily_hand_budget_minutes
-    // trails it, so the two strips must compose: drop the hand seed first,
-    // restoring the `warmup_every_hours` line as the statement terminator).
-    .replace(/,\r?\n  \('daily_hand_budget_minutes', '90'\)/, "")
+    // …and the warmup_every_hours seed row — since #147 dropped the
+    // daily-hand seed it is the last row, so the strip restores
+    // `daily_goal_completions` as the statement terminator.
     .replace(/,\r?\n  \('warmup_every_hours', '8'\)/, "");
   expect(v2Schema).not.toBe(current); // the strip actually removed the columns
   expect(v2Schema).not.toContain("deferred_until");
@@ -80,7 +80,6 @@ beforeAll(async () => {
   expect(v2Schema).not.toContain("streak_freezes");
   expect(v2Schema).not.toContain("was_warmup");
   expect(v2Schema).not.toContain("warmup_every_hours");
-  expect(v2Schema).not.toContain("daily_hand_budget_minutes");
   expect(v2Schema).not.toContain("anthropic_file_id");
   expect(v2Schema).not.toContain("'missed'");
   expect(v2Schema).not.toContain("resolved_at");
@@ -90,6 +89,12 @@ beforeAll(async () => {
   legacy
     .prepare("INSERT INTO tasks (title, category_id, effort_minutes, created_at) VALUES (?, ?, ?, ?)")
     .run("Legacy task", 1, 10, new Date().toISOString());
+  // Daily-hand residue (#147): a database that USED the removed feature —
+  // an edited budget (so v10's INSERT OR IGNORE provably keeps it, replaying
+  // history verbatim) plus a dealt hand row. v13 must delete both.
+  const seedSetting = legacy.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
+  seedSetting.run("daily_hand_budget_minutes", "45");
+  seedSetting.run("daily_hand", '{"date":"2026-01-01","taskIds":[1],"budgetMinutes":45}');
 
   // Pre-guard nested breakdown (#80): a 4-level chain plus a sibling and a
   // done grandchild, inserted the way pre-#35 API calls could have written
@@ -259,10 +264,10 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v12 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, daily_hand_budget_minutes, anthropic_file_id, goal resolution)", () => {
-  it("bumps user_version to 12", async () => {
+describe("migration v2 → v13 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal)", () => {
+  it("bumps user_version to 13", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(12);
+    expect(db.pragma("user_version", { simple: true })).toBe(13);
   });
 
   it("rebuilds goals with the missed status, resolved_at, and no scratch table (#145)", async () => {
@@ -317,25 +322,22 @@ describe("migration v2 → v12 (deferred_until, blocked, subtask_order_mode, win
     expect(listed.body[0]).not.toHaveProperty("anthropic_file_id");
   });
 
-  it("seeds daily_hand_budget_minutes and needs no table for the hand itself (#59)", async () => {
+  it("v13 deletes the daily-hand settings rows the fixture carried (#147)", async () => {
+    // The fixture seeded an edited budget ('45') and a dealt hand — v10's
+    // INSERT OR IGNORE replayed without resurrecting a '90', and v13 removed
+    // both rows: a pre-v13 database that used the feature comes out clean.
     const db = await testDb();
-    const seed = db
-      .prepare("SELECT value FROM settings WHERE key = 'daily_hand_budget_minutes'")
-      .get() as { value: string } | undefined;
-    expect(seed?.value).toBe("90");
-    // The migrated setting is public and editable like a fresh install's —
-    // the whole reason this version exists (the hand is a settings row, so
-    // v10 adds no schema at all).
+    const rows = db
+      .prepare("SELECT key FROM settings WHERE key IN ('daily_hand_budget_minutes', 'daily_hand')")
+      .all();
+    expect(rows).toEqual([]);
+    // …and the key does not resurface through the public settings surface.
     const settings = await request(app).get("/api/settings").expect(200);
-    expect(settings.body.daily_hand_budget_minutes).toBe("90");
-    expect(
-      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'daily_hand'").get(),
-    ).toBeUndefined();
+    expect(settings.body).not.toHaveProperty("daily_hand_budget_minutes");
   });
 
-  it("the migrated database can deal a hand (the hand row works without any seed)", async () => {
-    // GET answers "no hand today" on a database that has never seen one.
-    expect((await request(app).get("/api/hand").expect(200)).body).toBeNull();
+  it("serves no /api/hand endpoint anymore (#147)", async () => {
+    await request(app).get("/api/hand").expect(404);
   });
 
   it("adds completions.was_warmup with default 0 and seeds warmup_every_hours (#57)", async () => {
