@@ -1,8 +1,8 @@
 /* Fullscreen goal-achieved celebration (#145). Same surface contract as
-   .focus-overlay: fixed above all page chrome (nothing else exceeds 30) but
-   below the AchievementToast (100), so a first_goal unlock flips its card
-   above the victory screen. canvas-confetti stacks its canvas above both by
-   default — no ladder change needed. */
+   .focus-overlay: fixed above all page chrome (chrome tops out at 30, drag
+   previews at 40) but below the AchievementToast (100), so a first_goal
+   unlock flips its card above the victory screen. canvas-confetti stacks
+   its canvas above both by default — no ladder change needed. */
 .victory-overlay {
   position: fixed;
   inset: 0;

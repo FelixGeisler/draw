@@ -43,6 +43,11 @@ function GoalShelfContent({ onReactivated }: { onReactivated?: () => void }) {
     }
   }
 
+  // No empty-state flash on first expand: the two queries only start when
+  // the content mounts, so "nothing yet" is a claim we can't make until
+  // both have actually answered.
+  if (achieved.isPending || missed.isPending) return null;
+
   if ((achieved.data?.length ?? 0) === 0 && (missed.data?.length ?? 0) === 0) {
     return (
       <p className="goal-shelf-empty">

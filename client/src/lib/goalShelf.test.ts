@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { formatResolvedDate, formatTrackedMinutes, targetDelta } from "./goalShelf";
 
-// Midday-UTC timestamps throughout: the helpers truncate to the LOCAL day,
-// and noon UTC lands on the same calendar day in every offset this app can
-// realistically run in (UTC-11 … UTC+11).
+// Instants built from LOCAL date components: the helpers truncate to the
+// runner's local day, so a fixed UTC string would shift a calendar day in
+// far-offset zones (a noon-UTC instant is already "tomorrow" in UTC+13).
+// Deriving the instant from the local calendar keeps every expectation
+// true in EVERY timezone the suite can run in.
+const localNoon = (y: number, m: number, d: number) => new Date(y, m - 1, d, 12).toISOString();
 
 describe("formatResolvedDate", () => {
   it("renders the compact day-first form", () => {
-    expect(formatResolvedDate("2026-07-12T12:00:00.000Z")).toBe("12 Jul 2026");
+    expect(formatResolvedDate(localNoon(2026, 7, 12))).toBe("12 Jul 2026");
   });
 });
 
@@ -31,20 +34,20 @@ describe("formatTrackedMinutes", () => {
 
 describe("targetDelta", () => {
   it("answers null without both dates — pre-v12 resolved rows have no resolvedAt", () => {
-    expect(targetDelta(null, "2026-07-12T12:00:00.000Z")).toBeNull();
+    expect(targetDelta(null, localNoon(2026, 7, 12))).toBeNull();
     expect(targetDelta("2026-07-12", null)).toBeNull();
     expect(targetDelta(null, null)).toBeNull();
   });
 
   it("counts days before the target", () => {
-    expect(targetDelta("2026-07-14", "2026-07-12T12:00:00.000Z")).toBe("2d before target");
+    expect(targetDelta("2026-07-14", localNoon(2026, 7, 12))).toBe("2d before target");
   });
 
   it("counts days after the target", () => {
-    expect(targetDelta("2026-07-01", "2026-07-12T12:00:00.000Z")).toBe("11d after target");
+    expect(targetDelta("2026-07-01", localNoon(2026, 7, 12))).toBe("11d after target");
   });
 
   it("names a resolution on the target day itself", () => {
-    expect(targetDelta("2026-07-12", "2026-07-12T12:00:00.000Z")).toBe("on target day");
+    expect(targetDelta("2026-07-12", localNoon(2026, 7, 12))).toBe("on target day");
   });
 });

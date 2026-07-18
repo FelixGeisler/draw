@@ -204,8 +204,10 @@ function migrate() {
       // every task and materials.goal_id ON DELETE CASCADE would delete every
       // material. The pragma is a no-op inside a transaction, so it toggles
       // outside; foreign_key_check afterwards proves the rebuilt table left
-      // no dangling reference. No indexes/triggers/views exist on goals —
-      // nothing else to recreate.
+      // no dangling reference — scoped to the two tables that reference
+      // goals, so a pre-existing violation in an unrelated table cannot
+      // abort the boot blaming this rebuild. No indexes/triggers/views
+      // exist on goals — nothing else to recreate.
       db.pragma("foreign_keys = OFF");
       try {
         db.transaction(() => {
@@ -223,7 +225,10 @@ function migrate() {
                    SELECT id, title, outcome, target_date, status, created_at FROM goals`);
           db.exec("DROP TABLE goals");
           db.exec("ALTER TABLE goals_new RENAME TO goals");
-          const violations = db.pragma("foreign_key_check") as unknown[];
+          const violations = [
+            ...(db.pragma("foreign_key_check(tasks)") as unknown[]),
+            ...(db.pragma("foreign_key_check(materials)") as unknown[]),
+          ];
           if (violations.length > 0) {
             throw new Error(
               "v12 migration: foreign_key_check failed after the goals rebuild (issue #145, ADR-38)",
