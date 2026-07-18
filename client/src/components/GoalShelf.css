@@ -1,0 +1,121 @@
+/* Hall of Fame (#145): resolved goals below the active list. Trophy cards
+   paint the shared holo sheen (index.css, #124) — the same rarity language
+   as the trophy pile and the achievement collection — while missed rows are
+   deliberately quiet: thin border, dim text, no sheen. A defeat is recorded,
+   not celebrated. */
+.goal-shelf {
+  margin-top: 16px;
+}
+
+.goal-shelf-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.goal-shelf-empty {
+  color: var(--text-dim);
+  margin: 12px 0 0;
+}
+
+.goal-trophies {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.goal-trophy {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 226, 130, 0.4);
+  border-radius: 10px;
+  padding: 14px;
+  background: var(--bg-hover);
+}
+
+.goal-trophy::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--sheen-holo);
+  background-size: 250% 250%;
+  background-position: 85% 0;
+}
+
+/* The sweep is a hover reveal, not an ambient loop — a shelf of trophies
+   all shimmering at once would be the casino index.css warns against. */
+@media (prefers-reduced-motion: no-preference) {
+  .goal-trophy:hover::after {
+    animation: goal-trophy-sweep 1.4s ease both;
+  }
+
+  @keyframes goal-trophy-sweep {
+    from {
+      background-position: 85% 0;
+    }
+    to {
+      background-position: 15% 0;
+    }
+  }
+}
+
+.goal-trophy-title {
+  font-weight: 600;
+}
+
+.goal-trophy-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.goal-trophy-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.goal-trophy-actions button {
+  padding: 2px 10px;
+  /* Above the sheen overlay — ::after is pointer-events: none, but the
+     stacking still matters for the hover/focus styles to read crisply. */
+  position: relative;
+  z-index: 1;
+}
+
+.goal-missed-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.goal-missed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.goal-missed-row button {
+  padding: 2px 10px;
+}
+
+.goal-missed-text {
+  flex: 1;
+  color: var(--text-dim);
+}
+
+.goal-missed-meta {
+  font-size: 13px;
+}

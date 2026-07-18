@@ -27,6 +27,7 @@ const REVIEWED: Record<AchievementKey, AchievementRarity> = {
   monster_slayer: "rare",
   level_10: "epic",
   leverage_master: "epic",
+  first_goal: "epic",
   streak_30: "legendary",
   deck_clearer: "legendary",
 };
@@ -44,13 +45,13 @@ describe("achievementRarity", () => {
     }
   });
 
-  it("keeps the reviewed distribution: 2 common / 4 rare / 2 epic / 2 legendary", () => {
+  it("keeps the reviewed distribution: 2 common / 4 rare / 3 epic / 2 legendary", () => {
     const counts = ACHIEVEMENT_KEYS.reduce<Record<string, number>>((acc, key) => {
       const tier = achievementRarity(key);
       acc[tier] = (acc[tier] ?? 0) + 1;
       return acc;
     }, {});
-    expect(counts).toEqual({ common: 2, rare: 4, epic: 2, legendary: 2 });
+    expect(counts).toEqual({ common: 2, rare: 4, epic: 3, legendary: 2 });
   });
 
   it("reserves legendary for the two hardest unlocks", () => {

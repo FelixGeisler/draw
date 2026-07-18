@@ -3,10 +3,12 @@ import type { Goal } from "../api/types";
 import { useCreateGoal, useDeleteGoal, useUpdateGoal, useGoals } from "../hooks/useGoals";
 import { useCategories, useCreateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
+import { GoalShelf } from "../components/GoalShelf";
 import { GoalTasksSection } from "../components/GoalTasksSection";
 import { MaterialsSection } from "../components/MaterialsSection";
 import { AiGenerateTasksPanel, AiPlanPanel } from "../components/AiSuggestionPanel";
 import { TaskForm } from "../components/TaskForm";
+import { VictoryOverlay } from "../components/VictoryOverlay";
 import { daysUntil, feasibility, type Feasibility } from "../lib/feasibility";
 
 const VERDICT_STYLE = {
@@ -49,7 +51,19 @@ function FeasibilityChip({ f, onReplan }: { f: Feasibility; onReplan?: () => voi
   );
 }
 
-function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
+function GoalCard({
+  goal,
+  allGoals,
+  onAchieved,
+  onMissed,
+}: {
+  goal: Goal;
+  allGoals: Goal[];
+  /** Server-confirmed achieve (#145): the PATCH response opens the victory overlay. */
+  onAchieved: (goal: Goal) => void;
+  /** Quiet counterpart: feeds the page's live region — no fanfare for a defeat. */
+  onMissed: (title: string) => void;
+}) {
   const updateGoal = useUpdateGoal();
   const deleteGoal = useDeleteGoal();
   const createTask = useCreateTask();
@@ -156,10 +170,36 @@ function GoalCard({ goal, allGoals }: { goal: Goal; allGoals: Goal[] }) {
             </button>
             <button
               style={{ padding: "2px 10px" }}
-              onClick={() => updateGoal.mutate({ id: goal.id, status: "achieved" })}
+              // Per-call onSuccess: the celebration waits for the server to
+              // confirm (#110 — never before), and the response carries the
+              // stamped resolvedAt the overlay shows.
+              onClick={() =>
+                updateGoal.mutate(
+                  { id: goal.id, status: "achieved" },
+                  { onSuccess: (g) => onAchieved(g) },
+                )
+              }
               title="Mark achieved"
             >
               🏁
+            </button>
+            <button
+              style={{ padding: "2px 10px" }}
+              onClick={() => {
+                if (
+                  confirm(
+                    `Mark goal "${goal.title}" as missed? It moves to the Hall of Fame — you can reactivate it anytime.`,
+                  )
+                ) {
+                  updateGoal.mutate(
+                    { id: goal.id, status: "missed" },
+                    { onSuccess: () => onMissed(goal.title) },
+                  );
+                }
+              }}
+              title="Mark missed — the goal is over but wasn't reached"
+            >
+              ⌛
             </button>
             <button
               style={{ padding: "2px 10px" }}
@@ -286,6 +326,10 @@ export function GoalsPage() {
   const [title, setTitle] = useState("");
   const [outcome, setOutcome] = useState("");
   const [targetDate, setTargetDate] = useState("");
+  // The goal being celebrated (#145) — set from the server-confirmed PATCH
+  // response, so the overlay shows the stamped resolvedAt, not a client guess.
+  const [victory, setVictory] = useState<Goal | null>(null);
+  const [missedNotice, setMissedNotice] = useState<string | null>(null);
 
   return (
     <div className="content">
@@ -333,12 +377,32 @@ export function GoalsPage() {
           </div>
         </form>
       </div>
-      {goals.data?.map((g) => <GoalCard key={g.id} goal={g} allGoals={goals.data ?? []} />)}
+      {goals.data?.map((g) => (
+        <GoalCard
+          key={g.id}
+          goal={g}
+          allGoals={goals.data ?? []}
+          onAchieved={setVictory}
+          onMissed={(t) => setMissedNotice(`Moved "${t}" to the Hall of Fame as missed.`)}
+        />
+      ))}
       {(goals.data?.length ?? 0) === 0 && (
         <p style={{ color: "var(--text-dim)", marginTop: 16 }}>
           No active goals. A goal gives your tasks an impact rating — and a reason.
         </p>
       )}
+      {/* Always-mounted live region (the GoalTasksSection pattern): screen
+          readers only reliably announce a role="status" whose container
+          pre-exists its text, and this line is the whole feedback for a row
+          that just left the list — marking missed is quiet by design. */}
+      <div
+        role="status"
+        style={{ marginTop: missedNotice ? 12 : 0, fontSize: 13, color: "var(--text-dim)" }}
+      >
+        {missedNotice}
+      </div>
+      <GoalShelf onReactivated={() => setMissedNotice(null)} />
+      {victory && <VictoryOverlay goal={victory} onClose={() => setVictory(null)} />}
     </div>
   );
 }

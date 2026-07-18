@@ -151,8 +151,15 @@ export interface Goal {
   title: string;
   outcome: string | null;
   targetDate: string | null;
-  status: "active" | "achieved" | "dropped";
+  status: "active" | "achieved" | "missed" | "dropped";
   createdAt: string;
+  /**
+   * Goal resolution (#145, ADR-38): when the goal left 'active' — an event
+   * fact maintained server-side only (set on resolve, kept across
+   * corrections, cleared on reactivation). NULL on goals resolved before
+   * migration v12: render no date rather than a guess.
+   */
+  resolvedAt: string | null;
   taskCount: number;
   doneCount: number;
   materialCount: number;

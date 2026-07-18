@@ -10,8 +10,16 @@ CREATE TABLE goals (
   title TEXT NOT NULL,
   outcome TEXT,
   target_date TEXT,
-  status TEXT NOT NULL CHECK (status IN ('active', 'achieved', 'dropped')) DEFAULT 'active',
-  created_at TEXT NOT NULL
+  -- Goal resolution (#145, ADR-38): 'missed' = the outcome is decided and the
+  -- goal was not reached — a user assertion, never set automatically (the app
+  -- cannot know a grade); 'dropped' = abandoned by choice. resolved_at is an
+  -- EVENT FACT (the moment the goal left 'active'), not derivable state, so
+  -- storing it stays within ADR-2: set once on leaving 'active', kept across
+  -- resends and achieved<->missed corrections, cleared on reactivation. NULL
+  -- on rows resolved before v12 = unknown.
+  status TEXT NOT NULL CHECK (status IN ('active', 'achieved', 'missed', 'dropped')) DEFAULT 'active',
+  created_at TEXT NOT NULL,
+  resolved_at TEXT
 );
 
 CREATE TABLE tasks (

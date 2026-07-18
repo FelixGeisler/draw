@@ -1516,3 +1516,50 @@ stream seam, the #136 convention). Routing apply through the extracted cores
 is the only way "same validation as the routes" stays true by construction
 instead of by diligence. The live loop cannot run in CI (no key); its
 verification on a real key is a follow-up checklist item like #91's.
+
+== ADR-38: Goal resolution — `missed` is a user assertion, `resolved_at` is a stored event fact
+
+*Context:* Issue #145: marking a goal achieved was a silent column write (the
+goal vanished from the only listing the UI ran), and a goal whose outcome is
+decided against the user — the grade is in and it is not the one the goal
+named — had no honest state: `dropped` means "abandoned by choice", and was
+not even reachable from the UI. The feature adds a `missed` status, a
+celebration for achieved goals, and a Hall of Fame shelf that shows resolved
+goals with their resolution date — a date no existing column carried.
+
+*Decision:* (a) `missed` joins the status CHECK as a USER ASSERTION only: the
+app never sets it — an overdue `target_date` keeps producing the red chip and
+nothing else, because only the user knows whether the outcome is actually
+decided (a grade can arrive before or after the date). (b) `resolved_at`
+stores the moment a goal leaves `active`. This scopes ADR-2's "derive, don't
+store": the ban covers DERIVABLE state (counters, progress, drawability),
+and a resolution instant is not derivable — there is no transition log to
+replay, the same standing as `tasks.completed_at` and
+`achievements.unlocked_at`. It is maintained exclusively in the PATCH
+handler: set once on the transition out of `active`, kept verbatim across
+no-op resends (ADR-4 tolerance) and `achieved`&#8596;`missed` corrections,
+cleared on reactivation — and never client-supplied. Pre-v12 resolved rows
+keep `NULL` ("date unknown", the v11 `anthropic_file_id` honesty) rather
+than a backfilled guess. (c) All transitions stay legal; validation is enum
+membership only, turning the former CHECK-constraint 500 into a clean 400.
+Reactivation from the shelf requires `achieved/missed → active`, and a
+single-user app with one writer has no invariant for a state machine to
+protect. (d) The migration rebuilds the goals table (SQLite cannot alter a
+CHECK) with `foreign_keys` toggled OFF outside the transaction: ON, the
+implicit delete of `DROP TABLE goals` fires `tasks.goal_id`'s SET NULL and
+`materials`' CASCADE — the rebuild would "succeed" having silently unlinked
+every task and deleted every attachment; `foreign_key_check` afterwards
+proves the rebuilt table dangles nothing. (e) The shelf and every listing
+derive purely from `status` + `resolved_at`; `trackedMinutes14d` is
+deliberately absent from the shelf — a rolling window decays to zero after
+resolution and would misrepresent history (the victory overlay may show it:
+it fires at resolution time, labeled as the final 14 days).
+
+*Rationale:* A `missed` goal is a recorded defeat, not a deleted one — the
+distinction from `dropped` is the whole feature, so collapsing them was
+rejected. Auto-fail on the target date was rejected because the date is a
+plan, not a verdict. Storing the event fact beats deriving nothing: the
+alternative — a goal-transition log — is heavier than the one column and
+would still store the same instants. The FK-off rebuild is the standard
+SQLite recipe; the migration-v12 test pins the exact failure the pragma
+prevents, because it is the kind that ships green and loses data.

@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 11;
+export const CURRENT_VERSION = 12;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -188,6 +188,56 @@ function migrate() {
       // source of truth, so a database that never gets an id keeps working on
       // the base64 fallback path.
       db.exec("ALTER TABLE materials ADD COLUMN anthropic_file_id TEXT");
+    }
+    if (version < 12) {
+      // Goal resolution (#145, ADR-38): 'missed' joins the status CHECK and
+      // resolved_at records when the goal left 'active' — an event fact, not
+      // derivable state (ADR-2 bans stored DERIVABLES; there is no transition
+      // log to derive this from). No backfill: pre-v12 achieved/dropped rows
+      // keep NULL = "resolution date unknown", the same honesty as v11's
+      // anthropic_file_id.
+      //
+      // SQLite cannot ALTER a CHECK constraint, so the table is rebuilt.
+      // foreign_keys MUST be OFF for the rebuild: with it ON, the implicit
+      // row deletion of DROP TABLE fires the FK actions on this table's
+      // referencers — tasks.goal_id ON DELETE SET NULL would silently unlink
+      // every task and materials.goal_id ON DELETE CASCADE would delete every
+      // material. The pragma is a no-op inside a transaction, so it toggles
+      // outside; foreign_key_check afterwards proves the rebuilt table left
+      // no dangling reference — scoped to the two tables that reference
+      // goals, so a pre-existing violation in an unrelated table cannot
+      // abort the boot blaming this rebuild. No indexes/triggers/views
+      // exist on goals — nothing else to recreate.
+      db.pragma("foreign_keys = OFF");
+      try {
+        db.transaction(() => {
+          db.exec(`CREATE TABLE goals_new (
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL,
+            outcome TEXT,
+            target_date TEXT,
+            status TEXT NOT NULL CHECK (status IN ('active', 'achieved', 'missed', 'dropped')) DEFAULT 'active',
+            created_at TEXT NOT NULL,
+            resolved_at TEXT
+          )`);
+          // id copied explicitly — it is the FK target of tasks and materials.
+          db.exec(`INSERT INTO goals_new (id, title, outcome, target_date, status, created_at)
+                   SELECT id, title, outcome, target_date, status, created_at FROM goals`);
+          db.exec("DROP TABLE goals");
+          db.exec("ALTER TABLE goals_new RENAME TO goals");
+          const violations = [
+            ...(db.pragma("foreign_key_check(tasks)") as unknown[]),
+            ...(db.pragma("foreign_key_check(materials)") as unknown[]),
+          ];
+          if (violations.length > 0) {
+            throw new Error(
+              "v12 migration: foreign_key_check failed after the goals rebuild (issue #145, ADR-38)",
+            );
+          }
+        })();
+      } finally {
+        db.pragma("foreign_keys = ON");
+      }
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);

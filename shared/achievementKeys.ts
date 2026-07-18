@@ -47,6 +47,7 @@ export const ACHIEVEMENT_KEYS = [
   "level_5",
   "level_10",
   "early_bird",
+  "first_goal",
 ] as const;
 
 export type AchievementKey = (typeof ACHIEVEMENT_KEYS)[number];

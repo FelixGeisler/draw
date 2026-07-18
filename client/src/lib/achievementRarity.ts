@@ -18,7 +18,7 @@
  * Kept as an explicit table rather than derived from the key (e.g. parsing
  * "streak_30"): difficulty is a design judgement per achievement, not a
  * function of its name — `level_5` and `level_10` differ by a grind, not by a
- * number. The distribution (2 common / 4 rare / 2 epic / 2 legendary) is pinned
+ * number. The distribution (2 common / 4 rare / 3 epic / 2 legendary) is pinned
  * in achievementRarity.test.ts.
  *
  * The table is keyed off shared/achievementKeys.ts, the same list the server's
@@ -41,6 +41,7 @@ const RARITY = new Map<string, AchievementRarity>(Object.entries({
   monster_slayer: "rare", // every subtask (≥2 done) of one big task
   level_10: "epic", // the long-haul XP grind
   leverage_master: "epic", // ≥60% of a week's tracked time on 4–5★ — sustained, not a single act
+  first_goal: "epic", // a goal spans weeks of work — the grind tier, not a single act (#145)
   streak_30: "legendary", // 30 completed days in ONE unbroken streak
   deck_clearer: "legendary", // empty the whole drawable deck by completing it
   // Exhaustive over AchievementKey, not Record<string, …>: a key added to the
