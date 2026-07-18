@@ -72,28 +72,17 @@ handed out, not gambled), completing another card within 30 minutes of a
 warm-up completion pays momentum ×1.25 — every combined multiplier is capped
 at ×1.5, so warm-ups can never out-earn playing the deck.
 
-The *daily hand* (#59, ADR-34) reuses the formula unchanged — it is the same
-weights over the same pool, sampled WITHOUT replacement under an effort
-budget, so a dealt card is a gambled card and keeps the drawn ×1.5 when it
-is played. Only two things differ from a draw: dealing stamps nothing (a
-card dealt but never played must not eat the cooldown or carry a phantom
-recently-drawn bonus), and a candidate is only samplable while its effort
-still fits the REMAINING budget — which is also why the damping's k is
-recomputed per round over the still-affordable set: a sibling that cannot
-fit cannot flood the deal, so it must not dampen the card representing it.
-
 === The commitment invariant
 
-One rule spans the draw (#88), the warm-up (ADR-30) and the hand (ADR-34):
-*a card in play cannot be replaced, only resolved.* At most one current
-draw exists; `POST /api/draw/warmup` and `POST /api/hand/play` both answer
-409 while one is standing; there is no "Draw again", and no redeal. Every
-way out of a card is a real resolution — complete, snooze/block, edit out
-of the deck, or delete — because the alternative is fishing for a
-comfortable card, which is the choice paralysis the app exists to remove.
-This is why the hand only ever shrinks, and why nothing in it is free to
-re-roll: the freestyle draw is always available, so refusing the re-roll
-costs the user nothing except the fishing.
+One rule spans the draw (#88) and the warm-up (ADR-30): *a card in play
+cannot be replaced, only resolved.* At most one current draw exists;
+`POST /api/draw/warmup` answers 409 while one is standing; there is no
+"Draw again". Every way out of a card is a real resolution — complete,
+snooze/block, edit out of the deck, or delete — because the alternative is
+fishing for a comfortable card, which is the choice paralysis the app
+exists to remove. The same rule is why there is no multi-card day preview
+at all (ADR-39): one card face-up hides the mountain; a dealt strip would
+show it.
 
 == 8.3 Error handling
 
