@@ -1,0 +1,104 @@
+/* Fullscreen goal-achieved celebration (#145). Same surface contract as
+   .focus-overlay: fixed above all page chrome (nothing else exceeds 30) but
+   below the AchievementToast (100), so a first_goal unlock flips its card
+   above the victory screen. canvas-confetti stacks its canvas above both by
+   default — no ladder change needed. */
+.victory-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 32px;
+  text-align: center;
+  background:
+    radial-gradient(circle at 50% 30%, rgba(255, 200, 90, 0.16), transparent 60%),
+    var(--bg);
+}
+
+/* Focused programmatically on mount (modal focus management) — no ring on
+   the fullscreen surface; the real indicator lives on Claim victory. */
+.victory-overlay:focus {
+  outline: none;
+}
+
+/* The trophy card: gold frame plus the shared holo sheen (index.css, #124)
+   sweeping slowly across — the same rarity language as the drawn card and
+   the achievement collection, at victory-screen size. */
+.victory-card {
+  position: relative;
+  overflow: hidden;
+  max-width: 640px;
+  padding: 28px 36px 32px;
+  border: 1px solid rgba(255, 226, 130, 0.5);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  box-shadow: 0 0 48px rgba(255, 200, 90, 0.14);
+}
+
+.victory-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--sheen-holo);
+  background-size: 250% 250%;
+  background-position: 85% 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .victory-card::after {
+    animation: victory-sweep 3.2s ease-in-out infinite alternate;
+  }
+
+  @keyframes victory-sweep {
+    from {
+      background-position: 85% 0;
+    }
+    to {
+      background-position: 15% 0;
+    }
+  }
+}
+
+.victory-heading {
+  color: var(--warn);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.victory-title {
+  margin: 10px 0 0;
+  font-size: clamp(24px, 4vw, 40px);
+  line-height: 1.25;
+}
+
+.victory-outcome {
+  color: var(--text-dim);
+  margin: 10px 0 0;
+}
+
+.victory-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.victory-claim {
+  font-size: 17px;
+  padding: 12px 24px;
+}
+
+.victory-hint {
+  position: absolute;
+  bottom: 24px;
+  color: var(--text-dim);
+  font-size: 13px;
+}

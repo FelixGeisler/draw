@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Goal, Material } from "../api/types";
+import { announceAchievements } from "./useGamification";
 
 export function useGoals(status: string = "active") {
   return useQuery({
@@ -21,9 +22,16 @@ export function useCreateGoal() {
 export function useUpdateGoal() {
   const qc = useQueryClient();
   return useMutation({
+    // The PATCH response optionally carries newAchievements (#145): achieving
+    // the first goal ever unlocks first_goal server-side, delivered on the
+    // same additive response field as the draw/hand/tasks routes.
     mutationFn: ({ id, ...patch }: { id: number } & Record<string, unknown>) =>
-      api.patch<Goal>(`/api/goals/${id}`, patch),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["goals"] }),
+      api.patch<Goal & { newAchievements?: string[] }>(`/api/goals/${id}`, patch),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["goals"] });
+      announceAchievements(data.newAchievements);
+      if (data.newAchievements?.length) qc.invalidateQueries({ queryKey: ["gamification"] });
+    },
   });
 }
 
