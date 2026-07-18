@@ -530,6 +530,25 @@ describe("stats, goals, materials", () => {
     expect(materials.map((m) => m.kind).sort()).toEqual(["file", "note"]);
     expect(materials.map((m) => m.id)).toEqual(expect.arrayContaining([noteId, fileId]));
   });
+
+  it("list_goals filters by the missed status (#145)", async () => {
+    // Own goal, resolved via REST — the shared journey goal stays active for
+    // the tests that follow.
+    const missedGoal = (await restJson("POST", "/api/goals", {
+      title: "Missed the mark",
+    })) as { id: number };
+    await restJson("PATCH", `/api/goals/${missedGoal.id}`, { status: "missed" });
+
+    const missed = (await callTool("list_goals", { status: "missed" })).json<
+      Array<{ id: number; status: string }>
+    >();
+    expect(missed.map((g) => g.id)).toContain(missedGoal.id);
+    for (const g of missed) expect(g.status).toBe("missed");
+
+    // The default (active) listing keeps it out.
+    const active = (await callTool("list_goals")).json<Array<{ id: number }>>();
+    expect(active.map((g) => g.id)).not.toContain(missedGoal.id);
+  });
 });
 
 describe("resources", () => {

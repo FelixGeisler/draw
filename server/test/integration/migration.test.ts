@@ -18,9 +18,12 @@ import { freshApp, testDb } from "../helpers.js";
 //   v8 → v9 adds completions.was_warmup + seeds warmup_every_hours (issue #57)
 //   v9 → v10 seeds daily_hand_budget_minutes                       (issue #59)
 //   v10 → v11 adds materials.anthropic_file_id                     (issue #92)
+//   v11 → v12 rebuilds goals: 'missed' status + resolved_at       (issue #145)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
-// time, so one boot exercises all steps in sequence.
+// time, so one boot exercises all steps in sequence. (The v12 rebuild's own
+// hazards — FK actions firing during DROP TABLE, seeded statuses surviving —
+// have a dedicated file, migration-v12-goal-resolution.test.ts.)
 
 let app: express.Express;
 let legacyTaskId: number;
@@ -49,6 +52,14 @@ beforeAll(async () => {
     )
     .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "")
     .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
+    // v12 (#145): revert the goals CHECK to the three-status form and strip
+    // resolved_at (comment block + column) — the rebuild migration itself
+    // must find the pre-v12 shape to have anything to do.
+    .replace(
+      /  -- Goal resolution[\s\S]*?status TEXT NOT NULL CHECK \(status IN \('active', 'achieved', 'missed', 'dropped'\)\) DEFAULT 'active',\r?\n/,
+      "  status TEXT NOT NULL CHECK (status IN ('active', 'achieved', 'dropped')) DEFAULT 'active',\n",
+    )
+    .replace(/,\r?\n  resolved_at TEXT/, "")
     // v11 (#92): strip materials.anthropic_file_id (comment block + column),
     // restoring note_text as the last column before created_at. Without this
     // the reconstructed "v2" table would already carry the column and the
@@ -71,6 +82,8 @@ beforeAll(async () => {
   expect(v2Schema).not.toContain("warmup_every_hours");
   expect(v2Schema).not.toContain("daily_hand_budget_minutes");
   expect(v2Schema).not.toContain("anthropic_file_id");
+  expect(v2Schema).not.toContain("'missed'");
+  expect(v2Schema).not.toContain("resolved_at");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v2Schema);
@@ -246,10 +259,35 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v11 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, daily_hand_budget_minutes, anthropic_file_id)", () => {
-  it("bumps user_version to 11", async () => {
+describe("migration v2 → v12 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, daily_hand_budget_minutes, anthropic_file_id, goal resolution)", () => {
+  it("bumps user_version to 12", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(11);
+    expect(db.pragma("user_version", { simple: true })).toBe(12);
+  });
+
+  it("rebuilds goals with the missed status, resolved_at, and no scratch table (#145)", async () => {
+    const db = await testDb();
+    const columns = db.prepare("PRAGMA table_info(goals)").all() as {
+      name: string;
+      dflt_value: string | null;
+      notnull: number;
+    }[];
+    const resolvedAt = columns.find((c) => c.name === "resolved_at");
+    expect(resolvedAt).toBeTruthy();
+    // An event fact with no default and no backfill: pre-v12 rows read as
+    // "resolution date unknown".
+    expect(resolvedAt!.notnull).toBe(0);
+    expect(resolvedAt!.dflt_value).toBeNull();
+    expect(
+      db.prepare("SELECT name FROM sqlite_master WHERE name = 'goals_new'").get(),
+    ).toBeUndefined();
+
+    // The rebuilt CHECK admits 'missed' (and the seeded goals' tasks kept
+    // their links — the cascade assertions above already walked them).
+    const probe = db
+      .prepare("INSERT INTO goals (title, status, created_at) VALUES (?, 'missed', ?)")
+      .run("missed probe", new Date().toISOString());
+    db.prepare("DELETE FROM goals WHERE id = ?").run(probe.lastInsertRowid);
   });
 
   it("adds materials.anthropic_file_id, nullable with no default (#92)", async () => {

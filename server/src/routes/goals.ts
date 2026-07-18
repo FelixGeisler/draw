@@ -1,8 +1,15 @@
 import { Router } from "express";
 import { db } from "../db.js";
+import { checkAchievements } from "../services/gamificationService.js";
 import { MINUTES_EXPR } from "../services/statsService.js";
 
 export const goalsRouter = Router();
+
+// Goal resolution (#145, ADR-38): the schema CHECK would reject an unknown
+// status anyway, but as an unhandled 500 — validate here for a clean 400.
+// All transitions are legal (reactivation included): a state machine protects
+// no invariant in a single-user app with one writer.
+const GOAL_STATUSES = ["active", "achieved", "missed", "dropped"];
 
 // Feasibility inputs (#60), derived at query time like the counts — no new
 // columns, nothing stored (ADR-2/ADR-5):
@@ -19,6 +26,7 @@ export const goalsRouter = Router();
 //   like every stats range filter.
 const GOAL_SELECT = `
   SELECT g.id, g.title, g.outcome, g.target_date AS targetDate, g.status, g.created_at AS createdAt,
+         g.resolved_at AS resolvedAt,
          (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status != 'archived') AS taskCount,
          (SELECT COUNT(*) FROM tasks t WHERE t.goal_id = g.id AND t.status = 'done') AS doneCount,
          (SELECT COUNT(*) FROM materials m WHERE m.goal_id = g.id) AS materialCount,
@@ -56,6 +64,13 @@ goalsRouter.post("/", (req, res) => {
 goalsRouter.patch("/:id", (req, res) => {
   const id = Number(req.params.id);
   const body = req.body ?? {};
+  if ("status" in body && !GOAL_STATUSES.includes(body.status)) {
+    return res.status(400).json({ error: `status must be one of ${GOAL_STATUSES.join(", ")}` });
+  }
+  const existing = db
+    .prepare("SELECT status, resolved_at AS resolvedAt FROM goals WHERE id = ?")
+    .get(id) as { status: string; resolvedAt: string | null } | undefined;
+  if (!existing) return res.status(404).json({ error: "goal not found" });
   const fields: Record<string, string> = {
     title: "title",
     outcome: "outcome",
@@ -71,9 +86,31 @@ goalsRouter.patch("/:id", (req, res) => {
     }
   }
   if (sets.length === 0) return res.status(400).json({ error: "nothing to update" });
-  const r = db.prepare(`UPDATE goals SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
-  if (r.changes === 0) return res.status(404).json({ error: "goal not found" });
-  res.json(getGoal(id));
+  if ("status" in body) {
+    // resolved_at is the EVENT FACT of leaving 'active' (ADR-38), maintained
+    // server-side only: set once on the transition out, kept verbatim across
+    // resends and achieved<->missed corrections (so a pre-v12 resolved row
+    // keeps its honest NULL instead of minting a bogus date), cleared on
+    // reactivation.
+    sets.push("resolved_at = ?");
+    params.push(
+      body.status === "active"
+        ? null
+        : existing.status === "active"
+          ? new Date().toISOString()
+          : existing.resolvedAt,
+    );
+  }
+  db.prepare(`UPDATE goals SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+  // First transition into 'achieved' can unlock first_goal. The condition is
+  // state-derived inside checkAchievements (an achieved goal exists), like
+  // first_completion — the gate here only keeps plain goal edits from probing
+  // achievements on every save. Additive optional response field, the same
+  // newAchievements convention as the draw/hand/tasks routes.
+  const achieved = body.status === "achieved" && existing.status !== "achieved";
+  const newAchievements = achieved ? checkAchievements({}) : [];
+  const goal = getGoal(id) as Record<string, unknown>;
+  res.json(newAchievements.length ? { ...goal, newAchievements } : goal);
 });
 
 goalsRouter.delete("/:id", (req, res) => {

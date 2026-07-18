@@ -521,9 +521,12 @@ const listGoals = defineTool({
   name: "list_goals",
   description:
     "List goals with task/material counts. Defaults to active goals; status may be 'active', " +
-    "'achieved', 'dropped', or 'all'. Goals are what impact ratings point at (ADR-4).",
+    "'achieved', 'missed', 'dropped', or 'all'. Goals are what impact ratings point at (ADR-4).",
   inputSchema: {
-    status: z.enum(["active", "achieved", "dropped", "all"]).optional().describe("Default: active"),
+    status: z
+      .enum(["active", "achieved", "missed", "dropped", "all"])
+      .optional()
+      .describe("Default: active"),
   },
   annotations: {
     title: "List goals",

@@ -327,6 +327,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: "level_5", title: "Level 5", emoji: "⭐", description: "Reach level 5." },
   { key: "level_10", title: "Level 10", emoji: "🌟", description: "Reach level 10." },
   { key: "early_bird", title: "Early bird", emoji: "🐦", description: "Finish a 5★ task before its due date." },
+  { key: "first_goal", title: "Goal getter", emoji: "🏆", description: "Achieve a goal." },
 ];
 
 function unlockedKeys(): Set<string> {
@@ -381,6 +382,12 @@ export function checkAchievements(event: { completedTask?: TaskRow; drew?: boole
         event.completedTask.due_date &&
         isoDate(new Date()) <= event.completedTask.due_date,
     ),
+    // State-derived like first_completion, not event-based (#145): a restored
+    // backup that lost the achievements table re-earns it on the next check.
+    first_goal:
+      (db.prepare("SELECT COUNT(*) AS n FROM goals WHERE status = 'achieved'").get() as {
+        n: number;
+      }).n >= 1,
   };
 
   // leverage_master is evaluated by statsService weekly-grade logic at read
