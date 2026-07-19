@@ -120,6 +120,47 @@ describe("PATCH /api/achievements/:key — display overrides", () => {
     expect(n.n).toBe(0);
   });
 
+  it("saving the DEFAULT text verbatim creates no phantom override (#177 review)", async () => {
+    // The inline editor seeds its inputs from the effective (here: default)
+    // text, so a save that changed nothing sends the defaults back explicitly.
+    // A value equal to the default is not an override — the row must not appear.
+    await request(app)
+      .patch(`/api/achievements/${KEY}`)
+      .send({ title: DEFAULT_TITLE, description: DEFAULT_DESC })
+      .expect(200);
+    expect(await card(KEY)).toMatchObject({ customized: false, hidden: false });
+    const n = db
+      .prepare("SELECT COUNT(*) AS n FROM achievement_customizations WHERE key = ?")
+      .get(KEY) as { n: number };
+    expect(n.n).toBe(0);
+  });
+
+  it("hide → un-hide with unchanged text leaves no phantom override (#177 review)", async () => {
+    // Hiding sends the whole draft (default text + hidden:true); the row exists
+    // only for the flag, its default-matching text folded to null.
+    await request(app)
+      .patch(`/api/achievements/${KEY}`)
+      .send({ title: DEFAULT_TITLE, description: DEFAULT_DESC, hidden: true })
+      .expect(200);
+    expect(
+      db
+        .prepare("SELECT title, description, hidden FROM achievement_customizations WHERE key = ?")
+        .get(KEY),
+    ).toEqual({ title: null, description: null, hidden: 1 });
+    // Un-hiding with the same default text is now all-default and not hidden —
+    // the row collapses; the card is pristine again, customized:false (the bug
+    // this test guards left the default frozen in as a fake override).
+    await request(app)
+      .patch(`/api/achievements/${KEY}`)
+      .send({ title: DEFAULT_TITLE, description: DEFAULT_DESC, hidden: false })
+      .expect(200);
+    expect(await card(KEY)).toMatchObject({ customized: false, hidden: false });
+    const n = db
+      .prepare("SELECT COUNT(*) AS n FROM achievement_customizations WHERE key = ?")
+      .get(KEY) as { n: number };
+    expect(n.n).toBe(0);
+  });
+
   it("400s an unknown key", async () => {
     await request(app)
       .patch("/api/achievements/not_a_real_key")

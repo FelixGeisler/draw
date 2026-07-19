@@ -657,10 +657,22 @@ export function customizeAchievement(key: string, patch: AchievementPatch): Cust
       .prepare("SELECT title, description, hidden FROM achievement_customizations WHERE key = ?")
       .get(key) as { title: string | null; description: string | null; hidden: number } | undefined;
 
-    const title = "title" in patch ? patch.title ?? null : existing?.title ?? null;
-    const description =
+    let title = "title" in patch ? patch.title ?? null : existing?.title ?? null;
+    let description =
       "description" in patch ? patch.description ?? null : existing?.description ?? null;
     const hidden = "hidden" in patch ? (patch.hidden ? 1 : 0) : existing?.hidden ?? 0;
+
+    // A value equal to the shipped default is NOT an override (#177 review):
+    // the inline editor seeds its inputs from the effective (default-or-custom)
+    // text, so a save — or a hide→un-hide that never touched the text — would
+    // otherwise freeze the default in as a phantom override (customized: true,
+    // a spurious "Reset to default", and a row that never collapses). Fold a
+    // default-matching field back to null so the row disappears the moment
+    // nothing genuinely differs. A genuine custom that happens to equal the
+    // default is likewise a no-op display-wise, so nulling it is correct.
+    const def = ACHIEVEMENTS.find((a) => a.key === key)!;
+    if (title === def.title) title = null;
+    if (description === def.description) description = null;
 
     if (title == null && description == null && hidden === 0) {
       db.prepare("DELETE FROM achievement_customizations WHERE key = ?").run(key);
