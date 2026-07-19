@@ -1,4 +1,4 @@
-import { useContext, useState } from "react";
+import { Fragment, useContext, useState } from "react";
 import type { Category, Goal, NewTask, Task } from "../api/types";
 import { useCreateSubtasks, useDeleteTask, useSplitTask, useUpdateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
@@ -105,6 +105,12 @@ export function TaskRow({
   ]
     .filter(Boolean)
     .join(" ");
+  // Reorder gap zones (#157): thin drop lines between this parent's subtask
+  // rows (and after the last), shown ONLY while dragging one of THIS parent's
+  // open subtasks — reorder stays within one breakdown, and roots get none
+  // (dragging a root leaves parentId null, so this never lights up for them).
+  const showSubtaskGaps =
+    !!dnd?.dragging && dnd.dragging.parentId === task.id && dnd.dragging.status === "open";
 
   function snooze(patch: { deferredUntil?: string; blocked?: boolean }) {
     updateTask.mutate({ id: task.id, ...patch });
@@ -509,16 +515,63 @@ export function TaskRow({
       )}
       {expanded &&
         task.subtasks?.map((s) => (
-          <TaskRow
-            key={s.id}
-            task={s}
-            categories={categories}
-            goals={goals}
-            maxEffort={maxEffort}
-            depth={depth + 1}
-            parentOrderMode={task.subtaskOrderMode}
-          />
+          <Fragment key={s.id}>
+            {showSubtaskGaps && (
+              <SubtaskGap
+                parentId={task.id}
+                beforeId={s.id}
+                depth={depth + 1}
+                over={dnd?.overKey === `gap:${task.id}:${s.id}`}
+              />
+            )}
+            <TaskRow
+              task={s}
+              categories={categories}
+              goals={goals}
+              maxEffort={maxEffort}
+              depth={depth + 1}
+              parentOrderMode={task.subtaskOrderMode}
+            />
+          </Fragment>
         ))}
+      {/* Trailing gap = drop after the last sibling (beforeId null → the end). */}
+      {expanded && showSubtaskGaps && (
+        <SubtaskGap
+          parentId={task.id}
+          beforeId={null}
+          depth={depth + 1}
+          over={dnd?.overKey === `gap:${task.id}:end`}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * A reorder drop line between sibling rows (#157). Its net vertical footprint
+ * is zero — a 12px hit box pulled back by equal negative margins so it
+ * overlays the row boundary and appearing mid-drag never shifts the rows under
+ * the pointer (the nest/promote drags rely on stable geometry). The visible
+ * 2px line and its hover glow live in TaskDnd.css, behind the same
+ * dnd-over language the rows use; motion stays reduced-motion safe there.
+ */
+function SubtaskGap({
+  parentId,
+  beforeId,
+  depth,
+  over,
+}: {
+  parentId: number;
+  beforeId: number | null;
+  depth: number;
+  over: boolean;
+}) {
+  return (
+    <div
+      className={"dnd-gap" + (over ? " dnd-over" : "")}
+      data-dnd-gap={`${parentId}:${beforeId ?? "end"}`}
+      style={{ marginLeft: depth * 24 }}
+      aria-hidden="true"
+    />
   );
 }

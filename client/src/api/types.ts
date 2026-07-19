@@ -48,8 +48,8 @@ export interface Task {
   blocked: boolean;
   /**
    * Sequential subtask mode (#23, ADR-18). Only meaningful on parents: a
-   * 'sequential' parent exposes only its first open subtask (creation order)
-   * to the draw pool.
+   * 'sequential' parent exposes only its first open subtask (in sibling order,
+   * (sort_order, id) since #157/ADR-43 — drag-reorderable) to the draw pool.
    */
   subtaskOrderMode: "parallel" | "sequential";
   /**

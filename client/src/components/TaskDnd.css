@@ -42,6 +42,36 @@
   opacity: 0.45;
 }
 
+/* Reorder drop line between sibling rows (#157). A 12px hit box with equal
+   negative top/bottom margins → zero net height, so it overlays the row
+   boundary and appearing mid-drag never shifts the rows under the pointer.
+   z-index lifts it above the adjacent static rows so elementFromPoint returns
+   it in the overlap. The faint accent line follows the dnd-eligible language;
+   dnd-over strengthens it exactly like the row/zone targets. */
+.dnd-gap {
+  position: relative;
+  z-index: 5;
+  height: 12px;
+  margin-top: -6px;
+  margin-bottom: -6px;
+}
+.dnd-gap::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.dnd-gap.dnd-over::after {
+  height: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
 /* The hovered blocked target names its rule right under the row. */
 .dnd-reason {
   padding: 4px 10px;
@@ -115,6 +145,11 @@
     transition:
       background-color 0.15s ease,
       outline-color 0.15s ease;
+  }
+  .dnd-gap::after {
+    transition:
+      height 0.12s ease,
+      background-color 0.12s ease;
   }
 }
 

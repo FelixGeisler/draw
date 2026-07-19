@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import {
   useCategories,
   useCreateTask,
+  useReorderSubtask,
   useSettings,
   useTasks,
   useUpdateTask,
@@ -42,6 +43,7 @@ export function TasksPage() {
   const tasks = useTasks({ status: showDone ? "all" : "open" });
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
+  const reorderSubtask = useReorderSubtask();
 
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
   const roots = tasks.data ?? [];
@@ -78,6 +80,7 @@ export function TasksPage() {
   const dnd = useTaskDnd({
     taskById: (id) => taskById.get(id),
     reparent: (id, parentId) => updateTask.mutateAsync({ id, parentId }),
+    reorder: (id, beforeId) => reorderSubtask.mutateAsync({ id, beforeId }),
   });
 
   const triageRow = (t: Task, key: DrawGroup) => (

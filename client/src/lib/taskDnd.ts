@@ -19,15 +19,42 @@ export type DropSpot =
   /** A task row — root or subtask, any status; the verdict sorts them out. */
   | { type: "row"; task: ReparentTargetTask }
   /** The fixed "promote to top level" zone shown while a drag is live. */
-  | { type: "root-zone" };
+  | { type: "root-zone" }
+  /**
+   * A gap between two sibling rows inside an expanded breakdown (#157) —
+   * `beforeId` is the sibling the dragged task would land in front of, null =
+   * the end. Only rendered while dragging a subtask of `parentId`.
+   */
+  | { type: "gap"; parentId: number; beforeId: number | null };
 
 export type DropVerdict =
   /** Dropping nests the dragged task under targetId (menu: "Move under…"). */
   | { kind: "nest"; targetId: number; blockReason: string | null }
   /** Dropping promotes the dragged task to top level (menu: "⤴"). */
   | { kind: "promote"; blockReason: string | null }
+  /** Dropping reorders the dragged subtask before `beforeId` (#157). */
+  | { kind: "reorder"; beforeId: number | null; blockReason: string | null }
   /** Not a target for this drag — no highlight, no feedback. */
   | { kind: "inert" };
+
+// Reorder is WITHIN one breakdown (#157, ADR-43): a move to a different parent
+// is a reparent, which the row-nest path already covers. A done/archived
+// subtask has no position to arrange — but the drag handle only exists on open
+// rows, so this reason is a defensive backstop, never surfaced in practice.
+export const REORDER_CROSS_PARENT_REASON =
+  "reorder stays within one breakdown (ADR-43): drop onto a task to move it under a different parent";
+export const REORDER_DONE_REASON = "only open subtasks can be reordered";
+
+/** Why the dragged task cannot land in `gapParentId`'s breakdown — null when
+ *  the reorder is eligible. `beforeId === dragged.id` is the no-op gap right
+ *  before the dragged row itself, treated as inert by the caller. */
+function reorderBlockReason(dragged: ReparentSource, gapParentId: number): string | null {
+  if (dragged.parentId == null || dragged.parentId !== gapParentId) {
+    return REORDER_CROSS_PARENT_REASON;
+  }
+  if (dragged.status != null && dragged.status !== "open") return REORDER_DONE_REASON;
+  return null;
+}
 
 /**
  * The verdict for releasing `dragged` over `spot`. Mirrors the #100 menu
@@ -41,6 +68,17 @@ export function classifyDrop(dragged: ReparentSource, spot: DropSpot | null): Dr
     // exist — the zone stays visible but blocked with the reason, the same
     // philosophy as the picker's disabled options.
     return { kind: "promote", blockReason: promoteBlockReason(dragged) };
+  }
+  if (spot.type === "gap") {
+    // The gap directly before the dragged row is a no-op — dropping a task
+    // before itself is not a move, so it stays inert (no highlight, and the
+    // endpoint's own beforeId === id guard never fires).
+    if (spot.beforeId === dragged.id) return { kind: "inert" };
+    return {
+      kind: "reorder",
+      beforeId: spot.beforeId,
+      blockReason: reorderBlockReason(dragged, spot.parentId),
+    };
   }
   // Done/archived rows are never offered by the menu — inert here too, not
   // "blocked with a reason". The predicate is reparentTargets' own filter,
