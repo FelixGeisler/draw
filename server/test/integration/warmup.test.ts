@@ -392,7 +392,7 @@ describe("warm-up XP rules (#57): never ×1.5, window ×1.25, momentum ×1.25, c
     const trophy = gam.todayCompletions.find((c: any) => c.taskId === five.id);
     expect(trophy).toMatchObject({ impact: 5, wasDrawn: 0 });
 
-    // The history skyline (GET /api/activity) reads the same derivation.
+    // The History calendar (GET /api/activity) reads the same derivation.
     const today = localDay(new Date());
     const days = (
       await request(app).get(`/api/activity?from=${today}&to=${today}`).expect(200)

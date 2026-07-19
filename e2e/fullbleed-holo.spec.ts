@@ -28,7 +28,7 @@ const LONG_GOAL_TITLE = "Fullbleed long content goal";
 const LONG_TITLE =
   "Rehearse the two-minute demo flow until the transitions feel effortless and every screen state is preloaded before the call";
 const LONG_DESC =
-  "Run the full flow twice with the projector profile active. Preload the draw page, the goals board and the history skyline in separate tabs, confirm the seeded demo deck still matches the script, and note every place where a transition stutters or a tooltip lingers. Then run it once more cold, phone on the desk, narrating out loud at presentation pace to catch the spots where the story outruns the screen.";
+  "Run the full flow twice with the projector profile active. Preload the draw page, the goals board and the history calendar in separate tabs, confirm the seeded demo deck still matches the script, and note every place where a transition stutters or a tooltip lingers. Then run it once more cold, phone on the desk, narrating out loud at presentation pace to catch the spots where the story outruns the screen.";
 
 // Deterministic stand-in for generated art: visibly non-gradient, fine to
 // serve from a route stub (the client renders it as an <img> data URI).

@@ -1,0 +1,247 @@
+/* History contribution calendar (#174) — the GitHub-heatmap successor to the
+   house-of-cards skyline. One tile per local day in Monday-first week columns,
+   shaded by activity intensity (lib/historyCalendar.activityLevel). The intent
+   is a calm, dense record: a quiet day is a faint tile, not a lonely axis dot.
+   The five-step ramp reuses the app accent so the calendar reads as one system
+   with the rest of Stats; motion sits behind prefers-reduced-motion. */
+
+.cal-section {
+  margin-top: 24px;
+}
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.cal-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 6px 0 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.cal-summary strong {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cal-summary-range {
+  margin-left: auto;
+}
+
+/* The scroll stage. It only overflows once "Load earlier" widens the window
+   past the content column; the default half-year fits without a scrollbar. */
+.cal-scroll {
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+}
+
+.cal-grid {
+  --cal-cell: 13px;
+  display: grid;
+  grid-template-rows: auto repeat(7, var(--cal-cell));
+  gap: 3px;
+  width: max-content;
+}
+
+.cal-month {
+  align-self: end;
+  justify-self: start;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.cal-weekday {
+  align-self: center;
+  justify-self: end;
+  padding-right: 6px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.cal-pad {
+  width: var(--cal-cell);
+  height: var(--cal-cell);
+}
+
+.cal-cell {
+  position: relative;
+  width: var(--cal-cell);
+  height: var(--cal-cell);
+  border-radius: 3px;
+}
+
+/* Five-step intensity ramp, shared by the tiles and the legend swatches. */
+.cal-cell.lvl-0,
+.cal-swatch.lvl-0 {
+  background: color-mix(in srgb, var(--border) 55%, var(--bg));
+}
+.cal-cell.lvl-1,
+.cal-swatch.lvl-1 {
+  background: color-mix(in srgb, var(--accent) 26%, var(--bg-panel));
+}
+.cal-cell.lvl-2,
+.cal-swatch.lvl-2 {
+  background: color-mix(in srgb, var(--accent) 46%, var(--bg-panel));
+}
+.cal-cell.lvl-3,
+.cal-swatch.lvl-3 {
+  background: color-mix(in srgb, var(--accent) 70%, var(--bg-panel));
+}
+.cal-cell.lvl-4,
+.cal-swatch.lvl-4 {
+  background: var(--accent);
+}
+
+/* Today wears a light inset ring so it is findable at a glance. */
+.cal-cell.today {
+  box-shadow: inset 0 0 0 1.5px var(--text);
+}
+
+/* Hover / keyboard focus / tap: the tile grows and outlines, its detail docks
+   in the footer. transform + outline only — no reflow of the grid. */
+.cal-cell.active,
+.cal-cell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  z-index: 2;
+}
+.cal-cell.active {
+  transform: scale(1.3);
+}
+.cal-cell:focus-visible {
+  /* the onFocus handler adds .active too; keep a ring even if that lags */
+  outline-offset: 1px;
+}
+
+/* Drawn-card rarity (#62): a corner gem marks the day's rarest completion —
+   holo (drawn impact-5) glows, silver (impact-4) is a quiet bead. */
+.cal-cell.rarity-holo::after,
+.cal-cell.rarity-silver::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  border: 1px solid var(--bg-panel);
+  pointer-events: none;
+}
+.cal-cell.rarity-holo::after {
+  background: #ff6ec7;
+  box-shadow: 0 0 4px 1px color-mix(in srgb, #ff6ec7 70%, transparent);
+}
+.cal-cell.rarity-silver::after {
+  background: #d6e0f0;
+}
+
+.cal-foot {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  margin-top: 12px;
+}
+
+.cal-legend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.cal-swatch {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+}
+
+/* Docked day-detail: which tasks that day, completed vs unfinished, XP, rarity.
+   A panel, not a floating tooltip — no edge clipping, and it doubles as a live
+   region for keyboard users. */
+.cal-detail {
+  flex: 1;
+  min-width: 240px;
+  max-width: 380px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  font-size: 13px;
+}
+.cal-detail.idle {
+  display: flex;
+  align-items: center;
+  color: var(--text-dim);
+}
+.cal-detail-date {
+  font-weight: 600;
+}
+.cal-detail-today {
+  color: var(--accent);
+  font-weight: 600;
+}
+.cal-detail-totals {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.cal-detail-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.cal-detail-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cal-detail-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cal-detail-cat {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.cal-detail-suffix {
+  flex-shrink: 0;
+  color: var(--ok);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cal-detail-suffix.unfinished {
+  color: var(--warn);
+}
+.cal-detail-suffix.rarity-holo {
+  color: #ff8ad4;
+}
+.cal-detail-suffix.rarity-silver {
+  color: #cdd7ea;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .cal-cell {
+    transition:
+      transform 0.1s ease,
+      outline-color 0.1s ease;
+  }
+}

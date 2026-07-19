@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
 import { AchievementCard } from "../components/AchievementCard";
-import { Skyline } from "../components/Skyline";
+import { HistoryCalendar } from "../components/HistoryCalendar";
 import { biasStatement } from "../lib/estimationCoach";
 import { partitionAchievements } from "../lib/achievementEdit";
 
@@ -325,11 +325,12 @@ export function StatsPage() {
       )}
 
       {/* Independent of the stats query AND the week/month toggle (the
-          heatmap's old guarantee, kept through #155): the skyline is the
-          page's activity view with its own 8-week-plus /api/activity window,
-          and the achievements grid reads /api/gamification — a failing or
-          refetching stats query must never take either down with it. */}
-      <Skyline />
+          heatmap's old guarantee, kept through #155/#174): the History
+          calendar is the page's activity view with its own multi-week
+          /api/activity window, and the achievements grid reads
+          /api/gamification — a failing or refetching stats query must never
+          take either down with it. */}
+      <HistoryCalendar />
 
       <AchievementsGrid />
     </div>

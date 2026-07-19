@@ -18,9 +18,9 @@
  * the live tasks join (like title), editing a task's impact after completion
  * moves the rarity of today's card; accepted, consistent with the join.
  *
- * Shared by the trophy pile (TrophyDeck) and the Stats skyline's upright
- * cards (#53), whose payloads deliver `wasDrawn` differently — the pile as a
- * raw SQLite 0 | 1, the skyline as a boolean — hence the loose truthy check.
+ * Shared by the trophy pile (TrophyDeck) and the Stats page's History calendar
+ * (#53), whose payloads deliver `wasDrawn` differently — the pile as a
+ * raw SQLite 0 | 1, the activity payload as a boolean — hence the loose truthy check.
  */
 export type TrophyRarity = "holo" | "silver" | "none";
 

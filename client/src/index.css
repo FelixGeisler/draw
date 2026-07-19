@@ -12,19 +12,22 @@
 
   /* The two shipped rarity sheens (#62/#107, redesigned in #123), hoisted here
      in #124 so every card surface paints the SAME gradient instead of a
-     private copy: the standing drawn card's .draw-holo, the trophy pile and
-     the Stats skyline's rarity tiers, and the achievement collection's
+     private copy: the standing drawn card's .draw-holo, the trophy pile's
+     rarity tiers, and the achievement collection's
      super-rare/ultra-rare/secret-rare tiers (#156). Iridescent = the top tier, monochrome silver =
      the quiet one below it; opacities stay low everywhere — a glint you notice
      when you look, not a casino.
 
-     Two scales, because one band cannot serve a 235px card and a 20px tower.
+     Two scales, because one band cannot serve a 235px card and a tiny tile.
      The default pair is tuned for card-sized surfaces (90x126 and up), which
      oversize the band (background-size: 250%) so a drift/sweep can move it
      without ever changing the element's box. The -dense pair below is the same
      band — same 115deg, same hue order, same structure — compressed and
-     strengthened for the skyline's tiny static towers. Change a hue
-     here and both scales follow; only the width/alpha differ. */
+     strengthened for tiny static surfaces (built for the old skyline towers).
+     Change a hue here and both scales follow; only the width/alpha differ.
+     NOTE: #174 replaced the skyline with the History calendar, which marks
+     rarity with a corner gem rather than a sheen, so the -dense pair below has
+     no consumer at present — kept pending a separate cleanup. */
   --sheen-holo: linear-gradient(
     115deg,
     transparent 20%,
@@ -43,12 +46,12 @@
     transparent 70%
   );
 
-  /* The skyline's towers are 52px wide and as short as 20px, and they paint the
+  /* The old skyline towers were 52px wide and as short as 20px, and painted the
      band at its natural size (no sweep to hide, so no 250% oversize). At that
-     scale the card-tuned band above spreads its stops across ~10px and lands
+     scale the card-tuned band above spread its stops across ~10px and landed
      near-invisible, so these run a narrower band at ~1.4x (holo) / ~1.7x
      (silver) alpha to read at all. Deliberately denser, not a fork: same
-     language, small-surface scale. */
+     language, small-surface scale. Orphaned since #174 (see the note above). */
   --sheen-holo-dense: linear-gradient(
     115deg,
     transparent 25%,
@@ -152,9 +155,22 @@ textarea:focus {
 }
 
 .sidenav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 10px 12px;
   border-radius: 8px;
   color: var(--text-dim);
+}
+
+/* Fixed-width icon slot so glyphs of different natural widths (🎴 vs ⚙️) keep
+   the labels on one vertical line. */
+.sidenav .nav-ico {
+  width: 1.3em;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .sidenav a.active {

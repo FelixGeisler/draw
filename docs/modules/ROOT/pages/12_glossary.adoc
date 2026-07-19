@@ -71,10 +71,10 @@
 |Today's completed cards, fanned at the bottom of the Draw page
 
 |*Rarity (holo / silver)*
-|Deterministic sheen on completed-task cards (trophy pile and the history skyline): drawn + impact 5 = holo (an iridescent shimmer, also on the standing drawn card — #123), drawn + impact 4 = silver, else plain. Pure CSS, derived at render time from `(wasDrawn, impact)` — never stored (#62, ADR-2/ADR-5 pattern)
+|Deterministic rarity on completed-task cards, derived at render time from `(wasDrawn, impact)`: drawn + impact 5 = holo (an iridescent shimmer, also on the standing drawn card — #123), drawn + impact 4 = silver, else plain. The trophy pile and the standing card wear it as a sheen; the History calendar marks a day's rarest completion with a corner gem (holo/silver). Pure CSS — never stored (#62, ADR-2/ADR-5 pattern)
 
-|*History skyline*
-|The Stats page's activity view (#53): one tower of cards per LOCAL day — upright cards for completions, permanently face-down cards for started-but-unfinished work — loading backward in 8-week windows up to ten years. Lived on its own History page until #155 merged that page into Stats (ADR-41)
+|*History calendar*
+|The Stats page's activity view (#53; a GitHub-style contribution calendar since #174/ADR-45): one tile per LOCAL day in Monday-first week columns, shaded by activity intensity, with a day's tasks (completions vs. started-but-unfinished work), XP and rarity revealed in a docked detail panel on hover/focus/tap. Loads backward in 26-week windows up to ten years. Was the house-of-cards skyline until #174; lived on its own History page until #155 merged that page into Stats (ADR-41)
 
 |*Achievement card*
 |An achievement rendered as a collectible card on the Stats page (#124, extended #156/#177): earned = face-up (committed SVG art or an emoji-glyph fallback, name, earned date), unearned = face-down (the app's card-back weave over a darkened silhouette) with — on a CHAIN card — a progress bar toward the next threshold. Since #177 the face is NAME-ONLY: the description reveals on hover/focus, and a ✎ button opens an inline editor to rename/rewrite/hide the card (ADR-44). An earned-but-unclaimed card shows a Claim button. Same card language as the task cards (ADR-33) — no TCG furniture

@@ -11,7 +11,7 @@ test("completing a task from the tasks page removes the timer bar without reload
 }) => {
   // A category OF THIS SPEC'S OWN: the estimation assertions below must be
   // attributable to exactly this task's minutes — earlier serial specs
-  // (history-skyline sorts first) also complete tracked tasks in the default
+  // (history-calendar sorts first) also complete tracked tasks in the default
   // category, so a shared-category row could pass without this spec's entry
   // ever arriving. A unique category makes the row discriminating again.
   const SPEC_CATEGORY = "Timer spec laundry room";

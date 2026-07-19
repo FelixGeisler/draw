@@ -8,7 +8,7 @@ import {
   type ActivityTaskMeta,
 } from "../../src/services/activityService.js";
 
-// Pure card derivation for the history skyline (#53). All buildActivityDays
+// Pure card derivation behind the History calendar (#53). All buildActivityDays
 // cases pass an explicit offset so the assertions hold on any machine/TZ:
 // offset 0 = "server lives in UTC", offset 120 = UTC+2 (a Berlin summer).
 

@@ -22,12 +22,12 @@ export interface ActivityDay {
   totals: { started: number; completed: number; minutes: number; xp: number };
 }
 
-/** Per-day activity for the Stats page's skyline. from/to are local dates, inclusive. */
+/** Per-day activity for the Stats page's History calendar. from/to are local dates, inclusive. */
 export function useActivity(from: string, to: string) {
   return useQuery({
     queryKey: ["activity", from, to],
     queryFn: () => api.get<{ days: ActivityDay[] }>(`/api/activity?from=${from}&to=${to}`),
-    // "Load earlier" extends the range: keep the current skyline on screen
+    // "Load earlier" extends the range: keep the current calendar on screen
     // while the wider window loads instead of flashing empty.
     placeholderData: keepPreviousData,
   });

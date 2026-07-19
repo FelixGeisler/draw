@@ -121,7 +121,8 @@ test("stats: the leverage view renders with tracked data", async ({ page }) => {
   await expect(page.getByText("Estimates vs. reality")).toBeVisible();
   await expect(page.getByText(/No completed task in this range/)).toBeVisible();
 
-  // #155: the skyline is the merged page's activity view — the journey's
-  // completion and the timed-but-unfinished card both stand in today's tower.
-  await expect(page.locator(".hoc-day.today .hoc-card").first()).toBeVisible();
+  // #155/#174: the History calendar is the merged page's activity view — the
+  // journey's completion and the timed-but-unfinished card both land in today's
+  // tile, so it is an interactive (activity-bearing) day.
+  await expect(page.locator(".cal-cell.today")).toHaveAttribute("role", "button");
 });
