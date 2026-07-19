@@ -22,7 +22,7 @@ export interface ActivityDay {
   totals: { started: number; completed: number; minutes: number; xp: number };
 }
 
-/** Per-day activity for the History skyline. from/to are local dates, inclusive. */
+/** Per-day activity for the Stats page's skyline. from/to are local dates, inclusive. */
 export function useActivity(from: string, to: string) {
   return useQuery({
     queryKey: ["activity", from, to],
