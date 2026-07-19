@@ -47,10 +47,19 @@ test("completing a task from the tasks page removes the timer bar without reload
   // The server really closed the entry — not just a hidden bar.
   expect(await (await page.request.get("/api/timer/current")).json()).toBeNull();
 
-  // #22: this task is now completed WITH an estimate and a time entry — the
-  // one fixture in the journey that qualifies for "Estimates vs. reality".
+  // #22: this task is now completed WITH an estimate and a time entry, so it
+  // qualifies for "Estimates vs. reality". The per-task table is gone (#155):
+  // the minutes surface through the summary ratio and the task's category
+  // row instead — and the title must not appear anywhere in the section.
+  const categories: { name: string }[] = await (await page.request.get("/api/categories")).json();
   await page.goto("/stats");
+  const estimation = page.locator("section").filter({ hasText: "Estimates vs. reality" });
+  // The summary panel is populated (no empty state): count + totals line.
   await expect(
-    page.locator("section").filter({ hasText: "Estimates vs. reality" }).getByText("Fold the laundry"),
+    estimation.getByText(/\d+ tasks? · \d+ min estimated · \d+ min tracked/),
   ).toBeVisible();
+  // The task was captured into the default category (the form's first
+  // option), so that category carries a per-category row.
+  await expect(estimation.getByText(categories[0].name, { exact: true })).toBeVisible();
+  await expect(estimation.getByText("Fold the laundry")).toHaveCount(0);
 });

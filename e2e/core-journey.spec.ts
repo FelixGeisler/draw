@@ -120,4 +120,8 @@ test("stats: the leverage view renders with tracked data", async ({ page }) => {
   // was never timed, so it must show the empty state, not a fake 0× ratio.
   await expect(page.getByText("Estimates vs. reality")).toBeVisible();
   await expect(page.getByText(/No completed task in this range/)).toBeVisible();
+
+  // #155: the skyline is the merged page's activity view — the journey's
+  // completion and the timed-but-unfinished card both stand in today's tower.
+  await expect(page.locator(".hoc-day.today .hoc-card").first()).toBeVisible();
 });

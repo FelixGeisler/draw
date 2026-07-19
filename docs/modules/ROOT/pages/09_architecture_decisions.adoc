@@ -1639,3 +1639,40 @@ keeps the strip an emptying queue rather than a re-grown Capture page: a
 group whose rows offer nothing to do is a to-do list about the to-do list,
 and ADR-39's lesson applies — surfaces that only display state feed the
 overwhelm this app exists to replace.
+
+== ADR-41: History merges into Stats — one summarized progress page, the per-task estimation table is removed
+
+*Context:* Stats and History were two zoom levels of the same record
+(#155): the 26-week activity heatmap on /stats and the day-tower skyline
+on /history both rendered `GET /api/activity` via the same `useActivity`
+hook. Meanwhile the Stats page itself sprawled — the "Estimates vs.
+reality" block rendered an unbounded per-task table (~3 bars per completed
+task in range), which grows into exactly the wall of past effort the
+product philosophy avoids putting on screen.
+
+*Decision:* One page at `/stats`, in this order: header + week/month range
+chips, summary tiles + leverage banners, where-your-time-went bars,
+estimation SUMMARY (accuracy ratio, tendency copy, totals line, and the
+per-category rows with their coaching statements), the skyline, the
+achievement collection. The skyline moves whole — extracted into
+`components/Skyline.tsx` with every behavior intact (8-week windows +
+"Load earlier" to the ten-year cap, windowed virtualization, local-day
+bucketing, lift interactions, rarity sheens). The ActivityHeatmap is
+DELETED as a redundant zoom of the skyline's data (with `lib/heatmap.ts`,
+its only consumer gone). The estimation per-task table is deleted, and the
+server stops computing/shipping `estimation.tasks` — `summary` and
+`byCategory` stay, as does the separate all-history
+`/api/stats/estimation-bias` endpoint (ADR-27). The History nav entry is
+removed; `/history` survives as a client-side redirect to `/stats`
+(the ADR-40 `/capture` precedent).
+
+*Rationale:* One progress surface, summarized. Two views of one endpoint
+at different zooms is duplicated UI, not added insight — and of the two,
+the skyline is the richer artifact (per-card detail, rarity, face-down
+permanence) so it is the one that stays. Trimming `estimation.tasks` on
+the server rather than merely hiding the table follows the guardrail that
+unconsumed payload is dead code: coaching is deliberately per-category
+(ADR-27) because "your Study estimates run 2× low" is actionable while a
+scrollable ledger of individually mis-estimated tasks is only
+retrospection. The redirect keeps muscle memory and old links working at
+zero maintenance cost.
