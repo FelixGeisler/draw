@@ -127,6 +127,10 @@ test("click toggles the lift; clicking elsewhere lowers it", async ({ page }) =>
 
 test("a lifted card paints above its overlap neighbor at both pile ends", async ({ page }) => {
   await page.goto("/");
+  // The deck renders nothing until the gamification query resolves, and
+  // count() is a one-shot snapshot — anchor on this file's own seed first
+  // (auto-retrying) so a slow refetch can't read an empty pile (#158).
+  await expect(card(page, TITLES[0])).toBeVisible();
   const cards = page.locator(".trophy-card");
   const count = await cards.count();
   expect(count).toBeGreaterThanOrEqual(2);
@@ -196,6 +200,10 @@ test("pile overflow (#115, kept by #123): 20+ completions wrap — full-size, ho
   }
 
   await page.goto("/");
+  // One payload renders in one React commit, so the last seeded card visible
+  // means the whole pile is in the DOM — only then is the one-shot count()
+  // safe. Counting straight after goto() read 0 mid-fetch in CI (#158).
+  await expect(card(page, "Trophy overflow card 20")).toBeVisible();
   const cards = page.locator(".trophy-card");
   const count = await cards.count();
   expect(count).toBeGreaterThanOrEqual(20);
