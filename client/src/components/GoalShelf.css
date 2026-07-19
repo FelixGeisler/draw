@@ -1,8 +1,9 @@
-/* Hall of Fame (#145): resolved goals below the active list. Trophy cards
-   paint the shared holo sheen (index.css, #124) — the same rarity language
-   as the trophy pile and the achievement collection — while missed rows are
-   deliberately quiet: thin border, dim text, no sheen. A defeat is recorded,
-   not celebrated. */
+/* Hall of Fame (#145 → redesigned as a trophy cabinet in #168): resolved
+   goals below the active list. Achieved goals are gold cups standing on the
+   gold-edged glass shelves of a lit dark display case — the "glint, not
+   casino" language of index.css (#124), matching the app's dark theme, NOT
+   skeuomorphic wood. Missed goals stay deliberately quiet in a section beneath
+   the case: a defeat is recorded, not enshrined. */
 .goal-shelf {
   margin-top: 16px;
 }
@@ -17,28 +18,105 @@
   cursor: pointer;
 }
 
-.goal-shelf-empty {
-  color: var(--text-dim);
-  margin: 12px 0 0;
-}
+/* ---- The display case --------------------------------------------------- */
 
-.goal-trophies {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.goal-trophy {
+/* A lit dark-glass cabinet: a deep gradient behind the shelves, a thin warm
+   gold edge and an inner shadow for depth, and a soft warm gold radial glow
+   pooling from the top (the ::before) — it reads as a lit case whether it
+   holds trophies or stands empty. */
+.goal-cabinet {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 226, 130, 0.4);
-  border-radius: 10px;
-  padding: 14px;
-  background: var(--bg-hover);
+  margin-top: 12px;
+  padding: 22px 18px 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 226, 130, 0.28);
+  background: linear-gradient(160deg, #191725 0%, #121019 55%, #0e0c14 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 226, 130, 0.12),
+    inset 0 0 46px rgba(0, 0, 0, 0.6);
 }
 
-.goal-trophy::after {
+.goal-cabinet::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 70% at 50% -8%, rgba(255, 200, 90, 0.16), transparent 62%);
+}
+
+.goal-cabinet-empty {
+  position: relative; /* above the glow */
+  margin: 6px 0 12px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+/* flex-wrap flows trophies by width; align-items:flex-start pins each
+   trophy's fixed-height stand to the top, so every ledge (the stand's lower
+   edge) lands at the same y within a wrapped row and the per-trophy ledge
+   segments meet, flush (column-gap:0), into one continuous shelf line —
+   robust for 1..N trophies, one shelf per wrapped row. justify-content
+   centres a partial last row's shelf. */
+.goal-cabinet-shelves {
+  position: relative; /* above the radial glow */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: center;
+  column-gap: 0;
+  row-gap: 26px;
+}
+
+/* ---- A trophy ----------------------------------------------------------- */
+
+.goal-trophy {
+  /* Grow to fill a row (continuous shelf), capped so a lonely last-row trophy
+     never sprawls. No horizontal padding: the stand must span the full item
+     width edge-to-edge or the ledge segments would gap. */
+  flex: 1 1 172px;
+  max-width: 236px;
+  display: grid;
+  grid-template-rows: 104px auto; /* fixed stand height fixes the ledge y */
+}
+
+/* The stand: the cup + plinth sit at the foot (justify-content:flex-end),
+   standing on the shelf ledge. Its lower border IS the ledge — full item
+   width, so adjacent stands' ledges meet into one line; the box-shadow is the
+   depth lip/underside of the glass shelf. overflow:hidden clips the hover
+   glint sweep. */
+.goal-trophy-stand {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  border-bottom: 2px solid rgba(255, 226, 130, 0.5);
+  box-shadow:
+    0 1px 0 rgba(255, 245, 210, 0.14),
+    0 5px 7px -3px rgba(0, 0, 0, 0.6);
+}
+
+/* Soft warm glow behind the cup — the base pool that intensifies on hover.
+   Hover-reveal only: no ambient shimmer, so this stays a static pool. */
+.goal-trophy-stand::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 8px;
+  width: 118px;
+  height: 96px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(50% 50% at 50% 50%, rgba(255, 200, 90, 0.22), transparent 70%);
+}
+
+/* The glint: the shared holo band (index.css), swept only on hover/focus and
+   only under no-preference — a case of trophies all shimmering at once would
+   be the casino index.css warns against. */
+.goal-trophy-stand::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -46,36 +124,64 @@
   background: var(--sheen-holo);
   background-size: 250% 250%;
   background-position: 85% 0;
+  opacity: 0;
 }
 
-/* The sweep is a hover reveal, not an ambient loop — a shelf of trophies
-   all shimmering at once would be the casino index.css warns against. */
-@media (prefers-reduced-motion: no-preference) {
-  .goal-trophy:hover::after {
-    animation: goal-trophy-sweep 1.4s ease both;
-  }
+/* The committed gold-cup art (#124), a small portrait standing on the plinth.
+   Its dark background melts into the cabinet glass so the cup itself reads as
+   standing; the drop shadow lifts it off the shelf. */
+.goal-trophy-cup {
+  position: relative;
+  height: 88px;
+  width: auto;
+  border-radius: 7px;
+  filter: drop-shadow(0 5px 5px rgba(0, 0, 0, 0.5));
+}
 
-  @keyframes goal-trophy-sweep {
-    from {
-      background-position: 85% 0;
-    }
-    to {
-      background-position: 15% 0;
-    }
-  }
+/* A small dark pedestal the cup stands on, sitting on the ledge. */
+.goal-trophy-plinth {
+  position: relative;
+  width: 58px;
+  height: 8px;
+  border-radius: 3px 3px 2px 2px;
+  background: linear-gradient(#3a3550, #211d30);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 226, 130, 0.18),
+    0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* ---- The brass plaque --------------------------------------------------- */
+
+/* Hangs beneath the trophy like a museum nameplate: a dark brass gradient,
+   thin brass edge, engraved text. Real DOM (translatable/selectable). */
+.goal-trophy-plaque {
+  margin: 12px 8px 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(198, 154, 74, 0.55);
+  background: linear-gradient(160deg, #3a2f1c, #241c10);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 226, 150, 0.22),
+    0 2px 5px rgba(0, 0, 0, 0.4);
 }
 
 .goal-trophy-title {
   font-weight: 600;
+  color: #f4e3bb;
+  line-height: 1.3;
 }
 
 .goal-trophy-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
-  margin-top: 8px;
-  font-size: 13px;
-  color: var(--text-dim);
+  gap: 4px 10px;
+  margin-top: 6px;
+  font-size: 12.5px;
+  color: #c9b587;
+}
+
+.goal-trophy-delta {
+  color: #e6cf95;
 }
 
 .goal-trophy-actions {
@@ -86,16 +192,71 @@
 
 .goal-trophy-actions button {
   padding: 2px 10px;
-  /* Above the sheen overlay — ::after is pointer-events: none, but the
-     stacking still matters for the hover/focus styles to read crisply. */
-  position: relative;
-  z-index: 1;
+  font-size: 13px;
+}
+
+/* Hover/focus: intensify the gold glow (instant, no motion) and lift the
+   trophy. focus-within keeps the plaque's actions — the real controls —
+   reachable by keyboard, never hover-only. */
+.goal-trophy:hover .goal-trophy-stand::before,
+.goal-trophy:focus-within .goal-trophy-stand::before {
+  background: radial-gradient(50% 50% at 50% 50%, rgba(255, 210, 110, 0.42), transparent 72%);
+}
+
+.goal-trophy:hover .goal-trophy-cup,
+.goal-trophy:focus-within .goal-trophy-cup {
+  filter: drop-shadow(0 8px 10px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 10px rgba(255, 200, 90, 0.4));
+}
+
+/* Motion — the lift and the glint sweep — gated behind no-preference (never
+   overridden in a reduce block, so no specificity contest): the #62/#123
+   pattern. Under reduced motion the glow still intensifies on hover, but
+   nothing moves or sweeps. */
+@media (prefers-reduced-motion: no-preference) {
+  .goal-trophy {
+    transition: transform 0.16s ease;
+  }
+
+  .goal-trophy:hover,
+  .goal-trophy:focus-within {
+    /* transform + z-index only: a lift with no reflow. */
+    transform: translateY(-5px);
+    z-index: 1;
+  }
+
+  .goal-trophy:hover .goal-trophy-stand::after,
+  .goal-trophy:focus-within .goal-trophy-stand::after {
+    animation: goal-trophy-glint 1.4s ease both;
+  }
+
+  @keyframes goal-trophy-glint {
+    from {
+      opacity: 1;
+      background-position: 85% 0;
+    }
+    to {
+      opacity: 1;
+      background-position: 15% 0;
+    }
+  }
+}
+
+/* ---- Missed: quiet, below the case -------------------------------------- */
+
+.goal-missed {
+  margin-top: 20px;
+}
+
+.goal-missed-header {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
 }
 
 .goal-missed-list {
   display: grid;
   gap: 8px;
-  margin-top: 12px;
 }
 
 .goal-missed-row {
