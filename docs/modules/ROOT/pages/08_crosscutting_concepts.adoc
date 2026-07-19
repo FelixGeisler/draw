@@ -9,7 +9,10 @@ under a `sequential` parent — completing the step in front frees the next one
 with no write, ADR-18), "scheduled" (outside the task's availability window on
 the local wall clock — the window opening re-admits the card with no write,
 ADR-20), "in progress" (running time entry
-exists), XP/level/streak (aggregates over `completions`; the streak's rest
+exists), XP/level/streak (aggregates over `completions` PLUS claimed-achievement
+payouts — since #156 XP has TWO stored sources,
+`SUM(completions.xp_awarded) + SUM(achievements.claim_xp)`, both honest event
+logs so no counter drifts, ADR-42; the streak's rest
 days and freeze consumption are re-derived on every read from the rest-weekday
 setting and the append-only `streak_freezes` earn log — ADR-28), weekly grade
 (aggregation over `time_entries`), and the displayed effort of a broken-down
@@ -40,7 +43,15 @@ above — the draw pool, the Tasks page child list, the effort rollups, the
 sequential hold-back and the parent-completion gate — through the existing
 `status` conditions alone, with no write beyond the one status flip.
 Only facts are stored
-(tasks, entries, completions, unlocked achievements).
+(tasks, entries, completions, the append-only `draws` log, unlocked
+achievements and their one-time claim). Achievement CHAINS (#156, ADR-42)
+derive each level's progress from these logs — draws (non-warmup only, ADR-30),
+completions, streak, level, achieved goals, tracked hours — against one shared
+threshold table that also drives the unlock, so a full progress bar is always a
+real unlock. Claiming an unlocked achievement pays rarity-scaled XP once
+(idempotent by the achievements primary key); the 5-tier rarity ladder
+(common → secret-rare) lives in `shared/achievementTiers.ts`, imported by the
+server (claim price) and the client (styling) so the two cannot drift.
 
 == 8.2 The weight formula
 

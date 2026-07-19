@@ -43,4 +43,9 @@
 |*Achievements checked in application code* on completion/draw paths
 |New completion paths could skip checks
 |Single entry point (`completeTask`) mitigates; keep completions flowing through it
+
+|R9
+|*The 16 new #156 achievement-chain cards ship without hand-drawn art* — they render on the emoji-glyph fallback in `lib/achievementArt.ts` rather than committed SVGs (the existing 11 keys have SVGs)
+|Cosmetic only — the card face degrades gracefully to the emoji glyph (xref:09_architecture_decisions.adoc[ADR-33] e); no correctness impact
+|Deliberate per xref:09_architecture_decisions.adoc[ADR-42] (do not block a large feature on 16 drawings); per-chain shared art is acceptable, tracked in https://github.com/FelixGeisler/draw/issues/163[#163]
 |===
