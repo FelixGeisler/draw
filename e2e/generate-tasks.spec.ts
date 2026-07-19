@@ -255,22 +255,26 @@ test("import leaves needing triage fold into one collapsible strip group (#30)",
     await page.request.patch(`/api/tasks/${p.id}`, { data: { effortMinutes: null } });
   }
 
-  await page.goto("/tasks");
-  const group = triageStrip(page).locator("details").filter({ hasText: PARENT_TITLE });
-  // One header row wearing the count — not two flat rows drowning the list.
-  await expect(group.locator("summary")).toContainText(PARENT_TITLE);
-  await expect(group.locator("summary")).toContainText("(2)");
-  await expect(group.getByText(parts[0].title)).not.toBeVisible();
-  await group.locator("summary").click();
-  await expect(group.getByText(parts[0].title)).toBeVisible();
-  await expect(group.getByText(parts[1].title)).toBeVisible();
-
-  // Restore the estimates so the next test's goal-filtered draw sees all
-  // four leaves drawable again. API writes don't invalidate the client's
-  // query cache — reload to see the strip let go of the cluster.
-  for (const p of parts) {
-    await page.request.patch(`/api/tasks/${p.id}`, { data: { effortMinutes: 30 } });
+  try {
+    await page.goto("/tasks");
+    const group = triageStrip(page).locator("details").filter({ hasText: PARENT_TITLE });
+    // One header row wearing the count — not two flat rows drowning the list.
+    await expect(group.locator("summary")).toContainText(PARENT_TITLE);
+    await expect(group.locator("summary")).toContainText("(2)");
+    await expect(group.getByText(parts[0].title)).not.toBeVisible();
+    await group.locator("summary").click();
+    await expect(group.getByText(parts[0].title)).toBeVisible();
+    await expect(group.getByText(parts[1].title)).toBeVisible();
+  } finally {
+    // Restore the estimates EVEN when an assert above fails — the next
+    // test's goal-filtered draw needs all four leaves drawable, and one red
+    // test must not cascade into the rest of the serial file.
+    for (const p of parts) {
+      await page.request.patch(`/api/tasks/${p.id}`, { data: { effortMinutes: 30 } });
+    }
   }
+  // API writes don't invalidate the client's query cache — reload to see
+  // the strip let go of the cluster.
   await page.reload();
   await expect(triageStrip(page).getByText(parts[0].title)).toHaveCount(0);
 });

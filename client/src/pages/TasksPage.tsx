@@ -89,6 +89,17 @@ export function TasksPage() {
       maxEffort={maxEffort}
       rootTasks={tasks.data}
       estimateInput={key === "needs-estimate"}
+      // A strip row must offer exactly what its tree rendering offers ("show
+      // what's editable"): a sequential parent's subtask hides the ↻
+      // recurrence field in the tree, so it must hide it here too — the
+      // PATCH would only ever 400 (ADR-23 guard).
+      parentOrderMode={
+        t.parentId != null ? taskById.get(t.parentId)?.subtaskOrderMode : undefined
+      }
+      // depth stays 0 ON PURPOSE, category dot included: in the tree the
+      // parent row wears the dot for its subtasks, but the strip is a flat
+      // cross-category worklist where no parent row is visible — here the
+      // dot carries information instead of duplicating it.
     />
   );
 

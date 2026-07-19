@@ -135,12 +135,22 @@ test("the category tree below the strip keeps drag-and-drop; strip rows have non
     await page.request.get("/api/tasks")
   ).json();
   expect(tasks.find((t) => t.title === ALPHA)?.subtasks?.map((s) => s.title)).toContain(BETA);
+});
 
-  // Leave no residue in the shared DB: ALPHA's 15/20/25-minute cards would
-  // otherwise join the deck later spec files draw from. Deletes cascade to
-  // subtasks (BETA and the steps).
+// Leave no residue in the shared DB: ALPHA's 15/20/25-minute cards would
+// otherwise join the deck later spec files draw from (warmup-draw asserts on
+// the pool's smallest card). afterAll, not the tail of the last test: a
+// failure ANYWHERE in this serial file must still clean up. `browser` is
+// worker-scoped, so the hook runs even after mid-file failures; the fresh
+// context inherits the config baseURL. Deletes cascade to subtasks.
+test.afterAll(async ({ browser }) => {
+  const ctx = await browser.newContext();
+  const tasks: { id: number; title: string }[] = await (
+    await ctx.request.get("/api/tasks")
+  ).json();
   for (const title of [ALPHA, OVERSIZE]) {
-    const t = tasks.find((x) => x.title === title)!;
-    await page.request.delete(`/api/tasks/${t.id}`);
+    const t = tasks.find((x) => x.title === title);
+    if (t) await ctx.request.delete(`/api/tasks/${t.id}`);
   }
+  await ctx.close();
 });

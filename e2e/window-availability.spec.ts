@@ -97,4 +97,14 @@ test("a rejected night window surfaces the server's message instead of failing s
   await form.getByRole("button", { name: "Add" }).click();
   await expect(taskTree(page).getByText(NIGHT_TITLE)).toBeVisible();
   await expect(form.getByRole("alert")).toHaveCount(0);
+
+  // Clean up like the sibling specs: the corrected task's triage state
+  // depends on the wall clock (needs-estimate inside its 20:00–22:00
+  // weekday window, scheduled otherwise) — left behind, it would make later
+  // spec files' strip assertions time-of-day dependent.
+  const created: { id: number; title: string }[] = await (
+    await page.request.get("/api/tasks")
+  ).json();
+  const night = created.find((t) => t.title === NIGHT_TITLE)!;
+  await page.request.delete(`/api/tasks/${night.id}`);
 });
