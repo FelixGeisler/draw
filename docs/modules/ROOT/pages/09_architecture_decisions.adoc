@@ -497,7 +497,9 @@ its own endpoint instead of a stats extension. Bucketing lives in one pure
 function (`localDayOf`, offset injectable for tests); SQL only pre-filters on
 a UTC window widened by a day per side. Tracked minutes reuse the stats
 `MINUTES_EXPR` (running entries count up to now); midnight-spanning entries
-attribute to their start day; per-day `totals` ride along for the #54 heatmap.
+attribute to their start day; per-day `totals` ride along for day-level
+consumers (born for the #54 heatmap; the merged Stats page's skyline host
+keeps consuming them since #155/ADR-41).
 Accepted limitation: deleting a task cascades its entries/completions away and
 with them its history — we do not add write-path tracking to preserve it.
 *Rationale:* Deriving keeps history incapable of contradicting its sources

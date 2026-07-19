@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
 import { AchievementCard } from "../components/AchievementCard";
@@ -192,6 +192,10 @@ export function StatsPage() {
   const stats = useQuery({
     queryKey: ["stats", from, to],
     queryFn: () => api.get<Stats>(`/api/stats?from=${from}&to=${to}`),
+    // Range-chip toggles change the queryKey; without this the page body
+    // unmounts to nothing while the new range fetches. Same idiom as
+    // useActivity's widening (#53).
+    placeholderData: keepPreviousData,
   });
 
   const s = stats.data;
@@ -300,14 +304,17 @@ export function StatsPage() {
           )}
 
           <EstimationSection estimation={s.estimation} />
-
-          {/* Independent of the week/month toggle: the skyline is the page's
-              activity view (#155) and always shows its own 8-week-plus window. */}
-          <Skyline />
-
-          <AchievementsGrid />
         </>
       )}
+
+      {/* Independent of the stats query AND the week/month toggle (the
+          heatmap's old guarantee, kept through #155): the skyline is the
+          page's activity view with its own 8-week-plus /api/activity window,
+          and the achievements grid reads /api/gamification — a failing or
+          refetching stats query must never take either down with it. */}
+      <Skyline />
+
+      <AchievementsGrid />
     </div>
   );
 }
