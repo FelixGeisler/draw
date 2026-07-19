@@ -293,6 +293,29 @@ unlimited *by repetition, not by depth*. Recurring originals are rejected
 ADR-23's: drop the recurrence first), and the parts INSERT carries no
 recurrence column, so a split can never mint the ADR-23 ban either.
 
+*Amendment (#161): the umbrella is optional.* The container earns its keep for
+a large import — 40 comparable leaves would flood the lists as roots (#28/#29)
+and #30's fold hangs off it — but for a small hand-generated set it is
+bureaucracy: a parent that appears out of nowhere. The generate-tasks review
+panel now carries a "Group under one parent task" toggle, defaulting ON at
+`>= 5` accepted leaves and OFF below (`defaultUmbrella`, pinned client-side),
+always overridable before accepting. Toggle ON is unchanged — the umbrella
+parent plus one transactional subtasks batch above. Toggle OFF creates each
+leaf as a *root* task linked to the goal, through the SAME `POST /api/tasks`
+core the plan-backward accept loop uses (looped per leaf, non-atomic like that
+loop — roots have no parent to compensate for, and a mid-loop failure leaves
+only valid roots, never a half-imported container), so the ADR-4 impact gate is
+enforced identically: a goal-linked root may carry its reviewed per-task impact.
+No server change was needed — both accept paths were already served by the two
+existing write endpoints. The umbrella's default title also moved off the source
+file onto the *goal* ("Machine Learning — generated plan"): the file name read as
+an unrelated parent, the goal names the work. Impact itself became editable at
+review in the same issue (the shared `StarPicker`, replacing the read-only star
+text in every AI review panel) — ADR-14's contract is that the AI proposes and
+the user reviews, and impact was the one field the model guesses that could not
+be corrected; the impactSource "(model estimate)" annotation is dropped once the
+user touches the picker.
+
 == ADR-17: Snooze/block as retained timestamps, drawability stays derived
 
 *Context:* Some tasks are temporarily undoable (waiting on someone, wrong

@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
-import { drawFromGoal, triageStrip } from "./helpers";
+import { drawFromGoal, taskTree, triageStrip } from "./helpers";
 
 // Issue #29: the generate-tasks review panel on the Goals page. AI responses
 // are mocked at the browser boundary with page.route() — the suite never mocks
@@ -170,9 +170,23 @@ test("generate → review → commit: nothing written before commit, then one pa
   await expect(ex3Title).toHaveValue("Prove theorem from exercise 3");
   await ex3Title.fill(EDITED_LEAF_TITLE);
 
-  // The umbrella title defaults from the selected file and stays editable.
+  // Impact is editable at review now (#161, ADR-14): correct exercise 1 from
+  // its point-derived 2 up to 5 — the value must land on the committed leaf.
+  await goalCard
+    .getByTitle("Impact for exercise 1")
+    .getByRole("button", { name: "Set impact 5" })
+    .click();
+
+  // 4 leaves is below the ≥5 threshold, so the umbrella toggle defaults OFF
+  // and its title field is hidden until the toggle is turned on (#161).
+  const umbrellaToggle = goalCard.getByTitle("Group under one parent task");
+  await expect(umbrellaToggle).not.toBeChecked();
+  await expect(goalCard.getByTitle("Umbrella task title")).not.toBeVisible();
+  await umbrellaToggle.check();
+
+  // The umbrella title now derives from the GOAL, not the source file (#161).
   const parentInput = goalCard.getByTitle("Umbrella task title");
-  await expect(parentInput).toHaveValue(`Work through ${MATERIAL_NAME}`);
+  await expect(parentInput).toHaveValue(`${GOAL_TITLE} — generated plan`);
   await parentInput.fill(PARENT_TITLE);
 
   // Everything so far was review only — not a single task write.
@@ -215,7 +229,7 @@ test("generate → review → commit: nothing written before commit, then one pa
 
   const leaf1 = parent.subtasks.find((s) => s.title === "Solve exercise 1 (limits)")!;
   expect(leaf1.effortMinutes).toBe(15); // the panel edit landed
-  expect(leaf1.impact).toBe(2);
+  expect(leaf1.impact).toBe(5); // the review star edit (2 → 5) landed (#161)
   // Provenance cites the material's own numbers, not the edited effort.
   expect(leaf1.description).toBe(`Exercise 1 · 8 pts · ~20 min · ${MATERIAL_NAME}`);
 
@@ -306,4 +320,193 @@ test("a 503 from the real degraded server surfaces as the Settings hint, not a s
   await expect(
     goalCard.getByText("Claude AI is not configured — add your API key in Settings."),
   ).toBeVisible();
+});
+
+// --- Optional umbrella (#161) ---------------------------------------------
+// The umbrella is now opt-in: a small hand-generated set lands as plain
+// goal-linked roots, a large import stays folded under one container. The
+// toggle's default is pinned to the ≥5-leaf threshold, always overridable.
+
+async function seedGoal(page: Page, title: string, materialName: string, body: string) {
+  const goal = await (
+    await page.request.post("/api/goals", {
+      data: { title, outcome: "measured somehow", targetDate: "2027-01-01" },
+    })
+  ).json();
+  await page.request.post(`/api/goals/${goal.id}/materials`, {
+    multipart: {
+      file: { name: materialName, mimeType: "text/plain", buffer: Buffer.from(body) },
+    },
+  });
+  return goal;
+}
+
+// 2 model-rated exercises, 2 leaves — below the ≥5 threshold, so the umbrella
+// defaults OFF.
+const SMALL_RESULT = {
+  sourceOverview: "A short two-section warm-up.",
+  oversizedParts: false,
+  tasks: [
+    {
+      label: "1",
+      title: "Read section 1",
+      points: null,
+      statedMinutes: 20,
+      estimatedMinutes: 20,
+      suggestedImpact: 3,
+      rationale: "Section 1 overview",
+      parts: [],
+      impact: 3,
+      impactSource: "model",
+    },
+    {
+      label: "2",
+      title: "Summarize section 1",
+      points: null,
+      statedMinutes: 15,
+      estimatedMinutes: 15,
+      suggestedImpact: 2,
+      rationale: "Recap the section",
+      parts: [],
+      impact: 2,
+      impactSource: "model",
+    },
+  ],
+};
+
+// 6 exercises, 6 leaves — at/above the threshold, so the umbrella defaults ON.
+const LARGE_RESULT = {
+  sourceOverview: "Six exam exercises.",
+  oversizedParts: false,
+  tasks: Array.from({ length: 6 }, (_, i) => ({
+    label: String(i + 1),
+    title: `Solve exercise ${i + 1}`,
+    points: 10,
+    statedMinutes: 30,
+    estimatedMinutes: 30,
+    suggestedImpact: 3,
+    rationale: `Ex. ${i + 1} per the PDF`,
+    parts: [],
+    impact: 3,
+    impactSource: "points",
+  })),
+};
+
+test("a small set defaults to no umbrella and commits goal-linked roots (#161)", async ({
+  page,
+}) => {
+  const goal = await seedGoal(page, "Small hand-picked set", "notes.txt", "Section 1 ... Section 2");
+  await mockConfigured(page);
+  await page.route("**/api/ai/estimate", (route) =>
+    route.fulfill({ json: { inputTokens: 1200, estimatedUsd: 0.01 } }),
+  );
+  await page.route("**/api/ai/generate-tasks", (route) => route.fulfill({ json: SMALL_RESULT }));
+
+  const taskWrites: string[] = [];
+  page.on("request", (req: Request) => {
+    if (req.method() === "POST" && new URL(req.url()).pathname.startsWith("/api/tasks")) {
+      taskWrites.push(new URL(req.url()).pathname);
+    }
+  });
+
+  await page.goto("/goals");
+  const goalCard = card(page, "Small hand-picked set");
+  await goalCard.getByRole("button", { name: "✨ Generate tasks" }).click();
+  await goalCard.getByText("📄 notes.txt").click();
+  await goalCard.getByTitle("What should Claude extract?").fill("One task per section");
+  await goalCard.getByRole("button", { name: "Estimate cost" }).click();
+  await goalCard.getByRole("button", { name: "Ask Claude" }).click();
+
+  // Below the threshold: the umbrella toggle is OFF and its title field hidden.
+  await expect(goalCard.getByTitle("Group under one parent task")).not.toBeChecked();
+  await expect(goalCard.getByTitle("Umbrella task title")).not.toBeVisible();
+
+  // Both rows are model-rated, so both wear the "(model estimate)" annotation…
+  await expect(goalCard.getByText("(model estimate)")).toHaveCount(2);
+  // …until the user corrects one — touching exercise 1's picker drops its note.
+  await goalCard
+    .getByTitle("Impact for exercise 1")
+    .getByRole("button", { name: "Set impact 5" })
+    .click();
+  await expect(goalCard.getByText("(model estimate)")).toHaveCount(1);
+
+  await goalCard.getByRole("button", { name: "Add 2 tasks" }).click();
+
+  // Two root writes, no subtasks batch — nothing was grouped under a parent.
+  await expect(goalCard.getByText("0/2 tasks")).toBeVisible({ timeout: 15_000 });
+  expect(taskWrites).toEqual(["/api/tasks", "/api/tasks"]);
+
+  // Server state: two goal-linked ROOTS (no parent), the corrected impact on
+  // exercise 1, and the provenance description on each.
+  const roots: {
+    title: string;
+    parentId: number | null;
+    goalId: number;
+    impact: number;
+    description: string | null;
+    subtasks: unknown[];
+  }[] = await (await page.request.get(`/api/tasks?goalId=${goal.id}`)).json();
+  expect(roots).toHaveLength(2);
+  expect(roots.every((t) => t.parentId === null && t.goalId === goal.id)).toBe(true);
+  expect(roots.every((t) => t.subtasks.length === 0)).toBe(true);
+  const read = roots.find((t) => t.title === "Read section 1")!;
+  expect(read.impact).toBe(5); // the review star edit (3 → 5) landed
+  expect(read.description).toContain("notes.txt");
+  expect(roots.find((t) => t.title === "Summarize section 1")!.impact).toBe(2);
+
+  // They render as top-level rows on the Tasks page, not nested under a parent.
+  await page.goto("/tasks");
+  await expect(taskTree(page).getByText("Read section 1")).toBeVisible();
+  await expect(taskTree(page).getByText("Summarize section 1")).toBeVisible();
+});
+
+test("a large set defaults to the umbrella and folds under one goal-named parent (#161)", async ({
+  page,
+}) => {
+  const goal = await seedGoal(page, "Large exam import", "exam.txt", "Ex 1 ... Ex 6");
+  await mockConfigured(page);
+  await page.route("**/api/ai/estimate", (route) =>
+    route.fulfill({ json: { inputTokens: 9000, estimatedUsd: 0.05 } }),
+  );
+  await page.route("**/api/ai/generate-tasks", (route) => route.fulfill({ json: LARGE_RESULT }));
+
+  const taskWrites: string[] = [];
+  page.on("request", (req: Request) => {
+    if (req.method() === "POST" && new URL(req.url()).pathname.startsWith("/api/tasks")) {
+      taskWrites.push(new URL(req.url()).pathname);
+    }
+  });
+
+  await page.goto("/goals");
+  const goalCard = card(page, "Large exam import");
+  await goalCard.getByRole("button", { name: "✨ Generate tasks" }).click();
+  await goalCard.getByText("📄 exam.txt").click();
+  await goalCard.getByTitle("What should Claude extract?").fill("One task per exercise");
+  await goalCard.getByRole("button", { name: "Estimate cost" }).click();
+  await goalCard.getByRole("button", { name: "Ask Claude" }).click();
+
+  // At/above the threshold: the umbrella defaults ON with a goal-derived title.
+  await expect(goalCard.getByTitle("Group under one parent task")).toBeChecked();
+  await expect(goalCard.getByTitle("Umbrella task title")).toHaveValue(
+    "Large exam import — generated plan",
+  );
+
+  await goalCard.getByRole("button", { name: "Add 6 tasks" }).click();
+
+  // Two writes: the parent, then ONE transactional subtasks batch.
+  await expect(goalCard.getByText("0/7 tasks")).toBeVisible({ timeout: 15_000 });
+  expect(taskWrites).toHaveLength(2);
+  expect(taskWrites[1]).toMatch(/\/api\/tasks\/\d+\/subtasks$/);
+
+  // Server state: one unestimated container parent holding all six leaves.
+  const roots: {
+    title: string;
+    effortMinutes: number | null;
+    goalId: number;
+    subtasks: unknown[];
+  }[] = await (await page.request.get(`/api/tasks?goalId=${goal.id}`)).json();
+  expect(roots).toHaveLength(1);
+  expect(roots[0].title).toBe("Large exam import — generated plan");
+  expect(roots[0].effortMinutes).toBeNull();
+  expect(roots[0].subtasks).toHaveLength(6);
 });

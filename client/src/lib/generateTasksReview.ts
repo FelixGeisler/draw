@@ -22,6 +22,12 @@ export interface ReviewItem {
   sourceMinutes: number;
   impact: 1 | 2 | 3 | 4 | 5;
   impactSource: "points" | "model";
+  /**
+   * True once the user edits the star rating at review (#161). The
+   * impactSource "(model estimate)" annotation is shown only while this is
+   * false — after a manual edit the value is the user's, not the model's.
+   */
+  impactTouched: boolean;
   rationale: string;
   included: boolean;
   /** Non-empty when the exercise commits as flat part-leaves instead of one leaf. */
@@ -39,11 +45,24 @@ export function toReviewItems(tasks: GeneratedTask[]): ReviewItem[] {
       sourceMinutes: minutes,
       impact: t.impact,
       impactSource: t.impactSource,
+      impactTouched: false,
       rationale: t.rationale,
       included: true,
       parts: t.parts.map((p) => ({ title: p.title, minutes: p.minutes, included: true })),
     };
   });
+}
+
+/**
+ * Set an exercise's impact from the review StarPicker (#161) and mark it
+ * touched, which drops the impactSource annotation — the rating is now the
+ * user's, not the model's/point-derived one. A split exercise's parts inherit
+ * this impact at commit (commitLeaves), so one picker per exercise is enough.
+ */
+export function setItemImpact(items: ReviewItem[], index: number, impact: number): ReviewItem[] {
+  return items.map((item, i) =>
+    i === index ? { ...item, impact: impact as ReviewItem["impact"], impactTouched: true } : item,
+  );
 }
 
 /** Toggle an exercise; its parts always follow — a part cannot stay accepted under an excluded exercise. */
@@ -190,13 +209,26 @@ export function commitLeaves(items: ReviewItem[], sourceName: string | null): Co
 }
 
 /**
- * Default umbrella-parent title: the single selected file's name when there is
- * exactly one (the common "import this exam" case), otherwise the instruction
- * itself, truncated. Always user-editable before commit.
+ * Default umbrella-parent title (#161): derived from the GOAL, not the source
+ * file — a file-named parent read as a "weird parent task" appearing out of
+ * nowhere. "Machine Learning — generated plan". Always user-editable before
+ * commit. Falls back to a generic label for an (impossible in practice) empty
+ * goal title.
  */
-export function defaultParentTitle(fileNames: string[], instruction: string): string {
-  if (fileNames.length === 1) return `Work through ${fileNames[0]}`;
-  const trimmed = instruction.trim();
-  if (!trimmed) return "Generated tasks";
-  return trimmed.length > 60 ? `${trimmed.slice(0, 59)}…` : trimmed;
+export function defaultParentTitle(goalTitle: string): string {
+  const trimmed = goalTitle.trim();
+  return trimmed ? `${trimmed} — generated plan` : "Generated tasks";
+}
+
+/**
+ * The umbrella toggle's default state (#161): a container parent earns its
+ * keep when a large import would otherwise flood the lists as roots (#28/#29),
+ * but for a small hand-generated set it is bureaucracy. Pinned client-side:
+ * >= 5 accepted leaves default the toggle ON, fewer OFF — always overridable
+ * before accepting.
+ */
+export const UMBRELLA_DEFAULT_THRESHOLD = 5;
+
+export function defaultUmbrella(leafCount: number): boolean {
+  return leafCount >= UMBRELLA_DEFAULT_THRESHOLD;
 }

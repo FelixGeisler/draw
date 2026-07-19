@@ -3,9 +3,11 @@ import type { GeneratedTask } from "../hooks/useAi";
 import {
   commitLeaves,
   defaultParentTitle,
+  defaultUmbrella,
   formatDuration,
   provenance,
   setAllIncluded,
+  setItemImpact,
   setItemIncluded,
   setPartIncluded,
   summarize,
@@ -284,22 +286,39 @@ describe("commitLeaves", () => {
 });
 
 describe("defaultParentTitle", () => {
-  it("names the parent after the single selected file", () => {
-    expect(defaultParentTitle(["Probeklausur_2023.pdf"], "one task per exercise")).toBe(
-      "Work through Probeklausur_2023.pdf",
-    );
+  it("derives the umbrella title from the goal, not the source file (#161)", () => {
+    expect(defaultParentTitle("Machine Learning")).toBe("Machine Learning — generated plan");
   });
 
-  it("falls back to the instruction when zero or several files are selected", () => {
-    expect(defaultParentTitle([], "One task per exercise")).toBe("One task per exercise");
-    expect(defaultParentTitle(["a.pdf", "b.pdf"], "One task per exercise")).toBe(
-      "One task per exercise",
-    );
+  it("trims and never returns an empty title", () => {
+    expect(defaultParentTitle("  Pass the exam  ")).toBe("Pass the exam — generated plan");
+    expect(defaultParentTitle("   ")).toBe("Generated tasks");
+  });
+});
+
+describe("defaultUmbrella", () => {
+  it("defaults ON at >= 5 accepted leaves, OFF below (#161)", () => {
+    expect(defaultUmbrella(4)).toBe(false);
+    expect(defaultUmbrella(5)).toBe(true);
+    expect(defaultUmbrella(0)).toBe(false);
+    expect(defaultUmbrella(40)).toBe(true);
+  });
+});
+
+describe("setItemImpact", () => {
+  it("sets the exercise impact and marks it touched, leaving neighbours alone", () => {
+    const list = items({ impact: 2, impactSource: "model" }, { impact: 3, impactSource: "model" });
+    expect(list[0].impactTouched).toBe(false);
+    const next = setItemImpact(list, 0, 5);
+    expect(next[0].impact).toBe(5);
+    expect(next[0].impactTouched).toBe(true);
+    // The neighbour's rating and its untouched flag are untouched.
+    expect(next[1].impact).toBe(3);
+    expect(next[1].impactTouched).toBe(false);
   });
 
-  it("truncates a long instruction and never returns an empty title", () => {
-    const long = "x".repeat(80);
-    expect(defaultParentTitle([], long)).toHaveLength(60);
-    expect(defaultParentTitle([], "   ")).toBe("Generated tasks");
+  it("carries the corrected impact into the committed leaf", () => {
+    const next = setItemImpact(items({ impact: 2, impactSource: "points" }), 0, 4);
+    expect(commitLeaves(next, null)[0].impact).toBe(4);
   });
 });

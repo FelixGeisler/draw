@@ -13,8 +13,10 @@ import {
 import {
   commitLeaves,
   defaultParentTitle,
+  defaultUmbrella,
   formatDuration,
   setAllIncluded,
+  setItemImpact,
   setItemIncluded,
   setPartIncluded,
   summarize,
@@ -23,6 +25,7 @@ import {
   type ReviewPart,
 } from "../lib/generateTasksReview";
 import { seedInOrder } from "../lib/orderMode";
+import { StarPicker } from "./StarPicker";
 
 // ---------------------------------------------------------------------------
 // Shared pieces
@@ -94,9 +97,14 @@ function SuggestionList<T extends AiSubtask>({
               style={{ width: 66 }}
               title="minutes"
             />
-            <span title={`Impact ${row.data.impact}/5`} style={{ color: "var(--warn)", fontSize: 12 }}>
-              {"★".repeat(row.data.impact)}
-            </span>
+            {/* Editable at review (#161, ADR-14): the model guesses impact, so
+                the user must be able to correct it — the value flows through
+                onAccept unchanged (payloads already carry impact per row). */}
+            <StarPicker
+              value={row.data.impact}
+              size={14}
+              onChange={(v) => update(i, { data: { ...row.data, impact: v as T["impact"] } })}
+            />
             {extra?.(row.data)}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-dim)", marginLeft: 26 }}>
@@ -442,10 +450,13 @@ function aiErrorMessage(e: unknown): string {
 
 export function AiGenerateTasksPanel({
   goalId,
+  goalTitle,
   categoryId,
   onClose,
 }: {
   goalId: number;
+  /** Names the umbrella parent by default (#161) — the goal, not the file. */
+  goalTitle: string;
   categoryId: number;
   onClose: () => void;
 }) {
@@ -462,6 +473,11 @@ export function AiGenerateTasksPanel({
   const [overview, setOverview] = useState<string | null>(null);
   const [oversized, setOversized] = useState(false);
   const [parentTitle, setParentTitle] = useState("");
+  // Optional umbrella (#161): ON groups the leaves under one container parent
+  // (today's behavior — #28/#29's flood control + #30 folding), OFF creates
+  // them as goal-linked ROOT tasks. Seeded from the >= 5 leaf-count default in
+  // doRun, always overridable before accepting.
+  const [umbrella, setUmbrella] = useState(true);
   const [committing, setCommitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -518,44 +534,69 @@ export function AiGenerateTasksPanel({
         materialIds: [...selected],
         instruction: instruction.trim(),
       });
-      setItems(toReviewItems(result.tasks));
+      const reviewItems = toReviewItems(result.tasks);
+      setItems(reviewItems);
       setOverview(result.sourceOverview);
       setOversized(result.oversizedParts);
-      setParentTitle(defaultParentTitle(fileNames, instruction));
+      setParentTitle(defaultParentTitle(goalTitle));
+      // Seed the toggle from the fully-included leaf count — the set the user
+      // starts from; they can toggle it either way before accepting.
+      setUmbrella(defaultUmbrella(commitLeaves(reviewItems, sourceName).length));
     } catch (e) {
       setError(aiErrorMessage(e));
     }
   }
 
   async function doCommit() {
-    if (!items || leaves.length === 0 || !parentTitle.trim()) return;
+    if (!items || leaves.length === 0) return;
+    // The umbrella title is only required on the umbrella path (#161).
+    if (umbrella && !parentTitle.trim()) return;
     setError(null);
     setCommitting(true);
     try {
-      // Umbrella parent first: an unestimated container — never drawn while
-      // children are open, remaining effort aggregates from the leaves.
-      const parent = await createTask.mutateAsync({
-        title: parentTitle.trim(),
-        categoryId,
-        goalId,
-        effortMinutes: null,
-      });
-      try {
-        // One transactional batch; leaves inherit category/goal from the parent.
-        await createSubtasks.mutateAsync({ parentId: parent.id, subtasks: leaves });
-      } catch (e) {
-        // No half-imported state: cascade-delete the just-created parent. If
-        // the cleanup fails too (server/network down), say so — a leftover
-        // parent would otherwise sit on the Tasks page unexplained.
+      if (umbrella) {
+        // Umbrella parent first: an unestimated container — never drawn while
+        // children are open, remaining effort aggregates from the leaves.
+        const parent = await createTask.mutateAsync({
+          title: parentTitle.trim(),
+          categoryId,
+          goalId,
+          effortMinutes: null,
+        });
         try {
-          await deleteTask.mutateAsync(parent.id);
-        } catch {
-          setError(
-            `${aiErrorMessage(e)} — cleanup also failed, so the empty parent "${parentTitle.trim()}" may remain on the Tasks page; delete it there.`,
-          );
-          return;
+          // One transactional batch; leaves inherit category/goal from the parent.
+          await createSubtasks.mutateAsync({ parentId: parent.id, subtasks: leaves });
+        } catch (e) {
+          // No half-imported state: cascade-delete the just-created parent. If
+          // the cleanup fails too (server/network down), say so — a leftover
+          // parent would otherwise sit on the Tasks page unexplained.
+          try {
+            await deleteTask.mutateAsync(parent.id);
+          } catch {
+            setError(
+              `${aiErrorMessage(e)} — cleanup also failed, so the empty parent "${parentTitle.trim()}" may remain on the Tasks page; delete it there.`,
+            );
+            return;
+          }
+          throw e;
         }
-        throw e;
+      } else {
+        // No umbrella (#161): each leaf becomes a goal-linked ROOT task through
+        // the SAME POST /api/tasks core the plan-backward accept loop uses, so
+        // the ADR-4 impact gate (goal-linked tasks may carry impact) is
+        // enforced identically. Non-atomic like that loop — roots have no
+        // parent to compensate for — but a mid-loop failure leaves only valid
+        // roots, never a half-imported container.
+        for (const leaf of leaves) {
+          await createTask.mutateAsync({
+            title: leaf.title,
+            description: leaf.description,
+            categoryId,
+            goalId,
+            impact: leaf.impact,
+            effortMinutes: leaf.effortMinutes,
+          });
+        }
       }
       onClose();
     } catch (e) {
@@ -672,15 +713,24 @@ export function AiGenerateTasksPanel({
                       {item.points} pts
                     </span>
                   )}
-                  <span
-                    title={`Impact ${item.impact}/5${item.impactSource === "model" ? " (model estimate)" : " (from points)"}`}
-                    style={{ color: "var(--warn)", fontSize: 12, whiteSpace: "nowrap" }}
-                  >
-                    {"★".repeat(item.impact)}
-                    {item.impactSource === "model" && (
-                      <span style={{ color: "var(--text-dim)" }}> (model estimate)</span>
-                    )}
-                  </span>
+                  {/* Editable at review (#161, ADR-14): impact is the one
+                      field the model guesses, so it must be correctable. One
+                      picker per exercise — a split exercise's parts inherit it
+                      at commit. The impactSource annotation stays until touched. */}
+                  <StarPicker
+                    value={item.impact}
+                    size={14}
+                    title={`Impact for exercise ${item.label ?? i + 1}`}
+                    onChange={(v) => setItems(setItemImpact(items, i, v))}
+                  />
+                  {!item.impactTouched && item.impactSource === "model" && (
+                    <span
+                      style={{ color: "var(--text-dim)", fontSize: 12, whiteSpace: "nowrap" }}
+                      title="Claude estimated this — no points were stated"
+                    >
+                      (model estimate)
+                    </span>
+                  )}
                 </div>
                 {/* Audit line: every points/minutes claim must be checkable against the PDF. */}
                 <div style={{ fontSize: 12, color: "var(--text-dim)", marginLeft: 26 }}>
@@ -722,16 +772,32 @@ export function AiGenerateTasksPanel({
               </div>
             ))}
           </div>
-          <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
-            <span style={{ color: "var(--text-dim)" }}>
-              Added under one umbrella task (kept out of the draw while its parts are open):
-            </span>
-            <input
-              value={parentTitle}
-              onChange={(e) => setParentTitle(e.target.value)}
-              title="Umbrella task title"
-            />
-          </label>
+          {/* Optional umbrella (#161): grouping is opt-in — a large import
+              stays folded under one container (#28/#29/#30), a small set lands
+              as plain goal-linked roots. The toggle sits next to the title so
+              turning it off visibly hides the (now irrelevant) parent name. */}
+          <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+            <label style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input
+                type="checkbox"
+                checked={umbrella}
+                onChange={(e) => setUmbrella(e.target.checked)}
+                title="Group under one parent task"
+              />
+              Group under one parent task (kept out of the draw while its parts are open)
+            </label>
+            {umbrella ? (
+              <input
+                value={parentTitle}
+                onChange={(e) => setParentTitle(e.target.value)}
+                title="Umbrella task title"
+              />
+            ) : (
+              <span style={{ color: "var(--text-dim)" }}>
+                Off — accepted tasks are added directly to the goal as top-level tasks.
+              </span>
+            )}
+          </div>
         </>
       )}
       <div style={{ display: "flex", gap: 8 }}>
@@ -741,7 +807,7 @@ export function AiGenerateTasksPanel({
           <button
             className="primary"
             onClick={doCommit}
-            disabled={committing || leaves.length === 0 || !parentTitle.trim()}
+            disabled={committing || leaves.length === 0 || (umbrella && !parentTitle.trim())}
           >
             {committing ? "Adding…" : `Add ${leaves.length} tasks`}
           </button>
