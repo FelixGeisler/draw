@@ -10,7 +10,13 @@ achievementsRouter.post("/:key/claim", (req, res) => {
   const result = claimAchievement(req.params.key);
   switch (result.status) {
     case "ok":
-      return res.json({ xpAwarded: result.xpAwarded, levelUp: result.levelUp });
+      return res.json({
+        xpAwarded: result.xpAwarded,
+        levelUp: result.levelUp,
+        // A claim that crosses a level threshold unlocks the level_N card in
+        // the same transaction (#156 review) — relay it like any unlock.
+        newAchievements: result.newAchievements,
+      });
     case "unknown":
       return res.status(400).json({ error: "unknown achievement" });
     case "locked":

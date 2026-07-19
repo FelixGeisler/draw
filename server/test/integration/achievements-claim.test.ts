@@ -47,7 +47,9 @@ describe("POST /api/achievements/:key/claim", () => {
     seedUnlocked("first_goal"); // super-rare
 
     const res = await request(app).post("/api/achievements/first_goal/claim").expect(200);
-    expect(res.body).toEqual({ xpAwarded: 100, levelUp: true }); // 0 → 100 XP crosses level 1→2
+    // 0 → 100 XP crosses level 1→2, but level 2 unlocks no chain card (the
+    // lowest level achievement is level_5), so nothing rides back.
+    expect(res.body).toEqual({ xpAwarded: 100, levelUp: true, newAchievements: [] });
 
     // The XP is now in the total, and the payload marks the card claimed.
     expect(await xp()).toBe(100);
@@ -74,7 +76,35 @@ describe("POST /api/achievements/:key/claim", () => {
     seedUnlocked("first_draw"); // common
     const res = await request(app).post("/api/achievements/first_draw/claim").expect(200);
     // 100 → 125 XP stays inside level 2 (level 2 needs ~283 XP).
-    expect(res.body).toEqual({ xpAwarded: 25, levelUp: false });
+    expect(res.body).toEqual({ xpAwarded: 25, levelUp: false, newAchievements: [] });
     expect(await xp()).toBe(125);
+  });
+
+  it("a claim that crosses a level threshold unlocks level_N in the same call (#156 review)", async () => {
+    // The regression: claim XP feeds totalXp, which drives the level metric,
+    // which is the level_N chain's metric — so a level-crossing claim must
+    // unlock level_5 and toast it, not leave a full-bar-but-locked card.
+    // Park base XP at level 4, just under level 5 (cumulative 1703).
+    const task = (
+      await request(app).post("/api/tasks").send({ title: "xp ballast", categoryId: 1 })
+    ).body as { id: number };
+    db.prepare(
+      "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, 0, 0, ?)",
+    ).run(task.id, new Date().toISOString(), 1500); // 125 + 1500 = 1625 → level 4
+    seedUnlocked("first_completion"); // the one completion would else ride back as fresh
+    expect((await request(app).get("/api/gamification")).body.level).toBe(4);
+
+    // draw_10000 is secret-rare (500 XP): 1625 + 500 = 2125 → level 5.
+    seedUnlocked("draw_10000");
+    const res = await request(app).post("/api/achievements/draw_10000/claim").expect(200);
+    expect(res.body.xpAwarded).toBe(500);
+    expect(res.body.levelUp).toBe(true);
+    expect(res.body.newAchievements).toContain("level_5");
+
+    // The level card is genuinely unlocked now — not a full-bar-but-locked ghost.
+    const g = (await request(app).get("/api/gamification")).body;
+    expect(g.level).toBe(5);
+    const levelCard = g.achievements.find((a: { key: string }) => a.key === "level_5");
+    expect(levelCard.unlockedAt).not.toBeNull();
   });
 });

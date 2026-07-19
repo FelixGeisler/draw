@@ -478,7 +478,7 @@ function chainProgress(
   return { current: Math.min(metrics[spec.metric], spec.target), target: spec.target };
 }
 
-export function checkAchievements(event: { completedTask?: TaskRow; drew?: boolean }): string[] {
+export function checkAchievements(event: { completedTask?: TaskRow }): string[] {
   const unlocked = unlockedKeys();
   const fresh: string[] = [];
   const metrics = computeMetrics();
@@ -604,7 +604,7 @@ export function gamificationState() {
 // Claim-for-XP (#156, ADR-42)
 
 export type ClaimResult =
-  | { status: "ok"; xpAwarded: number; levelUp: boolean }
+  | { status: "ok"; xpAwarded: number; levelUp: boolean; newAchievements: string[] }
   | { status: "unknown" } // not a real achievement key → 400
   | { status: "locked" } // real key, but not unlocked yet → 400
   | { status: "claimed" }; // already claimed → 409
@@ -616,6 +616,14 @@ export type ClaimResult =
  * stamped from the SERVER tier table — the client is never the XP authority.
  * levelUp compares the derived level across the payout, so a claim that tips
  * the bar over surfaces the same level-up the client already animates.
+ *
+ * Claim XP feeds totalXp() and so can raise the derived level, which is the
+ * metric behind the level_N chain. Re-run the unlock check inside the same
+ * transaction (#156 review): without it a claim that crosses a level
+ * threshold leaves the level_N card reading a FULL progress bar yet locked
+ * until the next draw/completion — the exact "a full bar is always a real
+ * unlock" invariant ADR-42 promises. The freshly-unlocked keys ride back on
+ * the response so the client toasts them like any other unlock.
  */
 export function claimAchievement(key: string): ClaimResult {
   if (!(ACHIEVEMENT_KEYS as readonly string[]).includes(key)) return { status: "unknown" };
@@ -632,7 +640,8 @@ export function claimAchievement(key: string): ClaimResult {
       "UPDATE achievements SET claimed_at = ?, claim_xp = ? WHERE key = ? AND claimed_at IS NULL",
     ).run(new Date().toISOString(), xpAwarded, key);
     const levelAfter = levelFromXp(totalXp()).level;
-    return { status: "ok", xpAwarded, levelUp: levelAfter > levelBefore };
+    const newAchievements = checkAchievements({});
+    return { status: "ok", xpAwarded, levelUp: levelAfter > levelBefore, newAchievements };
   })();
 }
 

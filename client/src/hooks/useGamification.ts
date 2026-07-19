@@ -55,6 +55,9 @@ export function useGamification() {
 export interface ClaimResponse {
   xpAwarded: number;
   levelUp: boolean;
+  /** Achievements the claim's XP unlocked in the same transaction (a level
+   *  crossing, #156) — toasted like any other unlock. */
+  newAchievements: string[];
 }
 
 /**
@@ -66,8 +69,11 @@ export function useClaimAchievement() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (key: string) => api.post<ClaimResponse>(`/api/achievements/${key}/claim`, {}),
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["gamification"] });
+      // A claim can tip the level bar and unlock the level_N card — announce
+      // it so the toast fires just as it would for a draw/completion unlock.
+      announceAchievements(data.newAchievements);
     },
   });
 }
