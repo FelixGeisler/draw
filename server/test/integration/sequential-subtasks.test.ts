@@ -5,10 +5,12 @@ import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
 
 // Issue #23 (ADR-18): a 'sequential' parent exposes only its first open
-// subtask in creation order (created_at, id) to the draw pool; later open
-// siblings are held back — a derived predicate like snooze/block, never a
-// stored flag. Each test draws from its own goal-scoped pool, like
-// snooze-block.test.ts, so the roulette pick is deterministic.
+// subtask in sibling order to the draw pool; later open siblings are held back
+// — a derived predicate like snooze/block, never a stored flag. Sibling order
+// is (sort_order, id) since #157 (ADR-43), backfilled/stamped to id, so these
+// batch-created breakdowns still queue in creation order. Each test draws from
+// its own goal-scoped pool, like snooze-block.test.ts, so the pick is
+// deterministic.
 
 let app: express.Express;
 let db: Database.Database;

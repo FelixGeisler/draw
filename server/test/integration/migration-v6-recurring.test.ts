@@ -50,6 +50,11 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const schema = fs
     .readFileSync(schemaPath, "utf-8")
+    // …nor the v15 sort_order column and its stamp trigger (#157) — the
+    // v6 → v15 boot adds them, so leaving them in the seed would make the ALTER
+    // (and the CREATE TRIGGER) fail.
+    .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
+    .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
     .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
     // …nor the v9 warm-up column and setting seed (#57).
     .replace(/,\r?\n  -- Warm-up draw[\s\S]*?was_warmup INTEGER NOT NULL DEFAULT 0/, "")
@@ -74,6 +79,7 @@ beforeAll(async () => {
   expect(schema).not.toContain("anthropic_file_id");
   expect(schema).not.toContain("CREATE TABLE draws");
   expect(schema).not.toContain("claim_xp");
+  expect(schema).not.toContain("sort_order");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(schema);

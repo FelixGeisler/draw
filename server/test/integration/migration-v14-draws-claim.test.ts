@@ -23,12 +23,17 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v13Schema = current
+    // v15 (#157): strip the sort_order column and its stamp trigger so this
+    // pre-v15 fixture does not already carry what the v15 migration adds.
+    .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
+    .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
     .replace(/-- Draw log[\s\S]*?CREATE TABLE draws[\s\S]*?\);\r?\n/, "")
     .replace(/,\r?\n  -- Claim-for-XP[\s\S]*?claim_xp INTEGER/, "");
   expect(v13Schema).not.toBe(current);
   expect(v13Schema).not.toContain("CREATE TABLE draws");
   expect(v13Schema).not.toContain("claim_xp");
   expect(v13Schema).not.toContain("claimed_at");
+  expect(v13Schema).not.toContain("sort_order");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v13Schema);
@@ -50,9 +55,9 @@ beforeAll(async () => {
 });
 
 describe("migration v13 → v14 (#156, ADR-42)", () => {
-  it("runs the chain to the current version 14", async () => {
+  it("runs the chain to the current version (15: v14 draws/claim, then v15 sort_order)", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(14);
+    expect(db.pragma("user_version", { simple: true })).toBe(15);
   });
 
   it("creates the draws log with the append-only shape", async () => {

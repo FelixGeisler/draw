@@ -144,19 +144,21 @@ const LEAF_CONDITION =
   "NOT EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status != 'archived')";
 
 /**
- * Derived hold-back predicate (#23, ADR-18): the task sits behind an older
- * open sibling under a 'sequential' parent. Creation order is
- * (created_at, id) — the order the Tasks page renders and the AI breakdown
- * emits; the id tie-break keeps batch-inserted siblings (identical
- * created_at) deterministic. Like snoozing, this is never a stored flag:
- * completing the older sibling frees the next one with no write.
+ * Derived hold-back predicate (#23, ADR-18): the task sits behind an earlier
+ * open sibling under a 'sequential' parent. Sibling order is (sort_order, id)
+ * since #157 (ADR-43) — the stored, drag-reorderable position the Tasks page
+ * renders in; the id tie-break keeps siblings that share a sort_order (a
+ * pre-#157 backfill gives every row a distinct one, but a mid-renormalize read
+ * could momentarily tie) deterministic. Like snoozing, this is never a stored
+ * flag: completing the earlier sibling — or reordering this one ahead of it —
+ * frees the next one with no write to the freed row.
  */
 export function heldBackSql(alias: string): string {
   return `EXISTS(
     SELECT 1 FROM tasks p JOIN tasks s ON s.parent_id = p.id
     WHERE p.id = ${alias}.parent_id AND p.subtask_order_mode = 'sequential'
       AND s.status = 'open'
-      AND (s.created_at < ${alias}.created_at OR (s.created_at = ${alias}.created_at AND s.id < ${alias}.id))
+      AND (s.sort_order < ${alias}.sort_order OR (s.sort_order = ${alias}.sort_order AND s.id < ${alias}.id))
   )`;
 }
 

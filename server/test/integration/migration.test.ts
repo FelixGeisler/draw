@@ -21,6 +21,7 @@ import { freshApp, testDb } from "../helpers.js";
 //   v11 → v12 rebuilds goals: 'missed' status + resolved_at       (issue #145)
 //   v12 → v13 deletes the daily-hand settings rows                (issue #147)
 //   v13 → v14 creates the draws log + achievements claim columns  (issue #156)
+//   v14 → v15 adds tasks.sort_order (backfilled to id) + stamp trigger (issue #157)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence. (The v12 rebuild's own
@@ -47,6 +48,13 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v2Schema = current
+    // v15 (#157): strip the sort_order column (its comment block, the column,
+    // and the comma that made window_end non-final) plus its stamping trigger,
+    // so the reconstructed pre-v15 file carries neither — the v15 migration ADDs
+    // both, and a duplicate column or trigger would abort the chain. Runs FIRST
+    // so window_end regains its trailing newline before the window strip below.
+    .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
+    .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
     .replace(
       // \r?\n: checkouts may be CRLF (git autocrlf) or LF.
       /last_drawn_at TEXT,[\s\S]*?window_end TEXT\r?\n/,
@@ -93,6 +101,8 @@ beforeAll(async () => {
   expect(v2Schema).not.toContain("CREATE TABLE draws");
   expect(v2Schema).not.toContain("claim_xp");
   expect(v2Schema).not.toContain("claimed_at");
+  expect(v2Schema).not.toContain("sort_order");
+  expect(v2Schema).not.toContain("tasks_stamp_sort_order");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v2Schema);
@@ -277,10 +287,43 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v14 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal, draws log + claim columns)", () => {
-  it("bumps user_version to 14", async () => {
+describe("migration v2 → v15 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal, draws log + claim columns, sibling sort_order)", () => {
+  it("bumps user_version to 15", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(14);
+    expect(db.pragma("user_version", { simple: true })).toBe(15);
+  });
+
+  it("adds tasks.sort_order (REAL NOT NULL DEFAULT 0) backfilled to id, with the stamp trigger (#157)", async () => {
+    const db = await testDb();
+    const col = (
+      db.prepare("PRAGMA table_info(tasks)").all() as {
+        name: string;
+        type: string;
+        notnull: number;
+        dflt_value: string | null;
+      }[]
+    ).find((c) => c.name === "sort_order");
+    expect(col).toBeTruthy();
+    expect(col!.type).toBe("REAL");
+    expect(col!.notnull).toBe(1);
+    expect(col!.dflt_value).toBe("0");
+
+    // Backfill preserved creation order verbatim: every existing row's
+    // sort_order equals its id (the tie-break the pre-#157 order already used).
+    const mismatched = db
+      .prepare("SELECT COUNT(*) AS n FROM tasks WHERE sort_order != id")
+      .get() as { n: number };
+    expect(mismatched.n).toBe(0);
+
+    // The trigger stamps a new insert that left the default: sort_order = id.
+    const inserted = db
+      .prepare("INSERT INTO tasks (title, category_id, created_at) VALUES (?, 1, ?)")
+      .run("sort-order stamp probe", new Date().toISOString());
+    const stamped = db
+      .prepare("SELECT sort_order AS sortOrder FROM tasks WHERE id = ?")
+      .get(inserted.lastInsertRowid) as { sortOrder: number };
+    expect(stamped.sortOrder).toBe(Number(inserted.lastInsertRowid));
+    db.prepare("DELETE FROM tasks WHERE id = ?").run(inserted.lastInsertRowid);
   });
 
   it("creates the draws log (task_id ON DELETE SET NULL) and the achievements claim columns (#156)", async () => {

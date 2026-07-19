@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 14;
+export const CURRENT_VERSION = 15;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -273,6 +273,37 @@ function migrate() {
       )`);
       db.exec("ALTER TABLE achievements ADD COLUMN claimed_at TEXT");
       db.exec("ALTER TABLE achievements ADD COLUMN claim_xp INTEGER");
+    }
+    if (version < 15) {
+      // Stored sibling positions (#157, ADR-43): explicit, reorderable order
+      // for a breakdown's subtasks — the sequential queue's semantic consumer
+      // (ADR-18) can now be arranged by drag, not just creation order.
+      //
+      // sort_order is REAL so a reorder can drop a task at the MIDPOINT of two
+      // neighbors without touching the rest (an integer scheme would renumber
+      // the tail on every move); the rare precision underflow renormalizes to
+      // integer gaps (siblingOrder.ts). It is user state, not derivable state
+      // — a stored position stands with resolved_at (ADR-38) inside ADR-2,
+      // which bans stored DERIVABLES, not stored facts.
+      //
+      // Backfill sort_order = id: id is the monotone creation key the pre-#157
+      // (created_at, id) order already tie-broke on, so every existing sibling
+      // keeps its exact place and NOTHING moves on migration day. New rows are
+      // stamped the same way by the AFTER INSERT trigger below (sort_order = id
+      // when the insert left the 0 default), so a fresh root/sibling still
+      // lands after existing ones; split-in-place parts set sort_order
+      // explicitly to land in the archived original's slot, so the trigger's
+      // `WHEN NEW.sort_order = 0` guard leaves them alone (no legitimate
+      // position is ever 0 — backfill and midpoints are all > 0). Root order
+      // stays creation order (roots are not reorderable, ADR-43); the column
+      // exists on them too but no read sorts roots by it.
+      db.exec("ALTER TABLE tasks ADD COLUMN sort_order REAL NOT NULL DEFAULT 0");
+      db.exec("UPDATE tasks SET sort_order = id");
+      db.exec(`CREATE TRIGGER tasks_stamp_sort_order AFTER INSERT ON tasks
+        WHEN NEW.sort_order = 0
+        BEGIN
+          UPDATE tasks SET sort_order = NEW.id WHERE id = NEW.id;
+        END`);
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);
