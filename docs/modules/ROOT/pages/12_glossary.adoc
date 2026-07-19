@@ -23,13 +23,7 @@
 |An open subtask behind an older open sibling under a sequential parent — out of the deck until the steps in front close; derived at query time, shown as the ⏳ chip
 
 |*Draw*
-|Weighted random selection of one drawable task, presented as a card
-
-|*Daily hand*
-|Today's plan: 3–5 cards dealt once per local day out of the draw's own candidate pool, weighted-sampled without replacement under an effort budget (`daily_hand_budget_minutes`). It only ever shrinks — there is no redeal (ADR-34) — and dies at local midnight
-
-|*Play (a hand card)*
-|Turning a dealt card into the current draw: it stamps `last_drawn_at` and takes the ×1.5 drawn bonus, unlike merely *dealing* it. Impossible while another card is revealed (409)
+|Weighted random selection of one drawable task, presented as a card — deliberately the ONLY way tasks surface on the Draw page: there is no multi-card day preview (the daily hand of ADR-34 was removed by ADR-39)
 
 |*Impact*
 |1–5★ rating of a task's leverage toward its goal's measured outcome; only meaningful (and only shown) for goal-linked tasks

@@ -1,8 +1,8 @@
 /**
- * The server's LOCAL calendar day — the one home of the "user day" concept
- * (#59). Streaks, freeze milestones and the daily hand must never disagree
- * about which day it is, so the formatting rule lives here once instead of as
- * drifting private copies.
+ * The server's LOCAL calendar day — the one home of the "user day" concept.
+ * Streaks and freeze milestones must never disagree about which day it is,
+ * so the formatting rule lives here once instead of as drifting private
+ * copies.
  *
  * Deliberately local (`getFullYear`/`getMonth`/`getDate`, never `getUTC*`):
  * "today" is the user's own calendar day, the same convention the streak's

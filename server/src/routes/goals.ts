@@ -106,7 +106,7 @@ goalsRouter.patch("/:id", (req, res) => {
   // state-derived inside checkAchievements (an achieved goal exists), like
   // first_completion — the gate here only keeps plain goal edits from probing
   // achievements on every save. Additive optional response field, the same
-  // newAchievements convention as the draw/hand/tasks routes.
+  // newAchievements convention as the draw/tasks routes.
   const achieved = body.status === "achieved" && existing.status !== "achieved";
   const newAchievements = achieved ? checkAchievements({}) : [];
   const goal = getGoal(id) as Record<string, unknown>;

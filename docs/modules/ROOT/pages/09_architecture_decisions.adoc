@@ -1063,6 +1063,8 @@ absorbed by ATK and the star row (one datum, one place); the focus overlay
 (#56) adopts exactly the type-line pill and nothing else — its job is the
 clock, not the frame. Follow-ups noted in their issues: the skyline
 mini-cards (#53) and the daily hand (#59) adopt the frame when built.
+*Amendment (#147):* the daily hand was since removed (ADR-39) — that
+follow-up is void; the skyline mini-cards note stands.
 
 == ADR-32: Parent-task lifecycle follows the subtasks — derived effort, auto-complete at a symbolic 1 XP, reopen on new subtasks
 
@@ -1202,6 +1204,11 @@ language in the codebase, and the surviving pieces live where they are used
 
 
 == ADR-34: The daily hand is dealt once per local day, has no redeal, and lives in one settings row
+
+*Amendment (#147):* The daily hand was REMOVED — see ADR-39. This ADR stays
+as the record of how the feature worked, and of the no-redeal reasoning in
+(b), which outlived the feature (it is restated as the commitment invariant
+in section 8.2).
 
 *Context:* Drawing one card at a time answers "just start", but not the
 morning question "what does my day look like?" (#59). A hand of 3–5 cards
@@ -1563,3 +1570,35 @@ alternative — a goal-transition log — is heavier than the one column and
 would still store the same instants. The FK-off rebuild is the standard
 SQLite recipe; the migration-v12 test pins the exact failure the pragma
 prevents, because it is the kind that ships green and loses data.
+
+== ADR-39: The daily hand is removed — one card face-up, never a day preview
+
+*Context:* ADR-34's hand answered the morning question "what does my day
+look like?" (#59) with 3–5 cards dealt face-up. Living with it showed the
+question itself was the trap: the app's core psychology is to HIDE the
+mountain of effort and move from one small doable card to the next — one
+card face-up is a commitment you can start; five cards face-up is a to-do
+list, and a to-do list is the overwhelm machine this app was built to
+replace. The hand's one unique contribution — an "enough for today" finish
+line — was already covered by the daily goal (`daily_goal_completions`),
+which counts completions without ever previewing tasks (#147).
+
+*Decision:* Remove the feature entirely: the `/api/hand` routes and
+`handService`, the HandStrip and its hooks, the `daily_hand_budget_minutes`
+public setting and the `daily_hand` session row. Migration v13 is v10's
+mirror and equally pure data — it deletes the two settings rows on existing
+databases; v9/v10 stay verbatim as replayed history (a pre-v10 file still
+seeds the budget row, then v13 deletes it — the chain test pins exactly
+that). The single draw, the warm-up (ADR-30), focus mode and the trophy
+pile are untouched, and the commitment invariant (section 8.2) survives the
+feature that helped articulate it.
+
+*Rationale:* Philosophy-first, the #88 precedent: re-draw was removed
+because a feature that contradicts the product's one job is debt, not
+value, no matter how well it is built — and the hand was well built (no
+redeal, shared predicate, shrink-only). What #88 could not fix by
+tightening rules, this removes at the root: even a commitment-shaped
+day preview still SHOWS the day, and showing the day is the harm. Nothing
+of the user's is lost — the hand was validated pointers into tasks, dealt
+fresh each morning — and no capability is lost that the daily goal does not
+already provide.
