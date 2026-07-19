@@ -4,7 +4,7 @@ import { useDeleteGoal, useGoals, useUpdateGoal } from "../hooks/useGoals";
 import { formatResolvedDate, targetDelta } from "../lib/goalShelf";
 // The committed gold trophy-cup art (#124), reused here as the shared trophy
 // image — a string URL Vite fingerprints into the bundle (vite-env.d.ts).
-import trophyCup from "../assets/achievements/first_goal.svg";
+import trophyCup from "../assets/goal-trophy.svg";
 import "./GoalShelf.css";
 
 /**

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="66 130 168 162" width="168" height="162">
+  <defs>
+    <linearGradient id="goal-trophy-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffefbe"/>
+      <stop offset=".45" stop-color="#f6bd50"/>
+      <stop offset="1" stop-color="#bf7d25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- drop shadow -->
+  <g transform="translate(4 7)" opacity=".45">
+    <path d="M104 150 C106 194 124 224 146 228 L146 252 L126 252 L118 280 L182 280 L174 252 L154 252 L154 228 C176 224 194 194 196 150 Z" fill="#0d1017"/>
+    <ellipse cx="150" cy="150" rx="46" ry="11" fill="#0d1017"/>
+    <path d="M106 158 C78 156 74 200 108 200" fill="none" stroke="#0d1017" stroke-width="9" stroke-linecap="round"/>
+    <path d="M194 158 C222 156 226 200 192 200" fill="none" stroke="#0d1017" stroke-width="9" stroke-linecap="round"/>
+  </g>
+
+  <!-- handles -->
+  <path d="M106 158 C78 156 74 200 108 200" fill="none" stroke="url(#goal-trophy-gold)" stroke-width="9" stroke-linecap="round"/>
+  <path d="M194 158 C222 156 226 200 192 200" fill="none" stroke="url(#goal-trophy-gold)" stroke-width="9" stroke-linecap="round"/>
+
+  <!-- cup body + stem + base -->
+  <path d="M104 150 C106 194 124 224 146 228 L146 252 L126 252 L118 280 L182 280 L174 252 L154 252 L154 228 C176 224 194 194 196 150 Z" fill="url(#goal-trophy-gold)"/>
+
+  <!-- rim -->
+  <ellipse cx="150" cy="150" rx="46" ry="11" fill="url(#goal-trophy-gold)"/>
+  <ellipse cx="150" cy="149" rx="36" ry="7" fill="#8a5616" opacity=".55"/>
+
+  <!-- stem knob -->
+  <ellipse cx="150" cy="229" rx="15" ry="7" fill="url(#goal-trophy-gold)"/>
+
+  <!-- highlight / shadow -->
+  <path d="M120 160 C120 190 128 214 140 222 C132 210 128 188 128 162 Z" fill="#fff6dc" opacity=".35"/>
+  <path d="M196 150 C194 192 180 220 160 226 C178 218 190 190 188 152 Z" fill="#000000" opacity=".12"/>
+  <path d="M126 252 L174 252" stroke="#fff6dc" stroke-opacity=".3" stroke-width="2"/>
+  <path d="M118 280 L182 280" stroke="#000000" stroke-opacity=".18" stroke-width="3"/>
+</svg>

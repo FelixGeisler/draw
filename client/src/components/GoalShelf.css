@@ -127,15 +127,14 @@
   opacity: 0;
 }
 
-/* The committed gold-cup art (#124), a small portrait standing on the plinth.
-   Its dark background melts into the cabinet glass so the cup itself reads as
-   standing; the drop shadow lifts it off the shelf. */
+/* A bare gold cup on transparent ground (#168) — the standalone
+   goal-trophy.svg, cropped to the cup so it stands on the plinth against the
+   cabinet glass with no card frame. The drop shadow lifts it off the shelf. */
 .goal-trophy-cup {
   position: relative;
-  height: 88px;
+  height: 84px;
   width: auto;
-  border-radius: 7px;
-  filter: drop-shadow(0 5px 5px rgba(0, 0, 0, 0.5));
+  filter: drop-shadow(0 4px 5px rgba(0, 0, 0, 0.55));
 }
 
 /* A small dark pedestal the cup stands on, sitting on the ledge. */
