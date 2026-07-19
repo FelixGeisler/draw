@@ -10,7 +10,6 @@ function row(overrides: Partial<EstimationInputRow> = {}): EstimationInputRow {
   const id = nextId++;
   return {
     taskId: id,
-    title: `task ${id}`,
     estimatedMinutes: 30,
     trackedMinutes: 30,
     categoryId: 1,
@@ -23,7 +22,6 @@ function row(overrides: Partial<EstimationInputRow> = {}): EstimationInputRow {
 describe("buildEstimation", () => {
   it("returns null ratio and tendency (not NaN/Infinity) for empty input", () => {
     const e = buildEstimation([]);
-    expect(e.tasks).toEqual([]);
     expect(e.byCategory).toEqual([]);
     expect(e.summary).toEqual({
       taskCount: 0,
@@ -34,9 +32,8 @@ describe("buildEstimation", () => {
     });
   });
 
-  it("computes per-task ratio as tracked / estimated", () => {
+  it("computes the accuracy ratio as tracked / estimated", () => {
     const e = buildEstimation([row({ estimatedMinutes: 30, trackedMinutes: 45 })]);
-    expect(e.tasks[0].ratio).toBe(1.5);
     expect(e.summary.accuracyRatio).toBe(1.5);
   });
 
@@ -68,13 +65,12 @@ describe("buildEstimation", () => {
     expect(e.summary.tendency).toBe("under");
   });
 
-  it("excludes tasks with null or non-positive estimates from rows and totals", () => {
+  it("excludes tasks with null or non-positive estimates from the totals", () => {
     const e = buildEstimation([
       row({ estimatedMinutes: null, trackedMinutes: 500 }),
       row({ estimatedMinutes: 0, trackedMinutes: 500 }),
       row({ estimatedMinutes: 20, trackedMinutes: 10 }),
     ]);
-    expect(e.tasks).toHaveLength(1);
     expect(e.summary).toMatchObject({
       taskCount: 1,
       totalEstimatedMinutes: 20,
@@ -90,19 +86,11 @@ describe("buildEstimation", () => {
     expect(e.summary.tendency).toBeNull();
   });
 
-  it("rounds tracked minutes for display but derives the ratio from raw minutes", () => {
+  it("rounds tracked minutes for display but derives the ratios from raw minutes", () => {
     const e = buildEstimation([row({ estimatedMinutes: 30, trackedMinutes: 50.4 })]);
-    expect(e.tasks[0].trackedMinutes).toBe(50);
-    expect(e.tasks[0].ratio).toBe(1.68); // 50.4/30, not 50/30
-  });
-
-  it("sorts tasks by ratio descending — worst under-estimates first", () => {
-    const e = buildEstimation([
-      row({ taskId: 1, estimatedMinutes: 30, trackedMinutes: 30 }),
-      row({ taskId: 2, estimatedMinutes: 10, trackedMinutes: 40 }),
-      row({ taskId: 3, estimatedMinutes: 40, trackedMinutes: 20 }),
-    ]);
-    expect(e.tasks.map((t) => t.taskId)).toEqual([2, 1, 3]);
+    expect(e.summary.totalTrackedMinutes).toBe(50);
+    expect(e.summary.accuracyRatio).toBe(1.68); // 50.4/30, not 50/30
+    expect(e.byCategory[0]).toMatchObject({ trackedMinutes: 50, ratio: 1.68 });
   });
 
   it("reflects a single cycle for a recurring task with two completed cycles (#39)", () => {
@@ -119,7 +107,6 @@ describe("buildEstimation", () => {
     );
     const e = buildEstimation([row({ estimatedMinutes: 30 * cycles, trackedMinutes: minutes })]);
     // Lifetime attribution would report 75/30 = 2.5 — inflated by cycle 1.
-    expect(e.tasks[0].ratio).toBe(1.5);
     expect(e.summary.accuracyRatio).toBe(1.5);
   });
 
@@ -136,8 +123,11 @@ describe("buildEstimation", () => {
     );
     const e = buildEstimation([row({ estimatedMinutes: 30 * cycles, trackedMinutes: minutes })]);
     // 90 tracked over 2 × 30 estimated — not 90 (or 70) over a single 30.
-    expect(e.tasks[0]).toMatchObject({ estimatedMinutes: 60, trackedMinutes: 90, ratio: 1.5 });
-    expect(e.summary.accuracyRatio).toBe(1.5);
+    expect(e.summary).toMatchObject({
+      totalEstimatedMinutes: 60,
+      totalTrackedMinutes: 90,
+      accuracyRatio: 1.5,
+    });
   });
 
   it("groups per-category totals with their own ratio, largest tracked first", () => {

@@ -18,7 +18,6 @@ export interface Stats {
  */
 export interface EstimationInputRow {
   taskId: number;
-  title: string;
   estimatedMinutes: number | null;
   trackedMinutes: number;
   categoryId: number;
@@ -28,14 +27,10 @@ export interface EstimationInputRow {
 
 export type Tendency = "under" | "over" | "accurate";
 
+// Summary-only since #155 (ADR-41): the per-task array was an unbounded
+// overwhelm surface on the Stats page and had no other consumer, so it is
+// no longer computed or shipped.
 export interface Estimation {
-  tasks: {
-    taskId: number;
-    title: string;
-    estimatedMinutes: number;
-    trackedMinutes: number;
-    ratio: number;
-  }[];
   summary: {
     taskCount: number;
     totalEstimatedMinutes: number;
@@ -96,17 +91,6 @@ export function buildEstimation(rows: EstimationInputRow[]): Estimation {
       r.estimatedMinutes !== null && r.estimatedMinutes > 0,
   );
 
-  const tasks = qualifying
-    .map((r) => ({
-      taskId: r.taskId,
-      title: r.title,
-      estimatedMinutes: r.estimatedMinutes,
-      trackedMinutes: Math.round(r.trackedMinutes),
-      ratio: round2(r.trackedMinutes / r.estimatedMinutes),
-    }))
-    // Worst under-estimates first; taskId breaks ties deterministically.
-    .sort((a, b) => b.ratio - a.ratio || a.taskId - b.taskId);
-
   const totalEstimated = qualifying.reduce((sum, r) => sum + r.estimatedMinutes, 0);
   const totalTracked = qualifying.reduce((sum, r) => sum + r.trackedMinutes, 0);
   const accuracyRatio = totalEstimated > 0 ? round2(totalTracked / totalEstimated) : null;
@@ -145,7 +129,6 @@ export function buildEstimation(rows: EstimationInputRow[]): Estimation {
     .sort((a, b) => b.trackedMinutes - a.trackedMinutes || a.categoryId - b.categoryId);
 
   return {
-    tasks,
     summary: {
       taskCount: qualifying.length,
       totalEstimatedMinutes: totalEstimated,
@@ -211,7 +194,7 @@ export const MINUTES_EXPR = `(julianday(COALESCE(e.ended_at, strftime('%Y-%m-%dT
 function estimationRowsInRange(from: string, to: string): EstimationInputRow[] {
   const completedInRange = db
     .prepare(
-      `SELECT t.id AS taskId, t.title, t.effort_minutes AS estimatedMinutes,
+      `SELECT t.id AS taskId, t.effort_minutes AS estimatedMinutes,
               c.id AS categoryId, c.name AS categoryName, c.color AS categoryColor
        FROM tasks t
        JOIN categories c ON c.id = t.category_id
