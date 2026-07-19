@@ -31,10 +31,16 @@ beforeAll(async () => {
       /  -- Goal resolution[\s\S]*?status TEXT NOT NULL CHECK \(status IN \('active', 'achieved', 'missed', 'dropped'\)\) DEFAULT 'active',\r?\n/,
       "  status TEXT NOT NULL CHECK (status IN ('active', 'achieved', 'dropped')) DEFAULT 'active',\n",
     )
-    .replace(/,\r?\n  resolved_at TEXT/, "");
+    .replace(/,\r?\n  resolved_at TEXT/, "")
+    // v14 (#156): strip the draws table and the achievements claim columns so
+    // this pre-v14 fixture does not already carry what the v14 migration adds.
+    .replace(/-- Draw log[\s\S]*?CREATE TABLE draws[\s\S]*?\);\r?\n/, "")
+    .replace(/,\r?\n  -- Claim-for-XP[\s\S]*?claim_xp INTEGER/, "");
   expect(v11Schema).not.toBe(current);
   expect(v11Schema).not.toContain("'missed'");
   expect(v11Schema).not.toContain("resolved_at");
+  expect(v11Schema).not.toContain("CREATE TABLE draws");
+  expect(v11Schema).not.toContain("claim_xp");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v11Schema);
@@ -69,9 +75,10 @@ beforeAll(async () => {
 describe("migration v11 → v12 rebuilds goals without firing FK actions (#145, ADR-38)", () => {
   it("runs the chain to the current version and leaves no scratch table", async () => {
     const db = await testDb();
-    // 13, not 12: the boot always migrates to CURRENT_VERSION — v13 (#147)
-    // only deletes daily-hand settings rows this fixture never seeds.
-    expect(db.pragma("user_version", { simple: true })).toBe(13);
+    // 14, not 12: the boot always migrates to CURRENT_VERSION — v13 (#147)
+    // deletes daily-hand rows this fixture never seeds, and v14 (#156) adds the
+    // draws log + achievements claim columns.
+    expect(db.pragma("user_version", { simple: true })).toBe(14);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'goals_new'").get(),
     ).toBeUndefined();
