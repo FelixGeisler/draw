@@ -59,6 +59,8 @@ function ghostTransform(x: number, y: number): string {
 export function useTaskDnd(opts: {
   taskById: (id: number) => Task | undefined;
   reparent: (taskId: number, parentId: number | null) => Promise<unknown>;
+  /** Reorder a subtask before `beforeId` (#157); null moves it to the end. */
+  reorder: (taskId: number, beforeId: number | null) => Promise<unknown>;
 }): TaskDndController {
   const [dragging, setDragging] = useState<Task | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
@@ -101,6 +103,15 @@ export function useTaskDnd(opts: {
 
     const spotFromKey = (key: string): DropSpot | null => {
       if (key === "zone") return { type: "root-zone" };
+      if (key.startsWith("gap:")) {
+        // "gap:<parentId>:<beforeId|end>" — end = drop after the last sibling.
+        const [parentStr, beforeStr] = key.slice("gap:".length).split(":");
+        return {
+          type: "gap",
+          parentId: Number(parentStr),
+          beforeId: beforeStr === "end" ? null : Number(beforeStr),
+        };
+      }
       const target = optsRef.current.taskById(Number(key.slice("row:".length)));
       return target ? { type: "row", task: target } : null;
     };
@@ -128,16 +139,18 @@ export function useTaskDnd(opts: {
       }
       if (ghostEl.current) ghostEl.current.style.transform = ghostTransform(s.x, s.y);
       // The ghost is pointer-events: none, so elementFromPoint sees the row
-      // (or the fixed root zone) underneath it.
+      // (or the fixed root zone, or a sibling gap) underneath it.
       const el = document
         .elementFromPoint(ev.clientX, ev.clientY)
-        ?.closest("[data-dnd-row], [data-dnd-zone]");
+        ?.closest("[data-dnd-row], [data-dnd-zone], [data-dnd-gap]");
       const key =
         el == null
           ? null
           : el.hasAttribute("data-dnd-zone")
             ? "zone"
-            : `row:${el.getAttribute("data-dnd-row")}`;
+            : el.hasAttribute("data-dnd-gap")
+              ? `gap:${el.getAttribute("data-dnd-gap")}`
+              : `row:${el.getAttribute("data-dnd-row")}`;
       if (key !== s.overKey) {
         s.overKey = key;
         setOverKey(key);
@@ -160,12 +173,15 @@ export function useTaskDnd(opts: {
       // An invalid drop leaves the tree untouched — the hover already named
       // the rule; releasing is simply a cancel.
       if (verdict.kind === "inert" || verdict.blockReason != null) return;
-      const parentId = verdict.kind === "nest" ? verdict.targetId : null;
-      optsRef.current.reparent(s.task.id, parentId).catch((err) => {
-        // Server 400s (the validation matrix sees archived children etc. that
-        // the client mirror cannot) surface as the backstop.
-        setDropError((err as Error).message);
-      });
+      // Server 400s (the validation matrix sees archived children etc. that the
+      // client mirror cannot) surface as the backstop on either mutation.
+      const onError = (err: unknown) => setDropError((err as Error).message);
+      if (verdict.kind === "reorder") {
+        optsRef.current.reorder(s.task.id, verdict.beforeId).catch(onError);
+      } else {
+        const parentId = verdict.kind === "nest" ? verdict.targetId : null;
+        optsRef.current.reparent(s.task.id, parentId).catch(onError);
+      }
     };
     // Same identity discipline as move: only the session's own pointer can
     // commit or cancel — a second finger lifting is not our release.

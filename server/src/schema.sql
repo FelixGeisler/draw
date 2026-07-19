@@ -51,11 +51,40 @@ CREATE TABLE tasks (
   -- in TypeScript — never in SQL, where strftime/time run in UTC.
   window_days TEXT,
   window_start TEXT,
-  window_end TEXT
+  window_end TEXT,
+  -- Stored sibling position (#157, ADR-43): the explicit, reorderable order of
+  -- a breakdown's subtasks — the sequential hold-back queue (ADR-18) reads it
+  -- as (sort_order, id). REAL so a reorder drops a task at the midpoint of two
+  -- neighbors without renumbering the rest; the rare precision underflow
+  -- renormalizes to integer gaps (siblingOrder.ts). USER STATE, not derivable
+  -- (ADR-2 bans stored derivables, not stored facts — this stands with
+  -- resolved_at, ADR-38). The trigger below appends every unstamped insert
+  -- after its sibling group's current max, so creation order is the starting
+  -- order; split-in-place parts set it explicitly to land in the archived
+  -- original's slot. Root order stays creation order — roots are not
+  -- reorderable, no read sorts them by this.
+  sort_order REAL NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX idx_tasks_status ON tasks(status);
+
+-- Stamp sort_order (#157, ADR-43) on an unstamped insert as the GLOBAL
+-- MAX(sort_order)+1 — one monotonic-by-creation sequence across all tasks
+-- (matching the migration's global (created_at, id) backfill rank). Global,
+-- not per-group, so sort_order stays globally comparable: a fresh row is the
+-- latest position everywhere, so it appends within whatever group it joins,
+-- an adopted task keeps the "older step jumps the queue" order (ADR-43), and a
+-- new sibling can never fall below a group max inflated by end-moves. Split-in-
+-- place parts supply their own (> 0) sort_order to land in the archived
+-- original's neighborhood, so the guard skips them; no position is ever 0.
+CREATE TRIGGER tasks_stamp_sort_order AFTER INSERT ON tasks
+WHEN NEW.sort_order = 0
+BEGIN
+  UPDATE tasks SET sort_order =
+    (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks WHERE id != NEW.id)
+  WHERE id = NEW.id;
+END;
 
 CREATE TABLE time_entries (
   id INTEGER PRIMARY KEY,

@@ -27,6 +27,10 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v11Schema = current
+    // v15 (#157): strip the sort_order column and its stamp trigger so this
+    // pre-v15 fixture does not already carry what the v15 migration adds.
+    .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
+    .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
     .replace(
       /  -- Goal resolution[\s\S]*?status TEXT NOT NULL CHECK \(status IN \('active', 'achieved', 'missed', 'dropped'\)\) DEFAULT 'active',\r?\n/,
       "  status TEXT NOT NULL CHECK (status IN ('active', 'achieved', 'dropped')) DEFAULT 'active',\n",
@@ -41,6 +45,7 @@ beforeAll(async () => {
   expect(v11Schema).not.toContain("resolved_at");
   expect(v11Schema).not.toContain("CREATE TABLE draws");
   expect(v11Schema).not.toContain("claim_xp");
+  expect(v11Schema).not.toContain("sort_order");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v11Schema);
@@ -75,10 +80,10 @@ beforeAll(async () => {
 describe("migration v11 → v12 rebuilds goals without firing FK actions (#145, ADR-38)", () => {
   it("runs the chain to the current version and leaves no scratch table", async () => {
     const db = await testDb();
-    // 14, not 12: the boot always migrates to CURRENT_VERSION — v13 (#147)
-    // deletes daily-hand rows this fixture never seeds, and v14 (#156) adds the
-    // draws log + achievements claim columns.
-    expect(db.pragma("user_version", { simple: true })).toBe(14);
+    // 15, not 12: the boot always migrates to CURRENT_VERSION — v13 (#147)
+    // deletes daily-hand rows this fixture never seeds, v14 (#156) adds the
+    // draws log + achievements claim columns, and v15 (#157) adds sort_order.
+    expect(db.pragma("user_version", { simple: true })).toBe(15);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'goals_new'").get(),
     ).toBeUndefined();

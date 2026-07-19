@@ -10,9 +10,12 @@ import type { Task } from "../api/types";
  * payload hides).
  */
 
-/** What the rules read off the moved task. */
+/** What the rules read off the moved task. `status` is only read by the #157
+ *  reorder verdict (a done/archived subtask cannot be reordered); the reparent
+ *  rules ignore it, so it stays optional. */
 export type ReparentSource = Pick<Task, "id" | "parentId" | "recurEveryDays" | "hasOpenChildren"> & {
   subtasks?: Pick<Task, "id">[];
+  status?: Task["status"];
 };
 
 /** What the rules read off a candidate parent. */

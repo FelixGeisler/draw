@@ -350,12 +350,15 @@ describe("promote to root", () => {
   });
 });
 
-describe("sequential queue position (ADR-18): adoption orders by created_at", () => {
+describe("sequential queue position (ADR-18/ADR-43): adoption keeps its stored sort_order", () => {
   it("an older adopted task enters the queue AHEAD of the existing steps", async () => {
     const goal = await mkGoal("queue goal");
     const old = await mkTask({ title: "queue old-timer", goalId: goal.id, effortMinutes: 10 });
-    // An adopted task keeps its original created_at — backdate it well past
-    // any tie so the (created_at, id) comparison is unambiguous.
+    // An adopted task keeps its own sort_order — this PATCH does not touch it.
+    // `old` is created before the parent's steps, so its stamped sort_order
+    // (= its id) is the lowest of the three; that is what puts it AHEAD once
+    // adopted (sibling order is (sort_order, id) since #157). The created_at
+    // backdate no longer affects order — kept only to age the card for weight.
     db.prepare("UPDATE tasks SET created_at = ? WHERE id = ?").run(
       "2020-01-01T00:00:00.000Z",
       old.id,
@@ -372,7 +375,7 @@ describe("sequential queue position (ADR-18): adoption orders by created_at", ()
 
     await patchTask(old.id, { parentId: parent.id });
 
-    // The child listing reads top-down in (created_at, id)…
+    // The child listing reads top-down in (sort_order, id)…
     const listedParent = await listedTask(parent.id);
     expect(listedParent.subtasks.map((s: { title: string }) => s.title)).toEqual([
       "queue old-timer",
@@ -456,12 +459,15 @@ describe("current draw pointer (ADR-13/ADR-17)", () => {
       [{ title: "eager front step", effortMinutes: 5 }],
       "sequential",
     );
-    // The front step predates the drawn card, so the adopted card queues
-    // BEHIND it (created_at order).
-    db.prepare("UPDATE tasks SET created_at = ? WHERE id = ?").run(
-      "2020-01-01T00:00:00.000Z",
-      front.id,
-    );
+    // The front step must sort AHEAD of the drawn card so the adopted card
+    // queues BEHIND it (held-back). sort_order is a global creation sequence
+    // (#157, ADR-43), not the id, and the front step was created AFTER the
+    // drawn card, so it naturally sorts later — read the drawn card's actual
+    // sort_order and pin front just below it to reproduce the held-back landing.
+    const drawnOrder = (
+      db.prepare("SELECT sort_order AS so FROM tasks WHERE id = ?").get(drawn.id) as { so: number }
+    ).so;
+    db.prepare("UPDATE tasks SET sort_order = ? WHERE id = ?").run(drawnOrder - 0.5, front.id);
 
     expect((await draw(goal.id)).task.id).toBe(drawn.id);
     expect(persistedDrawId()).toBe(String(drawn.id));

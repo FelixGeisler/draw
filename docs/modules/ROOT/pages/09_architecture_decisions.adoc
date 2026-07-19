@@ -278,8 +278,10 @@ the moved task must be childless — children of *any* status, since a
 done/archived child is one status write away from being an open grandchild.
 Those two rules are also what keeps `parent_id` acyclic now that it is no
 longer INSERT-only (ADR-24): a childless mover can never become anyone's
-ancestor. An adopted task joins the breakdown in the universal
-(created_at, id) creation order (ADR-18). Split-in-place (#108) is the
+ancestor. An adopted task joins the breakdown keeping its own stored
+`sort_order` (ADR-43, `(sort_order, id)` order — backfilled to `id`, so it
+still lands by roughly creation order and may be dragged into place after).
+Split-in-place (#108) is the
 sanctioned path for *deep* decomposition within this ban: a subtask above the
 draw limit cannot be broken down further, so `POST /api/tasks/:id/split`
 *replaces* it with two or more parts as siblings under the same parent — the
@@ -412,6 +414,16 @@ dependency edges would be bookkeeping for a capability (arbitrary DAGs) the
 product explicitly does not want. Deriving hold-back keeps every mutation
 path (complete, reopen, delete, re-parent, toggle) automatically correct —
 the ADR-2 argument once more.
+
+*Amendment (#157, ADR-43):* the "creation order only, no `position` column"
+scope above is superseded — the named follow-up landed. Sibling order is now
+STORED in `tasks.sort_order` and read as `(sort_order, id)`; `heldBackSql` and
+the child listing key off it, and subtasks are drag-reorderable
+(`POST /:id/reorder`). Backfill = `id`, so the queue reads identically to the
+`(created_at, id)` era on migration day. The wear-off pointer clear this ADR
+describes for a reparent into a held-back slot now also fires on a reorder that
+strands the current draw. Roots stay out of scope (root order is creation
+order — no queue over roots). See ADR-43.
 
 == ADR-19: MCP adapter speaks HTTP to the local API; the client's approval flow replaces staged review
 
@@ -1768,3 +1780,68 @@ table would be a silent second source of truth. New chain keys ship on the
 emoji-glyph art fallback (`achievementArt`); hand-drawn per-chain SVGs are a
 follow-up (#163, tracked as R9 in section 11), not a blocker — the
 degraded-grace face already handles a missing art row (ADR-33 e).
+
+== ADR-43: Stored sibling positions — a REAL `sort_order` column, midpoint reorders, roots excluded
+
+*Context:* Sibling order was never stored. Subtasks sorted by
+`(created_at, id)` everywhere — the child listing, the sequential hold-back
+queue (ADR-18, where order is the whole semantics: the front step is what the
+draw exposes), the split-in-place placement (ADR-18 amendment) — so the DnD
+that could nest and promote (ADR-42 is unrelated; this is #101 → #157) could
+not REORDER a breakdown. `classifyDrop` knew only nest/promote/inert, and
+ADR-18 itself named explicit sibling ordering as the escalation if
+queue-jumping ever proved wrong. #157 is that escalation.
+
+*Decision:*
+
+* *One REAL column, `tasks.sort_order` (migration v15).* Sibling order is now
+`(sort_order, id)` everywhere the old `(created_at, id)` sort ran: the child
+listing (`routes/tasks.ts`), the hold-back predicate (`heldBackSql`, the
+semantic consumer), split-part placement, and — because MCP `list_tasks`
+proxies `GET /api/tasks` — the MCP subtask order too. The backfill is
+`sort_order = id`: `id` is the monotone creation key the pre-#157 order
+already tie-broke on, so for organically-created rows `(created_at, id)` order
+equals `id` order and NOTHING moves on migration day. New inserts are stamped
+`sort_order = id` by an AFTER INSERT trigger (`WHEN NEW.sort_order = 0`), so a
+fresh root/sibling lands after existing ones; split-in-place parts set
+`sort_order` explicitly (spread between the archived original's slot and the
+next sibling) to land in the original's exact place, so the trigger's guard
+skips them. No legitimate position is ever 0.
+
+* *REAL, not integer, so a reorder is a single-row midpoint write.*
+`POST /api/tasks/:id/reorder { beforeId }` sets the moved task's `sort_order`
+to the midpoint of its two new neighbors (`beforeId` null = one gap past the
+last sibling) and touches nothing else. Only when REAL precision leaves no
+value strictly between the neighbors — repeated bisection of one gap, rare in
+a single-user app — does the parent's whole breakdown renormalize to integer
+gaps (`siblingOrder.ts`). Guards: `beforeId` must share `:id`'s parent
+(cross-parent is a reparent — the nest PATCH, ADR-16 — not a reorder), 404
+unknown, 400 for a root (`:id` with no parent) or a before-self.
+
+* *Roots are NOT reorderable — documented exclusion.* Root order stays
+creation order (the list renders roots newest-first; there is no queue over
+roots, so no order semantics to arrange). The column exists on root rows
+(backfilled like any other) but no read sorts roots by it, and the endpoint
+400s a root `:id`.
+
+* *Sequential-queue interaction reuses the ADR-18 wear-off guard.* A reorder
+under a `sequential` parent changes which step is exposed vs held back, so if
+the move strands the persisted current draw — the moved card, OR a sibling it
+jumped in front of, pushed into a held-back slot — the pointer is cleared
+EAGERLY, exactly as the reparent path does (ADR-13/ADR-18): a held-back card
+would become restorable again the instant the step in front completes, with no
+GET between. Reparent (adoption into a sequential breakdown) is unchanged: the
+adopted task keeps its own `sort_order`, so it still enters by roughly creation
+order and may jump the queue — but #157 adds the remedy, dragging it into
+place afterward.
+
+*Rationale:* Sibling position is USER STATE, not derivable state — there is no
+predicate or log it could be computed from, so storing it stays WITHIN ADR-2
+(which bans stored DERIVABLES, e.g. XP/streak counters, not stored facts). It
+stands exactly with `resolved_at` (ADR-38): an event/decision the user made,
+recorded once, kept until changed. The REAL midpoint scheme is the standard
+fractional-index trick — it buys O(1) reorders against O(n) renumbering, and
+the renormalize path bounds the precision cost that a purely-fractional scheme
+would otherwise accrue. Deriving hold-back from the stored order (rather than
+storing a second "is exposed" flag) keeps every mutation path automatically
+correct, the ADR-2 argument once more.

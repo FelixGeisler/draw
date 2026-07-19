@@ -8,11 +8,13 @@ import { freshApp, testDb } from "../helpers.js";
 // non-recurring subtask with >= 2 parts as siblings at the same level, in one
 // transaction; the original ends archived (never deleted — its time entries
 // and completions survive) and falls out of every derived surface with no
-// write (ADR-2/8.1). Parts adopt the original's created_at verbatim, so under
-// a sequential parent they occupy its queue slot when sibling timestamps are
-// distinct; in a same-timestamp batch group the id tie-break puts them at the
-// group's end (ADR-18 amendment, both cases pinned below). Each test draws
-// from its own goal-scoped pool, like sequential-subtasks.test.ts.
+// write (ADR-2/8.1). Since #157 (ADR-43) sibling order is stored in sort_order,
+// and the parts get explicit sort_order values spread between the archived
+// original's slot and the next sibling — so they occupy the original's slot
+// EXACTLY, with no same-timestamp-group approximation left (the old id-tie-
+// break case is gone; the case is now pinned below to prove created_at no
+// longer drives placement). Each test draws from its own goal-scoped pool,
+// like sequential-subtasks.test.ts.
 
 let app: express.Express;
 let db: Database.Database;
@@ -310,7 +312,7 @@ describe("queue position under a sequential parent (ADR-18 amendment)", () => {
     expect(titles).toEqual(["queue A", "split part 1", "split part 2", "queue C"]);
   });
 
-  it("same-timestamp batch group: parts land at the group's end, the next sibling is exposed, flags stay honest (ADR-18 approximation)", async () => {
+  it("same-timestamp batch group: sort_order lands the parts in the original's exact slot — the approximation is gone (#157, ADR-43)", async () => {
     const { goalId, parent } = await seedGoalParent("split-batch-group");
     const [stepA, stepB, stepC] = await addSubtasks(
       parent.id,
@@ -321,9 +323,9 @@ describe("queue position under a sequential parent (ADR-18 amendment)", () => {
       ],
       "sequential",
     );
-    // The common creation path: one batch, one shared millisecond. Within
-    // the group only the id tie-break orders siblings, so A (lowest id) is
-    // the queue front.
+    // The common creation path: one batch, one shared millisecond. Placement
+    // is now by sort_order (backfilled/stamped to id), so this shared timestamp
+    // must NOT change where the parts land — it is set to prove exactly that.
     shareCreatedAt([stepA.id, stepB.id, stepC.id]);
 
     // Before the split, the too-big exposed front yields the honest reason.
@@ -331,26 +333,28 @@ describe("queue position under a sequential parent (ADR-18 amendment)", () => {
 
     const [part1, part2] = await split(stepA.id, TWO_PARTS);
 
-    // The parts adopt the shared created_at but carry the group's highest
-    // ids, so they land at the END of the group, not in A's slot — the
-    // accepted approximation. B becomes the exposed front and the flags say
-    // so rather than pretending part 1 is next.
-    expect((await draw(goalId)).task.id).toBe(stepB.id);
-    expect((await listedTask(part1.id)).heldBack).toBe(1);
+    // The parts get sort_order values spread between A's slot and B, so they
+    // occupy A's exact position — part 1 is the new exposed front, NOT B. This
+    // is the #157 fix to the pre-sort_order same-timestamp approximation.
+    expect((await draw(goalId)).task.id).toBe(part1.id);
+    expect((await listedTask(part1.id)).heldBack).toBe(0);
     expect((await listedTask(part2.id)).heldBack).toBe(1);
+    expect((await listedTask(stepB.id)).heldBack).toBe(1);
     expect((await listedTask(stepC.id)).heldBack).toBe(1);
     expect((await listedTask(parent.id)).subtasks.map((s: any) => s.title)).toEqual([
-      "batch B",
-      "batch C",
       "split part 1",
       "split part 2",
+      "batch B",
+      "batch C",
     ]);
 
-    // The queue stays coherent end to end: B, then C, then the parts.
+    // The queue stays coherent end to end: parts in order, then B, then C.
+    await request(app).patch(`/api/tasks/${part1.id}`).send({ status: "done" }).expect(200);
+    expect((await draw(goalId)).task.id).toBe(part2.id);
+    await request(app).patch(`/api/tasks/${part2.id}`).send({ status: "done" }).expect(200);
+    expect((await draw(goalId)).task.id).toBe(stepB.id);
     await request(app).patch(`/api/tasks/${stepB.id}`).send({ status: "done" }).expect(200);
     expect((await draw(goalId)).task.id).toBe(stepC.id);
-    await request(app).patch(`/api/tasks/${stepC.id}`).send({ status: "done" }).expect(200);
-    expect((await draw(goalId)).task.id).toBe(part1.id);
   });
 
   it("the archived original never gates the queue — no write needed (ADR-2/8.1)", async () => {

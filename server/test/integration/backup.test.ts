@@ -389,6 +389,11 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
     const current = fs.readFileSync(schemaPath, "utf-8");
     const v2Schema = current
+      // v15 (#157): strip the sort_order column + stamp trigger FIRST, so
+      // window_end regains its trailing newline before the window strip below
+      // (the forward-migration on import re-adds both).
+      .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
+      .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
       .replace(/last_drawn_at TEXT,[\s\S]*?window_end TEXT\r?\n/, "last_drawn_at TEXT\n")
       .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "")
       .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
@@ -411,6 +416,7 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     expect(v2Schema).not.toContain("anthropic_file_id");
     expect(v2Schema).not.toContain("CREATE TABLE draws");
     expect(v2Schema).not.toContain("claim_xp");
+    expect(v2Schema).not.toContain("sort_order");
 
     const legacyDbPath = path.join(dataDir(), "legacy-backup.db");
     const legacy = new Database(legacyDbPath);

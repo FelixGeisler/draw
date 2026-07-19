@@ -140,6 +140,20 @@ export function useSplitTask() {
   });
 }
 
+export function useReorderSubtask() {
+  const invalidate = useInvalidateTasks();
+  return useMutation({
+    // Reorder a subtask before `beforeId` (#157, ADR-43); beforeId null moves
+    // it to the end. Invalidate-refetch, like the reparent path (useUpdateTask)
+    // the drag shares: the server owns the midpoint/renormalize placement and a
+    // sequential parent's heldBack recomputes, so a refetch is the honest
+    // source of the new order rather than a guessed optimistic splice.
+    mutationFn: ({ id, beforeId }: { id: number; beforeId: number | null }) =>
+      api.post<Task>(`/api/tasks/${id}/reorder`, { beforeId }),
+    onSuccess: invalidate,
+  });
+}
+
 export function useCreateSubtasks() {
   const invalidate = useInvalidateTasks();
   return useMutation({

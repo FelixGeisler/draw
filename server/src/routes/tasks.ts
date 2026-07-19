@@ -6,9 +6,11 @@ import {
   getCurrentDrawTaskId,
   heldBackSql,
   isRestorable,
+  taskWithDeckState,
   toTaskPayload,
   type RestorableTask,
 } from "../services/drawService.js";
+import { reorderSibling, spreadBetween } from "../services/siblingOrder.js";
 import {
   completeTask,
   undoLatestCompletion,
@@ -210,10 +212,12 @@ tasksRouter.get("/", (req, res) => {
     .prepare(`${TASK_SELECT} WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`)
     .all(...params) as Record<string, unknown>[];
 
-  // (created_at, id) is the canonical creation order — the same order the
-  // sequential hold-back predicate uses (#23), so the queue reads top-down.
+  // (sort_order, id) is the canonical sibling order since #157 (ADR-43) — the
+  // stored, drag-reorderable position the sequential hold-back predicate reads
+  // (#23), so the queue and this list stay top-down in lockstep. Backfilled to
+  // id, so a pre-#157 breakdown renders in its old creation order verbatim.
   const childStmt = db.prepare(
-    `${TASK_SELECT} WHERE parent_id = ? AND status != 'archived' ORDER BY created_at ASC, id ASC`,
+    `${TASK_SELECT} WHERE parent_id = ? AND status != 'archived' ORDER BY sort_order ASC, id ASC`,
   );
   for (const root of roots) {
     toTaskPayload(root);
@@ -262,6 +266,7 @@ tasksRouter.post("/:id/split", (req, res) => {
         window_start: string | null;
         window_end: string | null;
         created_at: string;
+        sort_order: number;
       }
     | undefined;
   if (!raw) return res.status(404).json({ error: "task not found" });
@@ -308,25 +313,32 @@ tasksRouter.post("/:id/split", (req, res) => {
   // INSERT carries no recurrence column (like the batch), so parts under a
   // sequential parent can never mint the ADR-23 ban.
   //
-  // created_at is adopted VERBATIM from the original (ADR-18 amendment): the
-  // queue and the child list order by (created_at, id), so the parts sort
-  // into the original's slot — ahead of every later-timestamp sibling, and
-  // in array order among themselves via the new, higher ids. For siblings
-  // sharing the original's exact timestamp (batch groups) exact in-slot
-  // placement is impossible without mutating sibling rows — there is no
-  // (created_at, id) between (T, id5) and (T, id6) for a new higher id — so
-  // parts land at the end of that same-timestamp group (still ahead of
-  // later-timestamp siblings); the explicit position column stays the named
-  // escalation. Adopting created_at also inherits the original's staleness
-  // base (ADR-17) — deliberate: the work has genuinely been lying around
-  // since then.
+  // created_at is adopted VERBATIM from the original (ADR-18 amendment): it
+  // carries the staleness base (ADR-17) — deliberate, the work has genuinely
+  // been lying around since then — and keeps the parts inside the original's
+  // creation-era for any created_at reader that remains.
+  //
+  // Placement is now by sort_order (#157, ADR-43): the parts get explicit
+  // sort_order values spread strictly between the archived original's slot and
+  // the next sibling (spreadBetween), so they land EXACTLY where the original
+  // was — ahead of every later sibling and in array order among themselves —
+  // with no same-timestamp-group approximation left. Supplying sort_order in
+  // the INSERT (> 0) also bypasses the AFTER INSERT stamping trigger, which
+  // would otherwise stamp each part with its own high id and push them to the
+  // end of the breakdown.
+  const nextSibling = db
+    .prepare(
+      "SELECT MIN(sort_order) AS next FROM tasks WHERE parent_id = ? AND sort_order > ?",
+    )
+    .get(raw.parent_id, raw.sort_order) as { next: number | null };
+  const partOrders = spreadBetween(raw.sort_order, nextSibling.next, parts.length);
   const insert = db.prepare(
-    `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, due_date, window_days, window_start, window_end, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tasks (title, description, category_id, goal_id, parent_id, impact, effort_minutes, due_date, window_days, window_start, window_end, created_at, sort_order)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const created = db.transaction(() => {
     const ids: number[] = [];
-    for (const p of parts) {
+    parts.forEach((p, i) => {
       const r = insert.run(
         p.title.trim(),
         p.description ?? null,
@@ -340,9 +352,10 @@ tasksRouter.post("/:id/split", (req, res) => {
         raw.window_start,
         raw.window_end,
         raw.created_at,
+        partOrders[i],
       );
       ids.push(Number(r.lastInsertRowid));
-    }
+    });
     db.prepare("UPDATE tasks SET status = 'archived' WHERE id = ?").run(id);
     // The work session on the original is over — close its running time entry
     // at split time, mirroring what completion does (ADR-12). Its minutes
@@ -362,6 +375,85 @@ tasksRouter.post("/:id/split", (req, res) => {
   })();
 
   res.status(201).json(created);
+});
+
+// Reorder a subtask among its siblings (#157, ADR-43) — the endpoint behind
+// the drag-and-drop gap zones. { beforeId } names the sibling this task should
+// sit immediately BEFORE; null moves it to the end. Reorder is WITHIN one
+// breakdown: :id and beforeId must share a parent (cross-parent moves stay the
+// nest PATCH above), and roots are excluded (root order is creation order, no
+// semantics to arrange). The placement is a midpoint write, renormalizing only
+// on REAL underflow (siblingOrder.ts). For a sequential parent this changes
+// which step is exposed vs held back, so the persisted current draw is
+// re-validated and cleared eagerly if the move stranded it behind a sibling —
+// the same wear-off hazard the reparent path guards (a card that would become
+// restorable again the instant the step in front completes, with no GET
+// between, ADR-13/ADR-18).
+tasksRouter.post("/:id/reorder", (req, res) => {
+  const id = Number(req.params.id);
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  if (!("beforeId" in body)) {
+    return res
+      .status(400)
+      .json({ error: "beforeId is required — a sibling id, or null to move to the end" });
+  }
+  const beforeId = body.beforeId;
+  if (beforeId !== null && (!Number.isInteger(beforeId) || (beforeId as number) < 1)) {
+    return res
+      .status(400)
+      .json({ error: "beforeId must be a positive integer or null (null moves to the end)" });
+  }
+
+  const task = db.prepare("SELECT id, parent_id AS parentId FROM tasks WHERE id = ?").get(id) as
+    | { id: number; parentId: number | null }
+    | undefined;
+  if (!task) return res.status(404).json({ error: "task not found" });
+  // Roots are not reorderable (ADR-43): root order stays creation order.
+  if (task.parentId == null) {
+    return res.status(400).json({
+      error:
+        "root tasks are not reorderable (ADR-43): sibling order applies within one breakdown — " +
+        "reorder a parent's subtasks instead",
+    });
+  }
+  if (beforeId === id) {
+    return res.status(400).json({ error: "a task cannot be placed before itself" });
+  }
+  if (beforeId !== null) {
+    const before = db.prepare("SELECT parent_id AS parentId FROM tasks WHERE id = ?").get(beforeId) as
+      | { parentId: number | null }
+      | undefined;
+    if (!before) return res.status(404).json({ error: "beforeId task not found" });
+    // Same-parent guard: reorder never crosses breakdowns. A move to another
+    // parent is a reparent (the nest PATCH), which carries its own cascades.
+    if (before.parentId !== task.parentId) {
+      return res.status(400).json({
+        error:
+          "beforeId must be a sibling (same parent) — moving a task to a different breakdown is a " +
+          "reparent (PATCH parentId), not a reorder",
+      });
+    }
+  }
+
+  db.transaction(() => {
+    reorderSibling(task.parentId!, id, beforeId as number | null);
+  })();
+
+  // Persisted-draw guard, eager like the reparent path: the affected card may
+  // be the moved task OR a sibling it jumped in front of, so re-validate the
+  // current draw whenever it belongs to this breakdown.
+  const drawId = getCurrentDrawTaskId();
+  if (drawId != null) {
+    const drawRow = taskWithDeckState(drawId);
+    if (drawRow && (drawId === id || (drawRow.parentId as number | null) === task.parentId)) {
+      const payload = toTaskPayload(drawRow);
+      if (!isRestorable(payload as unknown as RestorableTask, getSetting("max_draw_effort", 30), new Date())) {
+        clearCurrentDraw(drawId);
+      }
+    }
+  }
+
+  res.json(getTask(id));
 });
 
 tasksRouter.patch("/:id", (req, res) => {
@@ -398,13 +490,14 @@ tasksRouter.patch("/:id", (req, res) => {
   // validation matrix below judges only genuine moves and a pre-ban
   // recurring-under-sequential row stays editable.
   //
-  // Queue position under a sequential target (ADR-18): heldBackSql and the
-  // Tasks page child listing order by (created_at, id), and an adopted task
-  // keeps its original created_at — a task older than the existing steps
-  // enters the queue AHEAD of them (it may jump the queue). Deliberate:
-  // adoption orders by creation time like everything else, one predicate and
-  // no stored positions; explicit sibling ordering is a possible follow-up
-  // if queue-jumping feels wrong in practice.
+  // Queue position under a sequential target (ADR-18/ADR-43): heldBackSql and
+  // the Tasks page child listing order by (sort_order, id), and an adopted
+  // task keeps its own stored sort_order (this PATCH does not touch it) —
+  // which was backfilled to its id, so a task older than the existing steps
+  // still enters the queue AHEAD of them (it may jump the queue), exactly the
+  // pre-#157 behavior. What #157 adds is the remedy: after the move the user
+  // can drag the adopted step into place (POST /:id/reorder). Cross-parent
+  // moves stay this nest PATCH; reorder is within one breakdown only.
   let reparenting = false;
   if ("parentId" in body) {
     if (

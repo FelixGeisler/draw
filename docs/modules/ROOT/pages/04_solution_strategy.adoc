@@ -11,7 +11,7 @@
 |*Drawability is a derived predicate*, not a flag: `status='open' AND effort ≤ max AND no open children AND not blocked AND (no deferred_until OR deferred_until ≤ now) AND not held back behind a sequential sibling AND inside the availability window (if any)`. Oversized tasks simply never appear in the deck — the UI funnels them into breakdown.
 
 |Ordered breakdowns drawn out of order
-|*Sequential subtask mode* (ADR-18): a per-parent `subtask_order_mode` lets a breakdown declare "do in order" — only the first open subtask in creation order enters the deck, later siblings queue up behind it (derived, like everything else). The AI breakdown suggests the mode (`orderMatters`); the user confirms. Recurring steps are banned inside such a breakdown (ADR-23): a step that never closes would gate its siblings forever.
+|*Sequential subtask mode* (ADR-18): a per-parent `subtask_order_mode` lets a breakdown declare "do in order" — only the first open subtask in sibling order (stored `sort_order`, drag-reorderable since ADR-43) enters the deck, later siblings queue up behind it (derived, like everything else). The AI breakdown suggests the mode (`orderMatters`); the user confirms. Recurring steps are banned inside such a breakdown (ADR-23): a step that never closes would gate its siblings forever.
 
 |Time-bound tasks drawn at the wrong time
 |*Availability windows* (ADR-20): a task can carry weekdays plus a daily start/end range ("call the doctor: Mon–Fri 08:00–12:00"). Outside the window the card does not exist for the draw — evaluated on the local wall clock in TypeScript, shown as the "scheduled" group; it returns on its own, no interaction needed.

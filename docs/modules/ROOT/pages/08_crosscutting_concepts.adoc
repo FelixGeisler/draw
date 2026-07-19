@@ -4,9 +4,10 @@
 
 Anything that can drift is computed at read time: drawability (SQL predicate),
 "snoozed" (`blocked` or `deferred_until` still ahead — an expired snooze
-re-enters the deck with no write, ADR-17), "held back" (an older open sibling
-under a `sequential` parent — completing the step in front frees the next one
-with no write, ADR-18), "scheduled" (outside the task's availability window on
+re-enters the deck with no write, ADR-17), "held back" (an EARLIER open sibling
+by stored `sort_order` under a `sequential` parent — completing the step in
+front, OR dragging this one ahead of it, frees the next one with no write to
+the freed row, ADR-18/ADR-43), "scheduled" (outside the task's availability window on
 the local wall clock — the window opening re-admits the card with no write,
 ADR-20), "in progress" (running time entry
 exists), XP/level/streak (aggregates over `completions` PLUS claimed-achievement
@@ -44,7 +45,10 @@ sequential hold-back and the parent-completion gate — through the existing
 `status` conditions alone, with no write beyond the one status flip.
 Only facts are stored
 (tasks, entries, completions, the append-only `draws` log, unlocked
-achievements and their one-time claim). Achievement CHAINS (#156, ADR-42)
+achievements and their one-time claim, and each subtask's `sort_order` — the
+user's chosen sibling POSITION is a stored fact like `resolved_at`, ADR-38/ADR-43,
+not a derivable, so it stays within this principle; "held back" is still
+DERIVED from it, never stored as a flag). Achievement CHAINS (#156, ADR-42)
 derive each level's progress from these logs — draws (non-warmup only, ADR-30),
 completions, streak, level, achieved goals, tracked hours — against one shared
 threshold table that also drives the unlock, so a full progress bar is always a
