@@ -21,3 +21,14 @@ export function celebrate(options: confetti.Options): void {
   if (prefersReducedMotion()) return;
   confetti(options);
 }
+
+/**
+ * Stop in-flight bursts and clear the shared canvas — for celebration
+ * surfaces that can unmount mid-animation (#152: an Escape half a second
+ * into the victory overlay must not leave particles raining on a page that
+ * has moved on). Here rather than at the call site so "the one door to
+ * canvas-confetti" stays literally true.
+ */
+export function resetCelebration(): void {
+  confetti.reset();
+}

@@ -50,8 +50,10 @@ test("the page's own ✓ Done fires confetti when motion is allowed", async ({ p
   await expect(page.locator(".draw-face.back h2")).toHaveText(LOUD_TASK);
 
   await page.locator(".draw-actions").getByRole("button", { name: "✓ Done" }).click();
-  // canvas-confetti's canvas is the page's only <canvas>.
-  await expect(page.locator("canvas")).toHaveCount(1);
+  // body > canvas, the sibling goal-victory-shelf idiom (#152): canvas-confetti
+  // mounts its canvas directly under body, and the scope keeps the assert
+  // honest if a page-level <canvas> ever appears.
+  await expect(page.locator("body > canvas")).toHaveCount(1);
   await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
 
   await cleanup(page.request, task.id);
@@ -71,7 +73,7 @@ test("reduced motion suppresses the ✓ Done confetti entirely", async ({ page }
   await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
   await expect(page.getByText("click to draw")).toBeVisible();
   // The matchMedia gate skipped the burst: no canvas was ever created.
-  await expect(page.locator("canvas")).toHaveCount(0);
+  await expect(page.locator("body > canvas")).toHaveCount(0);
 
   await cleanup(page.request, task.id);
 });

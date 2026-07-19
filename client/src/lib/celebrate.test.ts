@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { celebrate, prefersReducedMotion } from "./celebrate";
+import { celebrate, prefersReducedMotion, resetCelebration } from "./celebrate";
 
 // The confetti gate (#148): celebrate is the ONE door to canvas-confetti,
 // so these tests pin the gate itself — the burst fires exactly when motion
 // is allowed and never under prefers-reduced-motion. The E2E pair in
 // draw-confetti-gate.spec.ts pins the same fact against a real browser.
-const confettiMock = vi.hoisted(() => vi.fn());
+const { confettiMock, resetMock } = vi.hoisted(() => {
+  const resetMock = vi.fn();
+  return { confettiMock: Object.assign(vi.fn(), { reset: resetMock }), resetMock };
+});
 vi.mock("canvas-confetti", () => ({ default: confettiMock }));
 
 function stubMatchMedia(matches: boolean) {
@@ -16,7 +19,10 @@ function stubMatchMedia(matches: boolean) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // Two independent vi.fn()s glued by Object.assign — clearing one does not
+  // cascade to the other; both are cleared so no assert is order-dependent.
   confettiMock.mockClear();
+  resetMock.mockClear();
 });
 
 describe("prefersReducedMotion", () => {
@@ -45,5 +51,12 @@ describe("celebrate", () => {
     stubMatchMedia(true);
     celebrate({ particleCount: 120 });
     expect(confettiMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("resetCelebration", () => {
+  it("clears the shared canvas — the unmount path for mid-animation exits (#152)", () => {
+    resetCelebration();
+    expect(resetMock).toHaveBeenCalledOnce();
   });
 });
