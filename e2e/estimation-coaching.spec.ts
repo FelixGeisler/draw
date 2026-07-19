@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { captureForm } from "./helpers.js";
 
 // Estimation coaching (#55, ADR-27): a passive hint under TaskForm's effort
 // field and per-category bias statements on the Stats page. History arises
@@ -70,8 +71,11 @@ async function cleanupBiasHistory(request: APIRequestContext) {
   }
 }
 
+// The quick-capture form on the merged Tasks page (#151) — scoped by testid:
+// an open row editor elsewhere on the page would make bare form locators
+// ambiguous.
 function form(page: Page) {
-  return page.locator("form");
+  return captureForm(page).locator("form");
 }
 const categorySelect = (page: Page) => form(page).locator("select").first();
 const effortInput = (page: Page) => form(page).getByPlaceholder("min");
@@ -79,7 +83,7 @@ const hint = (page: Page) => page.getByTestId("estimate-hint");
 
 test("TaskForm shows the passive hint only while its preconditions hold", async ({ page }) => {
   await seedBiasHistory(page.request);
-  await page.goto("/capture");
+  await page.goto("/tasks");
 
   // Divergent estimate in the coached category → the hint appears. Tracked
   // ~0 min against 180 estimated makes the all-history ratio exactly 0, so
@@ -114,7 +118,7 @@ test("TaskForm shows the passive hint only while its preconditions hold", async 
 });
 
 test("the hint never rewrites the field or the submitted estimate", async ({ page }) => {
-  await page.goto("/capture");
+  await page.goto("/tasks");
   await categorySelect(page).selectOption({ label: COACHED });
   await form(page).getByPlaceholder("What needs doing?").fill("Passivity probe");
   await effortInput(page).fill("40");

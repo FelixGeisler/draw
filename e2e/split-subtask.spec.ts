@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
+import { subtaskEditor, taskTree } from "./helpers.js";
 
 // Issue #108: a subtask above max_draw_effort used to dead-end — Break down
 // only exists on root rows and nesting is banned (ADR-16). Split-in-place
@@ -23,8 +24,10 @@ async function seed(request: APIRequestContext) {
 }
 
 function taskRow(page: Page, title: string) {
-  // exact: part titles contain the original title as a prefix.
-  return page.getByText(title, { exact: true }).locator("..");
+  // exact: part titles contain the original title as a prefix. Tree-scoped
+  // (#151): the too-big root and its too-big step also sit in the triage
+  // strip — an unscoped title lookup would go ambiguous.
+  return taskTree(page).getByText(title, { exact: true }).locator("..");
 }
 
 test("a too-big subtask offers Split with the even-split pre-fill; accepting replaces it in place", async ({
@@ -35,8 +38,8 @@ test("a too-big subtask offers Split with the even-split pre-fill; accepting rep
   // Break the root down: one step over the default 30-minute draw limit.
   await page.goto("/tasks");
   await taskRow(page, PARENT_TITLE).getByRole("button", { name: "Break down" }).click();
-  const titles = page.getByPlaceholder("Small, concrete step…");
-  const minutes = page.getByPlaceholder("min");
+  const titles = subtaskEditor(page).getByPlaceholder("Small, concrete step…");
+  const minutes = subtaskEditor(page).getByPlaceholder("min");
   await titles.nth(0).fill(BIG_STEP);
   await minutes.nth(0).fill("45");
   await titles.nth(1).fill(SMALL_STEP);

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
-import { drawFromGoal } from "./helpers.js";
+import { drawFromGoal, subtaskEditor, taskTree } from "./helpers.js";
 
 // Issue #23: break a task down with "Do in order" — only the first open step
 // enters the deck, later siblings wear the ⏳ queued chip, and completing the
@@ -30,8 +30,11 @@ async function seed(request: APIRequestContext) {
   });
 }
 
+// Tree-scoped (#151): the 60-minute parent classifies too-big until it is
+// broken down, so the triage strip lists it too — an unscoped title lookup
+// would go ambiguous.
 function taskRow(page: Page, title: string) {
-  return page.getByText(title).locator("..");
+  return taskTree(page).getByText(title).locator("..");
 }
 
 test("sequential breakdown: only the first step is drawable, the second queues up", async ({
@@ -42,8 +45,8 @@ test("sequential breakdown: only the first step is drawable, the second queues u
   // Break the parent down with "Do in order" checked.
   await page.goto("/tasks");
   await taskRow(page, PARENT_TITLE).getByRole("button", { name: "Break down" }).click();
-  const rows = page.getByPlaceholder("Small, concrete step…");
-  const minutes = page.getByPlaceholder("min");
+  const rows = subtaskEditor(page).getByPlaceholder("Small, concrete step…");
+  const minutes = subtaskEditor(page).getByPlaceholder("min");
   await rows.nth(0).fill(STEP_ONE);
   await minutes.nth(0).fill("15");
   await rows.nth(1).fill(STEP_TWO);
@@ -87,8 +90,8 @@ test("flipping the parent back to any order clears the queue", async ({ page }) 
   // Give the flip something to hold back again: a third step, still in order.
   await page.goto("/tasks");
   await taskRow(page, PARENT_TITLE).getByRole("button", { name: "Break down" }).click();
-  const rows = page.getByPlaceholder("Small, concrete step…");
-  const minutes = page.getByPlaceholder("min");
+  const rows = subtaskEditor(page).getByPlaceholder("Small, concrete step…");
+  const minutes = subtaskEditor(page).getByPlaceholder("min");
   await rows.nth(0).fill("Mount the clothes rail");
   await minutes.nth(0).fill("10");
   // The toggle remembers the parent's sequential mode — no re-check needed.
@@ -130,8 +133,10 @@ test("recurring steps cannot join an in-order breakdown (#66)", async ({ page })
   // recurrence field — a recurring step would gate its siblings forever.
   await page.goto("/tasks");
   await taskRow(page, STEP_TWO).getByTitle("Edit", { exact: true }).click();
-  await expect(page.getByPlaceholder("What needs doing?")).toHaveValue(STEP_TWO);
-  await expect(page.getByTitle("Repeat every N days (optional)")).not.toBeVisible();
+  // Tree-scoped: the quick-capture form on top shares both the title
+  // placeholder and the recurrence input's tooltip (#151).
+  await expect(taskTree(page).getByPlaceholder("What needs doing?")).toHaveValue(STEP_TWO);
+  await expect(taskTree(page).getByTitle("Repeat every N days (optional)")).not.toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
 
   // A parallel parent's step CAN recur — but then the parent locks against
@@ -149,7 +154,7 @@ test("recurring steps cannot join an in-order breakdown (#66)", async ({ page })
 
   await page.goto("/tasks");
   await taskRow(page, RECUR_STEP_TITLE).getByTitle("Edit", { exact: true }).click();
-  await page.getByTitle("Repeat every N days (optional)").fill("3");
+  await taskTree(page).getByTitle("Repeat every N days (optional)").fill("3");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(taskRow(page, RECUR_STEP_TITLE).locator(".chip", { hasText: "↻ 3d" })).toBeVisible();
 

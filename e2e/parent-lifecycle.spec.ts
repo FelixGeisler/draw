@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
+import { subtaskEditor, taskTree } from "./helpers.js";
 
 // Issue #111 (ADR-32): the happy parent lifecycle on the Tasks page — break a
 // task down, complete every subtask from the UI, watch the parent flip to
@@ -20,8 +21,11 @@ async function seed(request: APIRequestContext) {
   });
 }
 
+// Tree-scoped (#151): the 60-minute parent classifies too-big until it is
+// broken down, so the triage strip lists it too — an unscoped title lookup
+// would go ambiguous.
 function taskRow(page: Page, title: string) {
-  return page.getByText(title, { exact: true }).locator("..");
+  return taskTree(page).getByText(title, { exact: true }).locator("..");
 }
 
 // Plain click, not .check(): the controlled checkbox only turns checked after
@@ -40,8 +44,8 @@ test("completing the last subtask flips the parent to done without manual action
 
   // Break the parent down into two steps from the UI.
   await taskRow(page, PARENT_TITLE).getByRole("button", { name: "Break down" }).click();
-  const rows = page.getByPlaceholder("Small, concrete step…");
-  const minutes = page.getByPlaceholder("min");
+  const rows = subtaskEditor(page).getByPlaceholder("Small, concrete step…");
+  const minutes = subtaskEditor(page).getByPlaceholder("min");
   await rows.nth(0).fill(STEP_ONE);
   await minutes.nth(0).fill("15");
   await rows.nth(1).fill(STEP_TWO);
@@ -84,8 +88,8 @@ test("adding a new subtask reopens the done parent; completing it closes the loo
   const breakDown = taskRow(page, PARENT_TITLE).getByRole("button", { name: "Break down" });
   await expect(breakDown).toHaveAttribute("title", /reopens the task/);
   await breakDown.click();
-  await page.getByPlaceholder("Small, concrete step…").first().fill(STEP_THREE);
-  await page.getByPlaceholder("min").first().fill("10");
+  await subtaskEditor(page).getByPlaceholder("Small, concrete step…").first().fill(STEP_THREE);
+  await subtaskEditor(page).getByPlaceholder("min").first().fill("10");
   await page.getByRole("button", { name: /Add 1 subtask/ }).click();
 
   // No reload: the parent reopened server-side and the invalidated tasks

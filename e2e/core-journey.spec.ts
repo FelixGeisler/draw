@@ -1,69 +1,70 @@
 import { expect, test, type Page } from "@playwright/test";
+import { captureForm, subtaskEditor, taskTree, triageStrip } from "./helpers.js";
 
-// One connected journey through the core product loop:
-// capture → breakdown rule → draw → complete → gamification feedback.
-// Runs serially against one fresh database (see playwright.config.ts).
+// One connected journey through the core product loop, all on the merged
+// Tasks page (#151): capture → triage (breakdown rule) → draw → complete →
+// gamification feedback. Runs serially against one fresh database (see
+// playwright.config.ts).
 test.describe.configure({ mode: "serial" });
 
-function section(page: Page, heading: string) {
-  return page.locator("section").filter({ hasText: heading });
+function stripSection(page: Page, heading: string) {
+  return triageStrip(page).locator("section").filter({ hasText: heading });
 }
 
 async function captureTask(page: Page, title: string, minutes: string) {
-  await page.getByPlaceholder("What needs doing?").fill(title);
-  await page.getByTitle("Effort estimate in minutes").fill(minutes);
-  await page.getByRole("button", { name: "Add", exact: true }).click();
+  const form = captureForm(page);
+  await form.getByPlaceholder("What needs doing?").fill(title);
+  await form.getByTitle("Effort estimate in minutes").fill(minutes);
+  await form.getByRole("button", { name: "Add", exact: true }).click();
   // The form clears once the mutation went through.
-  await expect(page.getByPlaceholder("What needs doing?")).toHaveValue("");
+  await expect(form.getByPlaceholder("What needs doing?")).toHaveValue("");
 }
 
-test("capture: an oversized task lands in 'too big', a small one is ready", async ({ page }) => {
-  await page.goto("/capture");
+test("capture: an oversized task lands in the too-big strip, a small one goes straight to its category", async ({
+  page,
+}) => {
+  await page.goto("/tasks");
 
   await captureTask(page, "Prepare exam statistics", "90");
   await expect(
-    section(page, "Too big — break these down").getByText("Prepare exam statistics"),
+    stripSection(page, "Too big — break these down").getByText("Prepare exam statistics"),
   ).toBeVisible();
 
+  // A drawable-sized capture needs no triage: no strip row, only the
+  // category group below — ready is the badge-less default, not a section.
   await captureTask(page, "Solve one past exam question", "20");
-  await expect(
-    section(page, "Ready to draw").getByText("Solve one past exam question"),
-  ).toBeVisible();
+  await expect(taskTree(page).getByText("Solve one past exam question")).toBeVisible();
+  await expect(triageStrip(page).getByText("Solve one past exam question")).toHaveCount(0);
 });
 
-test("breakdown: subtasks make the parent drawable ready work", async ({ page }) => {
+test("breakdown from the strip: subtasks make the parent drawable ready work", async ({ page }) => {
   await page.goto("/tasks");
-  // Scope to the oversized task's row — .first() would hit the newest task
-  // (rows are ordered created_at DESC), not the one that needs breaking down.
-  const parentRow = page.getByText("Prepare exam statistics").locator("..");
-  await parentRow.getByRole("button", { name: "Break down" }).click();
+  // The too-big strip row carries Break down in place — the seam the merge
+  // closed (#151): the triage verdict and the prescribed action share a row.
+  const stripRow = stripSection(page, "Too big — break these down")
+    .getByText("Prepare exam statistics")
+    .locator("..");
+  await stripRow.getByRole("button", { name: "Break down" }).click();
 
-  const rows = page.getByPlaceholder("Small, concrete step…");
-  const minutes = page.getByPlaceholder("min");
+  const editor = subtaskEditor(page);
+  const rows = editor.getByPlaceholder("Small, concrete step…");
+  const minutes = editor.getByPlaceholder("min");
   await rows.nth(0).fill("Open past paper, list topics");
   await minutes.nth(0).fill("15");
   await rows.nth(1).fill("Solve first two exercises");
   await minutes.nth(1).fill("25");
-  await page.getByRole("button", { name: /Add 2 subtasks/ }).click();
+  await editor.getByRole("button", { name: /Add 2 subtasks/ }).click();
 
-  await expect(page.getByText("Open past paper, list topics")).toBeVisible();
-
-  // The parent's minutes chip now shows the remaining work of its open
-  // subtasks (15 + 25), not the stale stored 90-minute estimate.
+  // The parent became a container: it leaves the triage strip entirely, and
+  // its tree row shows the remaining work of its open subtasks (15 + 25),
+  // not the stale stored 90-minute estimate.
+  await expect(triageStrip(page).getByText("Prepare exam statistics")).toHaveCount(0);
+  const parentRow = taskTree(page).getByText("Prepare exam statistics").locator("..");
   await expect(parentRow.locator(".chip", { hasText: "min" })).toHaveText("40 min");
 
-  // Subtasks are now in the deck, folded under a collapsible parent header
-  // with a count (#30); the container parent is not a flat row of its own.
-  await page.goto("/capture");
-  const ready = section(page, "Ready to draw");
-  const group = ready.locator("details").filter({ hasText: "Prepare exam statistics" });
-  await expect(group.locator("summary")).toContainText("Prepare exam statistics");
-  await expect(group.locator("summary")).toContainText("(2)");
-  // Collapsed by default; the sibling rows expand on demand.
-  await expect(group.getByText("Open past paper, list topics")).not.toBeVisible();
-  await group.locator("summary").click();
-  await expect(group.getByText("Open past paper, list topics")).toBeVisible();
-  await expect(group.getByText("Solve first two exercises")).toBeVisible();
+  // The drawable subtasks nest under their parent in the category tree.
+  await expect(taskTree(page).getByText("Open past paper, list topics")).toBeVisible();
+  await expect(taskTree(page).getByText("Solve first two exercises")).toBeVisible();
 });
 
 test("draw and complete: card flips, XP and trophy deck react", async ({ page }) => {

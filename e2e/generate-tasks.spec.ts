@@ -1,5 +1,5 @@
 import { expect, test, type Page, type Request } from "@playwright/test";
-import { drawFromGoal } from "./helpers";
+import { drawFromGoal, triageStrip } from "./helpers";
 
 // Issue #29: the generate-tasks review panel on the Goals page. AI responses
 // are mocked at the browser boundary with page.route() — the suite never mocks
@@ -237,16 +237,42 @@ test("generate → review → commit: nothing written before commit, then one pa
   await expect(page.getByText(EDITED_LEAF_TITLE)).toBeVisible();
 });
 
-test("the import folds into one collapsible group on the Capture page (#30)", async ({ page }) => {
-  await page.goto("/capture");
-  const ready = page.locator("section").filter({ hasText: "Ready to draw" });
-  const group = ready.locator("details").filter({ hasText: PARENT_TITLE });
-  // One header row wearing the count — not four flat rows drowning the list.
+test("import leaves needing triage fold into one collapsible strip group (#30)", async ({
+  page,
+}) => {
+  // The passive ready group dissolved with the Capture page (#151) — sibling
+  // folding now lives where triage happens: knock two part estimates out via
+  // the API and the strip's "Needs an estimate" section must cluster them
+  // under their umbrella instead of flooding the section with flat rows.
+  const tasks: { title: string; subtasks: { id: number; title: string }[] }[] = await (
+    await page.request.get("/api/tasks")
+  ).json();
+  const parts = tasks
+    .find((t) => t.title === PARENT_TITLE)!
+    .subtasks.filter((s) => /part [12]\/2/.test(s.title));
+  expect(parts).toHaveLength(2);
+  for (const p of parts) {
+    await page.request.patch(`/api/tasks/${p.id}`, { data: { effortMinutes: null } });
+  }
+
+  await page.goto("/tasks");
+  const group = triageStrip(page).locator("details").filter({ hasText: PARENT_TITLE });
+  // One header row wearing the count — not two flat rows drowning the list.
   await expect(group.locator("summary")).toContainText(PARENT_TITLE);
-  await expect(group.locator("summary")).toContainText("(4)");
-  await expect(group.getByText(EDITED_LEAF_TITLE)).not.toBeVisible();
+  await expect(group.locator("summary")).toContainText("(2)");
+  await expect(group.getByText(parts[0].title)).not.toBeVisible();
   await group.locator("summary").click();
-  await expect(group.getByText(EDITED_LEAF_TITLE)).toBeVisible();
+  await expect(group.getByText(parts[0].title)).toBeVisible();
+  await expect(group.getByText(parts[1].title)).toBeVisible();
+
+  // Restore the estimates so the next test's goal-filtered draw sees all
+  // four leaves drawable again. API writes don't invalidate the client's
+  // query cache — reload to see the strip let go of the cluster.
+  for (const p of parts) {
+    await page.request.patch(`/api/tasks/${p.id}`, { data: { effortMinutes: 30 } });
+  }
+  await page.reload();
+  await expect(triageStrip(page).getByText(parts[0].title)).toHaveCount(0);
 });
 
 test("a drawn leaf shows the provenance description on the card", async ({ page }) => {

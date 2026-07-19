@@ -53,14 +53,6 @@ test("snooze from the drawn card: dismissed, parked under Snoozed, woken again",
   await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
   await expect(page.getByText("click to draw")).toBeVisible();
 
-  // Capture no longer lists it under Ready — it moved to the Snoozed group.
-  await page.goto("/capture");
-  const ready = page.locator("section").filter({ hasText: "Ready to draw" });
-  await expect(ready.getByText(TASK_TITLE)).not.toBeVisible();
-  await expect(
-    page.locator("section").filter({ hasText: "Snoozed" }).getByText(TASK_TITLE),
-  ).toBeVisible();
-
   // On the Tasks page it left the category section into the collapsed group,
   // wearing the derived 💤 badge with its wake time.
   await page.goto("/tasks");

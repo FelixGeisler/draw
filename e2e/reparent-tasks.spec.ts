@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
+import { taskTree } from "./helpers.js";
 
 // Issue #100: the Tasks page offers menu-based reparenting — "Move under…" on
 // root rows without subtasks, "Promote to top-level" on subtask rows. Both
@@ -21,8 +22,10 @@ async function seed(request: APIRequestContext) {
   });
 }
 
+// Tree-scoped (#151): the 60-minute umbrella classifies too-big, so the
+// triage strip lists it too — an unscoped title lookup would go ambiguous.
 function row(page: Page, title: string): Locator {
-  return page.getByText(title, { exact: true }).locator("..");
+  return taskTree(page).getByText(title, { exact: true }).locator("..");
 }
 
 async function tasksByTitle(page: Page) {

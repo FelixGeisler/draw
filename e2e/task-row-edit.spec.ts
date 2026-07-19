@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
+import { taskTree } from "./helpers.js";
 
 // Issue #17: every open task row on the Tasks page offers Edit, reusing
 // TaskForm — including the goal link, which is how an existing task gets
@@ -48,8 +49,11 @@ async function seed(request: APIRequestContext) {
   });
 }
 
+// Everything is tree-scoped (#151): the quick-capture form on top shares the
+// row editor's placeholders and tooltips, and the 60-minute parent seed sits
+// in the triage strip too — unscoped lookups would go ambiguous.
 function row(page: Page, title: string): Locator {
-  return page.getByText(title, { exact: true }).locator("..");
+  return taskTree(page).getByText(title, { exact: true }).locator("..");
 }
 
 function goalCard(page: Page, title: string = GOAL_TITLE): Locator {
@@ -62,9 +66,9 @@ test("edit from the row: prefilled form, cancel discards, save persists", async 
 
   // The form opens prefilled with the task's current values.
   await row(page, TASK_TITLE).getByTitle("Edit", { exact: true }).click();
-  const title = page.getByPlaceholder("What needs doing?");
+  const title = taskTree(page).getByPlaceholder("What needs doing?");
   await expect(title).toHaveValue(TASK_TITLE);
-  await expect(page.getByTitle("Effort estimate in minutes")).toHaveValue("10");
+  await expect(taskTree(page).getByTitle("Effort estimate in minutes")).toHaveValue("10");
 
   // Cancel closes the form without changes.
   await title.fill("Discarded rename");
@@ -75,7 +79,7 @@ test("edit from the row: prefilled form, cancel discards, save persists", async 
   // Save PATCHes and the row re-renders from the invalidated query.
   await row(page, TASK_TITLE).getByTitle("Edit", { exact: true }).click();
   await title.fill(EDITED_TITLE);
-  await page.getByTitle("Effort estimate in minutes").fill("25");
+  await taskTree(page).getByTitle("Effort estimate in minutes").fill("25");
   await page.getByRole("button", { name: "Save", exact: true }).click();
 
   await expect(title).not.toBeVisible();
@@ -87,7 +91,7 @@ test("goal link: attach via edit, goal count reflects it, detach again", async (
   await page.goto("/tasks");
 
   await row(page, EDITED_TITLE).getByTitle("Edit", { exact: true }).click();
-  const goalSelect = page.getByTitle("Link to a goal (enables impact rating)");
+  const goalSelect = taskTree(page).getByTitle("Link to a goal (enables impact rating)");
   await goalSelect.selectOption({ label: `🎯 ${GOAL_TITLE}` });
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(goalSelect).not.toBeVisible();
@@ -129,8 +133,8 @@ test("subtask rows offer edit without the goal select; done rows offer none", as
 
   // Subtasks follow their parent's goal — the form opens without the select.
   await row(page, SUBTASK_TITLE).getByTitle("Edit", { exact: true }).click();
-  await expect(page.getByPlaceholder("What needs doing?")).toHaveValue(SUBTASK_TITLE);
-  await expect(page.getByTitle("Link to a goal (enables impact rating)")).not.toBeVisible();
+  await expect(taskTree(page).getByPlaceholder("What needs doing?")).toHaveValue(SUBTASK_TITLE);
+  await expect(taskTree(page).getByTitle("Link to a goal (enables impact rating)")).not.toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
 
   // Done rows show no Edit action (reopen first).
@@ -146,7 +150,7 @@ test("goal link on a broken-down task cascades to its subtasks", async ({ page }
   // and the goal-filtered draw key off each row's own goal link.
   await page.request.post("/api/goals", { data: { title: SECOND_GOAL_TITLE } });
 
-  const goalSelect = page.getByTitle("Link to a goal (enables impact rating)");
+  const goalSelect = taskTree(page).getByTitle("Link to a goal (enables impact rating)");
   async function setParentGoal(label: string) {
     await page.goto("/tasks");
     await row(page, PARENT_TITLE).getByTitle("Edit", { exact: true }).click();
