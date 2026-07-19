@@ -1,5 +1,4 @@
-import { NavLink, Route, Routes } from "react-router-dom";
-import { CapturePage } from "./pages/CapturePage";
+import { Navigate, NavLink, Route, Routes } from "react-router-dom";
 import { DrawPage } from "./pages/DrawPage";
 import { TasksPage } from "./pages/TasksPage";
 import { StatsPage } from "./pages/StatsPage";
@@ -14,7 +13,6 @@ import { useAiStatus } from "./hooks/useAi";
 
 const NAV = [
   { to: "/", label: "Draw" },
-  { to: "/capture", label: "Capture" },
   { to: "/tasks", label: "Tasks" },
   { to: "/goals", label: "Goals" },
   { to: "/stats", label: "Stats" },
@@ -30,7 +28,7 @@ const ASSISTANT = { to: "/assistant", label: "✨ Assistant" };
 
 export default function App() {
   const aiStatus = useAiStatus();
-  const nav = aiStatus.data?.configured ? [...NAV.slice(0, 4), ASSISTANT, ...NAV.slice(4)] : NAV;
+  const nav = aiStatus.data?.configured ? [...NAV.slice(0, 3), ASSISTANT, ...NAV.slice(3)] : NAV;
   return (
     <div className="layout">
       <nav className="sidenav">
@@ -47,7 +45,9 @@ export default function App() {
         <AchievementToast />
         <Routes>
           <Route path="/" element={<DrawPage />} />
-          <Route path="/capture" element={<CapturePage />} />
+          {/* Capture merged into Tasks (#151, ADR-40) — the route survives as
+              a redirect for muscle memory and old links. */}
+          <Route path="/capture" element={<Navigate to="/tasks" replace />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/goals" element={<GoalsPage />} />
           <Route path="/assistant" element={<AssistantPage />} />

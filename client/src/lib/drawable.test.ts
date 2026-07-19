@@ -149,7 +149,7 @@ describe("flattenOpen", () => {
   });
 });
 
-// #30 Capture ergonomics: sibling leaves collapse under their parent so a
+// #30 triage-list ergonomics: sibling leaves collapse under their parent so a
 // 40-leaf import (#29) is one header row, not 40 flat rows.
 describe("groupSiblings", () => {
   const roots = [
