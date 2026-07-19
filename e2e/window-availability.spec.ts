@@ -89,11 +89,12 @@ test("a rejected night window surfaces the server's message instead of failing s
   await expect(form.getByPlaceholder("What needs doing?")).toHaveValue(NIGHT_TITLE);
 
   // Correcting the window clears the error and the capture goes through.
-  // Unestimated on purpose (it must never enter the deck) — so the new row
-  // shows up BOTH in its category group and in the needs-estimate strip.
+  // Unestimated on purpose (it must never enter the deck). Its triage state
+  // depends on the wall clock — inside the 20:00–22:00 window it would need
+  // an estimate, outside it classifies scheduled (passive, not in the strip)
+  // — so only the always-true category-tree row is pinned.
   await form.getByLabel("Window end").fill("22:00");
   await form.getByRole("button", { name: "Add" }).click();
   await expect(taskTree(page).getByText(NIGHT_TITLE)).toBeVisible();
-  await expect(triageStrip(page).getByText(NIGHT_TITLE)).toBeVisible();
   await expect(form.getByRole("alert")).toHaveCount(0);
 });

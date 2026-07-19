@@ -64,8 +64,11 @@ test("a too-big subtask offers Split with the even-split pre-fill; accepting rep
   await expect(page.getByLabel(/Do in order/)).not.toBeVisible();
   await page.getByRole("button", { name: "Split into 2 parts" }).click();
 
-  // The row disappears and its parts render in place as siblings.
-  await expect(page.getByText(BIG_STEP, { exact: true })).not.toBeVisible();
+  // The row disappears and its parts render in place as siblings. Count, not
+  // visibility (#151): the too-big step rendered in BOTH the strip and the
+  // tree, so a not-visible check would trip strict mode mid-refetch instead
+  // of waiting for both copies to go.
+  await expect(page.getByText(BIG_STEP, { exact: true })).toHaveCount(0);
   await expect(taskRow(page, PART_ONE)).toBeVisible();
   await expect(taskRow(page, PART_TWO)).toBeVisible();
   await expect(taskRow(page, SMALL_STEP)).toBeVisible();
