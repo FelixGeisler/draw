@@ -3,11 +3,14 @@
    scrim, the name, the earned date, and a rarity sheen — nothing else. The
    rejected TCG furniture (ATK/DEF box, type line, star row) appears nowhere.
 
-   Rarity is a GRADATION of the two shipped sheens, never a third language:
-     legendary  --sheen-holo, drifting on its own (the drawn 5★ card's treat)
-     epic       --sheen-holo at reduced opacity, sweep on hover/focus
-     rare       --sheen-silver, sweep on hover/focus
-     common     no sheen at all — plain is the absence of one
+   Rarity is a GRADATION of the two shipped sheens (#156 widened the ladder to
+   five tiers), never a casual new language:
+     secret-rare  a deliberate top-tier treatment: dark/negative frame +
+                  --sheen-holo drifting + a distinct luminous border (ADR-42)
+     ultra-rare   --sheen-holo, drifting on its own (the drawn 5★ card's treat)
+     super-rare   --sheen-holo at reduced opacity, sweep on hover/focus
+     rare         --sheen-silver, sweep on hover/focus
+     common       no sheen at all — plain is the absence of one
    Only EARNED cards shimmer: an unearned reward must not glitter. */
 
 .ach-collection {
@@ -157,13 +160,79 @@
   color: var(--text-dim);
 }
 
+/* ---- Progress bar + claim (chains, #156) -------------------------------- */
+
+/* A slim bar on a locked CHAIN card — current/target toward the next
+   threshold. Lives in the caption band above the art, same paint order as the
+   name/hint. Muted on the face-down weave: it teases the grind without
+   competing with an earned card's sheen. */
+.ach-progress {
+  position: relative;
+  height: 14px;
+  margin-top: 5px;
+  border-radius: 7px;
+  background: rgba(18, 20, 26, 0.55);
+  overflow: hidden;
+}
+
+.ach-progress-fill {
+  height: 100%;
+  border-radius: 7px;
+  background: linear-gradient(90deg, var(--accent), #a06bff);
+  transition: width 0.4s;
+}
+
+.ach-progress-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  text-shadow: 0 1px 2px rgba(18, 20, 26, 0.9);
+}
+
+/* The claim affordance on an unlocked+unclaimed card (launch payday for the
+   pre-existing unlocks). A real button — keyboard-operable, above the art. */
+.ach-claim {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(79, 140, 255, 0.18);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ach-claim:hover:not(:disabled) {
+  background: rgba(79, 140, 255, 0.32);
+}
+
+.ach-claim:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ach-claimed {
+  margin-top: 5px;
+  font-size: 10.5px;
+  color: var(--ok);
+  text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
+}
+
 /* ---- Rarity sheens ------------------------------------------------------ */
 
 /* Overlay pseudo-element above the whole face (art included), clipped by the
    inner's overflow: hidden. Oversized so the sweep can move the band without
    ever changing the element's box. */
-.ach-card.unlocked.rarity-legendary .ach-card-inner::after,
-.ach-card.unlocked.rarity-epic .ach-card-inner::after,
+.ach-card.unlocked.rarity-secret-rare .ach-card-inner::after,
+.ach-card.unlocked.rarity-ultra-rare .ach-card-inner::after,
+.ach-card.unlocked.rarity-super-rare .ach-card-inner::after,
 .ach-card.unlocked.rarity-rare .ach-card-inner::after {
   content: "";
   position: absolute;
@@ -173,13 +242,13 @@
   background-position: 50% 50%;
 }
 
-.ach-card.unlocked.rarity-legendary .ach-card-inner::after {
+.ach-card.unlocked.rarity-ultra-rare .ach-card-inner::after {
   background-image: var(--sheen-holo);
 }
 
-/* Epic: the same iridescent band, dialed down — a tier below legendary in
-   intensity, not a competing language (#123 shipped exactly two sheens). */
-.ach-card.unlocked.rarity-epic .ach-card-inner::after {
+/* Super-rare: the same iridescent band, dialed down — a tier below ultra-rare
+   in intensity, not a competing language (#123 shipped exactly two sheens). */
+.ach-card.unlocked.rarity-super-rare .ach-card-inner::after {
   background-image: var(--sheen-holo);
   opacity: 0.5;
 }
@@ -188,13 +257,32 @@
   background-image: var(--sheen-silver);
 }
 
+/* Secret Rare — the ONE deliberate top-tier treatment (#156, ADR-42): not a
+   fourth sheen but a whole card mood. A dark/negative frame (near-black
+   gradient replacing the default slate) throws the holo band into relief, and
+   a distinct luminous violet border sets it apart from every other tier at a
+   glance. Reserved for the extreme chain ends. */
+.ach-card.unlocked.rarity-secret-rare .ach-card-inner {
+  background: linear-gradient(160deg, #0b0b12, #060608);
+  border-color: rgba(190, 130, 255, 0.85);
+  box-shadow:
+    0 3px 12px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(190, 130, 255, 0.35),
+    0 0 18px rgba(150, 90, 255, 0.35);
+}
+
+.ach-card.unlocked.rarity-secret-rare .ach-card-inner::after {
+  background-image: var(--sheen-holo);
+}
+
 /* Borders grade with the tier too: the sheen alone is easy to miss on a
-   150px card, and this stays paint — no furniture added to the face. */
-.ach-card.unlocked.rarity-legendary .ach-card-inner {
+   150px card, and this stays paint — no furniture added to the face.
+   (secret-rare sets its own above.) */
+.ach-card.unlocked.rarity-ultra-rare .ach-card-inner {
   border-color: rgba(255, 190, 120, 0.55);
 }
 
-.ach-card.unlocked.rarity-epic .ach-card-inner {
+.ach-card.unlocked.rarity-super-rare .ach-card-inner {
   border-color: rgba(150, 170, 255, 0.45);
 }
 
@@ -206,10 +294,10 @@
    prefers-reduced-motion keeps every sheen painted but STATIC, with no
    specificity contest — the #62/#123 pattern.
 
-   Legendary drifts unprompted: the top tier is the one card on the shelf that
-   moves by itself, exactly like the standing drawn 5★ card. Epic and rare
-   sweep only on hover/focus — a grid of ten shimmering cards would be a
-   casino. */
+   Secret-rare and ultra-rare drift unprompted: the top tiers are the cards on
+   the shelf that move by themselves, exactly like the standing drawn 5★ card.
+   Super-rare and rare sweep only on hover/focus — a grid of shimmering cards
+   would be a casino. */
 @media (prefers-reduced-motion: no-preference) {
   @keyframes ach-sheen-drift {
     from {
@@ -220,12 +308,13 @@
     }
   }
 
-  .ach-card.unlocked.rarity-legendary .ach-card-inner::after {
+  .ach-card.unlocked.rarity-secret-rare .ach-card-inner::after,
+  .ach-card.unlocked.rarity-ultra-rare .ach-card-inner::after {
     animation: ach-sheen-drift 7s ease-in-out infinite alternate;
   }
 
-  .ach-card.unlocked.rarity-epic:hover .ach-card-inner::after,
-  .ach-card.unlocked.rarity-epic:focus-within .ach-card-inner::after,
+  .ach-card.unlocked.rarity-super-rare:hover .ach-card-inner::after,
+  .ach-card.unlocked.rarity-super-rare:focus-within .ach-card-inner::after,
   .ach-card.unlocked.rarity-rare:hover .ach-card-inner::after,
   .ach-card.unlocked.rarity-rare:focus-within .ach-card-inner::after {
     animation: ach-sheen-drift 3.5s ease-in-out infinite alternate;

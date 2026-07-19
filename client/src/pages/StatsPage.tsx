@@ -179,7 +179,7 @@ function AchievementsGrid() {
       </h3>
       <div className="ach-collection">
         {data.achievements.map((a) => (
-          <AchievementCard key={a.key} achievement={a} />
+          <AchievementCard key={a.key} achievement={a} claimable />
         ))}
       </div>
     </section>
