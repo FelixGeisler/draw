@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="streak_100-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3e1d13"/>
+      <stop offset=".5" stop-color="#241413"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="streak_100-glow" cx="50%" cy="54%" r="56%">
+      <stop offset="0" stop-color="#ff7a30" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ff7a30" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="streak_100-heat" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffb64f" stop-opacity=".6"/>
+      <stop offset="1" stop-color="#ffb64f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="streak_100-outer" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff5f3b"/>
+      <stop offset=".55" stop-color="#ff9a3c"/>
+      <stop offset="1" stop-color="#ffd36b"/>
+    </linearGradient>
+    <linearGradient id="streak_100-inner" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ffd36b"/>
+      <stop offset="1" stop-color="#fff3c4"/>
+    </linearGradient>
+    <radialGradient id="streak_100-core" cx="50%" cy="64%" r="56%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset=".45" stop-color="#fff3c4"/>
+      <stop offset="1" stop-color="#ffcf6b"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#streak_100-bg)"/>
+  <ellipse cx="150" cy="226" rx="150" ry="176" fill="url(#streak_100-glow)"/>
+  <ellipse cx="150" cy="236" rx="74" ry="98" fill="url(#streak_100-heat)"/>
+
+  <!-- radiant heat rays: a sunburst behind the blaze, alternating long/short -->
+  <g fill="#ffce85" opacity=".17">
+    <path d="M 150 -8 L 156 182 L 144 182 Z"/>
+    <path d="M 150 -8 L 156 182 L 144 182 Z" transform="rotate(45 150 214)"/>
+    <path d="M 150 -8 L 156 182 L 144 182 Z" transform="rotate(90 150 214)"/>
+    <path d="M 150 -8 L 156 182 L 144 182 Z" transform="rotate(135 150 214)"/>
+    <path d="M 150 -8 L 156 182 L 144 182 Z" transform="rotate(180 150 214)"/>
+    <path d="M 150 -8 L 156 182 L 144 182 Z" transform="rotate(225 150 214)"/>
+    <path d="M 150 -8 L 156 182 L 144 182 Z" transform="rotate(270 150 214)"/>
+    <path d="M 150 -8 L 156 182 L 144 182 Z" transform="rotate(315 150 214)"/>
+    <path d="M 150 60 L 154 186 L 146 186 Z" transform="rotate(22.5 150 214)"/>
+    <path d="M 150 60 L 154 186 L 146 186 Z" transform="rotate(67.5 150 214)"/>
+    <path d="M 150 60 L 154 186 L 146 186 Z" transform="rotate(112.5 150 214)"/>
+    <path d="M 150 60 L 154 186 L 146 186 Z" transform="rotate(157.5 150 214)"/>
+    <path d="M 150 60 L 154 186 L 146 186 Z" transform="rotate(202.5 150 214)"/>
+    <path d="M 150 60 L 154 186 L 146 186 Z" transform="rotate(247.5 150 214)"/>
+    <path d="M 150 60 L 154 186 L 146 186 Z" transform="rotate(292.5 150 214)"/>
+    <path d="M 150 60 L 154 186 L 146 186 Z" transform="rotate(337.5 150 214)"/>
+  </g>
+
+  <!-- outer blaze: a wide base rising into five licking tongues -->
+  <path d="M 150 340
+           C 112 338 82 316 74 280
+           C 70 258 72 240 80 214
+           C 86 190 88 172 94 156
+           C 98 164 106 168 112 172
+           C 118 150 121 124 126 98
+           C 130 118 138 122 142 128
+           C 148 104 149 74 154 44
+           C 159 74 162 104 166 126
+           C 170 116 173 112 178 96
+           C 183 120 188 156 192 170
+           C 198 166 203 166 208 156
+           C 214 174 216 196 220 214
+           C 228 240 230 258 226 280
+           C 218 316 188 338 150 340 Z"
+        fill="url(#streak_100-outer)"/>
+
+  <!-- inner blaze: same silhouette drawn back toward the heart -->
+  <path d="M 150 322
+           C 126 320 104 302 98 274
+           C 94 258 96 240 102 224
+           C 106 210 106 200 108 190
+           C 112 200 118 200 122 198
+           C 126 180 128 166 132 150
+           C 136 162 140 164 144 170
+           C 148 148 149 128 152 108
+           C 156 130 158 150 162 168
+           C 166 160 168 158 172 148
+           C 176 168 178 184 180 196
+           C 184 200 190 198 192 190
+           C 194 200 196 212 198 224
+           C 204 240 206 258 202 274
+           C 196 302 174 320 150 322 Z"
+        fill="url(#streak_100-inner)"/>
+
+  <!-- brilliant white-gold core -->
+  <path d="M 150 150
+           C 158 190 172 214 172 250
+           C 172 276 163 292 150 292
+           C 137 292 128 276 128 250
+           C 128 214 142 190 150 150 Z"
+        fill="url(#streak_100-core)"/>
+  <ellipse cx="150" cy="238" rx="11" ry="16" fill="#ffffff" opacity=".9"/>
+
+  <!-- many embers: one hundred days rising -->
+  <g fill="#ffb64f">
+    <circle cx="150" cy="26" r="4" opacity=".95"/>
+    <circle cx="126" cy="60" r="2.5" opacity=".7"/>
+    <circle cx="176" cy="64" r="3" opacity=".75"/>
+    <circle cx="110" cy="92" r="2" opacity=".6"/>
+    <circle cx="192" cy="96" r="2.5" opacity=".65"/>
+    <circle cx="80" cy="110" r="3" opacity=".8"/>
+    <circle cx="220" cy="110" r="3" opacity=".8"/>
+    <circle cx="58" cy="150" r="3" opacity=".7"/>
+    <circle cx="242" cy="150" r="3" opacity=".7"/>
+    <circle cx="64" cy="192" r="2" opacity=".55"/>
+    <circle cx="236" cy="190" r="2" opacity=".55"/>
+    <circle cx="46" cy="210" r="2.5" opacity=".6"/>
+    <circle cx="252" cy="210" r="2.5" opacity=".6"/>
+    <circle cx="70" cy="258" r="3.5" opacity=".75"/>
+    <circle cx="230" cy="258" r="3.5" opacity=".75"/>
+    <circle cx="52" cy="300" r="3" opacity=".6"/>
+    <circle cx="248" cy="300" r="3" opacity=".6"/>
+    <circle cx="88" cy="300" r="2.5" opacity=".55"/>
+    <circle cx="212" cy="300" r="2.5" opacity=".55"/>
+    <circle cx="150" cy="322" r="3" opacity=".6"/>
+  </g>
+
+  <!-- brighter accent sparks in a lighter tint -->
+  <g fill="#ffe3b0">
+    <circle cx="150" cy="30" r="2.2" opacity=".95"/>
+    <circle cx="74" cy="176" r="2" opacity=".8"/>
+    <circle cx="226" cy="176" r="2" opacity=".8"/>
+    <circle cx="150" cy="112" r="1.8" opacity=".85"/>
+  </g>
+</svg>

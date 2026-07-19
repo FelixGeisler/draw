@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="level_25-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2748"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="level_25-glow" cx="50%" cy="42%" r="54%">
+      <stop offset="0" stop-color="#ffe08a" stop-opacity=".46"/>
+      <stop offset=".5" stop-color="#4f8cff" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="level_25-star" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fffefa"/>
+      <stop offset=".45" stop-color="#ffe08a"/>
+      <stop offset="1" stop-color="#ffb64f"/>
+    </linearGradient>
+    <linearGradient id="level_25-comp" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9a8"/>
+      <stop offset="1" stop-color="#ffb64f"/>
+    </linearGradient>
+    <linearGradient id="level_25-trail" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe08a" stop-opacity="0"/>
+      <stop offset="1" stop-color="#ffe08a" stop-opacity=".5"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#level_25-bg)"/>
+  <ellipse cx="150" cy="172" rx="150" ry="160" fill="url(#level_25-glow)"/>
+
+  <!-- deep field -->
+  <g>
+    <circle cx="36" cy="64" r="1.6" fill="#8fb6ff" opacity=".6"/>
+    <circle cx="266" cy="52" r="1.8" fill="#8fb6ff" opacity=".55"/>
+    <circle cx="286" cy="150" r="1.4" fill="#ffe08a" opacity=".5"/>
+    <circle cx="18" cy="150" r="1.4" fill="#ffe08a" opacity=".45"/>
+    <circle cx="70" cy="344" r="1.6" fill="#8fb6ff" opacity=".5"/>
+    <circle cx="236" cy="352" r="1.6" fill="#8fb6ff" opacity=".45"/>
+  </g>
+
+  <!-- the climb: a higher ascent -->
+  <g stroke="#2c3040" stroke-width="3" stroke-linecap="round">
+    <path d="M90 404 H210" opacity=".9"/>
+    <path d="M97 378 H203" opacity=".78"/>
+    <path d="M104 352 H196" opacity=".66"/>
+    <path d="M111 326 H189" opacity=".54"/>
+    <path d="M118 300 H182" opacity=".42"/>
+    <path d="M125 274 H175" opacity=".31"/>
+    <path d="M132 248 H168" opacity=".22"/>
+  </g>
+
+  <!-- ascent trail -->
+  <path d="M139 300 L150 250 L161 300 Z" fill="url(#level_25-trail)"/>
+
+  <!-- constellation lines -->
+  <g stroke="#ffe08a" stroke-opacity=".24" stroke-width="1.2" stroke-linecap="round" fill="none">
+    <path d="M150 40 L150 88"/>
+    <path d="M150 40 L78 92"/>
+    <path d="M150 40 L232 100"/>
+    <path d="M78 92 L64 152.5"/>
+    <path d="M232 100 L236 152.5"/>
+    <path d="M78 92 L42 204"/>
+    <path d="M232 100 L258 208"/>
+    <path d="M42 204 L64 152.5"/>
+    <path d="M258 208 L236 152.5"/>
+    <path d="M42 204 L97 256"/>
+    <path d="M258 208 L203 256"/>
+  </g>
+
+  <!-- companion stars of the constellation -->
+  <g>
+    <g transform="translate(150 40) scale(.143)">
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="#0d1017" opacity=".5" transform="translate(6 10)"/>
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="url(#level_25-comp)"/>
+    </g>
+    <g transform="translate(78 92) scale(.179)">
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="#0d1017" opacity=".5" transform="translate(6 10)"/>
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="url(#level_25-comp)"/>
+    </g>
+    <g transform="translate(232 100) scale(.167)">
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="#0d1017" opacity=".5" transform="translate(6 10)"/>
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="url(#level_25-comp)"/>
+    </g>
+    <g transform="translate(258 208) scale(.131)">
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="#0d1017" opacity=".5" transform="translate(6 10)"/>
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="url(#level_25-comp)"/>
+    </g>
+    <g transform="translate(42 204) scale(.143)">
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="#0d1017" opacity=".5" transform="translate(6 10)"/>
+      <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="url(#level_25-comp)"/>
+    </g>
+  </g>
+
+  <!-- one large hero star, risen at the heart of the constellation -->
+  <g transform="translate(150 172)">
+    <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="#0d1017" opacity=".5" transform="translate(4 9)"/>
+    <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 L-53 84 L-40 21.5 L-86 -19.5 L-24.7 -26 Z" fill="url(#level_25-star)"/>
+    <path d="M0 -84 L24.7 -26 L86 -19.5 L40 21.5 L53 84 L0 52 Z" fill="#000" opacity=".14"/>
+    <path d="M0 -54 L15 -18 L54 -13 L25 13 L33 53 L0 33 Z" fill="#fff6dc" opacity=".38"/>
+  </g>
+
+  <!-- attendant sparks -->
+  <g fill="#ffe08a">
+    <circle cx="60" cy="120" r="3" opacity=".8"/>
+    <circle cx="244" cy="140" r="2.5" opacity=".7"/>
+    <circle cx="52" cy="250" r="2" opacity=".5"/>
+    <circle cx="250" cy="258" r="2.5" opacity=".55"/>
+    <circle cx="150" cy="360" r="2" opacity=".5"/>
+  </g>
+</svg>

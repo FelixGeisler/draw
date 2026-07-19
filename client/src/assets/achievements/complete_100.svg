@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="complete_100-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#14271c"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="complete_100-glow" cx="50%" cy="45%" r="52%">
+      <stop offset="0" stop-color="#3fbf7f" stop-opacity=".46"/>
+      <stop offset="1" stop-color="#3fbf7f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="complete_100-check" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7fe3ae"/>
+      <stop offset="1" stop-color="#2e9a63"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#complete_100-bg)"/>
+  <ellipse cx="150" cy="194" rx="150" ry="158" fill="url(#complete_100-glow)"/>
+
+  <!-- grid of completed checks (the filled checklist) -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#0d1017" stroke-opacity=".5" stroke-width="10" transform="translate(1 3)">
+      <path d="M76 83 L92 100 L127 56"/>
+      <path d="M134 83 L150 100 L185 56"/>
+      <path d="M192 83 L208 100 L243 56"/>
+      <path d="M76 135 L92 152 L127 108"/>
+      <path d="M134 135 L150 152 L185 108"/>
+      <path d="M192 135 L208 152 L243 108"/>
+      <path d="M76 187 L92 204 L127 160"/>
+      <path d="M134 187 L150 204 L185 160"/>
+      <path d="M192 187 L208 204 L243 160"/>
+    </g>
+    <g stroke="url(#complete_100-check)" stroke-width="9">
+      <path d="M76 83 L92 100 L127 56"/>
+      <path d="M134 83 L150 100 L185 56"/>
+      <path d="M192 83 L208 100 L243 56"/>
+      <path d="M76 135 L92 152 L127 108"/>
+      <path d="M134 135 L150 152 L185 108"/>
+      <path d="M192 135 L208 152 L243 108"/>
+      <path d="M76 187 L92 204 L127 160"/>
+      <path d="M134 187 L150 204 L185 160"/>
+      <path d="M192 187 L208 204 L243 160"/>
+    </g>
+  </g>
+
+  <!-- hero check crowning the field -->
+  <g>
+    <path d="M114 283 L150 320 L228 221" fill="none" stroke="#0d1017" stroke-opacity=".55" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" transform="translate(3 7)"/>
+    <path d="M114 283 L150 320 L228 221" fill="none" stroke="url(#complete_100-check)" stroke-width="19" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M114 283 L150 320 L228 221" fill="none" stroke="#d6ffe9" stroke-opacity=".55" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -6)"/>
+  </g>
+
+  <!-- momentum sparks -->
+  <g fill="#8fe8b8">
+    <circle cx="238" cy="211" r="4" opacity=".9"/>
+    <circle cx="252" cy="234" r="2.5" opacity=".6"/>
+    <circle cx="222" cy="204" r="2.5" opacity=".55"/>
+    <circle cx="90" cy="300" r="2" opacity=".45"/>
+  </g>
+</svg>
