@@ -523,6 +523,51 @@ describe("task CRUD and breakdown rule", () => {
       .expect(400);
   });
 
+  it("creates generate-tasks roots when the umbrella is toggled off (issue #161)", async () => {
+    // The umbrella-off accept path (#161) loops POST /api/tasks per leaf as
+    // goal-linked ROOTS through the same createTaskWrite core the umbrella and
+    // plan-backward paths use — so the ADR-4 impact gate holds identically: a
+    // goal-linked root may carry per-task impact, a goal-less one may not.
+    const goal = (await request(app).post("/api/goals").send({ title: "Machine Learning" })).body;
+    const leaves = [
+      { title: "Derive the gradient", impact: 5, effortMinutes: 25, description: "Exercise 1 · 8 pts · ~25 min · ml.pdf" },
+      { title: "Implement backprop", impact: 4, effortMinutes: 40, description: "Exercise 2 · 6 pts · ~40 min · ml.pdf" },
+    ];
+    const created = [];
+    for (const leaf of leaves) {
+      created.push(
+        (
+          await request(app)
+            .post("/api/tasks")
+            .send({ ...leaf, categoryId: 1, goalId: goal.id })
+            .expect(201)
+        ).body,
+      );
+    }
+    // Each is a goal-linked ROOT (no parent) with its reviewed impact and the
+    // provenance description preserved — never a container child.
+    for (const [i, task] of created.entries()) {
+      expect(task.parentId).toBeNull();
+      expect(task.goalId).toBe(goal.id);
+      expect(task.impact).toBe(leaves[i].impact);
+      expect(task.description).toBe(leaves[i].description);
+    }
+    // They land as top-level rows on the goal, no umbrella parent between them.
+    const roots = (await request(app).get(`/api/tasks?goalId=${goal.id}`).expect(200)).body;
+    expect(roots.map((t: { title: string }) => t.title).sort()).toEqual(
+      ["Derive the gradient", "Implement backprop"],
+    );
+    expect(roots.every((t: { subtasks: unknown[] }) => t.subtasks.length === 0)).toBe(true);
+
+    // The gate still bites: the identical payload WITHOUT a goal is rejected,
+    // so toggling the umbrella off never becomes a way to smuggle goal-less
+    // impact past ADR-4.
+    await request(app)
+      .post("/api/tasks")
+      .send({ title: "Ungrounded leaf", categoryId: 1, impact: 5 })
+      .expect(400);
+  });
+
   it("rejects an impact change on a goal-less task via PATCH (issue #65)", async () => {
     const task = (
       await request(app).post("/api/tasks").send({ title: "No-goal target", categoryId: 1 })

@@ -312,6 +312,7 @@ function GoalCard({
       {aiPanel === "generate" && (
         <AiGenerateTasksPanel
           goalId={goal.id}
+          goalTitle={goal.title}
           categoryId={planCategoryId ?? defaultCategory}
           onClose={() => setAiPanel(null)}
         />

@@ -46,6 +46,9 @@
 |*Container*
 |A task with open subtasks; never drawn itself
 
+|*Umbrella task*
+|The container parent a generate-tasks import can be grouped under (ADR-16): created unestimated so it classifies as a Container, with each leaf carrying a provenance description and the whole set folding under it (#30). Optional since #161 — the review panel's "Group under one parent task" toggle defaults ON at ≥5 accepted leaves and OFF below; off, the accepted tasks are created as goal-linked roots instead. Its default title derives from the goal ("Machine Learning — generated plan"), always editable before accepting
+
 |*Snooze*
 |Timed removal from the deck: `deferred_until` in the future. Expires with no write — the retained timestamp becomes the wake time for staleness (ADR-17)
 
