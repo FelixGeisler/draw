@@ -19,7 +19,10 @@ function stubMatchMedia(matches: boolean) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // Two independent vi.fn()s glued by Object.assign — clearing one does not
+  // cascade to the other; both are cleared so no assert is order-dependent.
   confettiMock.mockClear();
+  resetMock.mockClear();
 });
 
 describe("prefersReducedMotion", () => {
