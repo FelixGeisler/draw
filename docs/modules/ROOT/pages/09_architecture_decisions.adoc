@@ -533,14 +533,19 @@ function (`localDayOf`, offset injectable for tests); SQL only pre-filters on
 a UTC window widened by a day per side. Tracked minutes reuse the stats
 `MINUTES_EXPR` (running entries count up to now); midnight-spanning entries
 attribute to their start day; per-day `totals` ride along for day-level
-consumers (born for the #54 heatmap; the merged Stats page's skyline host
-keeps consuming them since #155/ADR-41).
+consumers (born for the #54 heatmap; the merged Stats page's activity view
+keeps consuming them — the skyline through #155/ADR-41, the History
+contribution calendar since #174/ADR-44).
 Accepted limitation: deleting a task cascades its entries/completions away and
 with them its history — we do not add write-path tracking to preserve it.
 *Rationale:* Deriving keeps history incapable of contradicting its sources
 (no counters to drift, reopen/undo just works), and local-day bucketing puts a
 23:30 task on that evening's tower — the emotional ledger the feature exists
 for.
+
+*Amendment (#174):* the read model and local-day bucketing described here are
+unchanged; only the UI consuming them changed — the house-of-cards skyline
+became the History contribution calendar (ADR-44).
 
 == ADR-22: Card art as sanitized, model-written SVG — cached once per task
 
@@ -1027,7 +1032,7 @@ from `completions.was_warmup` rows at completion time, never stored —
 reopening the warm-up deletes its completion and disarms momentum
 automatically (ADR-2/ADR-5). (f) Display derivations agree with the XP:
 everywhere a completion is surfaced as "drawn" — the trophy pile's rarity
-and "(drawn)" label (#62), the History skyline — drawn-ness reads
+and "(drawn)" label (#62), the History calendar — drawn-ness reads
 `was_drawn AND NOT was_warmup` at query time. The completion row keeps both
 raw facts (the card WAS the persisted current draw, and it got there by
 deal), so a warm-up impact-5 completion mints no foil, exactly as it earns
@@ -1102,6 +1107,10 @@ clock, not the frame. Follow-ups noted in their issues: the skyline
 mini-cards (#53) and the daily hand (#59) adopt the frame when built.
 *Amendment (#147):* the daily hand was since removed (ADR-39) — that
 follow-up is void; the skyline mini-cards note stands.
+
+*Amendment (#174):* the skyline was itself replaced by the History
+contribution calendar (ADR-44), whose day detail is a plain docked list rather
+than TCG mini-cards — so the mini-cards follow-up is now void too.
 
 == ADR-32: Parent-task lifecycle follows the subtasks — derived effort, auto-complete at a symbolic 1 XP, reopen on new subtasks
 
@@ -1212,8 +1221,9 @@ text-heavy top/bottom edges, chips get a solid backing, title/description a
 text-shadow); the degraded no-art state keeps the previous gradient face
 and hides the #113 regenerate control exactly as before (#27).
 (c) Holo: drawn 5★ goal-linked cards shimmer — an iridescent overlay
-(`.draw-holo` on the standing card, rarity tier `holo` in the pile and the
-history skyline), oversized rainbow gradient at low opacities, slow drift
+(`.draw-holo` on the standing card, rarity tier `holo` in the pile; the
+History calendar marks the same rarity as a corner gem, ADR-44), oversized
+rainbow gradient at low opacities, slow drift
 gated behind `prefers-reduced-motion: no-preference` (reduced motion keeps
 the STATIC sheen). Holo REPLACES the #107 foil tier one-to-one — same
 predicate (`wasDrawn AND impact 5`; warm-up deals stay excluded, so display
@@ -1714,6 +1724,11 @@ scrollable ledger of individually mis-estimated tasks is only
 retrospection. The redirect keeps muscle memory and old links working at
 zero maintenance cost.
 
+*Amendment (#174):* the extracted `Skyline.tsx` was itself later replaced by
+`HistoryCalendar.tsx` — the Stats page keeps the same activity-view slot and the
+same `/api/activity` data, now rendered as a GitHub-style contribution calendar
+instead of card towers (ADR-44).
+
 == ADR-42: Achievement chains — the draws log, claim-for-XP as a second stored XP source, and the 5-tier ladder
 
 *Context:* Achievements were eleven one-off unlocks with a client-only
@@ -1846,3 +1861,37 @@ the renormalize path bounds the precision cost that a purely-fractional scheme
 would otherwise accrue. Deriving hold-back from the stored order (rather than
 storing a second "is exposed" flag) keeps every mutation path automatically
 correct, the ADR-2 argument once more.
+
+== ADR-44: History becomes a contribution calendar — same endpoint, a heatmap in place of the skyline
+
+*Context:* ADR-21's activity history first rendered as the house-of-cards
+skyline (#53): one tower of cards per local day. At any sustained cadence the
+towers stood one or two cards tall, the per-card TCG detail was unreadable at
+that size, and the floating card details clipped at the scroll edges. The
+record underneath — `GET /api/activity`, dense per-local-day cards and totals —
+carried far more than the towers could show.
+
+*Decision:* Replace the skyline with a GitHub-style contribution calendar
+(#174) WITHOUT touching the data model. Unchanged: the `/api/activity` contract,
+the read-side derivation (`activityService.buildActivityDays`), local-day
+bucketing (ADR-21), and the `(wasDrawn, impact)` rarity derivation (#62). New on
+the client is `components/HistoryCalendar.tsx` over a pure, unit-tested
+`lib/historyCalendar.ts` (the buildActivityDays split, kept DOM- and clock-free).
+One tile per local day in Monday-first week columns, shaded by an intensity
+level (0–4, blending tracked minutes with completion count); a day's rarest
+completion shows as a corner gem (holo/silver) rather than the holo/silver
+sheen; the per-day detail — which tasks, completed vs. worked-but-unfinished,
+XP, rarity — docks into a panel (a keyboard live region), not a floating card,
+so it cannot clip. "Load earlier" widens the window in 26-week steps to the same
+ten-year `MAX_RANGE_DAYS` cap. `Skyline.tsx/.css` and their E2E spec are
+deleted; the now-orphaned `--sheen-*-dense` CSS pair is left for a separate
+cleanup.
+
+*Rationale:* The calendar reads a year at a glance where the tower metaphor
+never scaled past a few weeks and buried the record it sat on. Because the
+endpoint and derivation are untouched, this is a pure client re-render — no
+migration, no server change, and the local-day and rarity invariants carry over
+verbatim. The docked detail panel is a strictly more robust successor to the
+floating card details (no edge clipping, and it doubles as an accessible live
+region). Supersedes the skyline as the Stats activity view established by
+ADR-41.

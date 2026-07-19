@@ -10,7 +10,7 @@ function isValidDate(s: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
-/** Today as a LOCAL date — the skyline buckets by local day, unlike stats. */
+/** Today as a LOCAL date — the History calendar buckets by local day, unlike stats. */
 function localToday(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");

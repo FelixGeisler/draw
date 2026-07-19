@@ -4,8 +4,8 @@ import type express from "express";
 import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
 
-// GET /api/activity (#53): per-local-day card derivation for the history
-// skyline. Same-day flows go through the real API routes (create task, timer
+// GET /api/activity (#53): per-local-day card derivation behind the History
+// calendar. Same-day flows go through the real API routes (create task, timer
 // start/stop, PATCH done); multi-day scenarios backdate rows directly via
 // testDb() — noon timestamps keep the local day unambiguous for any |offset|
 // < 12h, and expected day strings come from the same local formatter the
@@ -94,7 +94,7 @@ describe("face-down permanence across days", () => {
     });
   });
 
-  it("rolls the per-day totals the skyline's axis tooltips ride on", async () => {
+  it("rolls the per-day totals the History calendar rides on", async () => {
     const from = localDay(noonDaysAgo(2));
     const days = await getDays(from, localDay(noonDaysAgo(1)));
     expect(days[0].totals).toEqual({ started: 1, completed: 0, minutes: 30, xp: 0 });
@@ -115,7 +115,7 @@ describe("today via the real API routes", () => {
   });
 
   it("exposes the rarity facts (impact, wasDrawn) on every card (#62)", async () => {
-    // Contract guard: the skyline derives holo/silver at render time from
+    // Contract guard: the History calendar derives holo/silver at render time from
     // exactly these two fields — impact rides the live tasks join (like
     // title), wasDrawn folds out of the completions log. Nothing is stored.
     const goal = (await request(app).post("/api/goals").send({ title: "rarity goal" })).body;

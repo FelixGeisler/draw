@@ -29,7 +29,7 @@ export type Feasibility =
 
 /**
  * Days until the END of the target day, on the LOCAL wall clock — a target
- * date is a human-facing calendar day like streaks and the activity skyline
+ * date is a human-facing calendar day like streaks and the activity history
  * (ADR-21 local-day precedent), not a UTC instant. Lifted out of GoalsPage's
  * days-left chip so the chip and the classifier can never disagree.
  * Today → 1, tomorrow → 2, yesterday → 0 or less.

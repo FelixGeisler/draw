@@ -1,9 +1,11 @@
 import { db } from "../db.js";
 import { MINUTES_EXPR } from "./statsService.js";
 
-// House-of-cards skyline (#53): a browsable per-day history of started and
-// completed tasks, derived entirely from time_entries and completions — no
-// new write path, no stored history (ADR-21).
+// Activity history behind the Stats page's History calendar (#53; a
+// contribution calendar since #174, originally the house-of-cards skyline):
+// a browsable per-day record of started and completed tasks, derived entirely
+// from time_entries and completions — no new write path, no stored history
+// (ADR-21). This read model is UI-agnostic and unchanged across #174.
 
 export interface ActivityEntryRow {
   taskId: number;
@@ -59,9 +61,9 @@ export function addDays(dateStr: string, n: number): string {
 }
 
 /**
- * Local calendar day of a UTC instant. The skyline is a human-facing record —
- * a task started 23:30 local belongs to that evening's tower even though its
- * UTC date is already tomorrow (same choice as the streak logic's
+ * Local calendar day of a UTC instant. The History calendar is a human-facing
+ * record — a task started 23:30 local belongs to that evening's cell even
+ * though its UTC date is already tomorrow (same choice as the streak logic's
  * date(..., 'localtime') in gamificationService, NOT the UTC bucketing of
  * stats.ts). `offsetMinutes` is injectable so unit tests can pin the
  * midnight-boundary behavior on any machine; it defaults to the server's own
@@ -92,8 +94,9 @@ interface CardAcc {
  * yields a face-down card — permanently: completing on a later day earns THAT
  * day an upright card while the earlier face-down card stays. One card per
  * (task, day) no matter how many entries; minutes sum. Every day in
- * [from, to] appears — an empty day is a visible gap in the skyline, which is
- * the point. Callers must supply meta for every referenced task.
+ * [from, to] appears — an empty day is a visible (faint, level-0) tile in the
+ * History calendar, which is the point. Callers must supply meta for every
+ * referenced task.
  */
 export function buildActivityDays(
   entries: ActivityEntryRow[],
@@ -166,8 +169,8 @@ export function buildActivityDays(
     days.push({
       date: day,
       cards,
-      // `started` = tower height (cards laid that day, incl. completion-only
-      // ones) — the skyline's axis tooltip and empty-state check ride on it.
+      // `started` = cards laid that day (incl. completion-only ones) — the
+      // History calendar's intensity level and empty-state check ride on it.
       totals: {
         started: cards.length,
         completed: cards.filter((c) => c.completed).length,
@@ -198,7 +201,7 @@ export function computeActivity(from: string, to: string): ActivityDay[] {
     .all(lo, hi) as ActivityEntryRow[];
 
   // Drawn-ness reads was_drawn AND NOT was_warmup, matching the gamification
-  // surface (ADR-30): a warm-up deal earns no skyline rarity or 🃏 either.
+  // surface (ADR-30): a warm-up deal earns no History-calendar rarity or 🃏 either.
   const completions = db
     .prepare(
       `SELECT co.task_id AS taskId, co.completed_at AS completedAt,

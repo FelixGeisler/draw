@@ -21,7 +21,7 @@ export function useStartTimer() {
     mutationFn: (taskId: number) => api.post<{ ok: boolean }>(`/api/tasks/${taskId}/timer/start`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["timer"] });
-      // Starting a timer lays a (face-down) card into today's skyline tower.
+      // Starting a timer lights up today's cell in the History calendar (Stats).
       qc.invalidateQueries({ queryKey: ["activity"] });
       // Goal cards derive trackedMinutes14d from time_entries (#60), and a
       // running entry already counts toward the window via MINUTES_EXPR.

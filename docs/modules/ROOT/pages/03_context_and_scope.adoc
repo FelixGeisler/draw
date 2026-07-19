@@ -13,7 +13,7 @@ Person(user, "User", "Plans work, draws cards, tracks time")
 System_Ext(mcpClient, "MCP client", "Claude Code / Claude Desktop —\nconverses, approves every write")
 
 System_Boundary(draw, "Draw (localhost only)") {
-  Container(client, "Client", "React 19 + Vite SPA", "Draw page, tasks (capture-first),\ngoals, stats (incl. the history skyline)")
+  Container(client, "Client", "React 19 + Vite SPA", "Draw page, tasks (capture-first),\ngoals, stats (incl. the History contribution calendar)")
   Container(server, "Server", "Express 5 + better-sqlite3", "REST API, domain services,\nSQLite + uploaded files")
   Container(mcpServer, "MCP server", "stdio JSON-RPC adapter", "Domain tools + resources;\nno domain logic, never opens the DB")
 }
