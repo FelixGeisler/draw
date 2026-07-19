@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
-import confetti from "canvas-confetti";
 import type { Goal } from "../api/types";
+import { celebrate, prefersReducedMotion, resetCelebration } from "../lib/celebrate";
 import { useModalFocus } from "../hooks/useModalFocus";
 import { formatResolvedDate, formatTrackedMinutes, targetDelta } from "../lib/goalShelf";
 import "./VictoryOverlay.css";
@@ -31,21 +31,23 @@ export function VictoryOverlay({ goal, onClose }: { goal: Goal; onClose: () => v
   // an Escape half a second in must not leave particles raining on an
   // overlay that is no longer there.
   useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    confetti({ particleCount: 160, spread: 100, origin: { y: 0.6 } });
+    // Decide once, up front (#152): celebrate()'s per-burst gate would skip
+    // the cannons anyway, but scheduling timers for no-op bursts is noise.
+    if (prefersReducedMotion()) return;
+    celebrate({ particleCount: 160, spread: 100, origin: { y: 0.6 } });
     const cannons = [
       setTimeout(
-        () => confetti({ particleCount: 60, angle: 60, spread: 70, origin: { x: 0, y: 0.7 } }),
+        () => celebrate({ particleCount: 60, angle: 60, spread: 70, origin: { x: 0, y: 0.7 } }),
         250,
       ),
       setTimeout(
-        () => confetti({ particleCount: 60, angle: 120, spread: 70, origin: { x: 1, y: 0.7 } }),
+        () => celebrate({ particleCount: 60, angle: 120, spread: 70, origin: { x: 1, y: 0.7 } }),
         400,
       ),
     ];
     return () => {
       for (const cannon of cannons) clearTimeout(cannon);
-      confetti.reset();
+      resetCelebration();
     };
   }, []);
 
