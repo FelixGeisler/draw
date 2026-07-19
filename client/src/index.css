@@ -18,16 +18,9 @@
      the quiet one below it; opacities stay low everywhere — a glint you notice
      when you look, not a casino.
 
-     Two scales, because one band cannot serve a 235px card and a tiny tile.
-     The default pair is tuned for card-sized surfaces (90x126 and up), which
-     oversize the band (background-size: 250%) so a drift/sweep can move it
-     without ever changing the element's box. The -dense pair below is the same
-     band — same 115deg, same hue order, same structure — compressed and
-     strengthened for tiny static surfaces (built for the old skyline towers).
-     Change a hue here and both scales follow; only the width/alpha differ.
-     NOTE: #174 replaced the skyline with the History calendar, which marks
-     rarity with a corner gem rather than a sheen, so the -dense pair below has
-     no consumer at present — kept pending a separate cleanup. */
+     Card-sized surfaces (90x126 and up) oversize the band
+     (background-size: 250%) so a drift/sweep can move it without ever changing
+     the element's box. */
   --sheen-holo: linear-gradient(
     115deg,
     transparent 20%,
@@ -43,30 +36,6 @@
     rgba(214, 224, 240, 0.09) 42%,
     rgba(255, 255, 255, 0.14) 50%,
     rgba(214, 224, 240, 0.09) 58%,
-    transparent 70%
-  );
-
-  /* The old skyline towers were 52px wide and as short as 20px, and painted the
-     band at its natural size (no sweep to hide, so no 250% oversize). At that
-     scale the card-tuned band above spread its stops across ~10px and landed
-     near-invisible, so these run a narrower band at ~1.4x (holo) / ~1.7x
-     (silver) alpha to read at all. Deliberately denser, not a fork: same
-     language, small-surface scale. Orphaned since #174 (see the note above). */
-  --sheen-holo-dense: linear-gradient(
-    115deg,
-    transparent 25%,
-    rgba(255, 110, 199, 0.22) 38%,
-    rgba(255, 226, 130, 0.18) 46%,
-    rgba(120, 255, 214, 0.2) 54%,
-    rgba(120, 170, 255, 0.22) 62%,
-    transparent 75%
-  );
-  --sheen-silver-dense: linear-gradient(
-    115deg,
-    transparent 30%,
-    rgba(220, 228, 244, 0.16) 42%,
-    rgba(255, 255, 255, 0.24) 50%,
-    rgba(220, 228, 244, 0.16) 58%,
     transparent 70%
   );
 

@@ -1970,8 +1970,7 @@ sheen; the per-day detail — which tasks, completed vs. worked-but-unfinished,
 XP, rarity — docks into a panel (a keyboard live region), not a floating card,
 so it cannot clip. "Load earlier" widens the window in 26-week steps to the same
 ten-year `MAX_RANGE_DAYS` cap. `Skyline.tsx/.css` and their E2E spec are
-deleted; the now-orphaned `--sheen-*-dense` CSS pair is left for a separate
-cleanup.
+deleted.
 
 *Rationale:* The calendar reads a year at a glance where the tower metaphor
 never scaled past a few weeks and buried the record it sat on. Because the
