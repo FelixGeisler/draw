@@ -129,18 +129,24 @@ test("the shine sweep runs only while lifted, and reduced motion stills it", asy
   expect(bg).toContain("linear-gradient");
 });
 
-test("the stats-page skyline reuses the tiers on its upright cards", async ({ page }) => {
+test("the stats-page History calendar reuses the tiers on the day's tile and detail", async ({
+  page,
+}) => {
   await page.goto("/stats");
 
-  // Today's tower sits at the right end, where the skyline opens.
-  const holoSky = page.locator(`.hoc-card[aria-label*="${HOLO_TITLE}"]`);
-  await expect(holoSky).toHaveClass(/rarity-holo/);
-  await expect(holoSky).toHaveAttribute("aria-label", /holo$/);
+  // All three completions landed today, so today's tile wears the day's RAREST
+  // completion (holo) — its glint and its aria-label both name it.
+  const cell = page.locator(".cal-cell.today");
+  await expect(cell).toHaveClass(/rarity-holo/);
+  await expect(cell).toHaveAttribute("aria-label", /holo$/);
 
-  const silverSky = page.locator(`.hoc-card[aria-label*="${SILVER_TITLE}"]`);
-  await expect(silverSky).toHaveClass(/rarity-silver/);
-
-  const plainSky = page.locator(`.hoc-card[aria-label*="${PLAIN_TITLE}"]`);
-  await expect(plainSky).toBeVisible();
-  await expect(plainSky).not.toHaveClass(/rarity-/);
+  // The docked detail keeps EACH card's own tier: holo, silver, and a plain
+  // completion with no tier word at all.
+  await cell.hover();
+  const detail = page.locator(".cal-detail");
+  await expect(detail.locator(".cal-detail-card", { hasText: HOLO_TITLE })).toContainText("holo");
+  await expect(detail.locator(".cal-detail-card", { hasText: SILVER_TITLE })).toContainText("silver");
+  const plainLine = detail.locator(".cal-detail-card", { hasText: PLAIN_TITLE });
+  await expect(plainLine).toBeVisible();
+  await expect(plainLine).not.toContainText(/holo|silver/);
 });
