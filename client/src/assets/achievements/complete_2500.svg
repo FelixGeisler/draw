@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="complete_2500-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d2417"/>
+      <stop offset="1" stop-color="#0b0c12"/>
+    </linearGradient>
+    <radialGradient id="complete_2500-glow" cx="50%" cy="44%" r="56%">
+      <stop offset="0" stop-color="#3fbf7f" stop-opacity=".58"/>
+      <stop offset="1" stop-color="#3fbf7f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="complete_2500-core" cx="50%" cy="44%" r="30%">
+      <stop offset="0" stop-color="#7fe3ae" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#7fe3ae" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="complete_2500-ray" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#6fe0a4" stop-opacity="0"/>
+      <stop offset="1" stop-color="#3fbf7f" stop-opacity=".42"/>
+    </linearGradient>
+    <linearGradient id="complete_2500-check" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7fe3ae"/>
+      <stop offset="1" stop-color="#2e9a63"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#complete_2500-bg)"/>
+  <ellipse cx="150" cy="185" rx="158" ry="168" fill="url(#complete_2500-glow)"/>
+  <ellipse cx="150" cy="185" rx="90" ry="96" fill="url(#complete_2500-core)"/>
+
+  <!-- radiant sunburst -->
+  <g fill="url(#complete_2500-ray)">
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(0 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(30 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(60 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(90 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(120 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(150 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(180 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(210 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(240 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(270 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(300 150 190)"/>
+    <path d="M150 18 L146 190 L154 190 Z" transform="rotate(330 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(15 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(45 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(75 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(105 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(135 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(165 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(195 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(225 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(255 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(285 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(315 150 190)"/>
+    <path d="M150 66 L147 190 L153 190 Z" transform="rotate(345 150 190)"/>
+  </g>
+
+  <!-- field of tallies at the base -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <g stroke="#0d1017" stroke-opacity=".5" stroke-width="8" transform="translate(1 3)">
+      <path d="M53 341 L64 352 L88 322"/>
+      <path d="M97 341 L108 352 L132 322"/>
+      <path d="M141 341 L152 352 L176 322"/>
+      <path d="M185 341 L196 352 L220 322"/>
+      <path d="M229 341 L240 352 L264 322"/>
+      <path d="M53 377 L64 388 L88 358"/>
+      <path d="M97 377 L108 388 L132 358"/>
+      <path d="M141 377 L152 388 L176 358"/>
+      <path d="M185 377 L196 388 L220 358"/>
+      <path d="M229 377 L240 388 L264 358"/>
+    </g>
+    <g stroke="url(#complete_2500-check)" stroke-width="6">
+      <path d="M53 341 L64 352 L88 322"/>
+      <path d="M97 341 L108 352 L132 322"/>
+      <path d="M141 341 L152 352 L176 322"/>
+      <path d="M185 341 L196 352 L220 322"/>
+      <path d="M229 341 L240 352 L264 322"/>
+      <path d="M53 377 L64 388 L88 358"/>
+      <path d="M97 377 L108 388 L132 358"/>
+      <path d="M141 377 L152 388 L176 358"/>
+      <path d="M185 377 L196 388 L220 358"/>
+      <path d="M229 377 L240 388 L264 358"/>
+    </g>
+  </g>
+
+  <!-- grand central hero check -->
+  <g>
+    <path d="M98 183 L145 232 L248 101" fill="none" stroke="#0d1017" stroke-opacity=".55" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" transform="translate(3 9)"/>
+    <path d="M98 183 L145 232 L248 101" fill="none" stroke="url(#complete_2500-check)" stroke-width="25" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M98 183 L145 232 L248 101" fill="none" stroke="#d6ffe9" stroke-opacity=".6" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -8)"/>
+  </g>
+
+  <!-- crowning glint -->
+  <path d="M248 78 L251 97 L270 101 L251 105 L248 124 L245 105 L226 101 L245 97 Z" fill="#eafff4" opacity=".85"/>
+
+  <!-- sparks -->
+  <g fill="#8fe8b8">
+    <circle cx="262" cy="118" r="3" opacity=".85"/>
+    <circle cx="234" cy="82" r="3" opacity=".7"/>
+    <circle cx="150" cy="38" r="3" opacity=".6"/>
+    <circle cx="60" cy="150" r="2.5" opacity=".55"/>
+    <circle cx="250" cy="184" r="2.5" opacity=".5"/>
+    <circle cx="92" cy="250" r="2" opacity=".45"/>
+    <circle cx="208" cy="252" r="2" opacity=".45"/>
+  </g>
+</svg>

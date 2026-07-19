@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="draw_10000-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16274d"/>
+      <stop offset=".5" stop-color="#0e1424"/>
+      <stop offset="1" stop-color="#080a10"/>
+    </linearGradient>
+    <radialGradient id="draw_10000-glow" cx="50%" cy="49%" r="62%">
+      <stop offset="0" stop-color="#4f8cff" stop-opacity=".6"/>
+      <stop offset=".7" stop-color="#3a6adf" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#3a6adf" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="draw_10000-core" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".98"/>
+      <stop offset=".28" stop-color="#cfe1ff" stop-opacity=".9"/>
+      <stop offset=".6" stop-color="#6fa1ff" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="draw_10000-face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2f6ff"/>
+      <stop offset="1" stop-color="#a9c0ea"/>
+    </linearGradient>
+    <linearGradient id="draw_10000-back" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b3348"/>
+      <stop offset="1" stop-color="#1d2331"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#draw_10000-bg)"/>
+  <ellipse cx="150" cy="206" rx="180" ry="196" fill="url(#draw_10000-glow)"/>
+
+  <!-- the deck at the base -->
+  <g opacity=".9">
+    <rect x="98" y="330" width="112" height="112" rx="10" fill="url(#draw_10000-back)" stroke="#39435e" transform="rotate(-7 154 386)"/>
+    <rect x="104" y="336" width="112" height="112" rx="10" fill="url(#draw_10000-back)" stroke="#4f8cff" stroke-opacity=".4"/>
+  </g>
+
+  <!-- galaxy: two spiral arms of cards swirling into the core -->
+  <!-- arm A -->
+  <g transform="translate(161 177) rotate(202) scale(.40)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(143 164) rotate(170) scale(.46)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(113 164) rotate(138) scale(.54)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(83 186) rotate(106) scale(.63)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(67 229) rotate(74) scale(.74)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(82 281) rotate(42) scale(.86)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(129 323) rotate(10) scale(1)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <!-- arm B -->
+  <g transform="translate(139 233) rotate(22) scale(.40)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(157 246) rotate(350) scale(.46)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(187 246) rotate(318) scale(.54)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(217 224) rotate(286) scale(.63)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(233 181) rotate(254) scale(.74)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(218 129) rotate(222) scale(.86)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="translate(171 87) rotate(190) scale(1)">
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="#0d1017" opacity=".5" transform="translate(2 4)"/>
+    <rect x="-30" y="-42" width="60" height="84" rx="7" fill="url(#draw_10000-face)" stroke="#dce7fb"/>
+    <rect x="-24" y="-36" width="48" height="72" rx="4" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+
+  <!-- the blazing core the cards spiral into, with the lightning pip at its heart -->
+  <ellipse cx="150" cy="205" rx="70" ry="70" fill="url(#draw_10000-core)"/>
+  <path d="M 0 0 l -30 54 l 20 0 l -8 44 l 32 -56 l -21 0 z" transform="translate(156 170) scale(.72)" fill="#6fa1ff"/>
+
+  <!-- sparks flung across the vortex -->
+  <g fill="#bcd6ff">
+    <circle cx="150" cy="205" r="3.2" opacity=".95"/>
+    <circle cx="60" cy="150" r="3" opacity=".85"/>
+    <circle cx="244" cy="110" r="2.8" opacity=".8"/>
+    <circle cx="262" cy="250" r="2.6" opacity=".7"/>
+    <circle cx="40" cy="264" r="2.6" opacity=".72"/>
+    <circle cx="100" cy="86" r="2.4" opacity=".7"/>
+    <circle cx="210" cy="300" r="2.4" opacity=".68"/>
+    <circle cx="270" cy="180" r="2" opacity=".6"/>
+    <circle cx="34" cy="196" r="2" opacity=".6"/>
+    <circle cx="128" cy="70" r="2" opacity=".55"/>
+    <circle cx="196" cy="330" r="1.8" opacity=".5"/>
+  </g>
+</svg>

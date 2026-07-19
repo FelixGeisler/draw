@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="hours_10-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#123642"/>
+      <stop offset="1" stop-color="#101d24"/>
+    </linearGradient>
+    <radialGradient id="hours_10-glow" cx="50%" cy="52%" r="50%">
+      <stop offset="0" stop-color="#4fd0e0" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#4fd0e0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hours_10-cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6fe4f2"/>
+      <stop offset="1" stop-color="#2f7f8c"/>
+    </linearGradient>
+    <linearGradient id="hours_10-glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bff0f7" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#4fd0e0" stop-opacity=".10"/>
+    </linearGradient>
+    <linearGradient id="hours_10-sand" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#d6f7fb"/>
+      <stop offset="1" stop-color="#4fd0e0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#hours_10-bg)"/>
+  <ellipse cx="150" cy="210" rx="130" ry="150" fill="url(#hours_10-glow)"/>
+
+  <!-- drop shadow of the hourglass -->
+  <g fill="#0d1017" opacity=".5" transform="translate(4 6)">
+    <path d="M108 128 L192 128 L150 208 Z"/>
+    <path d="M150 212 L192 292 L108 292 Z"/>
+  </g>
+
+  <!-- glass body -->
+  <path d="M108 128 L192 128 L150 208 Z" fill="url(#hours_10-glass)" stroke="#6fe4f2" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M150 212 L192 292 L108 292 Z" fill="url(#hours_10-glass)" stroke="#6fe4f2" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- top sand -->
+  <path d="M116 134 L184 134 L162 178 L138 178 Z" fill="url(#hours_10-sand)"/>
+  <!-- falling stream -->
+  <rect x="147.5" y="206" width="5" height="82" fill="url(#hours_10-sand)"/>
+  <!-- bottom pile -->
+  <path d="M112 290 Q150 254 188 290 Z" fill="url(#hours_10-sand)"/>
+
+  <!-- caps -->
+  <rect x="98" y="116" width="104" height="12" rx="4" fill="url(#hours_10-cap)"/>
+  <rect x="98" y="290" width="104" height="12" rx="4" fill="url(#hours_10-cap)"/>
+
+  <!-- glass highlight -->
+  <path d="M120 134 L128 134 L150 200 Z" fill="#ffffff" opacity=".14"/>
+
+  <!-- sparks -->
+  <g fill="#a8ecf3">
+    <circle cx="212" cy="150" r="4" opacity=".9"/>
+    <circle cx="228" cy="206" r="2.5" opacity=".65"/>
+    <circle cx="84" cy="176" r="3.5" opacity=".8"/>
+    <circle cx="72" cy="240" r="2.5" opacity=".6"/>
+    <circle cx="150" cy="70" r="4" opacity=".9"/>
+  </g>
+</svg>

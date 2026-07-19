@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="draw_100-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b2740"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="draw_100-glow" cx="50%" cy="40%" r="60%">
+      <stop offset="0" stop-color="#4f8cff" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="draw_100-core" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#9dc0ff" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#9dc0ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="draw_100-face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f2f6ff"/>
+      <stop offset="1" stop-color="#a9c0ea"/>
+    </linearGradient>
+    <linearGradient id="draw_100-back" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2b3348"/>
+      <stop offset="1" stop-color="#1d2331"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#draw_100-bg)"/>
+  <ellipse cx="150" cy="176" rx="158" ry="170" fill="url(#draw_100-glow)"/>
+  <ellipse cx="150" cy="188" rx="86" ry="92" fill="url(#draw_100-core)"/>
+
+  <!-- the deck at the base -->
+  <g opacity=".95">
+    <rect x="86" y="300" width="128" height="126" rx="10" fill="url(#draw_100-back)" stroke="#39435e" transform="rotate(-8 150 363)"/>
+    <rect x="92" y="306" width="128" height="126" rx="10" fill="url(#draw_100-back)" stroke="#39435e" transform="rotate(-3 156 369)"/>
+    <rect x="96" y="312" width="128" height="126" rx="10" fill="url(#draw_100-back)" stroke="#4f8cff" stroke-opacity=".45"/>
+  </g>
+
+  <!-- a wide six-card fan cascading out of the deck -->
+  <g transform="rotate(-44 150 314)">
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="#0d1017" opacity=".5" transform="translate(3 6)"/>
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="url(#draw_100-face)" stroke="#dce7fb"/>
+    <rect x="118" y="213" width="64" height="96" rx="5" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="rotate(44 150 314)">
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="#0d1017" opacity=".5" transform="translate(3 6)"/>
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="url(#draw_100-face)" stroke="#dce7fb"/>
+    <rect x="118" y="213" width="64" height="96" rx="5" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="rotate(-26 150 314)">
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="#0d1017" opacity=".5" transform="translate(3 6)"/>
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="url(#draw_100-face)" stroke="#dce7fb"/>
+    <rect x="118" y="213" width="64" height="96" rx="5" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="rotate(26 150 314)">
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="#0d1017" opacity=".5" transform="translate(3 6)"/>
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="url(#draw_100-face)" stroke="#dce7fb"/>
+    <rect x="118" y="213" width="64" height="96" rx="5" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="rotate(9 150 314)">
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="#0d1017" opacity=".5" transform="translate(3 6)"/>
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="url(#draw_100-face)" stroke="#dce7fb"/>
+    <rect x="118" y="213" width="64" height="96" rx="5" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+  </g>
+  <g transform="rotate(-9 150 314)">
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="#0d1017" opacity=".5" transform="translate(3 6)"/>
+    <rect x="113" y="208" width="74" height="106" rx="8" fill="url(#draw_100-face)" stroke="#dce7fb"/>
+    <rect x="118" y="213" width="64" height="96" rx="5" fill="none" stroke="#4f8cff" stroke-opacity=".5"/>
+    <path d="M 0 0 l -30 54 l 20 0 l -8 44 l 32 -56 l -21 0 z" transform="translate(155 232) scale(.6)" fill="#3b6fd8"/>
+  </g>
+
+  <!-- sparks of the cascade -->
+  <g fill="#8fb6ff">
+    <circle cx="238" cy="150" r="3.5" opacity=".9"/>
+    <circle cx="60" cy="150" r="3.5" opacity=".85"/>
+    <circle cx="256" cy="210" r="2.6" opacity=".65"/>
+    <circle cx="44" cy="206" r="2.6" opacity=".7"/>
+    <circle cx="210" cy="108" r="2.4" opacity=".7"/>
+    <circle cx="92" cy="104" r="2.4" opacity=".65"/>
+    <circle cx="150" cy="120" r="3" opacity=".8"/>
+    <circle cx="180" cy="96" r="2" opacity=".5"/>
+    <circle cx="120" cy="96" r="2" opacity=".5"/>
+  </g>
+</svg>

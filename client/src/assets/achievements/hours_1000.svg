@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="hours_1000-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#12414f"/>
+      <stop offset="1" stop-color="#0c1a20"/>
+    </linearGradient>
+    <radialGradient id="hours_1000-glow" cx="50%" cy="50%" r="55%">
+      <stop offset="0" stop-color="#4fd0e0" stop-opacity=".6"/>
+      <stop offset="1" stop-color="#4fd0e0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hours_1000-ray" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4fd0e0" stop-opacity="0"/>
+      <stop offset="1" stop-color="#7fe4f2" stop-opacity=".55"/>
+    </linearGradient>
+    <radialGradient id="hours_1000-face" cx="50%" cy="44%" r="62%">
+      <stop offset="0" stop-color="#164653"/>
+      <stop offset="1" stop-color="#0e242c"/>
+    </radialGradient>
+    <linearGradient id="hours_1000-cap" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fecf7"/>
+      <stop offset="1" stop-color="#2f7f8c"/>
+    </linearGradient>
+    <linearGradient id="hours_1000-glass" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cff5fb" stop-opacity=".26"/>
+      <stop offset="1" stop-color="#4fd0e0" stop-opacity=".12"/>
+    </linearGradient>
+    <linearGradient id="hours_1000-sand" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eafcff"/>
+      <stop offset="1" stop-color="#4fd0e0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#hours_1000-bg)"/>
+  <ellipse cx="150" cy="210" rx="150" ry="170" fill="url(#hours_1000-glow)"/>
+
+  <!-- radiating hour rays -->
+  <g fill="url(#hours_1000-ray)">
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(0 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(30 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(60 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(90 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(120 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(150 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(180 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(210 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(240 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(270 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(300 150 210)"/>
+    <path d="M150 58 L143 90 L157 90 Z" transform="rotate(330 150 210)"/>
+  </g>
+
+  <!-- clock face disc -->
+  <circle cx="150" cy="210" r="118" fill="url(#hours_1000-face)" stroke="#4fd0e0" stroke-opacity=".4" stroke-width="2.5"/>
+  <circle cx="150" cy="210" r="130" fill="none" stroke="#4fd0e0" stroke-opacity=".2" stroke-width="1.5"/>
+
+  <!-- minor hour ticks -->
+  <g fill="#7fe0ee" opacity=".6">
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(0 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(30 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(60 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(90 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(120 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(150 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(180 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(210 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(240 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(270 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(300 150 210)"/>
+    <rect x="147.5" y="96" width="5" height="14" rx="1" transform="rotate(330 150 210)"/>
+  </g>
+  <!-- cardinal major ticks -->
+  <g fill="#bff2f9" opacity=".85">
+    <rect x="146" y="90" width="8" height="22" rx="1.5" transform="rotate(0 150 210)"/>
+    <rect x="146" y="90" width="8" height="22" rx="1.5" transform="rotate(90 150 210)"/>
+    <rect x="146" y="90" width="8" height="22" rx="1.5" transform="rotate(180 150 210)"/>
+    <rect x="146" y="90" width="8" height="22" rx="1.5" transform="rotate(270 150 210)"/>
+  </g>
+
+  <!-- drop shadow of the central hourglass -->
+  <g fill="#0d1017" opacity=".5" transform="translate(4 6)">
+    <path d="M110 158 L190 158 L150 212 Z"/>
+    <path d="M150 208 L190 270 L110 270 Z"/>
+  </g>
+
+  <!-- glass body -->
+  <path d="M110 158 L190 158 L150 212 Z" fill="url(#hours_1000-glass)" stroke="#8fecf7" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M150 208 L190 270 L110 270 Z" fill="url(#hours_1000-glass)" stroke="#8fecf7" stroke-width="2.5" stroke-linejoin="round"/>
+
+  <!-- top sand -->
+  <path d="M118 164 L182 164 L160 196 L140 196 Z" fill="url(#hours_1000-sand)"/>
+  <rect x="147" y="210" width="6" height="58" fill="url(#hours_1000-sand)"/>
+  <!-- bottom pile -->
+  <path d="M116 268 Q150 234 184 268 Z" fill="url(#hours_1000-sand)"/>
+
+  <!-- caps -->
+  <rect x="100" y="150" width="100" height="12" rx="4" fill="url(#hours_1000-cap)"/>
+  <rect x="100" y="270" width="100" height="12" rx="4" fill="url(#hours_1000-cap)"/>
+
+  <!-- glass highlight -->
+  <path d="M124 164 L132 164 L150 206 Z" fill="#ffffff" opacity=".16"/>
+
+  <!-- sparks -->
+  <g fill="#c9f5fa">
+    <circle cx="150" cy="48" r="4.5" opacity=".95"/>
+    <circle cx="246" cy="128" r="4" opacity=".85"/>
+    <circle cx="270" cy="210" r="3" opacity=".7"/>
+    <circle cx="246" cy="294" r="3.5" opacity=".75"/>
+    <circle cx="150" cy="372" r="4" opacity=".8"/>
+    <circle cx="54" cy="294" r="3.5" opacity=".75"/>
+    <circle cx="30" cy="210" r="3" opacity=".7"/>
+    <circle cx="54" cy="128" r="4" opacity=".85"/>
+  </g>
+</svg>

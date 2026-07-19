@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="goals_5-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2140"/>
+      <stop offset="1" stop-color="#120f18"/>
+    </linearGradient>
+    <radialGradient id="goals_5-glow" cx="50%" cy="40%" r="48%">
+      <stop offset="0" stop-color="#ffc24f" stop-opacity=".46"/>
+      <stop offset="1" stop-color="#ffc24f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="goals_5-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff2ca"/>
+      <stop offset=".45" stop-color="#f8c257"/>
+      <stop offset="1" stop-color="#c2801f"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#goals_5-bg)"/>
+  <ellipse cx="150" cy="176" rx="128" ry="140" fill="url(#goals_5-glow)"/>
+
+  <!-- laurels (behind cup) -->
+  <g fill="url(#goals_5-gold)">
+    <path d="M126 258 C100 236 96 192 112 154" fill="none" stroke="url(#goals_5-gold)" stroke-width="3.5" stroke-linecap="round"/>
+    <g transform="translate(122 248) rotate(120)"><ellipse rx="8" ry="3.2"/></g>
+    <g transform="translate(110 224) rotate(148)"><ellipse rx="8.5" ry="3.4"/></g>
+    <g transform="translate(102 200) rotate(168)"><ellipse rx="8.5" ry="3.4"/></g>
+    <g transform="translate(101 178) rotate(192)"><ellipse rx="8" ry="3.2"/></g>
+    <g transform="translate(107 158) rotate(212)"><ellipse rx="6.5" ry="2.8"/></g>
+  </g>
+  <g fill="url(#goals_5-gold)" transform="translate(300 0) scale(-1 1)">
+    <path d="M126 258 C100 236 96 192 112 154" fill="none" stroke="url(#goals_5-gold)" stroke-width="3.5" stroke-linecap="round"/>
+    <g transform="translate(122 248) rotate(120)"><ellipse rx="8" ry="3.2"/></g>
+    <g transform="translate(110 224) rotate(148)"><ellipse rx="8.5" ry="3.4"/></g>
+    <g transform="translate(102 200) rotate(168)"><ellipse rx="8.5" ry="3.4"/></g>
+    <g transform="translate(101 178) rotate(192)"><ellipse rx="8" ry="3.2"/></g>
+    <g transform="translate(107 158) rotate(212)"><ellipse rx="6.5" ry="2.8"/></g>
+  </g>
+
+  <!-- drop shadow -->
+  <g transform="translate(4 7)" opacity=".5">
+    <path d="M150 82 L156.47 99.10 L174.73 99.97 L160.46 111.40 L165.28 129.03 L150 119 L134.72 129.03 L139.54 111.40 L125.27 99.97 L143.53 99.10 Z" fill="#0d1017"/>
+    <path d="M104 148 C106 196 124 230 146 234 L146 250 L128 250 L122 266 L116 266 L110 292 L190 292 L184 266 L178 266 L172 250 L154 250 L154 234 C176 230 194 196 196 148 Z" fill="#0d1017"/>
+    <ellipse cx="150" cy="148" rx="46" ry="11" fill="#0d1017"/>
+    <path d="M106 156 C78 154 74 198 108 202" fill="none" stroke="#0d1017" stroke-width="9" stroke-linecap="round"/>
+    <path d="M194 156 C222 154 226 198 192 202" fill="none" stroke="#0d1017" stroke-width="9" stroke-linecap="round"/>
+  </g>
+
+  <!-- crowning star -->
+  <path d="M150 82 L156.47 99.10 L174.73 99.97 L160.46 111.40 L165.28 129.03 L150 119 L134.72 129.03 L139.54 111.40 L125.27 99.97 L143.53 99.10 Z" fill="url(#goals_5-gold)"/>
+  <path d="M150 82 L156.47 99.10 L174.73 99.97 L160.46 111.40 L165.28 129.03 L150 119 Z" fill="#000000" opacity=".12"/>
+  <path d="M150 92 L154 103 L165 104 L156 111 L159 122 L150 116 Z" fill="#fff6dc" opacity=".3"/>
+
+  <!-- handles -->
+  <path d="M106 156 C78 154 74 198 108 202" fill="none" stroke="url(#goals_5-gold)" stroke-width="9" stroke-linecap="round"/>
+  <path d="M194 156 C222 154 226 198 192 202" fill="none" stroke="url(#goals_5-gold)" stroke-width="9" stroke-linecap="round"/>
+
+  <!-- cup body + stem + two-step base -->
+  <path d="M104 148 C106 196 124 230 146 234 L146 250 L128 250 L122 266 L116 266 L110 292 L190 292 L184 266 L178 266 L172 250 L154 250 L154 234 C176 230 194 196 196 148 Z" fill="url(#goals_5-gold)"/>
+
+  <!-- rim -->
+  <ellipse cx="150" cy="148" rx="46" ry="11" fill="url(#goals_5-gold)"/>
+  <ellipse cx="150" cy="147" rx="36" ry="7" fill="#8a5616" opacity=".55"/>
+
+  <!-- stem knob -->
+  <ellipse cx="150" cy="235" rx="15" ry="7" fill="url(#goals_5-gold)"/>
+
+  <!-- highlight / shadow -->
+  <path d="M120 158 C120 192 128 220 142 228 C133 214 128 190 128 160 Z" fill="#fff6dc" opacity=".35"/>
+  <path d="M196 148 C194 194 180 224 160 230 C178 222 190 192 188 150 Z" fill="#000000" opacity=".12"/>
+  <path d="M128 250 L172 250" stroke="#fff6dc" stroke-opacity=".3" stroke-width="2"/>
+  <path d="M116 266 L184 266" stroke="#000000" stroke-opacity=".16" stroke-width="2.5"/>
+  <path d="M110 292 L190 292" stroke="#000000" stroke-opacity=".2" stroke-width="3"/>
+
+  <!-- sparks -->
+  <g fill="#ffe6a8">
+    <circle cx="66" cy="118" r="3" opacity=".8"/>
+    <circle cx="236" cy="126" r="2.5" opacity=".7"/>
+    <circle cx="52" cy="196" r="2.5" opacity=".55"/>
+    <circle cx="250" cy="200" r="2.5" opacity=".6"/>
+    <circle cx="150" cy="60" r="2.5" opacity=".7"/>
+    <circle cx="86" cy="150" r="2" opacity=".45"/>
+  </g>
+</svg>

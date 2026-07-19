@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="complete_25-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16241b"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="complete_25-glow" cx="50%" cy="46%" r="50%">
+      <stop offset="0" stop-color="#3fbf7f" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#3fbf7f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="complete_25-check" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7fe3ae"/>
+      <stop offset="1" stop-color="#2e9a63"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#complete_25-bg)"/>
+  <ellipse cx="150" cy="194" rx="140" ry="150" fill="url(#complete_25-glow)"/>
+
+  <!-- tally: three checks stacking up -->
+  <!-- check 1 (small) -->
+  <g>
+    <path d="M118 128 L140 152 L188 96" fill="none" stroke="#0d1017" stroke-opacity=".55" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" transform="translate(2 4)"/>
+    <path d="M118 128 L140 152 L188 96" fill="none" stroke="url(#complete_25-check)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M118 128 L140 152 L188 96" fill="none" stroke="#d6ffe9" stroke-opacity=".5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -4)"/>
+  </g>
+  <!-- check 2 (small) -->
+  <g>
+    <path d="M118 210 L140 234 L188 178" fill="none" stroke="#0d1017" stroke-opacity=".55" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" transform="translate(2 4)"/>
+    <path d="M118 210 L140 234 L188 178" fill="none" stroke="url(#complete_25-check)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M118 210 L140 234 L188 178" fill="none" stroke="#d6ffe9" stroke-opacity=".5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -4)"/>
+  </g>
+  <!-- hero check (bold) -->
+  <g>
+    <path d="M104 300 L134 334 L200 250" fill="none" stroke="#0d1017" stroke-opacity=".55" stroke-width="21" stroke-linecap="round" stroke-linejoin="round" transform="translate(3 7)"/>
+    <path d="M104 300 L134 334 L200 250" fill="none" stroke="url(#complete_25-check)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M104 300 L134 334 L200 250" fill="none" stroke="#d6ffe9" stroke-opacity=".55" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" transform="translate(0 -6)"/>
+  </g>
+
+  <!-- momentum sparks -->
+  <g fill="#8fe8b8">
+    <circle cx="210" cy="240" r="4" opacity=".9"/>
+    <circle cx="224" cy="262" r="2.5" opacity=".6"/>
+    <circle cx="194" cy="232" r="2.5" opacity=".55"/>
+    <circle cx="100" cy="318" r="2" opacity=".45"/>
+  </g>
+</svg>
