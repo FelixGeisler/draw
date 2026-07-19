@@ -45,10 +45,11 @@ sequential hold-back and the parent-completion gate — through the existing
 `status` conditions alone, with no write beyond the one status flip.
 Only facts are stored
 (tasks, entries, completions, the append-only `draws` log, unlocked
-achievements and their one-time claim, and each subtask's `sort_order` — the
-user's chosen sibling POSITION is a stored fact like `resolved_at`, ADR-38/ADR-43,
-not a derivable, so it stays within this principle; "held back" is still
-DERIVED from it, never stored as a flag). Achievement CHAINS (#156, ADR-42)
+achievements and their one-time claim, each subtask's `sort_order`, and the
+optional achievement DISPLAY overrides — the user's chosen sibling POSITION and
+a renamed/hidden achievement are stored facts like `resolved_at`,
+ADR-38/ADR-43/ADR-44, not derivables, so they stay within this principle;
+"held back" is still DERIVED from `sort_order`, never stored as a flag). Achievement CHAINS (#156, ADR-42)
 derive each level's progress from these logs — draws (non-warmup only, ADR-30),
 completions, streak, level, achieved goals, tracked hours — against one shared
 threshold table that also drives the unlock, so a full progress bar is always a
@@ -56,6 +57,17 @@ real unlock. Claiming an unlocked achievement pays rarity-scaled XP once
 (idempotent by the achievements primary key); the 5-tier rarity ladder
 (common → secret-rare) lives in `shared/achievementTiers.ts`, imported by the
 server (claim price) and the client (styling) so the two cannot drift.
+Achievement DISPLAY metadata is user-customizable (#177, ADR-44): the
+`achievement_customizations` side table (keyed by achievement key, so it covers
+LOCKED keys too) holds an optional renamed title, a rewritten description, and a
+`hidden` curation flag; `gamificationState()` ships `title`/`description` =
+`COALESCE(custom, default)` plus `hidden`/`customized`. These are DISPLAY-ONLY
+stored FACTS — a chosen label/visibility has no predicate to derive it from, so
+they sit with `resolved_at`/`sort_order` inside ADR-2 — and touch nothing about
+unlock, claim, XP, rarity or the shared key set: a hidden achievement still
+unlocks and is still claimable (in the Stats "Hidden" section). The unlock toast
+and every other reader pick up the custom copy for free, reading the same
+`/api/gamification` fields.
 
 == 8.2 The weight formula
 

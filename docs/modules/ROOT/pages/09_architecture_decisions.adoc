@@ -1870,3 +1870,65 @@ the renormalize path bounds the precision cost that a purely-fractional scheme
 would otherwise accrue. Deriving hold-back from the stored order (rather than
 storing a second "is exposed" flag) keeps every mutation path automatically
 correct, the ADR-2 argument once more.
+
+== ADR-44: User-customizable achievement display metadata — a side table, display-only, unlock/claim untouched
+
+*Context:* Achievements are server-defined (`ACHIEVEMENTS` in
+`gamificationService`) with no user overrides — the title, description and
+whether a card shows at all were fixed copy. #177 asked for two linked things:
+a NAME-ONLY card face with the description revealed on hover/focus, and a
+per-card edit affordance to rename an achievement, rewrite its description, and
+hide it. That is display personalization layered on top of a fixed achievement
+set — it must not touch the unlock/claim/XP machinery (#156, ADR-42) or the
+shared key contract (#124).
+
+*Decision:*
+
+* *One new table, `achievement_customizations` (migration v16).*
+`(key TEXT PRIMARY KEY, title TEXT, description TEXT, hidden INTEGER NOT NULL
+DEFAULT 0)`. Keyed by achievement KEY, NOT a foreign key to the `achievements`
+table — that table only rows UNLOCKED keys, and a customization must apply to a
+still-LOCKED key too (pre-rename or pre-hide a card before earning it). NULL
+`title`/`description` mean "use the server default"; the row exists only while
+some override is set — an all-default result (a reset) DELETES it, so
+`customized` is a simple truth about the row's presence.
+
+* *`gamificationState()` COALESCEs the overrides.* It reads the side table into
+a Map (the JS `ACHIEVEMENTS` array still owns order/emoji) and, per card,
+ships `title`/`description` = `COALESCE(custom, default)` plus `hidden` (bool)
+and a `customized` flag (any override set — gates the card's "Reset to
+default"). The shipped key SET and ORDER are unchanged, so the "ships exactly
+the shared key set" pin (#124) still holds.
+
+* *`PATCH /api/achievements/:key { title?, description?, hidden? }` — an
+upsert, DISTINCT from `POST /:key/claim`.* An absent field is left as-is;
+`title`/`description` = null (or a whitespace-only string, normalized) CLEARS
+that override; `hidden` toggles the curation flag. The key is validated against
+`ACHIEVEMENT_KEYS` (400 otherwise). "Reset to default" is the same PATCH with
+both texts null and `hidden` false. It returns the updated COALESCE'd
+achievement.
+
+* *Client: name-only face, hover/focus description, inline editor.* The card
+face shows the name only; the description reveals on hover/focus as a
+focus-reachable overlay (the ✎ button carries `aria-describedby` to it), and an
+✎ button opens an inline editor (name, description, Hide toggle, Save/Cancel,
+Reset to default) driven by a new `useUpdateAchievement` mutation that
+invalidates `['gamification']`. Hidden cards move OUT of the main grid into a
+collapsed "Hidden (N)" section on the Stats page — still editable, claimable,
+and un-hideable there. Every title/description consumer, the unlock TOAST
+included, reads the same `/api/gamification` payload, so custom values propagate
+with no extra wiring.
+
+*Rationale:* The overrides are DISPLAY ONLY — `checkAchievements`,
+`claimAchievement`, `totalXp`, the rarity ladder (ADR-42) and the shared key
+list are all untouched, so a hidden achievement still unlocks and is still
+claimable (in the Hidden section). A chosen label/visibility is USER STATE, not
+derivable state — there is no predicate or log it could be computed from — so
+storing it stays WITHIN ADR-2 (which bans stored DERIVABLES, not stored facts):
+it stands with `resolved_at` (ADR-38) and `sort_order` (ADR-43). Hiding is
+display CURATION, never deletion: the card, its unlock and its claim all remain.
+A side table keyed by achievement key (rather than columns on `achievements`)
+lets a locked key carry an override and keeps the append-only unlock table a
+pure event log. Backup/restore rides along for free (ADR-26): the table is part
+of the whole-file `VACUUM INTO` snapshot, and `reopenDatabase()` re-migrates on
+import, so a restored older backup gains the empty table on the way forward.
