@@ -173,3 +173,31 @@ test("the reorder drag works identically under reduced motion", async ({ page })
   }).toPass();
   expect(await poolIds(page)).toEqual([subId[STEP_A]]);
 });
+
+test("a reorder gap outranks the fixed root-zone banner so it is never occluded (#173)", async ({
+  page,
+}) => {
+  await page.goto("/tasks");
+  // Start a subtask drag but do NOT drop — crossing the 5px threshold mounts
+  // both the gap zones and the fixed "promote to top level" banner.
+  const h = handle(page, STEP_A);
+  await h.scrollIntoViewIfNeeded();
+  const a = (await h.boundingBox())!;
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
+  await expect(page.locator(".dnd-ghost")).toBeVisible();
+  await expect(page.locator(".dnd-root-zone")).toBeVisible();
+
+  // The fix (#173): a gap scrolled into the banner's top band must win
+  // elementFromPoint, or the drop is silently swallowed by the banner. The
+  // z-order IS the contract — a specific reorder slot outranks the general
+  // promote zone.
+  const zOf = (sel: string) =>
+    page.locator(sel).first().evaluate((el) => Number(getComputedStyle(el).zIndex));
+  const gapZ = await zOf(".dnd-gap");
+  const zoneZ = await zOf(".dnd-root-zone");
+  expect(gapZ).toBeGreaterThan(zoneZ);
+
+  await page.mouse.up();
+});
