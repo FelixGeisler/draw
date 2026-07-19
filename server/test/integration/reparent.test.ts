@@ -459,12 +459,15 @@ describe("current draw pointer (ADR-13/ADR-17)", () => {
       [{ title: "eager front step", effortMinutes: 5 }],
       "sequential",
     );
-    // The front step sits ahead of the drawn card in sort_order (#157, ADR-43),
-    // so the adopted card queues BEHIND it. The adopted card keeps its own
-    // sort_order (= its id, stamped on insert), which is LOWER than front's id
-    // here (it was created first), so without this the adoptee would jump ahead
-    // — pin front below it to reproduce the held-back landing.
-    db.prepare("UPDATE tasks SET sort_order = ? WHERE id = ?").run(drawn.id - 0.5, front.id);
+    // The front step must sort AHEAD of the drawn card so the adopted card
+    // queues BEHIND it (held-back). sort_order is a global creation sequence
+    // (#157, ADR-43), not the id, and the front step was created AFTER the
+    // drawn card, so it naturally sorts later — read the drawn card's actual
+    // sort_order and pin front just below it to reproduce the held-back landing.
+    const drawnOrder = (
+      db.prepare("SELECT sort_order AS so FROM tasks WHERE id = ?").get(drawn.id) as { so: number }
+    ).so;
+    db.prepare("UPDATE tasks SET sort_order = ? WHERE id = ?").run(drawnOrder - 0.5, front.id);
 
     expect((await draw(goal.id)).task.id).toBe(drawn.id);
     expect(persistedDrawId()).toBe(String(drawn.id));

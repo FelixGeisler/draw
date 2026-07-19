@@ -111,6 +111,16 @@ export function TaskRow({
   // (dragging a root leaves parentId null, so this never lights up for them).
   const showSubtaskGaps =
     !!dnd?.dragging && dnd.dragging.parentId === task.id && dnd.dragging.status === "open";
+  // The dragged row's two flanking gaps (directly above it and directly below
+  // it) are no-op drops — landing a task where it already sits (#157 review).
+  // Suppress them so neither lights up on hover nor fires a wasted reorder;
+  // gaps have zero footprint, so dropping two never shifts the rows. -1 when
+  // not dragging one of these siblings.
+  const draggingIdx = showSubtaskGaps
+    ? (task.subtasks?.findIndex((s) => s.id === dnd!.dragging!.id) ?? -1)
+    : -1;
+  const flanksDragged = (i: number) => draggingIdx >= 0 && (i === draggingIdx || i === draggingIdx + 1);
+  const draggedIsLast = draggingIdx >= 0 && draggingIdx === (task.subtasks?.length ?? 0) - 1;
 
   function snooze(patch: { deferredUntil?: string; blocked?: boolean }) {
     updateTask.mutate({ id: task.id, ...patch });
@@ -514,9 +524,9 @@ export function TaskRow({
         </>
       )}
       {expanded &&
-        task.subtasks?.map((s) => (
+        task.subtasks?.map((s, i) => (
           <Fragment key={s.id}>
-            {showSubtaskGaps && (
+            {showSubtaskGaps && !flanksDragged(i) && (
               <SubtaskGap
                 parentId={task.id}
                 beforeId={s.id}
@@ -534,8 +544,10 @@ export function TaskRow({
             />
           </Fragment>
         ))}
-      {/* Trailing gap = drop after the last sibling (beforeId null → the end). */}
-      {expanded && showSubtaskGaps && (
+      {/* Trailing gap = drop after the last sibling (beforeId null → the end).
+          Suppressed when the dragged row already IS last — that gap sits right
+          below it, another no-op. */}
+      {expanded && showSubtaskGaps && !draggedIsLast && (
         <SubtaskGap
           parentId={task.id}
           beforeId={null}

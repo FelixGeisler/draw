@@ -21,7 +21,7 @@ import { freshApp, testDb } from "../helpers.js";
 //   v11 → v12 rebuilds goals: 'missed' status + resolved_at       (issue #145)
 //   v12 → v13 deletes the daily-hand settings rows                (issue #147)
 //   v13 → v14 creates the draws log + achievements claim columns  (issue #156)
-//   v14 → v15 adds tasks.sort_order (backfilled to id) + stamp trigger (issue #157)
+//   v14 → v15 adds tasks.sort_order (global (created_at,id) rank) + trigger (issue #157)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence. (The v12 rebuild's own
@@ -308,21 +308,26 @@ describe("migration v2 → v15 (deferred_until, blocked, subtask_order_mode, win
     expect(col!.notnull).toBe(1);
     expect(col!.dflt_value).toBe("0");
 
-    // Backfill preserved creation order verbatim: every existing row's
-    // sort_order equals its id (the tie-break the pre-#157 order already used).
-    const mismatched = db
-      .prepare("SELECT COUNT(*) AS n FROM tasks WHERE sort_order != id")
+    // Backfill ran: every existing row got a positive global (created_at, id)
+    // rank — no 0 sentinel survives. The rank preserves the pre-#157 order
+    // (pinned in detail, including a backdated split part, by
+    // migration-v15-sort-order.test.ts).
+    const unstamped = db
+      .prepare("SELECT COUNT(*) AS n FROM tasks WHERE sort_order <= 0")
       .get() as { n: number };
-    expect(mismatched.n).toBe(0);
+    expect(unstamped.n).toBe(0);
 
-    // The trigger stamps a new insert that left the default: sort_order = id.
+    // The trigger continues that one global sequence: a new insert that left
+    // the default is stamped MAX(sort_order)+1 across all tasks (not its id).
+    const globalMax = (db.prepare("SELECT MAX(sort_order) AS m FROM tasks").get() as { m: number })
+      .m;
     const inserted = db
       .prepare("INSERT INTO tasks (title, category_id, created_at) VALUES (?, 1, ?)")
       .run("sort-order stamp probe", new Date().toISOString());
     const stamped = db
       .prepare("SELECT sort_order AS sortOrder FROM tasks WHERE id = ?")
       .get(inserted.lastInsertRowid) as { sortOrder: number };
-    expect(stamped.sortOrder).toBe(Number(inserted.lastInsertRowid));
+    expect(stamped.sortOrder).toBe(globalMax + 1);
     db.prepare("DELETE FROM tasks WHERE id = ?").run(inserted.lastInsertRowid);
   });
 

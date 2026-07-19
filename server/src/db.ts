@@ -286,23 +286,41 @@ function migrate() {
       // — a stored position stands with resolved_at (ADR-38) inside ADR-2,
       // which bans stored DERIVABLES, not stored facts.
       //
-      // Backfill sort_order = id: id is the monotone creation key the pre-#157
-      // (created_at, id) order already tie-broke on, so every existing sibling
-      // keeps its exact place and NOTHING moves on migration day. New rows are
-      // stamped the same way by the AFTER INSERT trigger below (sort_order = id
-      // when the insert left the 0 default), so a fresh root/sibling still
-      // lands after existing ones; split-in-place parts set sort_order
-      // explicitly to land in the archived original's slot, so the trigger's
-      // `WHEN NEW.sort_order = 0` guard leaves them alone (no legitimate
-      // position is ever 0 — backfill and midpoints are all > 0). Root order
-      // stays creation order (roots are not reorderable, ADR-43); the column
-      // exists on them too but no read sorts roots by it.
+      // Backfill by the exact pre-#157 order: a GLOBAL rank over
+      // (created_at, id) — NOT sort_order = id. id alone is WRONG because
+      // split-in-place (ADR-16/#108) adopts the original's created_at verbatim
+      // while the parts get NEW higher ids, so under the old
+      // `ORDER BY created_at, id` a part sorts into the original's mid-list
+      // slot yet id-order would jump it to the end. ROW_NUMBER() OVER
+      // (ORDER BY created_at, id) reproduces the visible order exactly WITHIN
+      // every sibling group, so NOTHING moves on migration day (pinned by
+      // migration-v15-sort-order.test.ts with a backdated split-part fixture).
+      //
+      // The rank is GLOBAL, not per-parent, on purpose: sort_order is one
+      // monotonic-by-creation sequence across all tasks, so it stays globally
+      // comparable — an adopted task (reparent, #100) keeps the pre-#157
+      // "older step jumps the sequential queue" behavior, which a per-parent
+      // 1..N scale would destroy (an adopted task's carried position would be
+      // meaningless against its new siblings; routes/tasks.ts adoption note,
+      // ADR-43). The AFTER INSERT trigger continues that one sequence by
+      // stamping GLOBAL MAX(sort_order)+1, so a fresh row is the globally
+      // latest position: it appends within whatever group it joins AND can
+      // never fall below a group's max inflated by repeated end-moves (the
+      // monotonicity gap the old `sort_order = id` trigger left). Split parts
+      // set sort_order explicitly (> 0), so the `WHEN NEW.sort_order = 0` guard
+      // leaves them in the archived original's slot. Root order stays creation
+      // order (roots are not reorderable).
       db.exec("ALTER TABLE tasks ADD COLUMN sort_order REAL NOT NULL DEFAULT 0");
-      db.exec("UPDATE tasks SET sort_order = id");
+      db.exec(`WITH ranked AS (
+                 SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS rn FROM tasks
+               )
+               UPDATE tasks SET sort_order = (SELECT rn FROM ranked WHERE ranked.id = tasks.id)`);
       db.exec(`CREATE TRIGGER tasks_stamp_sort_order AFTER INSERT ON tasks
         WHEN NEW.sort_order = 0
         BEGIN
-          UPDATE tasks SET sort_order = NEW.id WHERE id = NEW.id;
+          UPDATE tasks SET sort_order =
+            (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks WHERE id != NEW.id)
+          WHERE id = NEW.id;
         END`);
     }
   }
