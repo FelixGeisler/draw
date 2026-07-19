@@ -23,10 +23,13 @@
 |An open task currently outside its availability window — out of the deck until the window opens again; derived at query time, shown as the 🕒 chip
 
 |*Sequential breakdown*
-|A parent with `subtask_order_mode = 'sequential'`: only its first open subtask in creation order enters the deck (ADR-18). Recurring subtasks are rejected under it — a step that never closes would gate its siblings forever (ADR-23)
+|A parent with `subtask_order_mode = 'sequential'`: only its first open subtask in *sibling order* (see below) enters the deck (ADR-18). Recurring subtasks are rejected under it — a step that never closes would gate its siblings forever (ADR-23)
+
+|*Sibling order (sort_order)*
+|The stored, drag-reorderable position of a breakdown's subtasks: `(sort_order, id)`, a REAL column backfilled to `id` so it starts as creation order (ADR-43). It is what the sequential queue reads and what `POST /:id/reorder` rewrites (midpoint of two neighbors, renormalized on REAL underflow). A stored user fact like `resolved_at`, not derivable — but "held back" is still derived from it. Roots are NOT reorderable (root order stays creation order)
 
 |*Queued / held back*
-|An open subtask behind an older open sibling under a sequential parent — out of the deck until the steps in front close; derived at query time, shown as the ⏳ chip
+|An open subtask behind an earlier open sibling (by `sort_order`) under a sequential parent — out of the deck until the steps in front close or this one is dragged ahead of them; derived at query time, shown as the ⏳ chip
 
 |*Draw*
 |Weighted random selection of one drawable task, presented as a card — deliberately the ONLY way tasks surface on the Draw page: there is no multi-card day preview (the daily hand of ADR-34 was removed by ADR-39)
