@@ -158,9 +158,10 @@ export function DrawPage() {
         mutate(),
         new Promise((r) => setTimeout(r, 450)), // let the shuffle play
       ]);
-      // The reveal works off the mutation response: all three hooks write it
-      // through to the current-draw cache on success, so ending the shuffle
-      // flips straight to the drawn card — no refetch race in the animation.
+      // The reveal works off the mutation response: both hooks (draw and
+      // warm-up) write it through to the current-draw cache on success, so
+      // ending the shuffle flips straight to the drawn card — no refetch
+      // race in the animation.
       setResult(response);
     } finally {
       // #118: a rejected draw (server down, 409 from the warm-up route) used

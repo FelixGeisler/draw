@@ -90,8 +90,11 @@ beforeAll(async () => {
     .prepare("INSERT INTO tasks (title, category_id, effort_minutes, created_at) VALUES (?, ?, ?, ?)")
     .run("Legacy task", 1, 10, new Date().toISOString());
   // Daily-hand residue (#147): a database that USED the removed feature —
-  // an edited budget (so v10's INSERT OR IGNORE provably keeps it, replaying
-  // history verbatim) plus a dealt hand row. v13 must delete both.
+  // an edited budget plus a dealt hand row. The '45' pins what the default
+  // '90' could not: v10 tolerates a pre-existing row (a plain INSERT would
+  // abort the boot mid-chain) and v13 deletes a USER-EDITED value, not just
+  // the seed. (IGNORE-vs-REPLACE semantics are NOT observable here — the
+  // one-boot chain has no intermediate read, and v13 deletes either way.)
   const seedSetting = legacy.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
   seedSetting.run("daily_hand_budget_minutes", "45");
   seedSetting.run("daily_hand", '{"date":"2026-01-01","taskIds":[1],"budgetMinutes":45}');
@@ -323,9 +326,10 @@ describe("migration v2 → v13 (deferred_until, blocked, subtask_order_mode, win
   });
 
   it("v13 deletes the daily-hand settings rows the fixture carried (#147)", async () => {
-    // The fixture seeded an edited budget ('45') and a dealt hand — v10's
-    // INSERT OR IGNORE replayed without resurrecting a '90', and v13 removed
-    // both rows: a pre-v13 database that used the feature comes out clean.
+    // The fixture seeded an edited budget ('45') and a dealt hand — v10
+    // replayed over the existing row without aborting the chain, and v13
+    // removed both rows: a pre-v13 database that used the feature comes out
+    // clean.
     const db = await testDb();
     const rows = db
       .prepare("SELECT key FROM settings WHERE key IN ('daily_hand_budget_minutes', 'daily_hand')")
@@ -334,6 +338,21 @@ describe("migration v2 → v13 (deferred_until, blocked, subtask_order_mode, win
     // …and the key does not resurface through the public settings surface.
     const settings = await request(app).get("/api/settings").expect(200);
     expect(settings.body).not.toHaveProperty("daily_hand_budget_minutes");
+  });
+
+  it("a stale client PATCHing the removed key is ignored, never resurrected (#147)", async () => {
+    // The allowlist is the mechanism (routes/settings.ts): an unknown key in
+    // the body is simply not written. Pinned by name because it is half the
+    // acceptance criterion — "no longer appears in GET/PATCH /api/settings".
+    const patched = await request(app)
+      .patch("/api/settings")
+      .send({ daily_hand_budget_minutes: "60" })
+      .expect(200);
+    expect(patched.body).not.toHaveProperty("daily_hand_budget_minutes");
+    const db = await testDb();
+    expect(
+      db.prepare("SELECT key FROM settings WHERE key = 'daily_hand_budget_minutes'").get(),
+    ).toBeUndefined();
   });
 
   it("serves no /api/hand endpoint anymore (#147)", async () => {

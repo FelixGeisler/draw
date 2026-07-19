@@ -1063,6 +1063,8 @@ absorbed by ATK and the star row (one datum, one place); the focus overlay
 (#56) adopts exactly the type-line pill and nothing else — its job is the
 clock, not the frame. Follow-ups noted in their issues: the skyline
 mini-cards (#53) and the daily hand (#59) adopt the frame when built.
+*Amendment (#147):* the daily hand was since removed (ADR-39) — that
+follow-up is void; the skyline mini-cards note stands.
 
 == ADR-32: Parent-task lifecycle follows the subtasks — derived effort, auto-complete at a symbolic 1 XP, reopen on new subtasks
 
