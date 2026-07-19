@@ -566,6 +566,16 @@ export function gamificationState() {
     )
     .all() as { key: string; unlockedAt: string; claimedAt: string | null; claimXp: number | null }[];
   const unlockedMap = new Map(unlocked.map((u) => [u.key, u]));
+
+  // Display-only overrides (#177, ADR-44): title/description COALESCE onto the
+  // server default, and a hidden flag curates the card. Keyed by achievement
+  // key — applies to still-locked keys too. Read into a Map here rather than a
+  // SQL join because ACHIEVEMENTS is the JS source of order/emoji; the overrides
+  // are a sparse side table (a row exists only while some override is set).
+  const customRows = db
+    .prepare("SELECT key, title, description, hidden FROM achievement_customizations")
+    .all() as { key: string; title: string | null; description: string | null; hidden: number }[];
+  const customMap = new Map(customRows.map((c) => [c.key, c]));
   const metrics = computeMetrics();
 
   return {
@@ -589,8 +599,18 @@ export function gamificationState() {
     // the shared tier table until then.
     achievements: ACHIEVEMENTS.map((a) => {
       const row = unlockedMap.get(a.key);
+      const custom = customMap.get(a.key);
+      // COALESCE(custom, default): a NULL override means "use the default".
+      // `customized` gates the card's "Reset to default" affordance — true
+      // whenever ANY override is set, hidden included (a reset clears all three).
+      const customized =
+        custom != null && (custom.title != null || custom.description != null || custom.hidden === 1);
       return {
         ...a,
+        title: custom?.title ?? a.title,
+        description: custom?.description ?? a.description,
+        hidden: custom?.hidden === 1,
+        customized,
         unlockedAt: row?.unlockedAt ?? null,
         claimedAt: row?.claimedAt ?? null,
         claimXp: row?.claimXp ?? null,
@@ -598,6 +618,62 @@ export function gamificationState() {
       };
     }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Display-only customization (#177, ADR-44)
+
+/** The per-achievement shape gamificationState ships — the PATCH echoes one. */
+export type AchievementView = ReturnType<typeof gamificationState>["achievements"][number];
+
+export type CustomizeResult =
+  | { status: "ok"; achievement: AchievementView }
+  | { status: "unknown" }; // not a real achievement key → 400
+
+/**
+ * A partial display override: an absent field is left as-is, `title`/`description`
+ * = null CLEARS that override (falls back to the default), `hidden` toggles the
+ * curation flag. A trimmed-empty title/description is normalized to null by the
+ * route, so blanking an input in the editor resets that field to the default.
+ */
+export interface AchievementPatch {
+  title?: string | null;
+  description?: string | null;
+  hidden?: boolean;
+}
+
+/**
+ * Upsert a DISPLAY-ONLY override for an achievement (#177). Nothing here touches
+ * unlock, claim, XP, rarity or the shared key set — the override is metadata the
+ * gamificationState() read COALESCEs on. Keyed by achievement key so a still-
+ * LOCKED key can be pre-renamed/hidden. An all-default result (no title, no
+ * description, not hidden — e.g. a "reset to default") DELETES the row rather
+ * than storing a no-op, keeping `customized` a simple truth about the row.
+ */
+export function customizeAchievement(key: string, patch: AchievementPatch): CustomizeResult {
+  if (!(ACHIEVEMENT_KEYS as readonly string[]).includes(key)) return { status: "unknown" };
+  db.transaction(() => {
+    const existing = db
+      .prepare("SELECT title, description, hidden FROM achievement_customizations WHERE key = ?")
+      .get(key) as { title: string | null; description: string | null; hidden: number } | undefined;
+
+    const title = "title" in patch ? patch.title ?? null : existing?.title ?? null;
+    const description =
+      "description" in patch ? patch.description ?? null : existing?.description ?? null;
+    const hidden = "hidden" in patch ? (patch.hidden ? 1 : 0) : existing?.hidden ?? 0;
+
+    if (title == null && description == null && hidden === 0) {
+      db.prepare("DELETE FROM achievement_customizations WHERE key = ?").run(key);
+    } else {
+      db.prepare(
+        `INSERT INTO achievement_customizations (key, title, description, hidden)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           title = excluded.title, description = excluded.description, hidden = excluded.hidden`,
+      ).run(key, title, description, hidden);
+    }
+  })();
+  return { status: "ok", achievement: gamificationState().achievements.find((a) => a.key === key)! };
 }
 
 // ---------------------------------------------------------------------------

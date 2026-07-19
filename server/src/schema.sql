@@ -177,6 +177,24 @@ CREATE TABLE streak_freezes (
   created_at TEXT NOT NULL
 );
 
+-- User-customizable achievement display metadata (#177, ADR-44). DISPLAY-ONLY
+-- overrides on top of the server-defined ACHIEVEMENTS: a renamed title, a
+-- rewritten description, and a hidden flag that curates the card out of the
+-- main collection (never deletion — a hidden achievement still unlocks and is
+-- still claimable). Keyed by achievement KEY, not a foreign key to the
+-- `achievements` table (which only rows UNLOCKED keys), so an override can ride
+-- a still-LOCKED key too. NULL title/description = use the server default; the
+-- row exists only while some override is set (a reset PATCH deletes an
+-- all-default row). USER STATE, not derivable (ADR-2 bans stored derivables,
+-- not stored facts — it stands with resolved_at, ADR-38, and sort_order,
+-- ADR-43). Unlock/claim/XP/rarity and the shared key set stay untouched.
+CREATE TABLE achievement_customizations (
+  key TEXT PRIMARY KEY,
+  title TEXT,
+  description TEXT,
+  hidden INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
