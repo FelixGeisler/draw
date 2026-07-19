@@ -1,5 +1,6 @@
 import { db, getSetting, getSettingString } from "../db.js";
-import type { AchievementKey } from "../../../shared/achievementKeys.js";
+import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys.js";
+import { claimXpForKey } from "../../../shared/achievementTiers.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
 import { localDate } from "./localDay.js";
 import {
@@ -215,10 +216,18 @@ export function completeTask(
 // ---------------------------------------------------------------------------
 // XP / levels — always derived from completions, never stored.
 
+// XP has TWO stored sources since #156 (ADR-42, amending ADR-5): the
+// completions log (as ever) plus claimed achievements. Both are honest event
+// facts — a claim is a one-time payout, guarded idempotent by the achievements
+// primary key — so summing them stays within the "derive from logs, never a
+// stored counter" spirit: there is still no `xp` column anywhere.
 function totalXp(): number {
-  const row = db.prepare("SELECT COALESCE(SUM(xp_awarded), 0) AS xp FROM completions").get() as {
-    xp: number;
-  };
+  const row = db
+    .prepare(
+      `SELECT COALESCE((SELECT SUM(xp_awarded) FROM completions), 0)
+            + COALESCE((SELECT SUM(claim_xp) FROM achievements), 0) AS xp`,
+    )
+    .get() as { xp: number };
   return row.xp;
 }
 
@@ -302,23 +311,88 @@ export interface AchievementDef {
   description: string;
 }
 
+// Display order matches shared/achievementKeys.ts. Most keys form a chain
+// (#156): each level is its own achievement, tiered in shared/achievementTiers
+// and progress-tracked below. Streak thresholds count REAL completion days
+// (#58): rest and frozen days keep the run alive but never increment it, so 7
+// completed days may span more than 7 calendar days. Already-unlocked rows stay
+// unlocked — the achievements table is append-only.
 export const ACHIEVEMENTS: AchievementDef[] = [
+  // Draws chain — non-warmup deals only (ADR-30).
   { key: "first_draw", title: "First draw", emoji: "🃏", description: "Draw your first card." },
+  { key: "draw_10", title: "Warming the deck", emoji: "🎴", description: "Draw 10 cards." },
+  { key: "draw_100", title: "Seasoned drawer", emoji: "🃏", description: "Draw 100 cards." },
+  { key: "draw_1000", title: "Deck devotee", emoji: "🎴", description: "Draw 1,000 cards." },
+  { key: "draw_10000", title: "Ten thousand draws", emoji: "🎇", description: "Draw 10,000 cards." },
+  // Completions chain.
   { key: "first_completion", title: "Off the mark", emoji: "✅", description: "Complete your first task." },
-  // Streak thresholds count REAL completion days (#58): rest and frozen days
-  // keep the run alive but never increment it, so 7 completed days may span
-  // more than 7 calendar days. Already-unlocked rows stay unlocked — the
-  // achievements table is append-only.
+  { key: "complete_25", title: "Getting things done", emoji: "☑️", description: "Complete 25 tasks." },
+  { key: "complete_100", title: "Centurion", emoji: "💯", description: "Complete 100 tasks." },
+  { key: "complete_500", title: "Task machine", emoji: "⚙️", description: "Complete 500 tasks." },
+  { key: "complete_2500", title: "Unrelenting", emoji: "🏅", description: "Complete 2,500 tasks." },
+  // Streak chain.
   { key: "streak_7", title: "One week strong", emoji: "🔥", description: "7 completed days in one unbroken streak." },
   { key: "streak_30", title: "Unstoppable", emoji: "🌋", description: "30 completed days in one unbroken streak." },
+  { key: "streak_100", title: "Hundred-day fire", emoji: "☄️", description: "100 completed days in one unbroken streak." },
+  // Level chain.
+  { key: "level_5", title: "Level 5", emoji: "⭐", description: "Reach level 5." },
+  { key: "level_10", title: "Level 10", emoji: "🌟", description: "Reach level 10." },
+  { key: "level_25", title: "Level 25", emoji: "💫", description: "Reach level 25." },
+  { key: "level_50", title: "Level 50", emoji: "🌠", description: "Reach level 50." },
+  // Goals-achieved chain.
+  { key: "first_goal", title: "Goal getter", emoji: "🏆", description: "Achieve a goal." },
+  { key: "goals_5", title: "Five and thriving", emoji: "🥅", description: "Achieve 5 goals." },
+  { key: "goals_25", title: "Goal crusher", emoji: "🎖️", description: "Achieve 25 goals." },
+  // Tracked-time chain.
+  { key: "hours_10", title: "Ten hours in", emoji: "⏱️", description: "Track 10 hours of focused work." },
+  { key: "hours_100", title: "Hundred hours deep", emoji: "⏳", description: "Track 100 hours of focused work." },
+  { key: "hours_1000", title: "Thousand-hour master", emoji: "🕰️", description: "Track 1,000 hours of focused work." },
+  // One-offs — no running total, so no progress bar.
   { key: "monster_slayer", title: "Monster slayer", emoji: "🐉", description: "Finish every subtask of a big task." },
   { key: "leverage_master", title: "Leverage master", emoji: "🎯", description: "60% of a week's time on 4–5★ tasks." },
   { key: "deck_clearer", title: "Deck clearer", emoji: "🏜", description: "Empty the drawable deck by completing it." },
-  { key: "level_5", title: "Level 5", emoji: "⭐", description: "Reach level 5." },
-  { key: "level_10", title: "Level 10", emoji: "🌟", description: "Reach level 10." },
   { key: "early_bird", title: "Early bird", emoji: "🐦", description: "Finish a 5★ task before its due date." },
-  { key: "first_goal", title: "Goal getter", emoji: "🏆", description: "Achieve a goal." },
 ];
+
+// ---------------------------------------------------------------------------
+// Chains (#156). Each chain level unlocks when a single running metric crosses
+// a threshold. The SAME table drives both the unlock condition (met when the
+// metric ≥ target) and the progress bar (current/target), so the two can never
+// disagree — a bar that reads full is a card that unlocks. One-offs are absent
+// here: they have no meaningful running total, and gamificationState reports
+// their progress as null.
+type ChainMetric = "draws" | "completions" | "streak" | "level" | "goals" | "hours";
+
+interface ChainSpec {
+  metric: ChainMetric;
+  target: number;
+}
+
+const CHAIN_SPECS: Partial<Record<AchievementKey, ChainSpec>> = {
+  first_draw: { metric: "draws", target: 1 },
+  draw_10: { metric: "draws", target: 10 },
+  draw_100: { metric: "draws", target: 100 },
+  draw_1000: { metric: "draws", target: 1000 },
+  draw_10000: { metric: "draws", target: 10000 },
+  first_completion: { metric: "completions", target: 1 },
+  complete_25: { metric: "completions", target: 25 },
+  complete_100: { metric: "completions", target: 100 },
+  complete_500: { metric: "completions", target: 500 },
+  complete_2500: { metric: "completions", target: 2500 },
+  streak_7: { metric: "streak", target: 7 },
+  streak_30: { metric: "streak", target: 30 },
+  streak_100: { metric: "streak", target: 100 },
+  level_5: { metric: "level", target: 5 },
+  level_10: { metric: "level", target: 10 },
+  level_25: { metric: "level", target: 25 },
+  level_50: { metric: "level", target: 50 },
+  first_goal: { metric: "goals", target: 1 },
+  goals_5: { metric: "goals", target: 5 },
+  goals_25: { metric: "goals", target: 25 },
+  hours_10: { metric: "hours", target: 10 },
+  hours_100: { metric: "hours", target: 100 },
+  hours_1000: { metric: "hours", target: 1000 },
+};
 
 function unlockedKeys(): Set<string> {
   const rows = db.prepare("SELECT key FROM achievements").all() as { key: string }[];
@@ -340,45 +414,101 @@ function drawableCount(): number {
   return row.n;
 }
 
+// The running totals every chain level (#156) is measured against. Computed
+// once per check, then compared to each level's target. `draws` counts
+// NON-WARMUP rows only (ADR-30): a warm-up card was handed out, not gambled, so
+// it never advances the draws chain. `hours` is whole CLOSED tracked hours.
+interface Metrics {
+  draws: number;
+  completions: number;
+  streak: number;
+  level: number;
+  goals: number;
+  hours: number;
+}
+
+function nonWarmupDrawCount(): number {
+  return (db.prepare("SELECT COUNT(*) AS n FROM draws WHERE was_warmup = 0").get() as { n: number })
+    .n;
+}
+
+function achievedGoalCount(): number {
+  return (
+    db.prepare("SELECT COUNT(*) AS n FROM goals WHERE status = 'achieved'").get() as { n: number }
+  ).n;
+}
+
+/** Whole tracked hours from CLOSED time_entries (the codebase's closed-only
+ *  convention) — floored so the progress bar and the unlock threshold agree
+ *  exactly (10 shown means 10 reached). */
+function trackedHours(): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(SUM((julianday(ended_at) - julianday(started_at)) * 1440.0), 0) AS minutes
+       FROM time_entries WHERE ended_at IS NOT NULL`,
+    )
+    .get() as { minutes: number };
+  // Round the float sum to whole minutes before flooring to hours: julianday
+  // arithmetic makes an exact 600 minutes read as 599.9999997, which would
+  // floor to 9h and miss the threshold by a rounding artefact. Rounding to the
+  // nearest minute (the metric's natural granularity) recovers the true count.
+  return Math.floor(Math.round(row.minutes) / 60);
+}
+
+function computeMetrics(): Metrics {
+  return {
+    draws: nonWarmupDrawCount(),
+    completions: (db.prepare("SELECT COUNT(*) AS n FROM completions").get() as { n: number }).n,
+    streak: currentStreak(),
+    level: levelFromXp(totalXp()).level,
+    goals: achievedGoalCount(),
+    hours: trackedHours(),
+  };
+}
+
+/** Progress {current, target} for a chain key, or null for a one-off. current
+ *  is capped at target so an unlocked card reads as a full bar rather than an
+ *  over-100% overshoot (52 draws is 1/1 on first_draw, not 52/1). */
+function chainProgress(
+  key: AchievementKey,
+  metrics: Metrics,
+): { current: number; target: number } | null {
+  const spec = CHAIN_SPECS[key];
+  if (!spec) return null;
+  return { current: Math.min(metrics[spec.metric], spec.target), target: spec.target };
+}
+
 export function checkAchievements(event: { completedTask?: TaskRow; drew?: boolean }): string[] {
   const unlocked = unlockedKeys();
   const fresh: string[] = [];
+  const metrics = computeMetrics();
 
-  const completions = db.prepare("SELECT COUNT(*) AS n FROM completions").get() as { n: number };
-  const streak = currentStreak();
-  const level = levelFromXp(totalXp()).level;
+  const conditions: Record<string, boolean> = {};
 
-  const conditions: Record<string, boolean> = {
-    first_draw: Boolean(event.drew),
-    first_completion: completions.n >= 1,
-    streak_7: streak >= 7,
-    streak_30: streak >= 30,
-    monster_slayer: Boolean(
-      event.completedTask &&
-        (
-          db
-            .prepare(
-              "SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ? AND status = 'done'",
-            )
-            .get(event.completedTask.id) as { n: number }
-        ).n >= 2,
-    ),
-    deck_clearer: Boolean(event.completedTask) && completions.n >= 3 && drawableCount() === 0,
-    level_5: level >= 5,
-    level_10: level >= 10,
-    early_bird: Boolean(
-      event.completedTask &&
-        event.completedTask.impact === 5 &&
-        event.completedTask.due_date &&
-        isoDate(new Date()) <= event.completedTask.due_date,
-    ),
-    // State-derived like first_completion, not event-based (#145): a restored
-    // backup that lost the achievements table re-earns it on the next check.
-    first_goal:
-      (db.prepare("SELECT COUNT(*) AS n FROM goals WHERE status = 'achieved'").get() as {
-        n: number;
-      }).n >= 1,
-  };
+  // Every chain level unlocks off the same table that draws its progress bar,
+  // so a full bar is always a real unlock. first_draw and first_completion are
+  // just the target-1 heads of their chains — no special-casing.
+  for (const [key, spec] of Object.entries(CHAIN_SPECS) as [AchievementKey, ChainSpec][]) {
+    conditions[key] = metrics[spec.metric] >= spec.target;
+  }
+
+  // One-offs — event- or week-shaped, with no running total.
+  conditions.monster_slayer = Boolean(
+    event.completedTask &&
+      (
+        db
+          .prepare("SELECT COUNT(*) AS n FROM tasks WHERE parent_id = ? AND status = 'done'")
+          .get(event.completedTask.id) as { n: number }
+      ).n >= 2,
+  );
+  conditions.deck_clearer =
+    Boolean(event.completedTask) && metrics.completions >= 3 && drawableCount() === 0;
+  conditions.early_bird = Boolean(
+    event.completedTask &&
+      event.completedTask.impact === 5 &&
+      event.completedTask.due_date &&
+      isoDate(new Date()) <= event.completedTask.due_date,
+  );
 
   // leverage_master is evaluated by statsService weekly-grade logic at read
   // time; unlocking it here would need the same aggregation — check cheaply:
@@ -430,11 +560,13 @@ export function gamificationState() {
     )
     .all();
 
-  const unlocked = db.prepare("SELECT key, unlocked_at AS unlockedAt FROM achievements").all() as {
-    key: string;
-    unlockedAt: string;
-  }[];
-  const unlockedMap = new Map(unlocked.map((u) => [u.key, u.unlockedAt]));
+  const unlocked = db
+    .prepare(
+      "SELECT key, unlocked_at AS unlockedAt, claimed_at AS claimedAt, claim_xp AS claimXp FROM achievements",
+    )
+    .all() as { key: string; unlockedAt: string; claimedAt: string | null; claimXp: number | null }[];
+  const unlockedMap = new Map(unlocked.map((u) => [u.key, u]));
+  const metrics = computeMetrics();
 
   return {
     xp,
@@ -451,11 +583,57 @@ export function gamificationState() {
     dailyGoalMet: todayCompletions.length >= dailyGoal,
     dailyGoal,
     todayCompletions,
-    achievements: ACHIEVEMENTS.map((a) => ({
-      ...a,
-      unlockedAt: unlockedMap.get(a.key) ?? null,
-    })),
+    // Each card carries its unlock/claim state plus chain progress (#156):
+    // {current, target} for a chain level, null for a one-off. claimXp is the
+    // stamped payout once claimed; the client shows the prospective value from
+    // the shared tier table until then.
+    achievements: ACHIEVEMENTS.map((a) => {
+      const row = unlockedMap.get(a.key);
+      return {
+        ...a,
+        unlockedAt: row?.unlockedAt ?? null,
+        claimedAt: row?.claimedAt ?? null,
+        claimXp: row?.claimXp ?? null,
+        progress: chainProgress(a.key, metrics),
+      };
+    }),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Claim-for-XP (#156, ADR-42)
+
+export type ClaimResult =
+  | { status: "ok"; xpAwarded: number; levelUp: boolean }
+  | { status: "unknown" } // not a real achievement key → 400
+  | { status: "locked" } // real key, but not unlocked yet → 400
+  | { status: "claimed" }; // already claimed → 409
+
+/**
+ * Claim an unlocked achievement for rarity-scaled XP, ONCE ever. Idempotent by
+ * the achievements primary key: the guarded UPDATE (`claimed_at IS NULL`) plus
+ * the pre-read make a second claim a no-op that reports "claimed". claim_xp is
+ * stamped from the SERVER tier table — the client is never the XP authority.
+ * levelUp compares the derived level across the payout, so a claim that tips
+ * the bar over surfaces the same level-up the client already animates.
+ */
+export function claimAchievement(key: string): ClaimResult {
+  if (!(ACHIEVEMENT_KEYS as readonly string[]).includes(key)) return { status: "unknown" };
+  return db.transaction((): ClaimResult => {
+    const row = db.prepare("SELECT claimed_at AS claimedAt FROM achievements WHERE key = ?").get(key) as
+      | { claimedAt: string | null }
+      | undefined;
+    if (!row) return { status: "locked" };
+    if (row.claimedAt != null) return { status: "claimed" };
+
+    const xpAwarded = claimXpForKey(key);
+    const levelBefore = levelFromXp(totalXp()).level;
+    db.prepare(
+      "UPDATE achievements SET claimed_at = ?, claim_xp = ? WHERE key = ? AND claimed_at IS NULL",
+    ).run(new Date().toISOString(), xpAwarded, key);
+    const levelAfter = levelFromXp(totalXp()).level;
+    return { status: "ok", xpAwarded, levelUp: levelAfter > levelBefore };
+  })();
 }
 
 /** Reopening a task removes its latest completion so XP can't be farmed. */
