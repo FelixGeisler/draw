@@ -559,7 +559,7 @@ a UTC window widened by a day per side. Tracked minutes reuse the stats
 attribute to their start day; per-day `totals` ride along for day-level
 consumers (born for the #54 heatmap; the merged Stats page's activity view
 keeps consuming them — the skyline through #155/ADR-41, the History
-contribution calendar since #174/ADR-44).
+contribution calendar since #174/ADR-45).
 Accepted limitation: deleting a task cascades its entries/completions away and
 with them its history — we do not add write-path tracking to preserve it.
 *Rationale:* Deriving keeps history incapable of contradicting its sources
@@ -569,7 +569,7 @@ for.
 
 *Amendment (#174):* the read model and local-day bucketing described here are
 unchanged; only the UI consuming them changed — the house-of-cards skyline
-became the History contribution calendar (ADR-44).
+became the History contribution calendar (ADR-45).
 
 == ADR-22: Card art as sanitized, model-written SVG — cached once per task
 
@@ -1133,7 +1133,7 @@ mini-cards (#53) and the daily hand (#59) adopt the frame when built.
 follow-up is void; the skyline mini-cards note stands.
 
 *Amendment (#174):* the skyline was itself replaced by the History
-contribution calendar (ADR-44), whose day detail is a plain docked list rather
+contribution calendar (ADR-45), whose day detail is a plain docked list rather
 than TCG mini-cards — so the mini-cards follow-up is now void too.
 
 == ADR-32: Parent-task lifecycle follows the subtasks — derived effort, auto-complete at a symbolic 1 XP, reopen on new subtasks
@@ -1246,7 +1246,7 @@ text-shadow); the degraded no-art state keeps the previous gradient face
 and hides the #113 regenerate control exactly as before (#27).
 (c) Holo: drawn 5★ goal-linked cards shimmer — an iridescent overlay
 (`.draw-holo` on the standing card, rarity tier `holo` in the pile; the
-History calendar marks the same rarity as a corner gem, ADR-44), oversized
+History calendar marks the same rarity as a corner gem, ADR-45), oversized
 rainbow gradient at low opacities, slow drift
 gated behind `prefers-reduced-motion: no-preference` (reduced motion keeps
 the STATIC sheen). Holo REPLACES the #107 foil tier one-to-one — same
@@ -1751,7 +1751,7 @@ zero maintenance cost.
 *Amendment (#174):* the extracted `Skyline.tsx` was itself later replaced by
 `HistoryCalendar.tsx` — the Stats page keeps the same activity-view slot and the
 same `/api/activity` data, now rendered as a GitHub-style contribution calendar
-instead of card towers (ADR-44).
+instead of card towers (ADR-45).
 
 == ADR-42: Achievement chains — the draws log, claim-for-XP as a second stored XP source, and the 5-tier ladder
 
