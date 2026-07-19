@@ -5,9 +5,9 @@
  * the deeper draw tiers fanning into a vortex), ✅ the decisive check (tallies
  * mounting into a monument), 🔥 the streak flame rising to an inferno, ⭐ the
  * risen star growing to a galaxy, 🏆 bronze→silver→gold trophies for goals,
- * ⏳ hourglasses for tracked hours. Static imports, so Vite fingerprints them
- * into the bundle and the browser caches them — no data URIs, no network
- * dependency, no key required.
+ * ⏳ hourglasses for tracked hours. Static imports, so Vite bundles them
+ * (fingerprinted assets, or inlined as data URIs when small) and the browser
+ * caches them — no network dependency, no key required.
  *
  * Deliberately NOT the AI card-art pipeline (#27/#113/#114): that cache is
  * task-keyed, so achievements would need their own storage plus a degraded

@@ -1776,10 +1776,11 @@ and both are expressible as logs, so they stay within ADR-2/ADR-5's
 "derive, never store a counter" spirit — the draws table and the claim
 columns are event facts, not running totals. Sharing the tier table is
 forced by the claim: the moment the server pays XP by rarity, a client-only
-table would be a silent second source of truth. New chain keys ship on the
-emoji-glyph art fallback (`achievementArt`); hand-drawn per-chain SVGs are a
-follow-up (#163, tracked as R9 in section 11), not a blocker — the
-degraded-grace face already handles a missing art row (ADR-33 e).
+table would be a silent second source of truth. The chain keys shipped
+initially on the emoji-glyph art fallback (`achievementArt`) — deliberately
+not a blocker, since the degraded-grace face already handles a missing art
+row (ADR-33 e) — and committed per-chain SVGs followed in #163, so every
+key now carries hand-designed art.
 
 == ADR-43: Stored sibling positions — a REAL `sort_order` column, midpoint reorders, roots excluded
 
