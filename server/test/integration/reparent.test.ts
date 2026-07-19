@@ -144,6 +144,55 @@ describe("validation matrix — every rule answers with a named 400", () => {
   });
 });
 
+// #167: a CHILDLESS SUBTASK moves straight from one parent to a DIFFERENT root,
+// no promote-then-nest two-step. The server already accepted this — the reparent
+// matrix requires only a root target and a childless mover, never that the mover
+// currently BE a root — so this pins the behavior the #167 client change surfaces
+// as a first-class DnD + menu gesture. (The parent-revives-as-leaf and
+// current-draw specs below already exercise the move; this block asserts it
+// head-on with the adoption inheritance and the two illegal shapes.)
+describe("cross-parent subtask move (#167): a childless subtask A → root B directly", () => {
+  it("moves a childless subtask under a DIFFERENT root, inheriting B's goal and (while open) category", async () => {
+    const goalA = await mkGoal("x-parent goal A");
+    const goalB = await mkGoal("x-parent goal B");
+    const parentA = await mkTask({ title: "x-parent A", categoryId: 1, goalId: goalA.id });
+    const parentB = await mkTask({ title: "x-parent B", categoryId: 2, goalId: goalB.id });
+    const [child] = await subtasksOf(parentA.id, [{ title: "x-parent child", effortMinutes: 10 }]);
+    // On creation the child inherited A's goal and category.
+    expect(await listedTask(child.id)).toMatchObject({
+      parentId: parentA.id,
+      goalId: goalA.id,
+      categoryId: 1,
+    });
+
+    // One PATCH moves it straight under B — no promote step in between.
+    const res = await patchTask(child.id, { parentId: parentB.id });
+    expect(res.task).toMatchObject({ parentId: parentB.id, goalId: goalB.id, categoryId: 2 });
+
+    // It now lists as B's subtask and no longer under A.
+    expect((await listedTask(parentA.id)).subtasks).toEqual([]);
+    expect((await listedTask(parentB.id)).subtasks.map((s: { title: string }) => s.title)).toContain(
+      "x-parent child",
+    );
+  });
+
+  it("still 400s the illegal cross-parent shapes: a mover WITH children, and a subtask target", async () => {
+    const dest = await mkTask({ title: "x-parent dest" });
+    // A mover that HAS children cannot become a subtask (PARENT_INTO_SUBTASK).
+    const withChild = await mkTask({ title: "x-parent mover-with-child" });
+    await subtasksOf(withChild.id, [{ title: "x-parent grandchild-to-be" }]);
+    const p = await patchTask(withChild.id, { parentId: dest.id }, 400);
+    expect(p.error).toContain("cannot become a subtask itself");
+
+    // A subtask target rejects the one-level breakdown (NESTED_BREAKDOWN).
+    const parent = await mkTask({ title: "x-parent has-child parent" });
+    const [step] = await subtasksOf(parent.id, [{ title: "x-parent lone step" }]);
+    const mover = await mkTask({ title: "x-parent plain mover" });
+    const n = await patchTask(mover.id, { parentId: step.id }, 400);
+    expect(n.error).toContain("one level deep");
+  });
+});
+
 describe("no-ops (resend tolerance)", () => {
   it("accepts null on a root and the stored parent id on a subtask", async () => {
     const root = await mkTask({ title: "noop root", effortMinutes: 10 });
