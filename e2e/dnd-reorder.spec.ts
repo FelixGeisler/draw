@@ -84,9 +84,17 @@ async function dragToGap(page: Page, subtaskTitle: string, gapLocator: Locator) 
   await page.mouse.down();
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
-  // The gaps only exist now — measure and travel to the target one.
+  // The gaps only exist now — bring the target one into view and travel to it.
+  // The END gap is the last element on the page; when the breakdown sits at the
+  // bottom of the (shared-DB) list its zero-net-height box straddles the fold,
+  // so its exact center can land a sub-pixel BELOW the viewport and
+  // elementFromPoint returns null. Scrolling it in, then clamping the target a
+  // few px inside the viewport, keeps the pointer on the gap's in-view half.
+  await gapLocator.scrollIntoViewIfNeeded();
   const g = (await gapLocator.boundingBox())!;
-  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2, { steps: 10 });
+  const vh = page.viewportSize()!.height;
+  const ty = Math.max(3, Math.min(g.y + g.height / 2, vh - 3));
+  await page.mouse.move(g.x + g.width / 2, ty, { steps: 10 });
   await expect(gapLocator).toHaveClass(/dnd-over/);
   await page.mouse.up();
 }

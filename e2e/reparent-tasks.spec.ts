@@ -2,11 +2,12 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
 import { taskTree } from "./helpers.js";
 
-// Issue #100: the Tasks page offers menu-based reparenting — "Move under…" on
-// root rows without subtasks, "Promote to top-level" on subtask rows. Both
-// are plain buttons/selects (keyboard-operable by construction; the promote
-// test drives the keyboard path). Runs against the shared E2E database after
-// the other specs; all seeded titles are unique to this spec.
+// Issue #100 (+ #167): the Tasks page offers menu-based reparenting — "Move
+// under…" on any CHILDLESS row (a root or, since #167, a subtask that can move
+// to a different parent), "Promote to top-level" on subtask rows. Both are
+// plain buttons/selects (keyboard-operable by construction; the promote test
+// drives the keyboard path). Runs against the shared E2E database after the
+// other specs; all seeded titles are unique to this spec.
 test.describe.configure({ mode: "serial" });
 
 const UMBRELLA_TITLE = "Plan the e2e garden bed";
@@ -47,12 +48,13 @@ test("move a root task under another via the Move under… menu", async ({ page 
   await page.getByLabel("Move under").selectOption({ label: UMBRELLA_TITLE });
   await page.getByRole("button", { name: "Move", exact: true }).click();
 
-  // The row re-renders as a subtask: the promote affordance replaces the
-  // move menu, and the umbrella now expands over it.
+  // The row re-renders as a subtask: it gains the promote (⤴) affordance, and
+  // since #167 a childless subtask keeps its "Move under…" menu too (it can
+  // move under a different parent), so both reorganize controls are present.
   await expect(row(page, LOOSE_TITLE).getByTitle("Promote to top-level")).toBeVisible();
   await expect(
     row(page, LOOSE_TITLE).getByTitle("Move under another task (it becomes a subtask)"),
-  ).not.toBeVisible();
+  ).toBeVisible();
 
   // The server persisted the adoption — the task nests under the umbrella.
   const tasks = await tasksByTitle(page);
