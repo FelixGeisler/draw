@@ -1,5 +1,4 @@
 import { useState } from "react";
-import confetti from "canvas-confetti";
 import { ApiError } from "../api/client";
 import { useCategories, useDeleteTask, useSettings, useTasks, useUpdateTask } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
@@ -20,6 +19,7 @@ import { CategoryPill, TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
 import { svgDataUri } from "../lib/cardVisuals";
+import { celebrate } from "../lib/celebrate";
 import { classifyTask } from "../lib/drawable";
 import { heldCardResolved, resolveDrawnCard } from "../lib/drawnCard";
 import { resolveDrawView } from "../lib/focusView";
@@ -268,8 +268,9 @@ export function DrawPage() {
     }
     // Celebration belongs to the acting surface (#110): confetti fires for
     // the page's own ✓ Done only — a completion arriving from the TimerBar
-    // or the Tasks page dismisses the derived card without fanfare.
-    confetti({ particleCount: 120, spread: 75, origin: { y: 0.6 } });
+    // or the Tasks page dismisses the derived card without fanfare. The
+    // helper carries the reduced-motion gate (#148).
+    celebrate({ particleCount: 120, spread: 75, origin: { y: 0.6 } });
     // Surface why the XP was higher (#57) alongside the confetti.
     if (response.bonus === "warmup") setBonusNote("🔰 Warm-up bonus: +25% XP");
     else if (response.bonus === "momentum") setBonusNote("⚡ Momentum bonus: +25% XP");
