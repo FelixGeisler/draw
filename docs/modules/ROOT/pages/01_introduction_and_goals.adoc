@@ -24,8 +24,8 @@ Main features:
 |===
 |Feature |Purpose
 
-|Capture + forced breakdown
-|Tasks > 30 min cannot enter the deck; they must be split
+|Capture-first task page + forced breakdown
+|Quick capture on top of the Tasks page; tasks > 30 min cannot enter the deck — a triage strip surfaces them with the split/estimate controls in place (ADR-40)
 
 |Weighted card draw
 |Random pick weighted by impact² / effort × urgency × staleness
