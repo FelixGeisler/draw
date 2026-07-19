@@ -27,6 +27,11 @@ beforeAll(async () => {
     // pre-v15 fixture does not already carry what the v15 migration adds.
     .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
     .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
+    // v16 (#177): strip achievement_customizations so the forward migration re-adds it.
+    .replace(
+      /-- User-customizable achievement display metadata[\s\S]*?CREATE TABLE achievement_customizations[\s\S]*?\);\r?\n\r?\n/,
+      "",
+    )
     .replace(/-- Draw log[\s\S]*?CREATE TABLE draws[\s\S]*?\);\r?\n/, "")
     .replace(/,\r?\n  -- Claim-for-XP[\s\S]*?claim_xp INTEGER/, "");
   expect(v13Schema).not.toBe(current);
@@ -34,6 +39,7 @@ beforeAll(async () => {
   expect(v13Schema).not.toContain("claim_xp");
   expect(v13Schema).not.toContain("claimed_at");
   expect(v13Schema).not.toContain("sort_order");
+  expect(v13Schema).not.toContain("achievement_customizations");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v13Schema);
@@ -55,9 +61,9 @@ beforeAll(async () => {
 });
 
 describe("migration v13 → v14 (#156, ADR-42)", () => {
-  it("runs the chain to the current version (15: v14 draws/claim, then v15 sort_order)", async () => {
+  it("runs the chain to the current version (16: v14 draws/claim, v15 sort_order, v16 customizations)", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(15);
+    expect(db.pragma("user_version", { simple: true })).toBe(16);
   });
 
   it("creates the draws log with the append-only shape", async () => {

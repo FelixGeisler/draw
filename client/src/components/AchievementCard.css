@@ -16,10 +16,10 @@
 .ach-collection {
   display: grid;
   /* The card is portrait (5:7, the 300x420 draw card's ratio): the column width
-     and that aspect-ratio FIX the height, and .ach-card-inner clips. The
-     descriptions are short — the tallest caption is ~52px at the narrowest
-     column this grid produces, against ~200px of headroom — but a long one
-     would clip silently rather than grow the row. */
+     and that aspect-ratio FIX the height, and .ach-card-inner clips. Since #177
+     the face is name-only (the description moved to a hover/focus overlay), so
+     the caption band is just the name plus the date/progress/claim — well
+     inside the ~200px of headroom the ratio gives at the narrowest column. */
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 14px;
   margin: 0;
@@ -28,6 +28,20 @@
 
 .ach-card {
   aspect-ratio: 5 / 7;
+}
+
+/* Curated-away cards (#177) live in a collapsed section under the main grid —
+   display curation, never deletion, so they stay editable/claimable/un-hideable
+   here. The native <details> gives a keyboard-operable disclosure for free. */
+.ach-hidden-section {
+  margin-top: 16px;
+}
+
+.ach-hidden-section > summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 14px;
+  user-select: none;
 }
 
 .ach-card-inner {
@@ -109,15 +123,8 @@
   text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
 }
 
-.ach-hint {
-  color: var(--text-dim);
-  font-size: 11.5px;
-  line-height: 1.35;
-  text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
-}
-
 /* Rarity and locked-state are paint; this is the same fact as text, for
-   screen readers only (the visible name/date/hint are real DOM already). */
+   screen readers only (the visible name/date are real DOM already). */
 .ach-sr {
   position: absolute;
   width: 1px;
@@ -223,6 +230,184 @@
   font-size: 10.5px;
   color: var(--ok);
   text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
+}
+
+/* ---- Description reveal + edit affordance (#177) ------------------------- */
+
+/* The description is no longer a permanent caption line (#177) — the face is
+   name-only. It reveals here on hover/focus as a panel over the top of the art,
+   away from the name/claim band at the foot so it never covers them. Focus-
+   reachable: the ✎ button's aria-describedby points at this node, so a keyboard
+   user hears it the moment the button takes focus. pointer-events: none — it is
+   a reveal, never a click target. */
+.ach-desc {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 10px 12px 16px;
+  background: linear-gradient(rgba(12, 14, 19, 0.94), rgba(12, 14, 19, 0.74) 72%, transparent);
+  color: var(--text);
+  font-size: 11.5px;
+  line-height: 1.35;
+  pointer-events: none;
+  opacity: 0;
+  text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
+}
+
+.ach-card:hover .ach-desc,
+.ach-card:focus-within .ach-desc {
+  opacity: 1;
+}
+
+/* The ✎ button sits in the top-right, revealed on hover/focus. Opacity-hidden
+   (never display:none) so it stays in the tab order — focusing it flips
+   :focus-within, which reveals both it and the description panel. */
+.ach-edit {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(18, 20, 26, 0.75);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.ach-card:hover .ach-edit,
+.ach-card:focus-within .ach-edit {
+  opacity: 1;
+}
+
+.ach-edit:hover {
+  background: rgba(79, 140, 255, 0.32);
+  border-color: var(--accent);
+}
+
+/* A keyboard user must see it the instant it takes focus — even before any
+   reveal transition — with a clear ring. */
+.ach-edit:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ---- Inline editor (#177) ----------------------------------------------- */
+
+/* A full-card overlay form: rename, rewrite the description, hide, then Save /
+   Cancel / Reset. Opaque so it reads over the art; scrolls if the form is
+   taller than the card. */
+.ach-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: linear-gradient(160deg, #1c2230, #12151d);
+  overflow-y: auto;
+}
+
+.ach-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.ach-editor-field > span {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.ach-editor input[type="text"],
+.ach-editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+
+.ach-editor textarea {
+  min-height: 42px;
+  resize: vertical;
+}
+
+.ach-editor-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.ach-editor-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ach-editor-actions button {
+  flex: 1;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ach-editor-save {
+  border-color: var(--accent) !important;
+  background: rgba(79, 140, 255, 0.22) !important;
+}
+
+.ach-editor-reset {
+  padding: 3px 6px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.ach-editor button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* Reveal fades are motion — gated behind no-preference, so reduced motion keeps
+   the reveal instant (opacity still toggles) with no sweep, matching the sheen
+   pattern above. */
+@media (prefers-reduced-motion: no-preference) {
+  .ach-desc {
+    transition: opacity 0.18s ease;
+  }
+  .ach-edit {
+    transition:
+      opacity 0.18s ease,
+      background 0.15s;
+  }
 }
 
 /* ---- Rarity sheens ------------------------------------------------------ */

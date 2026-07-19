@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 15;
+export const CURRENT_VERSION = 16;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -322,6 +322,32 @@ function migrate() {
             (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM tasks WHERE id != NEW.id)
           WHERE id = NEW.id;
         END`);
+    }
+    if (version < 16) {
+      // User-customizable achievement display metadata (#177, ADR-44): the
+      // user may rename an achievement, rewrite its description, and hide it
+      // from the main collection — DISPLAY-ONLY overrides. Unlock, claim, XP,
+      // rarity and the shared key set are untouched (a hidden achievement still
+      // unlocks and is still claimable).
+      //
+      // Keyed by achievement KEY, NOT a foreign key to `achievements` (which
+      // only rows UNLOCKED keys): a customization applies to a still-LOCKED key
+      // too, so a user can pre-rename or hide a card before earning it. NULL
+      // title/description = "use the server default"; the row exists only while
+      // some override is set (the reset/PATCH deletes an all-default row). No
+      // backfill — every pre-#177 achievement reads at its default until edited.
+      //
+      // User STATE, not derivable state (a chosen label/visibility has no
+      // predicate or log it could be computed from), so it stands with
+      // `resolved_at` (ADR-38) and `sort_order` (ADR-43) WITHIN ADR-2, which
+      // bans stored DERIVABLES, not stored facts. Rides the backup/restore
+      // round trip like any other table (reopenDatabase re-migrates, ADR-26).
+      db.exec(`CREATE TABLE achievement_customizations (
+        key TEXT PRIMARY KEY,
+        title TEXT,
+        description TEXT,
+        hidden INTEGER NOT NULL DEFAULT 0
+      )`);
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);

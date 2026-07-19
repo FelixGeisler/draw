@@ -96,26 +96,29 @@ test("unlocking deals the achievement as a card in the toast", async ({ page }) 
   expect(archive.ok()).toBe(true);
 });
 
-test("the collection shows earned cards face-up and unearned ones face-down with the hint", async ({
+test("the collection shows earned cards face-up and unearned ones face-down, criteria on the reveal", async ({
   page,
 }) => {
   await page.goto("/stats");
 
-  // Earned: face-up — art, name, earned date, no criteria line.
+  // Earned: face-up — art, name-only face (#177 removed the permanent criteria
+  // line), earned date. The description now lives in the hover/focus reveal.
   const earned = card(page, "early_bird");
   await expect(earned).toHaveClass(/unlocked/);
   await expect(earned.locator(".ach-art")).toBeVisible();
   await expect(earned.locator(".ach-name")).toHaveText("Early bird");
   await expect(earned.locator(".ach-date")).toContainText("unlocked 20");
-  await expect(earned.locator(".ach-hint")).toHaveCount(0);
+  await expect(earned.locator(".ach-hint")).toHaveCount(0); // the old caption line is gone
+  await expect(earned.locator(".ach-desc")).toHaveText("Finish a 5★ task before its due date.");
 
   // Unearned: face-down — but the criteria stay readable (the issue's
-  // deliberate openness; no "???" mystery cards) and the art stays behind it
-  // as a silhouette rather than being dropped.
+  // deliberate openness; no "???" mystery cards), now in the reveal panel, and
+  // the art stays behind it as a silhouette rather than being dropped.
   const unearned = card(page, "streak_30");
   await expect(unearned).toHaveClass(/locked/);
   await expect(unearned.locator(".ach-name")).toHaveText("Unstoppable");
-  await expect(unearned.locator(".ach-hint")).toHaveText("30 completed days in one unbroken streak.");
+  await expect(unearned.locator(".ach-desc")).toHaveText("30 completed days in one unbroken streak.");
+  await expect(unearned.locator(".ach-hint")).toHaveCount(0);
   await expect(unearned.locator(".ach-date")).toHaveCount(0);
   await expect(unearned.locator(".ach-art")).toBeVisible();
 

@@ -30,7 +30,13 @@ const currentSchema = fs.readFileSync(schemaPath, "utf-8");
 // its stamp trigger (both ADDED by the v15 migration).
 const v14Schema = currentSchema
   .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
-  .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "");
+  .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
+  // v16 (#177): strip achievement_customizations too — this pre-v15 fixture is
+  // pre-v16 as well, so the chain re-adds it; a duplicate CREATE would abort.
+  .replace(
+    /-- User-customizable achievement display metadata[\s\S]*?CREATE TABLE achievement_customizations[\s\S]*?\);\r?\n\r?\n/,
+    "",
+  );
 
 let app: express.Express;
 let parentId: number;
@@ -45,6 +51,7 @@ beforeAll(async () => {
   expect(v14Schema).not.toBe(currentSchema);
   expect(v14Schema).not.toContain("sort_order");
   expect(v14Schema).not.toContain("tasks_stamp_sort_order");
+  expect(v14Schema).not.toContain("achievement_customizations");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v14Schema);
@@ -95,9 +102,9 @@ beforeAll(async () => {
 });
 
 describe("migration v14 → v15 adds tasks.sort_order (#157, ADR-43)", () => {
-  it("bumps user_version to 15", async () => {
+  it("bumps user_version to 16 (v15 sort_order, then v16 customizations ride the same chain)", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(15);
+    expect(db.pragma("user_version", { simple: true })).toBe(16);
   });
 
   it("adds sort_order as REAL NOT NULL DEFAULT 0", async () => {
