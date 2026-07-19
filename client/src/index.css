@@ -13,8 +13,8 @@
   /* The two shipped rarity sheens (#62/#107, redesigned in #123), hoisted here
      in #124 so every card surface paints the SAME gradient instead of a
      private copy: the standing drawn card's .draw-holo, the trophy pile and
-     history skyline's rarity tiers, and the achievement collection's
-     legendary/epic/rare tiers. Iridescent = the top tier, monochrome silver =
+     the Stats skyline's rarity tiers, and the achievement collection's
+     super-rare/ultra-rare/secret-rare tiers (#156). Iridescent = the top tier, monochrome silver =
      the quiet one below it; opacities stay low everywhere — a glint you notice
      when you look, not a casino.
 
@@ -23,7 +23,7 @@
      oversize the band (background-size: 250%) so a drift/sweep can move it
      without ever changing the element's box. The -dense pair below is the same
      band — same 115deg, same hue order, same structure — compressed and
-     strengthened for the history skyline's tiny static towers. Change a hue
+     strengthened for the skyline's tiny static towers. Change a hue
      here and both scales follow; only the width/alpha differ. */
   --sheen-holo: linear-gradient(
     115deg,

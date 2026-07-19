@@ -112,7 +112,28 @@ CREATE TABLE card_art (
 
 CREATE TABLE achievements (
   key TEXT PRIMARY KEY,
-  unlocked_at TEXT NOT NULL
+  unlocked_at TEXT NOT NULL,
+  -- Claim-for-XP (#156, ADR-42): an unlocked achievement can be CLAIMED once
+  -- ever for rarity-scaled XP — a SECOND stored XP source amending ADR-5's
+  -- "XP is the completions log" (totalXp now sums both). claimed_at is the
+  -- event fact; claim_xp is the amount, stamped from the SERVER tier table at
+  -- claim time (the client is never the XP authority). Both NULL until claimed;
+  -- idempotent by the primary key — one row per key, one claim ever.
+  claimed_at TEXT,
+  claim_xp INTEGER
+);
+
+-- Draw log (#156, ADR-42): append-only event log of every card dealt, the
+-- ADR-5 shape (log over counters) like completions and streak_freezes. A draw
+-- HAPPENED even if the task is later deleted, so task_id is ON DELETE SET NULL,
+-- NEVER CASCADE — losing the task must not rewrite draw history. was_warmup
+-- separates gambled draws from handed-out warm-up deals (ADR-30); the draws
+-- achievement chain counts non-warmup rows only.
+CREATE TABLE draws (
+  id INTEGER PRIMARY KEY,
+  task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  drawn_at TEXT NOT NULL,
+  was_warmup INTEGER NOT NULL DEFAULT 0
 );
 
 -- Streak freeze tokens (#58, ADR-28): append-only log of EARNED events only.

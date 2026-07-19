@@ -397,13 +397,20 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
       // v11 (#92): a genuine v2 backup has no anthropic_file_id column, so the
       // forward-migration on import re-adds it. Leaving it in would make the
       // import's ALTER fail with a duplicate column (a raw 500).
-      .replace(/  -- Anthropic Files API id[\s\S]*?anthropic_file_id TEXT,\r?\n/, "");
+      .replace(/  -- Anthropic Files API id[\s\S]*?anthropic_file_id TEXT,\r?\n/, "")
+      // v14 (#156): a genuine v2 backup has no draws table and no achievements
+      // claim columns, so the forward-migration on import re-adds them. Leaving
+      // them in would make the import's CREATE TABLE / ALTER fail (a raw 500).
+      .replace(/-- Draw log[\s\S]*?CREATE TABLE draws[\s\S]*?\);\r?\n/, "")
+      .replace(/,\r?\n  -- Claim-for-XP[\s\S]*?claim_xp INTEGER/, "");
     expect(v2Schema).not.toContain("deferred_until");
     expect(v2Schema).not.toContain("card_art");
     expect(v2Schema).not.toContain("streak_freezes");
     expect(v2Schema).not.toContain("was_warmup");
     expect(v2Schema).not.toContain("warmup_every_hours");
     expect(v2Schema).not.toContain("anthropic_file_id");
+    expect(v2Schema).not.toContain("CREATE TABLE draws");
+    expect(v2Schema).not.toContain("claim_xp");
 
     const legacyDbPath = path.join(dataDir(), "legacy-backup.db");
     const legacy = new Database(legacyDbPath);

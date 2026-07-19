@@ -459,6 +459,11 @@ describe("current-draw pointer through the cascade (ADR-13)", () => {
 // point is real and kept.
 describe("estimation stats stay clean (ADR-15)", () => {
   it("a parent auto-completion never reaches the estimation block", async () => {
+    // The payload is summary-only since #155 (no per-task rows), so the
+    // exclusions are pinned as before/after DELTAS of the summary: constant
+    // residue from the earlier tests cancels out.
+    const before = (await request(app).get("/api/stats").expect(200)).body.estimation.summary;
+
     // Parent A: stored estimate but NO tracked time → zero tracked cycles.
     const parentA = await mkTask({ title: "Estimation parent A", effortMinutes: 90 });
     const [subA] = await mkSubtasks(parentA.id, [{ title: "estimation step A", effortMinutes: 20 }]);
@@ -482,11 +487,11 @@ describe("estimation stats stay clean (ADR-15)", () => {
     );
     await patchTask(subB.id, { status: "done" }); // parent B auto-done, tracked but unestimated
 
-    const stats = (await request(app).get("/api/stats").expect(200)).body;
-    const ids = stats.estimation.tasks.map((t: { taskId: number }) => t.taskId);
-    expect(ids).toContain(subA.id);
-    expect(ids).not.toContain(parentA.id);
-    expect(ids).not.toContain(parentB.id);
+    const after = (await request(app).get("/api/stats").expect(200)).body.estimation.summary;
+    // Only subA entered: +1 task (parent B in would make it +2) carrying
+    // +20 estimated minutes (parent A in would add its 90 on top).
+    expect(after.taskCount - before.taskCount).toBe(1);
+    expect(after.totalEstimatedMinutes - before.totalEstimatedMinutes).toBe(20);
   });
 });
 

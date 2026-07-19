@@ -130,15 +130,18 @@ test("the collection shows earned cards face-up and unearned ones face-down with
   await expect(earned).not.toContainText("DEF");
 });
 
-test("rarity grades the sheen: legendary tiered, common plain", async ({ page }) => {
+test("rarity grades the sheen across the 5-tier ladder, common plain", async ({ page }) => {
   await page.goto("/stats");
 
   // Same assertion style as trophy-rarity.spec.ts: the tier is a class, and
-  // "common" is the ABSENCE of one — plain is no sheen, not a tier of one.
-  await expect(card(page, "streak_30")).toHaveClass(/rarity-legendary/);
-  await expect(card(page, "deck_clearer")).toHaveClass(/rarity-legendary/);
-  await expect(card(page, "level_10")).toHaveClass(/rarity-epic/);
+  // "common" is the ABSENCE of one — plain is no sheen, not a tier of one. The
+  // #156 ladder migrated the old tiers: streak_30 legendary → ultra-rare,
+  // level_10 epic → super-rare.
+  await expect(card(page, "streak_30")).toHaveClass(/rarity-ultra-rare/);
+  await expect(card(page, "deck_clearer")).toHaveClass(/rarity-ultra-rare/);
+  await expect(card(page, "level_10")).toHaveClass(/rarity-super-rare/);
   await expect(card(page, "early_bird")).toHaveClass(/rarity-rare/);
+  await expect(card(page, "draw_10000")).toHaveClass(/rarity-secret-rare/);
   await expect(card(page, "first_draw")).not.toHaveClass(/rarity-/);
   await expect(card(page, "first_completion")).not.toHaveClass(/rarity-/);
 
@@ -179,4 +182,84 @@ test("reduced motion keeps the sheen painted but still", async ({ page }) => {
     return t;
   });
   expect(flipTransition).toBe("0s");
+});
+
+// --- Chains + claim-for-XP (#156) ------------------------------------------
+
+test("a locked chain card shows a progress bar toward its threshold", async ({ page }) => {
+  await page.goto("/stats");
+
+  // complete_2500 is a chain end (secret-rare) — unreachable in E2E, so it is a
+  // reliably LOCKED chain card, which is exactly where the progress bar lives.
+  const locked = card(page, "complete_2500");
+  await expect(locked).toHaveClass(/locked/);
+  const bar = locked.locator(".ach-progress");
+  await expect(bar).toBeVisible();
+  await expect(bar).toHaveAttribute("role", "progressbar");
+  await expect(locked.locator(".ach-progress-label")).toContainText("/2500");
+
+  // A one-off has no running total, so it carries no bar (progress is null).
+  await expect(card(page, "early_bird").locator(".ach-progress")).toHaveCount(0);
+});
+
+test("Secret Rare gets a distinct treatment, painted but still under reduced motion", async ({
+  page,
+}) => {
+  await page.goto("/stats");
+  await page.emulateMedia({ reducedMotion: "reduce" });
+
+  // No secret-rare achievement is reachable in E2E (10k draws, a 100-day
+  // streak…), so the top-tier treatment is exercised on a synthetic card that
+  // mimics the real DOM — the same approach the flip-transition assertion above
+  // uses. The CSS contract: the holo sheen is PAINTED, its drift is STILLED
+  // under reduced motion, and the frame wears the deliberate violet border.
+  const style = await page.evaluate(() => {
+    const outer = document.createElement("div");
+    outer.className = "ach-card unlocked rarity-secret-rare";
+    const inner = document.createElement("div");
+    inner.className = "ach-card-inner";
+    outer.append(inner);
+    document.body.append(outer);
+    const after = getComputedStyle(inner, "::after");
+    const frame = getComputedStyle(inner);
+    const result = {
+      sheen: after.backgroundImage,
+      animation: after.animationName,
+      border: frame.borderTopColor,
+    };
+    outer.remove();
+    return result;
+  });
+  expect(style.sheen).toContain("gradient"); // holo painted
+  expect(style.animation).toBe("none"); // drift stilled by reduced motion
+  expect(style.border).toContain("190, 130, 255"); // the distinct violet frame
+});
+
+test("claiming an unlocked card raises the header XP and is idempotent", async ({ page }) => {
+  await page.goto("/stats");
+
+  // early_bird was unlocked by the first test in this file and never claimed —
+  // the launch-payday state (unlocked, claimable). It is a rare card → 50 XP.
+  const before = await (await page.request.get("/api/gamification")).json();
+  const earlyBird = before.achievements.find((a: { key: string }) => a.key === "early_bird");
+  expect(earlyBird.unlockedAt).not.toBeNull();
+  expect(earlyBird.claimedAt).toBeNull();
+
+  const cardEl = card(page, "early_bird");
+  const claimBtn = cardEl.getByRole("button", { name: /Claim \+50 XP/ });
+  await expect(claimBtn).toBeVisible();
+  await claimBtn.click();
+
+  // The card flips to its claimed state — button gone, "claimed +50 XP" shown.
+  await expect(cardEl.locator(".ach-claimed")).toContainText("claimed +50 XP");
+  await expect(cardEl.getByRole("button", { name: /Claim/ })).toHaveCount(0);
+
+  // The header total rose by the rare payout, live via the gamification invalidate.
+  await expect(page.getByText(`${before.xp + 50} XP`, { exact: true })).toBeVisible();
+
+  // Idempotent under retry: a second claim 409s and the total does not double.
+  const retry = await page.request.post("/api/achievements/early_bird/claim");
+  expect(retry.status()).toBe(409);
+  const after = await (await page.request.get("/api/gamification")).json();
+  expect(after.xp).toBe(before.xp + 50);
 });

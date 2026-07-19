@@ -1,9 +1,9 @@
-// Shared LOCAL-calendar-day helpers (PR #72 review): the skyline
-// (HistoryPage) and the activity heatmap (ActivityHeatmap) must never
-// disagree about which local day an activity belongs to (ADR-21), so the
-// day math and formatting they share live here once instead of as drifting
-// copies. Days are YYYY-MM-DD strings; arithmetic uses the UTC trick (no
-// DST holes) while parsing-for-display stays local.
+// Shared LOCAL-calendar-day helpers (PR #72 review): every activity view —
+// today the skyline (components/Skyline) and the streak flame — must agree
+// about which local day an activity belongs to (ADR-21), so the day math
+// and formatting live here once instead of as drifting copies. Days are
+// YYYY-MM-DD strings; arithmetic uses the UTC trick (no DST holes) while
+// parsing-for-display stays local.
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");

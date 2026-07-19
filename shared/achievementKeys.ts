@@ -35,19 +35,51 @@
  * (NodeNext on the server, bundler resolution on the client).
  */
 
-/** Every achievement key the server can ship, in `ACHIEVEMENTS` display order. */
+/**
+ * Every achievement key the server can ship, in `ACHIEVEMENTS` display order.
+ *
+ * Since #156 most keys belong to a MULTI-LEVEL CHAIN (draws, completions,
+ * streak, level, goals, tracked hours) — each level is its own key so it fits
+ * the append-only `achievements` table and this shared-key machinery. A handful
+ * stay one-offs (event unlocks with no meaningful running total). The tier per
+ * key lives next door in `shared/achievementTiers.ts`, imported by BOTH the
+ * server (claim-XP values) and the client (styling) — the same drift-guard.
+ */
 export const ACHIEVEMENT_KEYS = [
+  // Draws chain — non-warmup deals only (ADR-30), counted from the draws log.
   "first_draw",
+  "draw_10",
+  "draw_100",
+  "draw_1000",
+  "draw_10000",
+  // Completions chain — from the completions log; undo lowers progress.
   "first_completion",
+  "complete_25",
+  "complete_100",
+  "complete_500",
+  "complete_2500",
+  // Streak chain — real completion days in one unbroken run (#58).
   "streak_7",
   "streak_30",
+  "streak_100",
+  // Level chain — derived from total XP (completions + claims).
+  "level_5",
+  "level_10",
+  "level_25",
+  "level_50",
+  // Goals-achieved chain — state-derived from achieved goals.
+  "first_goal",
+  "goals_5",
+  "goals_25",
+  // Tracked-time chain — from closed time_entries.
+  "hours_10",
+  "hours_100",
+  "hours_1000",
+  // One-offs — event unlocks with no running total (progress is null).
   "monster_slayer",
   "leverage_master",
   "deck_clearer",
-  "level_5",
-  "level_10",
   "early_bird",
-  "first_goal",
 ] as const;
 
 export type AchievementKey = (typeof ACHIEVEMENT_KEYS)[number];

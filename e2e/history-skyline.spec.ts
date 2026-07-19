@@ -1,12 +1,13 @@
 import { expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 
-// Issue #53: the History page shows a house-of-cards skyline — one tower per
-// local day, upright cards for completions, face-down cards for tasks worked
-// on but not finished. Hover, keyboard focus, and tap lift a card and reveal
-// its details (trophy-pile interaction, PR #47). Runs against the shared
-// serial E2E database; every assertion scopes to this file's uniquely-titled
-// cards (never counts).
+// Issue #53: the house-of-cards skyline — one tower per local day, upright
+// cards for completions, face-down cards for tasks worked on but not
+// finished. Hover, keyboard focus, and tap lift a card and reveal its
+// details (trophy-pile interaction, PR #47). Since #155 the skyline lives on
+// the merged Stats page and /history is a redirect — same assertions, new
+// address. Runs against the shared serial E2E database; every assertion
+// scopes to this file's uniquely-titled cards (never counts).
 test.describe.configure({ mode: "serial" });
 
 const DONE_TITLE = "Skyline card finished essay";
@@ -43,12 +44,22 @@ function card(page: Page, title: string) {
   return page.locator(`.hoc-card[aria-label*="${title}"]`);
 }
 
+test("/history redirects to the merged Stats page; the nav entry is gone", async ({ page }) => {
+  await page.goto("/history");
+  await page.waitForURL("**/stats");
+  // The skyline section is really there — heading plus its Load earlier
+  // control — and History no longer exists as a nav destination.
+  await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "← Load earlier" })).toBeVisible();
+  await expect(page.locator(".sidenav a", { hasText: "History" })).toHaveCount(0);
+});
+
 test("today's tower: upright for completed, face-down for started-only; hover reveals details without reflow", async ({
   page,
 }) => {
   const categoryName = await seedActivity(page.request);
   await page.goto("/");
-  await page.getByRole("link", { name: "History" }).click();
+  await page.getByRole("link", { name: "Stats" }).click();
 
   const done = card(page, DONE_TITLE);
   const open = card(page, OPEN_TITLE);
@@ -91,7 +102,7 @@ test("today's tower: upright for completed, face-down for started-only; hover re
 test("keyboard focus lifts with Escape lowering; tap toggles; outside tap lowers", async ({
   page,
 }) => {
-  await page.goto("/history");
+  await page.goto("/stats");
 
   // A real Tab keypress from the neighboring card guarantees the
   // :focus-visible heuristic treats the focus as keyboard-driven. Today's
@@ -130,7 +141,7 @@ test("axis marks today, and prefers-reduced-motion drops the lift transition", a
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/history");
+  await page.goto("/stats");
 
   const open = card(page, OPEN_TITLE);
   await expect(open).toHaveCSS("transition-duration", "0s");

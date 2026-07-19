@@ -3,6 +3,7 @@ import type { Category, Goal, NewTask, Task } from "../api/types";
 import { useEstimationBias } from "../hooks/useEstimationBias";
 import { estimateHint, hintText } from "../lib/estimationCoach";
 import { resolveSubmittedImpact } from "../lib/impact";
+import { StarPicker } from "./StarPicker";
 
 interface Props {
   categories: Category[];
@@ -31,22 +32,6 @@ const WEEKDAYS: { day: number; label: string }[] = [
   { day: 6, label: "Sat" },
   { day: 0, label: "Sun" },
 ];
-
-function StarPicker({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  return (
-    <span title="Impact toward the goal (1–5)" style={{ fontSize: 18, cursor: "pointer" }}>
-      {[1, 2, 3, 4, 5].map((n) => (
-        <span
-          key={n}
-          onClick={() => onChange(n)}
-          style={{ color: n <= value ? "var(--warn)" : "var(--border)" }}
-        >
-          ★
-        </span>
-      ))}
-    </span>
-  );
-}
 
 export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, hideRecur, onSubmit, onCancel }: Props) {
   const [title, setTitle] = useState(initial?.title ?? "");

@@ -27,8 +27,8 @@ actor "User" as user
 component "MCP client\nClaude Code / Desktop" as mcpClient
 
 package "client/ — React SPA" {
-  component "pages + components\nDraw, Tasks, Goals,\nStats, History, Settings" as pages
-  component "lib/ — pure logic\ndrawable, focusView,\ndrawnCard, heatmap, rarity" as clib
+  component "pages + components\nDraw, Tasks, Goals,\nStats, Settings" as pages
+  component "lib/ — pure logic\ndrawable, focusView,\ndrawnCard, localDay, rarity" as clib
   component "hooks/ — TanStack Query\nuseTasks, useDraw, useTimer,\nuseGamification, useAi" as hooks
   component "api/client.ts\ntyped fetch wrapper" as apiClient
 }
@@ -112,7 +112,7 @@ server/src/
     ├── localDay.ts          the server's local calendar day (streaks): pure
     ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation
     │                        accuracy + per-category bias (coaching input, ADR-27)
-    ├── activityService.ts   per-day card derivation for the history skyline (pure core + SQL fetch)
+    ├── activityService.ts   per-day card derivation for the Stats skyline (pure core + SQL fetch)
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
     ├── streak.ts            pure streak fold: rest days, freeze tokens (ADR-28)
     ├── backupService.ts     zip export/import of app.db + files/ (ADR-26)
@@ -163,10 +163,11 @@ client/src/
 │                              useActivity, useEstimationBias)
 ├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip),
 │                              Tasks (capture-first: quick capture + triage strip +
-│                              category tree, ADR-40), Goals, Stats (incl. activity
-│                              heatmap), History (skyline), Settings
+│                              category tree, ADR-40), Goals, Stats (summary tiles,
+│                              time bars, estimation summary, history skyline,
+│                              achievements — ADR-41), Settings
 ├── lib/                       pure client logic (drawable classification, effort display,
-│                              generate-tasks review model, heatmap grid/quantization,
+│                              generate-tasks review model,
 │                              shared local-day math, estimation coaching decisions,
 │                              timer/countdown formatting + focus-view decision,
 │                              trophy rarity tiers) — unit-tested
@@ -175,7 +176,7 @@ client/src/
                                (inline triage estimate), TimerBar,
                                FocusOverlay (fullscreen focus mode, ADR-29),
                                EmptyPoolReason (one voice for an empty pool),
-                               GamificationHeader, TrophyDeck, ActivityHeatmap,
+                               GamificationHeader, TrophyDeck, Skyline,
                                AchievementToast, MaterialsSection, AiSuggestionPanel
                                (breakdown, plan, generate-tasks panels)
 ....

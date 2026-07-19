@@ -57,7 +57,12 @@ beforeAll(async () => {
     // …nor the v11 materials.anthropic_file_id column (#92) — the v6 → v11
     // boot re-adds it, and leaving it in the seed would make that ALTER fail
     // with a duplicate column.
-    .replace(/  -- Anthropic Files API id[\s\S]*?anthropic_file_id TEXT,\r?\n/, "");
+    .replace(/  -- Anthropic Files API id[\s\S]*?anthropic_file_id TEXT,\r?\n/, "")
+    // …nor the v14 draws table and achievements claim columns (#156): the
+    // v6 → v14 boot creates/adds them, so leaving them in the seed would make
+    // CREATE TABLE draws / the ADD COLUMN fail.
+    .replace(/-- Draw log[\s\S]*?CREATE TABLE draws[\s\S]*?\);\r?\n/, "")
+    .replace(/,\r?\n  -- Claim-for-XP[\s\S]*?claim_xp INTEGER/, "");
   // Sanity: unlike migration.test.ts's v2 file, this file CAN express the
   // collision — sequential mode and recurrence both exist at v6.
   expect(schema).toContain("subtask_order_mode");
@@ -67,6 +72,8 @@ beforeAll(async () => {
   expect(schema).not.toContain("was_warmup");
   expect(schema).not.toContain("warmup_every_hours");
   expect(schema).not.toContain("anthropic_file_id");
+  expect(schema).not.toContain("CREATE TABLE draws");
+  expect(schema).not.toContain("claim_xp");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(schema);

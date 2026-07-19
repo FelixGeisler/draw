@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 13;
+export const CURRENT_VERSION = 14;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -249,6 +249,30 @@ function migrate() {
       // seeds the row this step deletes, which is the honest replay of
       // history (the chain test pins exactly that).
       db.exec("DELETE FROM settings WHERE key IN ('daily_hand_budget_minutes', 'daily_hand')");
+    }
+    if (version < 14) {
+      // Achievement chains + claim-for-XP (#156, ADR-42). Two additions:
+      //
+      //   1. The draws log — a new append-only event table (ADR-5's log-over-
+      //      counters, the shape of completions and streak_freezes). A draw
+      //      HAPPENED even if the task is later deleted, so task_id is
+      //      ON DELETE SET NULL, never CASCADE. No backfill: pre-log draws are
+      //      honestly unknown, so the draws-chain progress bar simply starts
+      //      at 0 on an existing database.
+      //
+      //   2. Two nullable columns on achievements for the claim: claimed_at
+      //      (the event fact) and claim_xp (the stamped amount). No default,
+      //      no backfill — every pre-#156 row reads as "unlocked, unclaimed",
+      //      which is exactly the launch-payday state (the 11 existing unlocks
+      //      become immediately claimable).
+      db.exec(`CREATE TABLE draws (
+        id INTEGER PRIMARY KEY,
+        task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+        drawn_at TEXT NOT NULL,
+        was_warmup INTEGER NOT NULL DEFAULT 0
+      )`);
+      db.exec("ALTER TABLE achievements ADD COLUMN claimed_at TEXT");
+      db.exec("ALTER TABLE achievements ADD COLUMN claim_xp INTEGER");
     }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);

@@ -10,13 +10,15 @@ import { useActivity, type ActivityCard, type ActivityDay } from "../hooks/useAc
 import { useCategories } from "../hooks/useTasks";
 import { addDays, asLocalDate, diffDays, formatDay, localToday } from "../lib/localDay";
 import { trophyRarity } from "../lib/trophyRarity";
-import "./HistoryPage.css";
+import "./Skyline.css";
 
 // House-of-cards skyline (#53): one tower per local day, upright cards for
 // tasks completed that day, permanent face-down cards for tasks worked on but
 // not finished that day. Interaction and a11y reuse the trophy-pile pattern
 // (PR #47): CSS-only hover/focus lift, tap toggle with pointerdown-outside
-// lowering, transform + z-index only so nothing reflows.
+// lowering, transform + z-index only so nothing reflows. Extracted from the
+// former History page when it merged into Stats (#155, ADR-41) — it is the
+// Stats page's activity view now, behavior unchanged.
 
 /** Fixed tower slot width — makes the windowed rendering pure arithmetic. */
 const DAY_W = 68;
@@ -181,7 +183,7 @@ function Tower({
   );
 }
 
-export function HistoryPage() {
+export function Skyline() {
   const today = localToday();
   const [from, setFrom] = useState(() => addDays(today, -(WINDOW_DAYS - 1)));
   // Oldest `from` the server accepts for a window ending today (range cap).
@@ -271,9 +273,9 @@ export function HistoryPage() {
   );
 
   return (
-    <div className="content">
+    <section style={{ marginTop: 24 }}>
       <div className="hoc-header">
-        <h1 style={{ flex: 1 }}>History</h1>
+        <h3 style={{ flex: 1 }}>History</h3>
         <button
           onClick={() =>
             setFrom((f) => {
@@ -329,6 +331,6 @@ export function HistoryPage() {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }

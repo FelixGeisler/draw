@@ -94,7 +94,7 @@ describe("face-down permanence across days", () => {
     });
   });
 
-  it("rolls the per-day totals for the #54 heatmap", async () => {
+  it("rolls the per-day totals the skyline's axis tooltips ride on", async () => {
     const from = localDay(noonDaysAgo(2));
     const days = await getDays(from, localDay(noonDaysAgo(1)));
     expect(days[0].totals).toEqual({ started: 1, completed: 0, minutes: 30, xp: 0 });
