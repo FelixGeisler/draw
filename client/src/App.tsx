@@ -10,19 +10,24 @@ import { GamificationHeader } from "./components/GamificationHeader";
 import { AchievementToast } from "./components/AchievementToast";
 import { useAiStatus } from "./hooks/useAi";
 
+// Each entry wears a leading emoji in the app's existing icon idiom (the brand
+// 🃏, the AI ✨, the goal filter's 🎯): 🎯 already means "a goal" on the Draw
+// page's filter, and 📊/⚙️ are the conventional stats/settings glyphs. The icon
+// sits in a fixed-width slot (.nav-ico) so the labels line up regardless of the
+// glyph's natural width.
 const NAV = [
-  { to: "/", label: "Draw" },
-  { to: "/tasks", label: "Tasks" },
-  { to: "/goals", label: "Goals" },
-  { to: "/stats", label: "Stats" },
-  { to: "/settings", label: "Settings" },
+  { to: "/", label: "Draw", icon: "🎴" },
+  { to: "/tasks", label: "Tasks", icon: "📋" },
+  { to: "/goals", label: "Goals", icon: "🎯" },
+  { to: "/stats", label: "Stats", icon: "📊" },
+  { to: "/settings", label: "Settings", icon: "⚙️" },
 ];
 
 // The Assistant (#31) is an AI surface: its nav entry exists only while a key
 // is configured (degraded mode hides the feature, like every AI affordance).
 // The ROUTE stays registered either way — a direct visit in degraded mode
 // gets the page's own Settings hint instead of a dead link.
-const ASSISTANT = { to: "/assistant", label: "✨ Assistant" };
+const ASSISTANT = { to: "/assistant", label: "Assistant", icon: "✨" };
 
 export default function App() {
   const aiStatus = useAiStatus();
@@ -33,6 +38,9 @@ export default function App() {
         <div className="brand">🃏 Draw</div>
         {nav.map((item) => (
           <NavLink key={item.to} to={item.to} end={item.to === "/"}>
+            <span className="nav-ico" aria-hidden="true">
+              {item.icon}
+            </span>
             {item.label}
           </NavLink>
         ))}

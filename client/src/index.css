@@ -152,9 +152,22 @@ textarea:focus {
 }
 
 .sidenav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 10px 12px;
   border-radius: 8px;
   color: var(--text-dim);
+}
+
+/* Fixed-width icon slot so glyphs of different natural widths (🎴 vs ⚙️) keep
+   the labels on one vertical line. */
+.sidenav .nav-ico {
+  width: 1.3em;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1;
 }
 
 .sidenav a.active {
