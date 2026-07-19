@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 
 export interface GamificationState {
@@ -31,9 +31,17 @@ export interface GamificationState {
   }[];
   achievements: {
     key: string;
+    /** Display title — the user's override (#177) COALESCE'd onto the default. */
     title: string;
     emoji: string;
+    /** Display description — the user's override (#177) or the default. */
     description: string;
+    /** Display curation (#177): hidden cards move to the Stats "Hidden" section;
+     *  hiding never affects unlock/claim/XP — a hidden card still unlocks. */
+    hidden: boolean;
+    /** Any display override is set (title/description/hidden) — gates the card's
+     *  "Reset to default" affordance (#177). */
+    customized: boolean;
     unlockedAt: string | null;
     /** Claim-for-XP (#156): the moment this achievement was claimed, or null
      *  when unlocked-but-unclaimed (claimable) or still locked. */
@@ -76,6 +84,42 @@ export function useClaimAchievement() {
       announceAchievements(data.newAchievements);
     },
   });
+}
+
+/** A display override (#177): the fields PATCH /api/achievements/:key accepts.
+ *  title/description = null clears that override (default restored). */
+export interface UpdateAchievementInput {
+  key: string;
+  title?: string | null;
+  description?: string | null;
+  hidden?: boolean;
+}
+
+/**
+ * The update-achievement mutation options, factored out (the agentApplyMutation
+ * precedent) so the PATCH + invalidation can be exercised through query-core's
+ * MutationObserver without a renderer — the client suite has no DOM.
+ */
+export function updateAchievementMutation(queryClient: QueryClient) {
+  return {
+    mutationFn: ({ key, ...patch }: UpdateAchievementInput) =>
+      api.patch(`/api/achievements/${key}`, patch),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["gamification"] });
+    },
+  };
+}
+
+/**
+ * Edit an achievement's DISPLAY metadata — rename, rewrite the description, hide
+ * (#177). Display-only: unlock, claim, XP and rarity are untouched server-side.
+ * On success the gamification query is invalidated so the collection, the header
+ * and any open toast re-read the COALESCE'd title/description — the client never
+ * computes the merged values itself.
+ */
+export function useUpdateAchievement() {
+  const queryClient = useQueryClient();
+  return useMutation(updateAchievementMutation(queryClient));
 }
 
 /** Broadcast newly unlocked achievements so the global toast can render them. */
