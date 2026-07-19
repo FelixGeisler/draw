@@ -28,7 +28,10 @@ drawRouter.post("/", (req, res) => {
     categoryId: categoryId ? Number(categoryId) : undefined,
     goalId: goalId ? Number(goalId) : undefined,
   });
-  const newAchievements = result.task ? checkAchievements({ drew: true }) : [];
+  // The draw itself is already logged to the draws table (drawService), so
+  // the draw chain (first_draw…draw_10000) derives from that count — the
+  // event carries nothing (#156).
+  const newAchievements = result.task ? checkAchievements({}) : [];
   res.json({ ...result, newAchievements });
 });
 
@@ -52,7 +55,10 @@ drawRouter.post("/warmup", (req, res) => {
     categoryId: categoryId ? Number(categoryId) : undefined,
     goalId: goalId ? Number(goalId) : undefined,
   });
-  const newAchievements = result.task ? checkAchievements({ drew: true }) : [];
+  // Warm-up deals are logged as was_warmup rows, which the draw chain
+  // deliberately excludes (dealt, not gambled) — the count-derived check
+  // needs no event flag (#156).
+  const newAchievements = result.task ? checkAchievements({}) : [];
   res.json({ ...result, newAchievements });
 });
 

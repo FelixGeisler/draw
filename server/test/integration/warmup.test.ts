@@ -74,8 +74,14 @@ describe("POST /api/draw/warmup — the deterministic deal", () => {
     expect(res.poolSize).toBeUndefined();
     // Window floor: max(5, 15) = 15 minutes.
     expect(res.warmup).toMatchObject({ taskId: tiny.id, windowMinutes: 15 });
-    // Dealing IS a draw for achievements.
-    expect(res.newAchievements).toContain("first_draw");
+    // A warm-up card is handed out, not gambled (ADR-30), so it lands in the
+    // draws log as was_warmup 1 and does NOT advance the draws chain (#156):
+    // first_draw stays locked until a REAL draw.
+    expect(res.newAchievements).not.toContain("first_draw");
+    const warmupRows = db
+      .prepare("SELECT COUNT(*) AS n FROM draws WHERE task_id = ? AND was_warmup = 1")
+      .get(tiny.id) as { n: number };
+    expect(warmupRows.n).toBe(1);
 
     // The deal behaves like a draw: last_drawn_at stamped…
     const row = db

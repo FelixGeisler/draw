@@ -200,7 +200,7 @@
    when you look, not a casino. Paints above face, art and text
    (pointer-events: none), clipped by the face's border-radius. The gradient
    itself is --sheen-holo (index.css), shared verbatim with the trophy tiers
-   and the achievement collection's legendary cards (#124). */
+   and the achievement collection's top tiers (#124, retiered in #156). */
 .draw-holo {
   position: absolute;
   inset: 0;

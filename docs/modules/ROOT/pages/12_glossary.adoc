@@ -74,10 +74,19 @@
 |The Stats page's activity view (#53): one tower of cards per LOCAL day — upright cards for completions, permanently face-down cards for started-but-unfinished work — loading backward in 8-week windows up to ten years. Lived on its own History page until #155 merged that page into Stats (ADR-41)
 
 |*Achievement card*
-|An achievement rendered as a collectible card on the Stats page (#124): earned = face-up (committed SVG art, name, earned date), unearned = face-down (the app's card-back weave over a darkened silhouette) with its criteria still readable. Same card language as the task cards (ADR-33) — no TCG furniture
+|An achievement rendered as a collectible card on the Stats page (#124, extended #156): earned = face-up (committed SVG art or an emoji-glyph fallback, name, earned date), unearned = face-down (the app's card-back weave over a darkened silhouette) with its criteria readable and — on a CHAIN card — a progress bar toward the next threshold. An earned-but-unclaimed card shows a Claim button. Same card language as the task cards (ADR-33) — no TCG furniture
 
-|*Achievement rarity (common / rare / epic / legendary)*
-|A SECOND, separate rarity vocabulary from the holo/silver above — it ranks an achievement's real unlock difficulty, not a completion's leverage. A client-side lookup keyed by achievement key (`lib/achievementRarity`, mirroring `lib/trophyRarity`); the server payload, `ACHIEVEMENTS` and the `achievements` table are untouched (ADR-5). The two vocabularies share ONE set of sheens: legendary paints the holo band (drifting on its own), epic the same band dimmed, rare the silver, common nothing. Only earned cards shimmer
+|*Achievement rarity (common / rare / super-rare / ultra-rare / secret-rare)*
+|A SECOND, separate rarity vocabulary from the holo/silver above — it ranks an achievement's real unlock difficulty, not a completion's leverage. Since #156 the ladder is 5 TCG tiers living in `shared/achievementTiers.ts`, imported by BOTH the server (it prices claim XP by tier — common 25 → secret-rare 500) and the client (`lib/achievementRarity` is now a thin lookup over it), so the two cannot drift (ADR-42). Migrated from the old ladder: epic → super-rare, legendary → ultra-rare. Four tiers reuse the two shipped sheens (ultra-rare/secret-rare drift on their own, super-rare/rare sweep on hover); Secret Rare adds ONE deliberate treatment — a dark/negative frame + holo + a distinct violet border. Only earned cards shimmer; `trophyRarity` stays its own 3-tier vocabulary, untouched
+
+|*Achievement chain*
+|A multi-level achievement (#156) where each level is its own key sharing one running metric — draws (non-warmup), completions, streak, level, achieved goals, or tracked hours — e.g. draws 1 → 10 → 100 → 1000 → 10000. One shared threshold table drives both the unlock condition and the progress bar, so a full bar is always a real unlock
+
+|*Draws log*
+|The append-only `draws(id, task_id, drawn_at, was_warmup)` table (#156, ADR-42) — one row per card dealt. `task_id` is `ON DELETE SET NULL` (a draw HAPPENED even if the task is later deleted, never CASCADE); `was_warmup` marks handed-out warm-up deals (ADR-30). Source of truth for the draws achievement chain, which counts non-warmup rows only
+
+|*Claim (claim-for-XP)*
+|`POST /api/achievements/:key/claim` pays an unlocked achievement's rarity-scaled XP ONCE ever (`achievements.claimed_at` / `claim_xp`, stamped from the server tier table; idempotent by primary key — a repeat 409s). A SECOND stored XP source amending ADR-5: `totalXp = SUM(completions.xp_awarded) + SUM(achievements.claim_xp)` (#156, ADR-42)
 
 |*Streak*
 |Count of REAL completion days in an unbroken run of local calendar days; rest and frozen days keep the run alive but never increment it (ADR-28)

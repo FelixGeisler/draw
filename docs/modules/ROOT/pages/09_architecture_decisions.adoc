@@ -1701,3 +1701,70 @@ unconsumed payload is dead code: coaching is deliberately per-category
 scrollable ledger of individually mis-estimated tasks is only
 retrospection. The redirect keeps muscle memory and old links working at
 zero maintenance cost.
+
+== ADR-42: Achievement chains — the draws log, claim-for-XP as a second stored XP source, and the 5-tier ladder
+
+*Context:* Achievements were eleven one-off unlocks with a client-only
+rarity tier (ADR-5 stored just `unlocked_at`; #124 layered presentation on
+top). #156 turns them into multi-level CHAINS with visible progress and a
+click-to-claim XP payout, which needs three things the old model did not
+have: a count of how many cards have been DRAWN (nothing logged draws —
+`last_drawn_at` is a single overwritten timestamp, not a history), a place
+to record a claim, and a rarity ladder both the server and client agree on
+(the server now pays XP by tier).
+
+*Decision:*
+
+* *Draws log (new `draws` table).* An append-only event log,
+`draws(id, task_id, drawn_at, was_warmup)`, written by `drawTask()` and the
+warm-up deal — exactly the ADR-5 log-over-counters shape of `completions`
+and `streak_freezes`. `task_id` is `ON DELETE SET NULL`, never CASCADE: a
+draw HAPPENED even if the task is later deleted, so its history must survive
+the row it pointed at. `was_warmup` separates gambled draws from handed-out
+warm-up deals (ADR-30); the draws achievement chain counts non-warmup rows
+ONLY. No backfill — pre-log draws are honestly unknown, so a chain progress
+bar simply starts at 0 on an existing database.
+
+* *Claim-for-XP amends ADR-5 with a SECOND stored XP source.*
+`achievements` gains `claimed_at` and `claim_xp`. An unlocked achievement
+can be claimed ONCE ever (idempotent by the primary key + a guarded
+`claimed_at IS NULL` UPDATE) for rarity-scaled XP, and
+`totalXp() = SUM(completions.xp_awarded) + COALESCE(SUM(achievements.claim_xp), 0)`.
+This deliberately widens ADR-5's "XP is the completions log": a claim is
+still an honest, idempotent event fact, so there is still no stored `xp`
+counter to drift — the total is derived from two logs instead of one.
+`POST /api/achievements/:key/claim` returns `200 {xpAwarded, levelUp}`,
+`400` for an unknown or not-yet-unlocked key, `409` for a repeat. `claim_xp`
+is stamped from the SERVER tier table at claim time — the client is never
+the XP authority.
+
+* *The 5-tier ladder moves to `shared/`.* Rarity was a client-only lookup;
+now the server reads it to price claims, so the tier per key lives in
+`shared/achievementTiers.ts` (common 25 / rare 50 / super-rare 100 /
+ultra-rare 250 / secret-rare 500 XP), imported by both sides — the same
+drift-guard as `shared/achievementKeys.ts`. The old tiers migrate:
+epic → super-rare, legendary → ultra-rare. `client/lib/achievementRarity.ts`
+becomes a thin lookup over the shared table. The chains and their progress
+share ONE table (`CHAIN_SPECS`) that drives both the unlock condition and
+the progress bar, so a full bar is always a real unlock.
+
+* *One new visual treatment, deliberately.* The two shipped sheens
+(holo/silver, the "glint, not casino" doctrine) cover four tiers. Secret
+Rare — reserved for the extreme chain ends (10k draws, 2500 completions, a
+100-day streak, level 50, 25 goals) — gets ONE new treatment: a
+dark/negative card frame + drifting holo + a distinct luminous violet
+border. Not a casual new gradient; recorded here as the single exception.
+Motion stays gated behind `prefers-reduced-motion: no-preference`, so the
+frame and sheen paint but never move under reduced motion. `trophyRarity`
+(task trophies) keeps its own separate 3-tier vocabulary — untouched.
+
+*Rationale:* Progress and claims are exactly the anti-procrastination loop
+the product wants (a visible next rung, a small reward for reaching one),
+and both are expressible as logs, so they stay within ADR-2/ADR-5's
+"derive, never store a counter" spirit — the draws table and the claim
+columns are event facts, not running totals. Sharing the tier table is
+forced by the claim: the moment the server pays XP by rarity, a client-only
+table would be a silent second source of truth. New chain keys ship on the
+emoji-glyph art fallback (`achievementArt`); hand-drawn per-chain SVGs are a
+follow-up (#163, tracked as R9 in section 11), not a blocker — the
+degraded-grace face already handles a missing art row (ADR-33 e).

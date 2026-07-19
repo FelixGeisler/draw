@@ -397,6 +397,13 @@ export function drawTask(filters: DrawFilters): DrawResult {
 
   const chosen = candidates[picked];
   db.prepare("UPDATE tasks SET last_drawn_at = ? WHERE id = ?").run(now.toISOString(), chosen.id);
+  // Log the deal to the append-only draws table (#156, ADR-42): a real,
+  // gambled draw (was_warmup 0) — the source of truth for the draws
+  // achievement chain, which counts non-warmup rows only.
+  db.prepare("INSERT INTO draws (task_id, drawn_at, was_warmup) VALUES (?, ?, 0)").run(
+    chosen.id,
+    now.toISOString(),
+  );
   // Persist the draw so a page reload restores the card (ADR-13) — a new
   // draw simply overwrites the previous one. A regular draw is never a
   // warm-up, so a leftover marker is dropped with the pointer it described.
@@ -668,6 +675,13 @@ export function warmupDraw(filters: DrawFilters): DrawResult {
   if (!chosen) return { task: null, reason: "cooling_down" };
 
   db.prepare("UPDATE tasks SET last_drawn_at = ? WHERE id = ?").run(now.toISOString(), chosen.id);
+  // Log the deal (#156, ADR-42) with was_warmup 1: a warm-up card was handed
+  // out, not gambled (ADR-30), so it lands in the draws log but is excluded
+  // from the draws achievement chain.
+  db.prepare("INSERT INTO draws (task_id, drawn_at, was_warmup) VALUES (?, ?, 1)").run(
+    chosen.id,
+    now.toISOString(),
+  );
   setSetting(CURRENT_DRAW_SETTING, String(chosen.id));
   const marker: WarmupMarker = {
     taskId: chosen.id,

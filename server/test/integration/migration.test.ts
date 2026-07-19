@@ -20,6 +20,7 @@ import { freshApp, testDb } from "../helpers.js";
 //   v10 → v11 adds materials.anthropic_file_id                     (issue #92)
 //   v11 → v12 rebuilds goals: 'missed' status + resolved_at       (issue #145)
 //   v12 → v13 deletes the daily-hand settings rows                (issue #147)
+//   v13 → v14 creates the draws log + achievements claim columns  (issue #156)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence. (The v12 rebuild's own
@@ -53,6 +54,12 @@ beforeAll(async () => {
     )
     .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "")
     .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
+    // v14 (#156): strip the draws table and the achievements claim columns —
+    // both are ADDED by the v14 migration, so a reconstructed pre-v14 file must
+    // not already carry them (a CREATE TABLE draws or duplicate ADD COLUMN
+    // would otherwise abort the chain).
+    .replace(/-- Draw log[\s\S]*?CREATE TABLE draws[\s\S]*?\);\r?\n/, "")
+    .replace(/,\r?\n  -- Claim-for-XP[\s\S]*?claim_xp INTEGER/, "")
     // v12 (#145): revert the goals CHECK to the three-status form and strip
     // resolved_at (comment block + column) — the rebuild migration itself
     // must find the pre-v12 shape to have anything to do.
@@ -83,6 +90,9 @@ beforeAll(async () => {
   expect(v2Schema).not.toContain("anthropic_file_id");
   expect(v2Schema).not.toContain("'missed'");
   expect(v2Schema).not.toContain("resolved_at");
+  expect(v2Schema).not.toContain("CREATE TABLE draws");
+  expect(v2Schema).not.toContain("claim_xp");
+  expect(v2Schema).not.toContain("claimed_at");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v2Schema);
@@ -267,10 +277,50 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v13 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal)", () => {
-  it("bumps user_version to 13", async () => {
+describe("migration v2 → v14 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal, draws log + claim columns)", () => {
+  it("bumps user_version to 14", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(13);
+    expect(db.pragma("user_version", { simple: true })).toBe(14);
+  });
+
+  it("creates the draws log (task_id ON DELETE SET NULL) and the achievements claim columns (#156)", async () => {
+    const db = await testDb();
+
+    // The draws table exists with the append-only shape.
+    const drawsCols = db.prepare("PRAGMA table_info(draws)").all() as { name: string }[];
+    expect(drawsCols.map((c) => c.name).sort()).toEqual(
+      ["drawn_at", "id", "task_id", "was_warmup"].sort(),
+    );
+
+    // task_id is ON DELETE SET NULL, never CASCADE: a draw HAPPENED even if the
+    // task is later deleted. Prove it directly on the migrated file.
+    const task = db
+      .prepare("INSERT INTO tasks (title, category_id, created_at) VALUES (?, 1, ?)")
+      .run("draw-fk probe", new Date().toISOString());
+    db.prepare("INSERT INTO draws (task_id, drawn_at, was_warmup) VALUES (?, ?, 0)").run(
+      task.lastInsertRowid,
+      new Date().toISOString(),
+    );
+    db.prepare("DELETE FROM tasks WHERE id = ?").run(task.lastInsertRowid);
+    const orphan = db
+      .prepare("SELECT task_id AS taskId, was_warmup AS wasWarmup FROM draws WHERE task_id IS NULL")
+      .get() as { taskId: number | null; wasWarmup: number } | undefined;
+    expect(orphan).toEqual({ taskId: null, wasWarmup: 0 });
+    db.prepare("DELETE FROM draws").run();
+
+    // achievements gains claimed_at + claim_xp, both nullable with no default
+    // (a pre-#156 unlock reads as "unlocked, unclaimed").
+    const achCols = db.prepare("PRAGMA table_info(achievements)").all() as {
+      name: string;
+      notnull: number;
+      dflt_value: string | null;
+    }[];
+    for (const name of ["claimed_at", "claim_xp"]) {
+      const col = achCols.find((c) => c.name === name);
+      expect(col, name).toBeTruthy();
+      expect(col!.notnull, name).toBe(0);
+      expect(col!.dflt_value, name).toBeNull();
+    }
   });
 
   it("rebuilds goals with the missed status, resolved_at, and no scratch table (#145)", async () => {
