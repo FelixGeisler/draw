@@ -29,8 +29,10 @@ interface Props {
   parentOrderMode?: Task["subtaskOrderMode"];
   /**
    * Every root task on the page (#100) — the "Move under…" picker's candidate
-   * pool. Only passed to root rows; subtask rows get "Promote to top-level"
-   * instead and need no targets.
+   * pool. Passed to root AND subtask rows since #167: a childless subtask now
+   * offers "Move under…" too (it can move under a different open root), so its
+   * row also needs the target pool. Its own parent is listed but disabled with
+   * the ALREADY_UNDER_TARGET reason.
    */
   rootTasks?: Task[];
   /**
@@ -75,13 +77,13 @@ export function TaskRow({
   // switch to 'do in order' — on the flip button and in both breakdown editors.
   const sequentialLocked = sequentialLockedByRecurrence(task.subtasks, task.subtaskOrderMode);
   // Reparent targets (#100): shared rule source with the drag-and-drop (#101)
-  // — offersMoveUnder is the same root-only gate classifyDrop routes on.
-  // Only leaf rows offer it: a task with subtasks cannot become a subtask
-  // itself (ADR-16).
+  // — offersMoveUnder is the same childless gate classifyDrop routes on. Any
+  // CHILDLESS task offers it now (#167): a root, or a subtask moving under a
+  // different parent. offersMoveUnder already excludes containers (a task with
+  // subtasks cannot become a subtask itself, ADR-16), so no extra !hasSubtasks
+  // guard is needed here.
   const moveTargets =
-    !done && offersMoveUnder(task) && !hasSubtasks && rootTasks
-      ? reparentTargets(task, rootTasks)
-      : [];
+    !done && offersMoveUnder(task) && rootTasks ? reparentTargets(task, rootTasks) : [];
   // Split-in-place (#108): where root rows show Break down, an open subtask
   // row that classifies too-big offers Split — a subtask cannot be broken
   // down further (ADR-16), so it is replaced by its parts as siblings.
@@ -541,6 +543,9 @@ export function TaskRow({
               maxEffort={maxEffort}
               depth={depth + 1}
               parentOrderMode={task.subtaskOrderMode}
+              // A childless subtask offers "Move under…" too (#167) — it needs
+              // the same root pool as its parent to list cross-parent targets.
+              rootTasks={rootTasks}
             />
           </Fragment>
         ))}

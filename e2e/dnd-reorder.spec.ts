@@ -96,14 +96,21 @@ async function dragToGap(page: Page, subtaskTitle: string, gapLocator: Locator) 
   // Cross the 5px activation threshold so the gap zones mount.
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
-  // The gaps only exist now — settle the pointer onto the target one.
+  // The gaps only exist now — settle the pointer onto the target one. Two
+  // hazards compound on the shared-DB page and both are addressed per retry:
+  // (1) the gap is a zero-net-height box, so a single precise move can miss the
+  // hover and dnd-over never flips — step off onto the row below and back to
+  // force a fresh overKey transition; (2) the END gap at the bottom of a tall
+  // list can straddle the viewport fold where elementFromPoint returns null —
+  // scroll it in and clamp the target a few px inside the viewport. Retry until
+  // the highlight registers; the drop outcome is still asserted by every caller.
   await expect(async () => {
+    await gapLocator.scrollIntoViewIfNeeded();
     const g = (await gapLocator.boundingBox())!;
+    const vh = page.viewportSize()!.height;
     const cx = g.x + g.width / 2;
-    const cy = g.y + g.height / 2;
-    // Step onto the row just below the gap (a different overKey), then back to
-    // the gap's centre so the move-into is guaranteed to re-fire the update.
-    await page.mouse.move(cx, cy + g.height);
+    const cy = Math.max(3, Math.min(g.y + g.height / 2, vh - 3));
+    await page.mouse.move(cx, Math.min(cy + g.height, vh - 1));
     await page.mouse.move(cx, cy, { steps: 4 });
     await expect(gapLocator).toHaveClass(/dnd-over/, { timeout: 750 });
   }).toPass({ timeout: 10_000 });
