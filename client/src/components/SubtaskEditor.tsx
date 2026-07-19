@@ -68,7 +68,9 @@ export function SubtaskEditor({
   const valid = rows.filter((r) => r.title.trim() && (!requireMinutes || r.effortMinutes != null));
 
   return (
-    <div className="panel" style={{ marginTop: 8, display: "grid", gap: 8 }}>
+    // The testid scopes E2E locators: the row inputs share the "min"
+    // placeholder with the quick-capture form and the inline estimate (#151).
+    <div className="panel" data-testid="subtask-editor" style={{ marginTop: 8, display: "grid", gap: 8 }}>
       <strong>{heading ?? `Break it down (each step ≤ ${maxEffort} min)`}</strong>
       {rows.map((row) => (
         <div key={row.key} style={{ display: "flex", gap: 8 }}>

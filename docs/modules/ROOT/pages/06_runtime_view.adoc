@@ -57,6 +57,9 @@ Empty pool returns
 the UI turns `all_too_big` into a "break something down" call to action, while
 `all_outside_window` (every remaining candidate is outside its availability
 window, ADR-20) says "scheduled for later": those cards return on their own.
+Every call to action links to the Tasks page, where capture, the estimate
+input and the break-down control all live since the Capture merge (ADR-40) —
+each named action exists where the link lands.
 
 The pick is persisted as the *current draw* (ADR-13). The DrawPage DERIVES
 the standing card from `GET /api/draw/current` continuously (#110, ADR-29

@@ -159,7 +159,7 @@ Three levels, all mandatory per PR (enforced by CI):
 
 |End-to-end
 |Playwright
-|User journeys in a real browser: capture → breakdown → draw → complete → timer → stats; own ports (`API_PORT`/`VITE_PORT`) + throwaway DB, so a live dev server is undisturbed
+|User journeys in a real browser: capture → triage/breakdown → draw → complete → timer → stats (the planning steps all on the single Tasks page, ADR-40); own ports (`API_PORT`/`VITE_PORT`) + throwaway DB, so a live dev server is undisturbed
 |===
 
 Design rules: tests never touch `server/data/`; journey E2E tests run serially

@@ -9,6 +9,7 @@ import { evenSplitPlan } from "../lib/splitPlan";
 import { classifyDrop } from "../lib/taskDnd";
 import { TaskDndContext } from "./TaskDnd";
 import { TaskBadges } from "./TaskBadges";
+import { EstimateInput } from "./EstimateInput";
 import { SnoozeMenu } from "./SnoozeMenu";
 import { TaskForm } from "./TaskForm";
 import { SubtaskEditor } from "./SubtaskEditor";
@@ -32,6 +33,12 @@ interface Props {
    * instead and need no targets.
    */
   rootTasks?: Task[];
+  /**
+   * Triage strip only (#151): render the inline Enter-to-save minutes input
+   * next to the badges, so a needs-estimate row can be resolved in place
+   * without opening the edit form.
+   */
+  estimateInput?: boolean;
 }
 
 export function TaskRow({
@@ -42,6 +49,7 @@ export function TaskRow({
   depth = 0,
   parentOrderMode,
   rootTasks,
+  estimateInput,
 }: Props) {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
@@ -141,7 +149,9 @@ export function TaskRow({
         </div>
       ) : (
       <div
-        data-dnd-row={task.id}
+        // Rows outside a DnD context (the triage strip, #151) are not drop
+        // targets — without the attribute the hit-test skips them entirely.
+        data-dnd-row={dnd ? task.id : undefined}
         className={dndClass || undefined}
         style={{
           display: "flex",
@@ -190,6 +200,7 @@ export function TaskRow({
         {/* Subtasks follow their parent's goal (#76) — repeating the parent's
             goal chip on every step would be noise, so only root rows get it. */}
         <TaskBadges task={task} goals={task.parentId == null ? goals : undefined} />
+        {estimateInput && !done && <EstimateInput task={task} />}
         {snoozed ? (
           // Wake = deferredUntil now, not null (ADR-17): the retained value
           // becomes the wake timestamp, so staleness counts from here.

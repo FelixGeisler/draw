@@ -5,6 +5,10 @@ import { Link } from "react-router-dom";
  * SERVER's shared `emptyPoolReason` can return (drawService), kept as one
  * voice for one server-side predicate.
  *
+ * Every link leads to the Tasks page (#151): capture, estimating, and
+ * breaking down all live there now, so each named action exists where the
+ * link lands.
+ *
  * Draw-only reasons (`cooling_down`, `warmup_unavailable`) stay at their call
  * site: they describe the warm-up allowance, not the pool.
  */
@@ -17,7 +21,7 @@ export function EmptyPoolReason({
     return (
       <p>
         Everything left is scheduled for later — those cards come back on their own when their{" "}
-        <Link to="/capture" style={{ color: "var(--accent)" }}>
+        <Link to="/tasks" style={{ color: "var(--accent)" }}>
           availability window
         </Link>{" "}
         opens.
@@ -28,7 +32,7 @@ export function EmptyPoolReason({
     return (
       <p>
         Everything left is too big or unestimated.{" "}
-        <Link to="/capture" style={{ color: "var(--accent)" }}>
+        <Link to="/tasks" style={{ color: "var(--accent)" }}>
           Break something down
         </Link>{" "}
         to refill the deck.
@@ -38,7 +42,7 @@ export function EmptyPoolReason({
   return (
     <p>
       The deck is empty.{" "}
-      <Link to="/capture" style={{ color: "var(--accent)" }}>
+      <Link to="/tasks" style={{ color: "var(--accent)" }}>
         Capture a task
       </Link>{" "}
       to get started.

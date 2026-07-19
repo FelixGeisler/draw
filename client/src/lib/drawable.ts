@@ -105,7 +105,7 @@ export interface SiblingCluster {
 }
 
 /**
- * Capture-list ergonomics (#30): split a section's tasks into flat top-level
+ * Triage-list ergonomics (#30): split a section's tasks into flat top-level
  * rows and per-parent sibling clusters, so a 40-leaf import (#29) renders as
  * one collapsible header instead of 40 flat rows. Trees are two levels deep
  * everywhere (ADR-16/24), so the parent lookup is over roots only. Singleton

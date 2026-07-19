@@ -45,7 +45,7 @@ export function TaskBadges({
   /**
    * Goal chip (#88): rendered only when the caller supplies the goals list —
    * the Tasks page rows let you edit the goal link (#17), so they show which
-   * goal that is. Callers without the list (drawn card, Capture) stay as-is.
+   * goal that is. Callers without the list (the drawn card) stay as-is.
    */
   goals?: Goal[];
 }) {

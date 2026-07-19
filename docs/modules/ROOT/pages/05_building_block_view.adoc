@@ -27,7 +27,7 @@ actor "User" as user
 component "MCP client\nClaude Code / Desktop" as mcpClient
 
 package "client/ — React SPA" {
-  component "pages + components\nDraw, Capture, Tasks, Goals,\nStats, History, Settings" as pages
+  component "pages + components\nDraw, Tasks, Goals,\nStats, History, Settings" as pages
   component "lib/ — pure logic\ndrawable, focusView,\ndrawnCard, heatmap, rarity" as clib
   component "hooks/ — TanStack Query\nuseTasks, useDraw, useTimer,\nuseGamification, useAi" as hooks
   component "api/client.ts\ntyped fetch wrapper" as apiClient
@@ -161,16 +161,18 @@ client/src/
 ├── hooks/                     TanStack Query wrappers (useTasks, useDraw,
 │                              useTimer, useGamification, useGoals, useAi,
 │                              useActivity, useEstimationBias)
-├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip), Capture,
-│                              Tasks, Goals, Stats (incl. activity heatmap), History
-│                              (skyline), Settings
+├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip),
+│                              Tasks (capture-first: quick capture + triage strip +
+│                              category tree, ADR-40), Goals, Stats (incl. activity
+│                              heatmap), History (skyline), Settings
 ├── lib/                       pure client logic (drawable classification, effort display,
 │                              generate-tasks review model, heatmap grid/quantization,
 │                              shared local-day math, estimation coaching decisions,
 │                              timer/countdown formatting + focus-view decision,
 │                              trophy rarity tiers) — unit-tested
 │                              without rendering
-└── components/                TaskRow/Form/Badges, SubtaskEditor, TimerBar,
+└── components/                TaskRow/Form/Badges, SubtaskEditor, EstimateInput
+                               (inline triage estimate), TimerBar,
                                FocusOverlay (fullscreen focus mode, ADR-29),
                                EmptyPoolReason (one voice for an empty pool),
                                GamificationHeader, TrophyDeck, ActivityHeatmap,

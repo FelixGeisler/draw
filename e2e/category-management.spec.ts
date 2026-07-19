@@ -24,8 +24,9 @@ test("rename: click-to-edit updates the row and the TaskForm select", async ({ p
   await expect(page.getByTitle("Change color of Uni Study")).toBeVisible();
 
   // Client-side navigation (no reload): the select only shows the new name
-  // because the mutation invalidated the ["categories"] query.
-  await page.getByRole("link", { name: "Capture" }).click();
+  // because the mutation invalidated the ["categories"] query. The capture
+  // form lives on the Tasks page since #151.
+  await page.getByRole("link", { name: "Tasks" }).click();
   const select = page.locator("select").first();
   await expect(select.locator("option", { hasText: "Uni Study" })).toHaveCount(1);
   await expect(select.locator("option", { hasText: /^Study$/ })).toHaveCount(0);

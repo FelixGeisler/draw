@@ -1,4 +1,25 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
+
+/**
+ * Regions of the merged Tasks page (#151). A needs-estimate or too-big task
+ * renders TWICE — once in the triage strip, once in its category group — so
+ * page-wide title lookups go ambiguous. Scope row work to the tree and
+ * capture work to the form; the strip has its own testid for triage asserts.
+ * The subtask editor's testid disambiguates its "min" inputs from the
+ * quick-capture form's and the strip's inline estimate inputs.
+ */
+export function captureForm(page: Page): Locator {
+  return page.getByTestId("capture-form");
+}
+export function triageStrip(page: Page): Locator {
+  return page.getByTestId("triage-strip");
+}
+export function taskTree(page: Page): Locator {
+  return page.getByTestId("task-tree");
+}
+export function subtaskEditor(page: Page): Locator {
+  return page.getByTestId("subtask-editor");
+}
 
 /**
  * Resolve a current draw persisted by an earlier serial spec (issue #25).

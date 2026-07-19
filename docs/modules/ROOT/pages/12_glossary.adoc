@@ -10,6 +10,12 @@
 |*Drawable*
 |Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks, not snoozed/blocked, not held back, and inside its availability window if it has one — a derived predicate, never stored
 
+|*Quick capture*
+|The always-focused TaskForm pinned on top of the Tasks page (ADR-40): title-only Enter submit, fields reset, focus retained — thought to card in one keystroke
+
+|*Triage strip*
+|The "not deck-ready" section of the Tasks page (ADR-40) listing only the actionable eligibility states — needs-estimate rows carry an inline Enter-to-save estimate input, too-big rows offer break-down/split in place. Passive states (queued, scheduled, snoozed) are per-row chips, not sections; strip rows also appear in their category group below
+
 |*Availability window*
 |Optional per-task weekdays (`window_days`, JS `getDay()` numbers) plus a daily `[window_start, window_end)` range, local wall clock; outside it the card leaves the deck and returns on its own (ADR-20)
 

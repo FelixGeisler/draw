@@ -1602,3 +1602,40 @@ day preview still SHOWS the day, and showing the day is the harm. Nothing
 of the user's is lost — the hand was validated pointers into tasks, dealt
 fresh each morning — and no capability is lost that the daily goal does not
 already provide.
+
+== ADR-40: Capture merges into Tasks — one capture-first task page
+
+*Context:* Capture and Tasks were two partial views of the same task list
+(#151), and the split had real seams: Capture's "too big" group said
+_"split them"_ but the split control lived on the other page; the Draw
+page's empty-pool helper linked "Break something down" to `/capture`,
+where breakdown did not exist; adding an estimate had two different UIs
+(Capture's inline input, Tasks' row-edit form) for the same PATCH; and the
+Tasks page could not create a task at all — its empty state walked the
+user to Capture. ADR-39's "hide the mountain" doctrine is about the DRAW
+page, not these planning surfaces: Capture already listed every open task,
+so consolidation exposes nothing new.
+
+*Decision:* One page at `/tasks`, capture-FIRST: the shared `TaskForm`
+pinned on top with the rapid-entry ritual intact (autoFocus, title-only
+Enter submit, fields reset, focus retained for the next thought), then a
+"not deck-ready" *triage strip*, then the category tree with full row
+actions and drag-and-drop. The strip lists only the ACTIONABLE eligibility
+groups: needs-estimate rows carry the inline Enter-to-save estimate input,
+too-big rows are full `TaskRow`s whose Break down / Split work in place —
+and the #30 sibling folding applies inside the strip. The passive groups
+(ready, queued, scheduled) dissolve: `TaskBadges` already wears those
+states per row. `classifyTask`/`groupSiblings` stay the single predicate
+source (`lib/drawable.ts`); the server is untouched. The Capture nav entry
+is removed; `/capture` survives as a client-side redirect to `/tasks`
+(muscle memory, old links).
+
+*Rationale:* One home per concern — the page that names a problem must own
+the control that fixes it. A triage row deliberately renders in BOTH the
+strip and its category group: the strip is a worklist over the list, not a
+second tree — which is also why strip rows live outside the DnD context
+and are neither drag sources nor drop targets. Actionable-only triage
+keeps the strip an emptying queue rather than a re-grown Capture page: a
+group whose rows offer nothing to do is a to-do list about the to-do list,
+and ADR-39's lesson applies — surfaces that only display state feed the
+overwhelm this app exists to replace.

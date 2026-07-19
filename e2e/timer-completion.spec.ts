@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { captureForm, taskTree } from "./helpers.js";
 
 // Issue #12: completing a task stops its own running timer — the top-bar
 // timer must disappear without a reload (query invalidation, not refetch
@@ -9,11 +10,12 @@ test("completing a task from the tasks page removes the timer bar without reload
   page,
 }) => {
   // Capture a fresh task so the test doesn't depend on core-journey's tasks.
-  await page.goto("/capture");
-  await page.getByPlaceholder("What needs doing?").fill("Fold the laundry");
-  await page.getByTitle("Effort estimate in minutes").fill("10");
-  await page.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(page.getByPlaceholder("What needs doing?")).toHaveValue("");
+  await page.goto("/tasks");
+  const form = captureForm(page);
+  await form.getByPlaceholder("What needs doing?").fill("Fold the laundry");
+  await form.getByTitle("Effort estimate in minutes").fill("10");
+  await form.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(form.getByPlaceholder("What needs doing?")).toHaveValue("");
 
   // Start its timer deterministically via the API (the draw page picks a
   // random card, and the tasks page has no per-task start button).
@@ -31,7 +33,7 @@ test("completing a task from the tasks page removes the timer bar without reload
   // Complete the task via its row checkbox — no reload afterwards. Plain
   // click: the controlled checkbox never turns checked, the row disappears
   // from the "open" filter instead, so .check()'s state assertion would fail.
-  await page
+  await taskTree(page)
     .getByText("Fold the laundry", { exact: true })
     .locator("..")
     .getByRole("checkbox")
