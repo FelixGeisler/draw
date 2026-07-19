@@ -89,34 +89,11 @@ endpoint answers 409 while a valid current draw exists, and the dealt card
 is the same commitment as a drawn one, marker and badge surviving reloads
 via `GET /api/draw/current`.
 
-The *daily hand* (#59, ADR-34) is the morning ritual — 3–5 cards dealt as
-today's plan, out of the SAME candidate query as the draw (no second
-eligibility path), weighted-sampled without replacement under
-`daily_hand_budget_minutes`, once per local day.
-
-....
-POST /api/hand/deal      → 409 if today's hand exists (one per local day)
-  candidates := queryCandidates({})        ← the draw's own pool
-  hand := sample without replacement while effort fits remaining budget,
-          max 5 cards                      ← poolWeights, ADR-25 damping
-  persist {date, taskIds} in the `daily_hand` settings row
-  NO last_drawn_at stamp, NO current draw, NO achievement — dealing is not drawing
-
-POST /api/hand/play {taskId}
-  ├─ 409 if a valid current draw exists    ← #88: the hand is not a re-roll rack
-  ├─ 404 if no hand today / card not in it / card went stale (pruned on the way out)
-  └─ stamp last_drawn_at, set current draw, check achievements
-     → from here the card IS the drawn card (ADR-13), with its ×1.5 and its holo
-....
-
-There is deliberately no redeal (ADR-34): the hand only ever shrinks, and a
-card you do not want leaves the way any drawn card leaves — resolved.
-`GET /api/hand` re-validates every member with the current draw's own
-`isRestorable` and prunes stale ones permanently; completion, snooze/block
-and delete prune EAGERLY, because a recurring task stays open, a snooze
-wears off, and a freed task id can be re-bound — none of which a later GET
-could catch in time. A row from an earlier day is not a hand: the ritual
-resets at local midnight and unplayed cards return to the deck.
+There is deliberately no "deal me a day" batch of face-up cards (ADR-39
+removed the daily hand, #147): a strip of dealt cards is a to-do list, and
+showing the pile is the overwhelm the one-card draw exists to prevent. The
+"enough for today" finish line is the daily goal (`daily_goal_completions`),
+which counts completions without ever previewing tasks.
 
 == 6.2 Completing a task (single transaction)
 
@@ -158,7 +135,6 @@ else
       Gam -> DB : status = 'done', completed_at, clear snooze/block
     end
     Gam -> DB : clearCurrentDraw() — drops the pointer + warm-up marker if it was this card
-    Gam -> DB : removeFromHand() — a completed card leaves today's hand (#59); eager because a recurring card stays open (ADR-6) and would otherwise offer itself in the strip again
     Gam -> DB : freeze-token earn on a 7th/14th/… day — INSERT OR IGNORE, idempotent (ADR-28)
     Gam -> Gam : checkAchievements()
     Gam --> Route : {xpAwarded, bonus, newAchievements, recurring, levelUp}

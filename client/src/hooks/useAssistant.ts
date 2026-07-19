@@ -118,7 +118,6 @@ export function agentApplyMutation(qc: QueryClient) {
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["gamification"] });
       qc.invalidateQueries({ queryKey: ["draw", "current"], refetchType: "all" });
-      qc.invalidateQueries({ queryKey: ["hand"], refetchType: "all" });
     },
   };
 }

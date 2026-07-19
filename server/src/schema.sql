@@ -141,5 +141,4 @@ INSERT INTO settings (key, value) VALUES
   ('max_draw_effort', '30'),
   ('draw_cooldown_minutes', '60'),
   ('daily_goal_completions', '1'),
-  ('warmup_every_hours', '8'),
-  ('daily_hand_budget_minutes', '90');
+  ('warmup_every_hours', '8');

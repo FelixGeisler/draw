@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 12;
+export const CURRENT_VERSION = 13;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -239,6 +239,17 @@ function migrate() {
         db.pragma("foreign_keys = ON");
       }
     }
+    if (version < 13) {
+      // Daily hand removal (#147, ADR-39): the feature was PURE DATA (v10
+      // seeded a settings row, the hand itself lived in another — no table,
+      // ADR-34), so its removal is pure data too: delete the now-orphaned
+      // rows. Leaving them would be harmless today but would hand a future
+      // key collision a stale '90' — and a database should not carry rows no
+      // code can read. v10 above stays verbatim: on a pre-v10 file it still
+      // seeds the row this step deletes, which is the honest replay of
+      // history (the chain test pins exactly that).
+      db.exec("DELETE FROM settings WHERE key IN ('daily_hand_budget_minutes', 'daily_hand')");
+    }
   }
   db.pragma(`user_version = ${CURRENT_VERSION}`);
 }
@@ -277,18 +288,6 @@ export const CURRENT_DRAW_SETTING = "current_draw_task_id";
 // refund it, so the warm-up cannot be fished for a better card.
 export const WARMUP_DRAW_SETTING = "warmup_current_draw";
 export const WARMUP_LAST_DEALT_SETTING = "warmup_last_dealt";
-
-// Daily hand (#59, ADR-34) — today's dealt plan as internal session state
-// next to the current draw, excluded from the settings endpoints exactly like
-// it (GET /api/hand is its endpoint). JSON: {date, taskIds}, where `date` is
-// the SERVER-LOCAL day (the streak convention, services/localDay.ts). A row
-// from an earlier day counts as no hand at all: the ritual resets at local
-// midnight and unplayed cards simply return to the deck.
-//
-// Deliberately NO `redealt` field: there is no redeal (ADR-34). The hand is
-// dealt once per local day and only ever SHRINKS — re-dealing five cards
-// would be the card-fishing that #88 removed from the single draw.
-export const DAILY_HAND_SETTING = "daily_hand";
 
 export function getSetting(key: string, fallback: number): number {
   const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as

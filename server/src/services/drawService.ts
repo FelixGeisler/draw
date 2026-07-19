@@ -224,11 +224,6 @@ function filterConditions(filters: DrawFilters): { conditions: string[]; params:
  * express — so both callers share one predicate by construction.
  * `windowExcluded` counts the rows the window filter removed; drawTask's
  * empty-pool dispatch needs it to report `all_outside_window`.
- *
- * Exported for the daily hand (#59, ADR-34), which deals out of EXACTLY this
- * pool: sharing the query — rather than copying the predicate — is what makes
- * snooze/block (ADR-17), sequential hold-back (#23) and availability windows
- * (#33) land in the hand for free and stay impossible to drift apart.
  */
 export function queryCandidates(
   filters: DrawFilters,
@@ -355,8 +350,7 @@ const TRACKED_MINUTES_SQL = `(SELECT CAST(COALESCE(SUM(
 
 /** Full payload row for a freshly dealt card — a pool candidate is an open
  *  leaf by construction (zero non-archived children, #111), so
- *  hasOpenChildren/hasNonArchivedChildren/heldBack are constant 0. Shared
- *  with the daily hand's deal (#59), whose cards come from the same pool. */
+ *  hasOpenChildren/hasNonArchivedChildren/heldBack are constant 0. */
 export function dealtTaskRow(id: number): Record<string, unknown> {
   return db
     .prepare(
@@ -515,9 +509,8 @@ export function clearDanglingDraw() {
  * unlike dealtTaskRow's constants, these are computed, because a pointer into
  * the deck can go stale sideways (the card was broken down, or reparented
  * behind a sequential sibling). The one home of the restore-validation row
- * shape: the current draw (below) and every daily-hand member (#59) are
- * validated against the identical payload, so the two can never drift into
- * disagreeing about what is still in the deck. Undefined when the row is gone.
+ * shape, so restore surfaces cannot drift into disagreeing about what is
+ * still in the deck. Undefined when the row is gone.
  */
 export function taskWithDeckState(id: number): Record<string, unknown> | undefined {
   return db

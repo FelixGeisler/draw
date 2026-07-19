@@ -72,11 +72,6 @@ function useInvalidateTasks() {
     // query (#110), so the dismissal must reach the cache even while the
     // page is unmounted — remounting must not flash the stale card.
     qc.invalidateQueries({ queryKey: ["draw", "current"], refetchType: "all" });
-    // Today's hand (#59) holds the same kind of pointer and shrinks on the
-    // same events: completing removes a card, snooze/block/delete prune it,
-    // an edit can push it out of the deck. Same refetchType "all" and the
-    // same reason — the strip must not flash a resolved card on remount.
-    qc.invalidateQueries({ queryKey: ["hand"], refetchType: "all" });
     // Goal cards derive taskCount/doneCount from tasks — keep them in sync.
     qc.invalidateQueries({ queryKey: ["goals"] });
   };

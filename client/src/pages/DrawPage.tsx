@@ -10,12 +10,10 @@ import {
   useWarmupStatus,
   type DrawResponse,
 } from "../hooks/useDraw";
-import { usePlayHandCard } from "../hooks/useHand";
 import { useCardArt, useRegenerateCardArt } from "../hooks/useAi";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
 import { EmptyPoolReason } from "../components/EmptyPoolReason";
 import { FocusOverlay } from "../components/FocusOverlay";
-import { HandStrip } from "../components/HandStrip";
 import { SnoozeMenu } from "../components/SnoozeMenu";
 import { CategoryPill, TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
@@ -36,7 +34,6 @@ export function DrawPage() {
   const draw = useDraw();
   const warmup = useWarmupDraw();
   const warmupStatus = useWarmupStatus();
-  const playCard = usePlayHandCard();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const startTimer = useStartTimer();
@@ -144,13 +141,11 @@ export function DrawPage() {
           : undefined;
 
   /**
-   * Put a card on the table. `shuffle` is the only difference between the
-   * three ways to get one: a gamble plays the animation, a card that was
-   * already decided (a hand card, #59) flips straight over like the #25
-   * restore path — the suspense belongs to the draw, not to the reveal.
+   * Put a card on the table: a gamble plays the shuffle animation before the
+   * flip — the suspense belongs to the draw, not to the reveal.
    */
-  async function reveal(mutate: () => Promise<DrawResponse>, shuffle = true) {
-    setShuffling(shuffle);
+  async function reveal(mutate: () => Promise<DrawResponse>) {
+    setShuffling(true);
     setResult(null);
     setEditing(false);
     setEdited(false);
@@ -161,11 +156,12 @@ export function DrawPage() {
     try {
       const [response] = await Promise.all([
         mutate(),
-        shuffle ? new Promise((r) => setTimeout(r, 450)) : Promise.resolve(), // let the shuffle play
+        new Promise((r) => setTimeout(r, 450)), // let the shuffle play
       ]);
-      // The reveal works off the mutation response: all three hooks write it
-      // through to the current-draw cache on success, so ending the shuffle
-      // flips straight to the drawn card — no refetch race in the animation.
+      // The reveal works off the mutation response: both hooks (draw and
+      // warm-up) write it through to the current-draw cache on success, so
+      // ending the shuffle flips straight to the drawn card — no refetch
+      // race in the animation.
       setResult(response);
     } finally {
       // #118: a rejected draw (server down, 409 from the warm-up route) used
@@ -183,11 +179,6 @@ export function DrawPage() {
   // persists the same current-draw pointer, so the derived card picks it up
   // exactly like a regular draw.
   const doWarmup = () => reveal(() => warmup.mutateAsync({ categoryId, goalId }));
-  // Play a hand card (#59): the card was dealt this morning, so there is
-  // nothing left to gamble — no shuffle. It writes the same current-draw
-  // pointer, which is the point: a played card IS the drawn card, and every
-  // action below (Start, Done, Not now, Edit, Delete) works on it unchanged.
-  const doPlay = (taskId: number) => reveal(() => playCard.mutateAsync(taskId), false);
 
   async function saveEdit(patch: NewTask) {
     if (!task) return;
@@ -355,22 +346,6 @@ export function DrawPage() {
       <p style={{ color: "var(--text-dim)" }}>
         Stop choosing. Draw one small task and just start.
       </p>
-
-      {/* Today's hand (#59) sits ABOVE the draw scene: it is the morning
-          entry point ("what does my day look like?"), and sharing this page
-          keeps the played card and the freestyle draw on ONE current-draw
-          pointer, so they cannot diverge. Playing is disabled while a card is
-          revealed — the server 409s, because a hand is not a re-roll rack
-          (#88). The freestyle draw below, filters and all, is untouched. */}
-      {/* `playable` also waits out an in-flight play: the reveal deliberately
-          skips the shuffle, so — unlike a draw — nothing takes the phase out
-          of "idle" while the request runs, and a second click would just
-          collect the route's 409. */}
-      <HandStrip
-        playable={phase === "idle" && !playCard.isPending}
-        currentTaskId={task?.id ?? null}
-        onPlay={doPlay}
-      />
 
       <div className="draw-filters">
         <span
@@ -624,8 +599,6 @@ export function DrawPage() {
               .
             </p>
           ) : (
-            /* The three POOL reasons are shared verbatim with the hand's
-               empty deal (#59) — one voice for one server-side predicate. */
             <EmptyPoolReason reason={result.reason} />
           )}
         </div>

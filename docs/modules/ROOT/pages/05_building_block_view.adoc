@@ -98,7 +98,6 @@ server/src/
 │   ├── timer.ts             current/stop; start lives on tasks route
 │   ├── draw.ts              POST /api/draw, POST/GET /api/draw/warmup (#57),
 │   │                        GET /api/draw/current (restore)
-│   ├── hand.ts              GET /api/hand, POST /api/hand/deal|play (#59) — no redeal
 │   ├── stats.ts             GET /api/stats (UTC date-range handling),
 │   │                        GET /api/stats/estimation-bias (all-history, ADR-27)
 │   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
@@ -110,9 +109,7 @@ server/src/
 │   └── ai.ts                status, key, estimate, breakdown, plan-goal, generate-tasks
 └── services/                Domain logic
     ├── drawService.ts       drawable predicate + weight formula + roulette selection + current draw
-    ├── handService.ts       daily hand (#59): budgeted deal out of drawService's own
-    │                        candidate query, play → current draw, lazy + eager pruning
-    ├── localDay.ts          the server's local calendar day (streaks, the hand): pure
+    ├── localDay.ts          the server's local calendar day (streaks): pure
     ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation
     │                        accuracy + per-category bias (coaching input, ADR-27)
     ├── activityService.ts   per-day card derivation for the history skyline (pure core + SQL fetch)
@@ -134,10 +131,6 @@ server/src/
 |`drawService`
 |Candidate selection + weighting
 |Drawability is computed, never stored
-
-|`handService`
-|Today's dealt hand (ADR-34)
-|Eligibility is drawService's own `queryCandidates` — never a second predicate; the hand only shrinks (no redeal), dies at local midnight, and cannot be played over a standing card (409)
 
 |`gamificationService`
 |Completion side-effects
@@ -165,7 +158,7 @@ server/src/
 ....
 client/src/
 ├── api/client.ts + types.ts   typed fetch wrapper, shared DTOs
-├── hooks/                     TanStack Query wrappers (useTasks, useDraw, useHand,
+├── hooks/                     TanStack Query wrappers (useTasks, useDraw,
 │                              useTimer, useGamification, useGoals, useAi,
 │                              useActivity, useEstimationBias)
 ├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip), Capture,
@@ -175,11 +168,10 @@ client/src/
 │                              generate-tasks review model, heatmap grid/quantization,
 │                              shared local-day math, estimation coaching decisions,
 │                              timer/countdown formatting + focus-view decision,
-│                              trophy rarity tiers, hand card states) — unit-tested
+│                              trophy rarity tiers) — unit-tested
 │                              without rendering
 └── components/                TaskRow/Form/Badges, SubtaskEditor, TimerBar,
                                FocusOverlay (fullscreen focus mode, ADR-29),
-                               HandStrip (today's dealt hand, ADR-34),
                                EmptyPoolReason (one voice for an empty pool),
                                GamificationHeader, TrophyDeck, ActivityHeatmap,
                                AchievementToast, MaterialsSection, AiSuggestionPanel
@@ -189,9 +181,9 @@ client/src/
 All server state flows through TanStack Query; task mutations invalidate the
 `tasks`/`gamification`/`stats`/`activity`/`goals` query keys (goal cards derive
 their task counts from tasks; timer start/stop also touches `activity` — a
-started task lays a card into today's skyline tower), plus `draw.current` and
-`hand`, which both hold pointers a task mutation can invalidate (ADR-13,
-ADR-34). There is no other state management.
+started task lays a card into today's skyline tower), plus `draw.current`,
+which holds a pointer a task mutation can invalidate (ADR-13). There is no
+other state management.
 
 == 5.4 Data Model
 
