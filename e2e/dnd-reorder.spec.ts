@@ -96,14 +96,21 @@ async function dragToGap(page: Page, subtaskTitle: string, gapLocator: Locator) 
   // Cross the 5px activation threshold so the gap zones mount.
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
-  // The gaps only exist now — settle the pointer onto the target one.
+  // The gaps only exist now — settle the pointer onto the target one. Two
+  // hazards compound on the shared-DB page and both are addressed per retry:
+  // (1) the gap is a zero-net-height box, so a single precise move can miss the
+  // hover and dnd-over never flips — step off onto the row below and back to
+  // force a fresh overKey transition; (2) the END gap at the bottom of a tall
+  // list can straddle the viewport fold where elementFromPoint returns null —
+  // scroll it in and clamp the target a few px inside the viewport. Retry until
+  // the highlight registers; the drop outcome is still asserted by every caller.
   await expect(async () => {
+    await gapLocator.scrollIntoViewIfNeeded();
     const g = (await gapLocator.boundingBox())!;
+    const vh = page.viewportSize()!.height;
     const cx = g.x + g.width / 2;
-    const cy = g.y + g.height / 2;
-    // Step onto the row just below the gap (a different overKey), then back to
-    // the gap's centre so the move-into is guaranteed to re-fire the update.
-    await page.mouse.move(cx, cy + g.height);
+    const cy = Math.max(3, Math.min(g.y + g.height / 2, vh - 3));
+    await page.mouse.move(cx, Math.min(cy + g.height, vh - 1));
     await page.mouse.move(cx, cy, { steps: 4 });
     await expect(gapLocator).toHaveClass(/dnd-over/, { timeout: 750 });
   }).toPass({ timeout: 10_000 });
@@ -165,4 +172,32 @@ test("the reorder drag works identically under reduced motion", async ({ page })
     expect(await childTitles(page)).toEqual([STEP_A, STEP_B, STEP_C]);
   }).toPass();
   expect(await poolIds(page)).toEqual([subId[STEP_A]]);
+});
+
+test("a reorder gap outranks the fixed root-zone banner so it is never occluded (#173)", async ({
+  page,
+}) => {
+  await page.goto("/tasks");
+  // Start a subtask drag but do NOT drop — crossing the 5px threshold mounts
+  // both the gap zones and the fixed "promote to top level" banner.
+  const h = handle(page, STEP_A);
+  await h.scrollIntoViewIfNeeded();
+  const a = (await h.boundingBox())!;
+  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
+  await expect(page.locator(".dnd-ghost")).toBeVisible();
+  await expect(page.locator(".dnd-root-zone")).toBeVisible();
+
+  // The fix (#173): a gap scrolled into the banner's top band must win
+  // elementFromPoint, or the drop is silently swallowed by the banner. The
+  // z-order IS the contract — a specific reorder slot outranks the general
+  // promote zone.
+  const zOf = (sel: string) =>
+    page.locator(sel).first().evaluate((el) => Number(getComputedStyle(el).zIndex));
+  const gapZ = await zOf(".dnd-gap");
+  const zoneZ = await zOf(".dnd-root-zone");
+  expect(gapZ).toBeGreaterThan(zoneZ);
+
+  await page.mouse.up();
 });

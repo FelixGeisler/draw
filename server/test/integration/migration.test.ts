@@ -22,6 +22,7 @@ import { freshApp, testDb } from "../helpers.js";
 //   v12 → v13 deletes the daily-hand settings rows                (issue #147)
 //   v13 → v14 creates the draws log + achievements claim columns  (issue #156)
 //   v14 → v15 adds tasks.sort_order (global (created_at,id) rank) + trigger (issue #157)
+//   v15 → v16 creates the achievement_customizations table         (issue #177)
 // This file builds a version-2 database in its private DATA_DIR before the
 // app (and thus db.ts with its migrate() call) is imported for the first
 // time, so one boot exercises all steps in sequence. (The v12 rebuild's own
@@ -55,6 +56,13 @@ beforeAll(async () => {
     // so window_end regains its trailing newline before the window strip below.
     .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
     .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
+    // v16 (#177): strip the achievement_customizations table — ADDED by the v16
+    // migration, so a reconstructed pre-v16 file must not already carry it (a
+    // CREATE TABLE would otherwise abort the chain).
+    .replace(
+      /-- User-customizable achievement display metadata[\s\S]*?CREATE TABLE achievement_customizations[\s\S]*?\);\r?\n\r?\n/,
+      "",
+    )
     .replace(
       // \r?\n: checkouts may be CRLF (git autocrlf) or LF.
       /last_drawn_at TEXT,[\s\S]*?window_end TEXT\r?\n/,
@@ -103,6 +111,7 @@ beforeAll(async () => {
   expect(v2Schema).not.toContain("claimed_at");
   expect(v2Schema).not.toContain("sort_order");
   expect(v2Schema).not.toContain("tasks_stamp_sort_order");
+  expect(v2Schema).not.toContain("achievement_customizations");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v2Schema);
@@ -287,10 +296,34 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v15 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal, draws log + claim columns, sibling sort_order)", () => {
-  it("bumps user_version to 15", async () => {
+describe("migration v2 → v16 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal, draws log + claim columns, sibling sort_order, achievement customizations)", () => {
+  it("bumps user_version to 16", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(15);
+    expect(db.pragma("user_version", { simple: true })).toBe(16);
+  });
+
+  it("creates the achievement_customizations table, empty (no backfill) (#177)", async () => {
+    const db = await testDb();
+    const table = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'achievement_customizations'",
+      )
+      .get();
+    expect(table).toBeTruthy();
+    // key PK, nullable title/description, hidden NOT NULL DEFAULT 0.
+    const cols = db.prepare("PRAGMA table_info(achievement_customizations)").all() as {
+      name: string;
+      notnull: number;
+      pk: number;
+      dflt_value: string | null;
+    }[];
+    expect(cols.find((c) => c.name === "key")!.pk).toBe(1);
+    expect(cols.find((c) => c.name === "title")!.notnull).toBe(0);
+    expect(cols.find((c) => c.name === "hidden")).toMatchObject({ notnull: 1, dflt_value: "0" });
+    // No backfill — a pre-#177 database carries no customization rows.
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM achievement_customizations").get(),
+    ).toEqual({ n: 0 });
   });
 
   it("adds tasks.sort_order (REAL NOT NULL DEFAULT 0) backfilled to id, with the stamp trigger (#157)", async () => {

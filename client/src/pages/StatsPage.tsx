@@ -5,6 +5,7 @@ import { useGamification } from "../hooks/useGamification";
 import { AchievementCard } from "../components/AchievementCard";
 import { HistoryCalendar } from "../components/HistoryCalendar";
 import { biasStatement } from "../lib/estimationCoach";
+import { partitionAchievements } from "../lib/achievementEdit";
 
 // The estimation block is summary-only since #155 (ADR-41): the server no
 // longer ships a per-task array, and the page must not want one back.
@@ -158,17 +159,22 @@ const GRADE_COLORS: Record<string, string> = {
 };
 
 /**
- * The achievement collection (#124): a card set, not a panel grid — earned
- * cards face-up with their art and date, unearned ones face-down with the
- * criteria still readable, so the shelf shows both what you have and what is
- * left to collect. The count in the heading is the point of a collection; it
- * is derived from the payload, never asserted on in E2E (counts break when
- * tests re-order).
+ * The achievement collection (#124, extended #177): a card set, not a panel grid
+ * — earned cards face-up with their art and date, unearned ones face-down with a
+ * progress bar, so the shelf shows both what you have and what is left to
+ * collect. Each card is name-only on the face; the description reveals on
+ * hover/focus, and an ✎ button opens an inline editor to rename/rewrite/hide it
+ * (display only — unlock/claim/XP untouched, ADR-44). Hidden cards move OUT of
+ * the main grid into a collapsed "Hidden (N)" section — still editable,
+ * claimable, and un-hideable there. The count in the heading is the point of a
+ * collection; it counts ALL cards (hidden included — hiding is curation, not
+ * removal) and is derived from the payload, never asserted on in E2E.
  */
 function AchievementsGrid() {
   const { data } = useGamification();
   if (!data) return null;
   const collected = data.achievements.filter((a) => a.unlockedAt).length;
+  const { visible, hidden } = partitionAchievements(data.achievements);
   return (
     <section style={{ marginTop: 24 }}>
       <h3>
@@ -178,10 +184,21 @@ function AchievementsGrid() {
         </span>
       </h3>
       <div className="ach-collection">
-        {data.achievements.map((a) => (
-          <AchievementCard key={a.key} achievement={a} claimable />
+        {visible.map((a) => (
+          <AchievementCard key={a.key} achievement={a} claimable editable />
         ))}
       </div>
+
+      {hidden.length > 0 && (
+        <details className="ach-hidden-section">
+          <summary>Hidden ({hidden.length})</summary>
+          <div className="ach-collection" style={{ marginTop: 12 }}>
+            {hidden.map((a) => (
+              <AchievementCard key={a.key} achievement={a} claimable editable />
+            ))}
+          </div>
+        </details>
+      )}
     </section>
   );
 }

@@ -55,6 +55,12 @@ beforeAll(async () => {
     // (and the CREATE TRIGGER) fail.
     .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
     .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
+    // …nor the v16 achievement_customizations table (#177): the v6 → v16 boot
+    // creates it, so leaving it in the seed would make CREATE TABLE fail.
+    .replace(
+      /-- User-customizable achievement display metadata[\s\S]*?CREATE TABLE achievement_customizations[\s\S]*?\);\r?\n\r?\n/,
+      "",
+    )
     .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
     // …nor the v9 warm-up column and setting seed (#57).
     .replace(/,\r?\n  -- Warm-up draw[\s\S]*?was_warmup INTEGER NOT NULL DEFAULT 0/, "")
@@ -80,6 +86,7 @@ beforeAll(async () => {
   expect(schema).not.toContain("CREATE TABLE draws");
   expect(schema).not.toContain("claim_xp");
   expect(schema).not.toContain("sort_order");
+  expect(schema).not.toContain("achievement_customizations");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(schema);

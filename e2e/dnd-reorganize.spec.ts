@@ -82,12 +82,14 @@ test("drag a childless root onto another root to nest it as a subtask", async ({
   await expect(row(page, NEST_TARGET)).toHaveClass(/dnd-over/);
   await page.mouse.up();
 
-  // The list updates without a reload: the row re-renders as a subtask —
-  // the promote affordance replaces the move menu.
+  // The list updates without a reload: the row re-renders as a subtask, so it
+  // gains the promote (⤴) affordance — and since #167 a childless subtask also
+  // keeps its "Move under…" menu (it can move under a different parent too), so
+  // both reorganize controls are present.
   await expect(row(page, NEST_MOVER).getByTitle("Promote to top-level")).toBeVisible();
   await expect(
     row(page, NEST_MOVER).getByTitle("Move under another task (it becomes a subtask)"),
-  ).not.toBeVisible();
+  ).toBeVisible();
 
   const tasks = await tasksByTitle(page);
   expect(tasks.some((t) => t.title === NEST_MOVER)).toBe(false); // no longer a root
@@ -96,28 +98,22 @@ test("drag a childless root onto another root to nest it as a subtask", async ({
   );
 });
 
-test("an invalid target names its rule mid-drag and the drop leaves the tree unchanged", async ({
+test("a container offers no nest gesture — its drag stays inert and changes nothing (#167)", async ({
   page,
 }) => {
   await page.goto("/tasks");
 
-  // PARENT_WITH_CHILD has a subtask — nesting it anywhere violates ADR-16.
+  // PARENT_WITH_CHILD has a subtask, so it is a container: it cannot itself
+  // become a subtask (ADR-16). Since #167 the move-under gesture is gated on
+  // CHILDLESSNESS, so a container's drag is inert over every row — no eligible
+  // glow, no blocked reason (the gesture is hidden, not shown-disabled).
   await dragWithoutRelease(page, handle(page, PARENT_WITH_CHILD), row(page, NEST_TARGET));
-  await expect(row(page, NEST_TARGET)).toHaveClass(/dnd-blocked/);
   await expect(row(page, NEST_TARGET)).not.toHaveClass(/dnd-eligible/);
-  // The reason comes from the shared eligibility helper (#100), not a copy.
-  const reason = page.locator(".dnd-reason");
-  await expect(reason).toContainText("a task with subtasks cannot become a subtask itself");
-
-  // Drifting onto the strip itself must not flicker it away: it carries the
-  // row's data-dnd-row, so the pointer sitting on it keeps the row hovered.
-  const r = (await reason.boundingBox())!;
-  await page.mouse.move(r.x + r.width / 2, r.y + r.height / 2, { steps: 4 });
-  await expect(reason).toBeVisible();
-  await expect(row(page, NEST_TARGET)).toHaveClass(/dnd-blocked/);
+  await expect(row(page, NEST_TARGET)).not.toHaveClass(/dnd-blocked/);
+  await expect(page.locator(".dnd-reason")).toHaveCount(0);
   await page.mouse.up();
 
-  // Dropping on a blocked target is a cancel: tree unchanged on the server.
+  // An inert drop is a no-op: the tree is unchanged on the server.
   const tasks = await tasksByTitle(page);
   const parent = tasks.find((t) => t.title === PARENT_WITH_CHILD);
   expect(parent?.parentId).toBeNull();
@@ -137,9 +133,11 @@ test("drag a subtask to the root drop zone to promote it — under reduced motio
 
   const zone = page.locator(".dnd-root-zone");
   await dragWithoutRelease(page, handle(page, CHILD), row(page, NEST_TARGET));
-  // A dragged subtask has exactly one gesture (menu parity): root rows stay
-  // inert — no eligible highlight — and only the zone is a live target.
-  await expect(row(page, NEST_TARGET)).not.toHaveClass(/dnd-eligible/);
+  // Since #167 a childless subtask also nests under a DIFFERENT root, so
+  // NEST_TARGET now highlights as an eligible nest target — but the promote
+  // zone stays a live target in parallel, and dropping ON the zone (below) is
+  // what this test exercises. The two reorganize gestures coexist.
+  await expect(row(page, NEST_TARGET)).toHaveClass(/dnd-eligible/);
   await expect(zone).toContainText("Drop here to promote");
 
   const z = (await zone.boundingBox())!;

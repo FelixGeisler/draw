@@ -93,9 +93,16 @@ describe("offering predicates", () => {
     expect(isOfferableTarget({ status: "archived" })).toBe(false);
   });
 
-  it("gives only root tasks the move-under gesture", () => {
-    expect(offersMoveUnder({ parentId: null })).toBe(true);
-    expect(offersMoveUnder({ parentId: 3 })).toBe(false);
+  it("gives every CHILDLESS task the move-under gesture — root or subtask (#167)", () => {
+    // A childless root offers it (unchanged)…
+    expect(offersMoveUnder({ hasOpenChildren: 0 })).toBe(true);
+    // …and so does a childless subtask now — the payload shape is the same, a
+    // task with neither a subtasks array nor open children.
+    expect(offersMoveUnder({ hasOpenChildren: 0, subtasks: [] })).toBe(true);
+    // A container (listed subtasks OR open children the payload hides) cannot
+    // itself become a subtask, so it is never offered.
+    expect(offersMoveUnder({ hasOpenChildren: 0, subtasks: [{ id: 5 }] })).toBe(false);
+    expect(offersMoveUnder({ hasOpenChildren: 1 })).toBe(false);
   });
 });
 

@@ -84,9 +84,13 @@ export function classifyDrop(dragged: ReparentSource, spot: DropSpot | null): Dr
   // "blocked with a reason". The predicate is reparentTargets' own filter,
   // so the two inputs cannot diverge on what is offered.
   if (!isOfferableTarget(spot.task)) return { kind: "inert" };
-  // A dragged subtask has exactly one gesture: promote via the root zone.
-  // Same predicate as TaskRow's "Move under…" button gate — rows stay inert
-  // rather than DnD growing a move-to-another-parent path the menu lacks.
+  // A dragged CHILDLESS task — root OR subtask (#167) — can nest under an open
+  // root: moveUnderBlockReason below sorts a different root (eligible) from its
+  // own parent (ALREADY_UNDER_TARGET_REASON) and a subtask target
+  // (TARGET_IS_SUBTASK_REASON, one level deep). A task WITH subtasks is a
+  // container that cannot itself become a subtask, so its rows stay inert.
+  // Same predicate as TaskRow's "Move under…" button gate — the menu and the
+  // drag offer exactly the same set.
   if (!offersMoveUnder(dragged)) return { kind: "inert" };
   return {
     kind: "nest",

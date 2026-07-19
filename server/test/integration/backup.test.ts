@@ -110,6 +110,13 @@ beforeAll(async () => {
   await request(app).patch("/api/settings").send({ streak_rest_weekdays: [6, 0] }).expect(200);
   await request(app).put("/api/ai/key").send({ key: "sk-ant-backup-test-000" }).expect(200);
 
+  // A display customization (#177, ADR-44): it must ride the backup round trip
+  // too — the new achievement_customizations table is part of the DB snapshot.
+  await request(app)
+    .patch("/api/achievements/first_draw")
+    .send({ title: "Backed-up rename", hidden: true })
+    .expect(200);
+
   // Streak/freeze state (#58, ADR-28) must survive the round trip too. One
   // earned token is banked directly — earning organically needs a 7-day
   // streak — using the same localtime day convention completeTask writes.
@@ -219,6 +226,13 @@ describe("POST /api/backup/import — round trip", () => {
     expect(after.goals).toEqual(before.goals);
     expect(after.settings).toEqual(before.settings);
     expect(after.gamification).toEqual(before.gamification);
+    // The display customization (#177) survived the round trip — the new
+    // achievement_customizations table rode ADR-26's whole-file snapshot and the
+    // reopen-and-remigrate on import.
+    const restoredCard = after.gamification.achievements.find(
+      (a: { key: string }) => a.key === "first_draw",
+    );
+    expect(restoredCard).toMatchObject({ title: "Backed-up rename", hidden: true });
     // The banked token itself, not just the derived number (#58, ADR-28) —
     // testDb() is re-fetched because the import swapped and reopened `db`.
     expect(after.gamification.freezesBanked).toBe(1);
@@ -394,6 +408,13 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
       // (the forward-migration on import re-adds both).
       .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
       .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
+      // v16 (#177): a genuine v2 backup has no achievement_customizations table,
+      // so the forward-migration on import re-adds it. Leaving it in would make
+      // the import's CREATE TABLE fail (a raw 500).
+      .replace(
+        /-- User-customizable achievement display metadata[\s\S]*?CREATE TABLE achievement_customizations[\s\S]*?\);\r?\n\r?\n/,
+        "",
+      )
       .replace(/last_drawn_at TEXT,[\s\S]*?window_end TEXT\r?\n/, "last_drawn_at TEXT\n")
       .replace(/-- AI card art cache[\s\S]*?CREATE TABLE card_art[\s\S]*?\);\r?\n/, "")
       .replace(/-- Streak freeze tokens[\s\S]*?CREATE TABLE streak_freezes[\s\S]*?\);\r?\n/, "")
@@ -417,6 +438,7 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     expect(v2Schema).not.toContain("CREATE TABLE draws");
     expect(v2Schema).not.toContain("claim_xp");
     expect(v2Schema).not.toContain("sort_order");
+    expect(v2Schema).not.toContain("achievement_customizations");
 
     const legacyDbPath = path.join(dataDir(), "legacy-backup.db");
     const legacy = new Database(legacyDbPath);

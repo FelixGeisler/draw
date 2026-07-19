@@ -45,12 +45,18 @@
 /* Reorder drop line between sibling rows (#157). A 12px hit box with equal
    negative top/bottom margins → zero net height, so it overlays the row
    boundary and appearing mid-drag never shifts the rows under the pointer.
-   z-index lifts it above the adjacent static rows so elementFromPoint returns
-   it in the overlap. The faint accent line follows the dnd-eligible language;
-   dnd-over strengthens it exactly like the row/zone targets. */
+   z-index lifts it above the adjacent static rows AND above the fixed
+   root-zone banner (30) so elementFromPoint returns the gap in either overlap
+   (#173): a breakdown scrolled into the top band would otherwise have its gap
+   occluded by the banner and refuse the drop. A specific reorder slot rightly
+   wins over the general promote zone when the pointer is on it; everywhere
+   else the banner is unobstructed (a gap is a thin line at one y). Stays below
+   the ghost (40, pointer-events:none). The faint accent line follows the
+   dnd-eligible language; dnd-over strengthens it exactly like the row/zone
+   targets. */
 .dnd-gap {
   position: relative;
-  z-index: 5;
+  z-index: 31;
   height: 12px;
   margin-top: -6px;
   margin-bottom: -6px;

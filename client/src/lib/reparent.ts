@@ -68,13 +68,23 @@ export function isOfferableTarget(target: Pick<Task, "status">): boolean {
 }
 
 /**
- * Whether a task's row offers the "Move under…" gesture at all: only root
- * tasks do — a subtask's single reorganize gesture is promotion, because
- * breakdowns are one level deep (ADR-16) and moving between parents is not a
- * thing. Shared by TaskRow's button gate and the DnD routing (#101).
+ * Whether a task's row offers the "Move under…" gesture at all. The rule is
+ * CHILDLESSNESS, not root-ness (#167): any task with no subtasks — a root OR a
+ * subtask — can move under an open root, because a childless mover never
+ * violates the one-level-deep breakdown (ADR-16) nor the acyclicity it carries
+ * (it can never become anyone's ancestor). Moving a childless subtask between
+ * parents IS now a first-class gesture — the same PATCH parentId the server's
+ * reparent matrix has always accepted (the target-is-root and mover-is-childless
+ * invariants are unchanged; only the earlier client-side "subtasks can't change
+ * parent" restriction is lifted). A task that HAS subtasks is a container and
+ * genuinely cannot itself become a subtask, so it is never offered. Shared by
+ * TaskRow's button gate and the DnD routing (#101/#167), so what is offered vs
+ * merely blocked-with-reason cannot silently diverge.
  */
-export function offersMoveUnder(task: Pick<Task, "parentId">): boolean {
-  return task.parentId == null;
+export function offersMoveUnder(
+  task: Pick<Task, "hasOpenChildren"> & { subtasks?: Pick<Task, "id">[] },
+): boolean {
+  return (task.subtasks?.length ?? 0) === 0 && !task.hasOpenChildren;
 }
 
 export interface ReparentTarget {

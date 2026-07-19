@@ -161,3 +161,50 @@ test("reduced motion suppresses the confetti entirely", async ({ page }) => {
   // Leave the goal achieved: the suite ends with a trophy on the shelf.
   await page.getByRole("button", { name: "Claim victory" }).click();
 });
+
+// Trophy cabinet redesign (#168): the case shows the committed cup art on a
+// plaque, and missed goals sit in a quiet section BELOW the case — not inside
+// it. Reduced-motion run: the assertions are structural, never animation.
+test("the cabinet shows cup art + plaque, with missed goals below the case", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/goals");
+
+  const CAB_WIN = "Fill the e2e trophy cabinet";
+  const CAB_MISS = "Skip the e2e cabinet entry";
+
+  // An achieved goal → a trophy standing in the case.
+  await addGoal(page, CAB_WIN, "Ship the cabinet");
+  await page.locator(".panel").filter({ hasText: CAB_WIN }).getByTitle("Mark achieved").click();
+  await expect(page.getByRole("dialog", { name: `Goal achieved: ${CAB_WIN}` })).toBeVisible();
+  await page.getByRole("button", { name: "Claim victory" }).click();
+
+  // A missed goal → a quiet row beneath the case.
+  await addGoal(page, CAB_MISS);
+  page.on("dialog", (dialog) => dialog.accept());
+  await page.locator(".panel").filter({ hasText: CAB_MISS }).getByTitle(/Mark missed/).click();
+  await expect(page.getByText(`Moved "${CAB_MISS}" to the Hall of Fame as missed.`)).toBeVisible();
+
+  await openShelf(page);
+
+  // The trophy carries the committed cup image and a brass plaque with its facts.
+  const trophy = page.locator(".goal-trophy").filter({ hasText: CAB_WIN });
+  await expect(trophy).toBeVisible();
+  await expect(trophy.locator("img.goal-trophy-cup")).toBeVisible();
+  await expect(trophy.locator(".goal-trophy-plaque")).toContainText(CAB_WIN);
+  await expect(trophy.getByText(/Achieved \d{1,2} \w{3} \d{4}/)).toBeVisible();
+
+  // The missed row lives in the section below the case, never inside the cabinet.
+  const missedRow = page.locator(".goal-missed-row").filter({ hasText: CAB_MISS });
+  await expect(missedRow).toBeVisible();
+  await expect(page.locator(".goal-cabinet .goal-missed-row")).toHaveCount(0);
+
+  const caseBox = await page.locator(".goal-cabinet").boundingBox();
+  const missedBox = await page.locator(".goal-missed").boundingBox();
+  expect(caseBox).not.toBeNull();
+  expect(missedBox).not.toBeNull();
+  expect(missedBox!.y).toBeGreaterThanOrEqual(caseBox!.y + caseBox!.height - 4);
+
+  // Reactivate works from the new trophy: back to the active list.
+  await trophy.getByRole("button", { name: "↩ Reactivate" }).click();
+  await expect(page.getByRole("heading", { name: `🎯 ${CAB_WIN}` })).toBeVisible();
+});
