@@ -318,6 +318,30 @@ the user reviews, and impact was the one field the model guesses that could not
 be corrected; the impactSource "(model estimate)" annotation is dropped once the
 user touches the picker.
 
+*Amendment (#167): cross-parent moves of a childless task are a first-class
+gesture.* The reparent matrix above always accepted a childless *subtask*
+PATCHed to a new root — it requires a root target and a childless mover, never
+that the mover currently BE a root. The client, however, had gated the whole
+"Move under…" affordance on `parentId == null` (root-only), so moving a subtask
+to a different parent needed two steps: promote to root, then nest. That gate
+was cosmetic, not an invariant, and it made the common "wrong parent, fix it"
+reorganization unintuitive. The client offer predicate (`offersMoveUnder`,
+shared by the menu button and the drag-and-drop routing #101) now keys on
+*childlessness* instead: any task with no subtasks — root or subtask — offers
+the gesture, and a container (a task WITH subtasks) never does (it genuinely
+cannot become a subtask, and the earlier root-only gate happened to *show* it
+disabled — hiding it is both correct and cleaner). Consequences: a childless
+subtask now nests under a different open root directly (drag onto the row, or
+the "Move under…" menu); its own-parent drop stays blocked with
+`ALREADY_UNDER_TARGET`, a subtask target with `TARGET_IS_SUBTASK` (one level
+deep), and the reorder gap-zones (#157, ADR-43) still handle same-parent
+ordering — gaps and rows are distinct drop spots, so the two gestures coexist
+without collision. The moved subtask inherits the new parent's goal (and, while
+open, category) through the same adoption write documented above; no server or
+migration change was needed. The one-level-deep and childless-mover invariants
+are unchanged — only the "subtasks cannot change parent" client restriction is
+lifted.
+
 == ADR-17: Snooze/block as retained timestamps, drawability stays derived
 
 *Context:* Some tasks are temporarily undoable (waiting on someone, wrong
