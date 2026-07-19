@@ -167,7 +167,7 @@ export function buildActivityDays(
       date: day,
       cards,
       // `started` = tower height (cards laid that day, incl. completion-only
-      // ones) — what the #54 heatmap shades by.
+      // ones) — the skyline's axis tooltip and empty-state check ride on it.
       totals: {
         started: cards.length,
         completed: cards.filter((c) => c.completed).length,

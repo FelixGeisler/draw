@@ -151,11 +151,12 @@ describe("estimation block (estimated vs. tracked)", () => {
   it("compares estimates with all tracked time for one-shot tasks completed in range", async () => {
     const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
 
-    expect(stats.estimation.tasks).toEqual([
-      // 50/30 → worst under-estimate sorts first
-      { taskId: report.id, title: "write report", estimatedMinutes: 30, trackedMinutes: 50, ratio: 1.67 },
-      { taskId: quickFix.id, title: "quick fix", estimatedMinutes: 20, trackedMinutes: 10, ratio: 0.5 },
-    ]);
+    // The payload is summary-only since #155 (ADR-41) — the per-task array
+    // must not come back.
+    expect(stats.estimation.tasks).toBeUndefined();
+    // 30+20 estimated vs (35+15)+10 tracked: the report's pre-range entry
+    // counts (completed-in-range attributes all its work), the estimate-less
+    // and never-tracked seeds do not.
     expect(stats.estimation.summary).toEqual({
       taskCount: 2,
       totalEstimatedMinutes: 50,
@@ -178,7 +179,7 @@ describe("estimation block (estimated vs. tracked)", () => {
     const stats = (
       await request(app).get("/api/stats?from=2000-01-01&to=2000-01-02").expect(200)
     ).body;
-    expect(stats.estimation.tasks).toEqual([]);
+    expect(stats.estimation.byCategory).toEqual([]);
     expect(stats.estimation.summary.accuracyRatio).toBeNull();
     expect(stats.estimation.summary.tendency).toBeNull();
   });
@@ -224,9 +225,6 @@ describe("estimation with recurring tasks (#39)", () => {
     const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
 
     // Lifetime attribution would report (60 + 30 + 40) / 20 = 6.5×.
-    expect(stats.estimation.tasks).toEqual([
-      { taskId: chore.id, title: "water plants", estimatedMinutes: 20, trackedMinutes: 30, ratio: 1.5 },
-    ]);
     expect(stats.estimation.summary).toEqual({
       taskCount: 1,
       totalEstimatedMinutes: 20,
@@ -289,27 +287,17 @@ describe("estimation with recurring tasks completed twice in range (#48)", () =>
   it("keeps a task whose tracked entries all belong to the earlier in-range cycle", async () => {
     const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
 
-    // One tracked cycle → one 20-min estimate; the untracked second
-    // completion neither hides the task nor scales its estimate.
-    expect(stats.estimation.tasks).toContainEqual({
-      taskId: stretch.id,
-      title: "stretch",
-      estimatedMinutes: 20,
-      trackedMinutes: 30,
-      ratio: 1.5,
-    });
+    // Latest-cycle-only attribution dropped "stretch" (taskCount 1); scaling
+    // its estimate by the untracked second completion would read 100 here.
+    expect(stats.estimation.summary.taskCount).toBe(2);
+    expect(stats.estimation.summary.totalEstimatedMinutes).toBe(80); // 20 + 60
   });
 
   it("scores two tracked cycles against two per-cycle estimates", async () => {
     const stats = (await request(app).get(`/api/stats?${RANGE}`).expect(200)).body;
 
-    expect(stats.estimation.tasks).toContainEqual({
-      taskId: review.id,
-      title: "review notes",
-      estimatedMinutes: 60, // 2 tracked cycles × 30 min
-      trackedMinutes: 60, // 40 + 20
-      ratio: 1,
-    });
+    // "review notes": 2 tracked cycles × 30 min estimated against 40 + 20
+    // tracked — a single-cycle attribution would put the totals at 50/60.
     expect(stats.estimation.summary).toEqual({
       taskCount: 2,
       totalEstimatedMinutes: 80, // 20 + 60
@@ -317,5 +305,10 @@ describe("estimation with recurring tasks completed twice in range (#48)", () =>
       accuracyRatio: 1.13, // 90/80 rounded
       tendency: "under",
     });
+    // Both seeds share category 2 — the per-category row carries the same
+    // per-cycle arithmetic.
+    expect(stats.estimation.byCategory).toEqual([
+      { categoryId: 2, name: "Study", color: "#a06bff", taskCount: 2, estimatedMinutes: 80, trackedMinutes: 90, ratio: 1.13 },
+    ]);
   });
 });

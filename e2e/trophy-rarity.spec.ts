@@ -129,8 +129,8 @@ test("the shine sweep runs only while lifted, and reduced motion stills it", asy
   expect(bg).toContain("linear-gradient");
 });
 
-test("the history skyline reuses the tiers on its upright cards", async ({ page }) => {
-  await page.goto("/history");
+test("the stats-page skyline reuses the tiers on its upright cards", async ({ page }) => {
+  await page.goto("/stats");
 
   // Today's tower sits at the right end, where the skyline opens.
   const holoSky = page.locator(`.hoc-card[aria-label*="${HOLO_TITLE}"]`);

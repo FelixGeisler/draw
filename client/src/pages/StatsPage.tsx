@@ -1,13 +1,14 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
 import { AchievementCard } from "../components/AchievementCard";
-import { ActivityHeatmap } from "../components/ActivityHeatmap";
+import { Skyline } from "../components/Skyline";
 import { biasStatement } from "../lib/estimationCoach";
 
+// The estimation block is summary-only since #155 (ADR-41): the server no
+// longer ships a per-task array, and the page must not want one back.
 interface Estimation {
-  tasks: { taskId: number; title: string; estimatedMinutes: number; trackedMinutes: number; ratio: number }[];
   summary: {
     taskCount: number;
     totalEstimatedMinutes: number;
@@ -81,8 +82,7 @@ function ratioColor(ratio: number): string {
 }
 
 function EstimationSection({ estimation }: { estimation: Estimation }) {
-  const { tasks, summary, byCategory } = estimation;
-  const maxMinutes = Math.max(1, ...tasks.flatMap((t) => [t.estimatedMinutes, t.trackedMinutes]));
+  const { summary, byCategory } = estimation;
 
   return (
     <section style={{ marginTop: 24 }}>
@@ -106,21 +106,6 @@ function EstimationSection({ estimation }: { estimation: Estimation }) {
               {summary.taskCount} task{summary.taskCount === 1 ? "" : "s"} ·{" "}
               {summary.totalEstimatedMinutes} min estimated · {summary.totalTrackedMinutes} min tracked
             </div>
-          </div>
-
-          <div className="panel" style={{ marginTop: 12 }}>
-            {tasks.map((t) => (
-              <div key={t.taskId} style={{ padding: "6px 0" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 14 }}>
-                  <span>{t.title}</span>
-                  <span style={{ color: ratioColor(t.ratio), fontVariantNumeric: "tabular-nums" }}>
-                    {t.ratio}×
-                  </span>
-                </div>
-                <Bar label="estimated" minutes={t.estimatedMinutes} max={maxMinutes} color="#7a8093" />
-                <Bar label="tracked" minutes={t.trackedMinutes} max={maxMinutes} color={ratioColor(t.ratio)} />
-              </div>
-            ))}
           </div>
 
           {byCategory.length > 0 && (
@@ -207,6 +192,10 @@ export function StatsPage() {
   const stats = useQuery({
     queryKey: ["stats", from, to],
     queryFn: () => api.get<Stats>(`/api/stats?from=${from}&to=${to}`),
+    // Range-chip toggles change the queryKey; without this the page body
+    // unmounts to nothing while the new range fetches. Same idiom as
+    // useActivity's widening (#53).
+    placeholderData: keepPreviousData,
   });
 
   const s = stats.data;
@@ -315,14 +304,17 @@ export function StatsPage() {
           )}
 
           <EstimationSection estimation={s.estimation} />
-
-          <AchievementsGrid />
         </>
       )}
 
-      {/* Independent of the stats query and of the week/month toggle: the
-          heatmap always shows its 26-week consistency record (#54). */}
-      <ActivityHeatmap />
+      {/* Independent of the stats query AND the week/month toggle (the
+          heatmap's old guarantee, kept through #155): the skyline is the
+          page's activity view with its own 8-week-plus /api/activity window,
+          and the achievements grid reads /api/gamification — a failing or
+          refetching stats query must never take either down with it. */}
+      <Skyline />
+
+      <AchievementsGrid />
     </div>
   );
 }
