@@ -75,6 +75,17 @@ async function childTitles(page: Page): Promise<string[]> {
  * Press on `subtaskTitle`'s handle, cross the 5px activation threshold so the
  * gap zones mount, then travel to `gapLocator` and release. Mid-drag the gap
  * must report dnd-over before the drop, mirroring dnd-reorganize's assertions.
+ *
+ * The gap is a net-zero, 12px hit box overlaying a row boundary (TaskDnd.css):
+ * the DnD context only flips it to dnd-over on a pointermove whose
+ * elementFromPoint lands inside it, and no further events fire after a single
+ * precise move. A lone move-to-centre is therefore timing/precision-sensitive
+ * in headless CI — one pixel off the zero-height box and overKey never updates,
+ * leaving the assertion to poll a static DOM until it times out. So re-measure
+ * and re-nudge until the highlight registers: each attempt steps off the gap
+ * onto a neighbouring row and back onto its centre, forcing a fresh overKey
+ * transition that survives a missed event or a pixel of imprecision. The drop
+ * outcome is still asserted by every caller, so this only hardens the signal.
  */
 async function dragToGap(page: Page, subtaskTitle: string, gapLocator: Locator) {
   const h = handle(page, subtaskTitle);
@@ -82,20 +93,27 @@ async function dragToGap(page: Page, subtaskTitle: string, gapLocator: Locator) 
   const a = (await h.boundingBox())!;
   await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
   await page.mouse.down();
+  // Cross the 5px activation threshold so the gap zones mount.
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
-  // The gaps only exist now — bring the target one into view and travel to it.
-  // The END gap is the last element on the page; when the breakdown sits at the
-  // bottom of the (shared-DB) list its zero-net-height box straddles the fold,
-  // so its exact center can land a sub-pixel BELOW the viewport and
-  // elementFromPoint returns null. Scrolling it in, then clamping the target a
-  // few px inside the viewport, keeps the pointer on the gap's in-view half.
-  await gapLocator.scrollIntoViewIfNeeded();
-  const g = (await gapLocator.boundingBox())!;
-  const vh = page.viewportSize()!.height;
-  const ty = Math.max(3, Math.min(g.y + g.height / 2, vh - 3));
-  await page.mouse.move(g.x + g.width / 2, ty, { steps: 10 });
-  await expect(gapLocator).toHaveClass(/dnd-over/);
+  // The gaps only exist now — settle the pointer onto the target one. Two
+  // hazards compound on the shared-DB page and both are addressed per retry:
+  // (1) the gap is a zero-net-height box, so a single precise move can miss the
+  // hover and dnd-over never flips — step off onto the row below and back to
+  // force a fresh overKey transition; (2) the END gap at the bottom of a tall
+  // list can straddle the viewport fold where elementFromPoint returns null —
+  // scroll it in and clamp the target a few px inside the viewport. Retry until
+  // the highlight registers; the drop outcome is still asserted by every caller.
+  await expect(async () => {
+    await gapLocator.scrollIntoViewIfNeeded();
+    const g = (await gapLocator.boundingBox())!;
+    const vh = page.viewportSize()!.height;
+    const cx = g.x + g.width / 2;
+    const cy = Math.max(3, Math.min(g.y + g.height / 2, vh - 3));
+    await page.mouse.move(cx, Math.min(cy + g.height, vh - 1));
+    await page.mouse.move(cx, cy, { steps: 4 });
+    await expect(gapLocator).toHaveClass(/dnd-over/, { timeout: 750 });
+  }).toPass({ timeout: 10_000 });
   await page.mouse.up();
 }
 
