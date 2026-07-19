@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ALREADY_ROOT_REASON,
-  HAS_SUBTASKS_REASON,
+  ALREADY_UNDER_TARGET_REASON,
   OWN_PARENT_REASON,
   RECURRING_SEQUENTIAL_REASON,
   TARGET_IS_SUBTASK_REASON,
@@ -50,7 +50,6 @@ describe("classifyDrop", () => {
     };
     expect(block(dragged({ id: 2 }), rowSpot({ id: 2 }))).toBe(OWN_PARENT_REASON);
     expect(block(dragged(), rowSpot({ parentId: 9 }))).toBe(TARGET_IS_SUBTASK_REASON);
-    expect(block(dragged({ hasOpenChildren: 1 }), rowSpot())).toBe(HAS_SUBTASKS_REASON);
     expect(block(dragged({ recurEveryDays: 2 }), rowSpot({ subtaskOrderMode: "sequential" }))).toBe(
       RECURRING_SEQUENTIAL_REASON,
     );
@@ -60,15 +59,43 @@ describe("classifyDrop", () => {
     expect(classifyDrop(dragged(), rowSpot({ status: "done" }))).toEqual({ kind: "inert" });
   });
 
-  it("gives a dragged subtask exactly one gesture: rows are inert, the zone promotes", () => {
-    const subtask = dragged({ parentId: 7 });
-    // Menu parity: subtask rows have no "Move under…", so DnD must not grow
-    // a move-to-another-parent path — even over an otherwise valid root.
-    expect(classifyDrop(subtask, rowSpot())).toEqual({ kind: "inert" });
+  it("nests a childless subtask under a different root, blocks its own parent and subtask targets (#167)", () => {
+    // The #167 fix: a subtask is no longer inert over rows. As a CHILDLESS
+    // mover it nests under a different open root exactly like a childless root,
+    // via the shared moveUnderBlockReason — the same set the menu now offers.
+    const subtask = dragged({ id: 1, parentId: 7 });
+    // A DIFFERENT open root → eligible nest (was inert before #167).
+    expect(classifyDrop(subtask, rowSpot({ id: 2 }))).toEqual({
+      kind: "nest",
+      targetId: 2,
+      blockReason: null,
+    });
+    // Its OWN parent row → blocked with the shared already-there reason.
+    expect(classifyDrop(subtask, rowSpot({ id: 7 }))).toEqual({
+      kind: "nest",
+      targetId: 7,
+      blockReason: ALREADY_UNDER_TARGET_REASON,
+    });
+    // Another SUBTASK → blocked, one level deep.
+    expect(classifyDrop(subtask, rowSpot({ id: 9, parentId: 3 }))).toEqual({
+      kind: "nest",
+      targetId: 9,
+      blockReason: TARGET_IS_SUBTASK_REASON,
+    });
+    // The root zone still promotes it — reorganize gestures coexist.
     expect(classifyDrop(subtask, { type: "root-zone" })).toEqual({
       kind: "promote",
       blockReason: null,
     });
+  });
+
+  it("treats a dragged CONTAINER as inert over rows — a task with subtasks can't nest (#167)", () => {
+    // offersMoveUnder excludes containers, so the drag grows no nest path: the
+    // row stays inert, not blocked-with-reason, the same way TaskRow hides the
+    // "Move under…" button for them. The HAS_SUBTASKS rule itself lives in the
+    // shared matrix (reparent.test.ts).
+    expect(classifyDrop(dragged({ hasOpenChildren: 1 }), rowSpot())).toEqual({ kind: "inert" });
+    expect(classifyDrop(dragged({ subtasks: [{ id: 8 }] }), rowSpot())).toEqual({ kind: "inert" });
   });
 
   it("blocks the zone for a dragged root with the shared already-root reason", () => {
