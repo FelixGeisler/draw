@@ -75,6 +75,17 @@ async function childTitles(page: Page): Promise<string[]> {
  * Press on `subtaskTitle`'s handle, cross the 5px activation threshold so the
  * gap zones mount, then travel to `gapLocator` and release. Mid-drag the gap
  * must report dnd-over before the drop, mirroring dnd-reorganize's assertions.
+ *
+ * The gap is a net-zero, 12px hit box overlaying a row boundary (TaskDnd.css):
+ * the DnD context only flips it to dnd-over on a pointermove whose
+ * elementFromPoint lands inside it, and no further events fire after a single
+ * precise move. A lone move-to-centre is therefore timing/precision-sensitive
+ * in headless CI — one pixel off the zero-height box and overKey never updates,
+ * leaving the assertion to poll a static DOM until it times out. So re-measure
+ * and re-nudge until the highlight registers: each attempt steps off the gap
+ * onto a neighbouring row and back onto its centre, forcing a fresh overKey
+ * transition that survives a missed event or a pixel of imprecision. The drop
+ * outcome is still asserted by every caller, so this only hardens the signal.
  */
 async function dragToGap(page: Page, subtaskTitle: string, gapLocator: Locator) {
   const h = handle(page, subtaskTitle);
@@ -82,12 +93,20 @@ async function dragToGap(page: Page, subtaskTitle: string, gapLocator: Locator) 
   const a = (await h.boundingBox())!;
   await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
   await page.mouse.down();
+  // Cross the 5px activation threshold so the gap zones mount.
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
-  // The gaps only exist now — measure and travel to the target one.
-  const g = (await gapLocator.boundingBox())!;
-  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2, { steps: 10 });
-  await expect(gapLocator).toHaveClass(/dnd-over/);
+  // The gaps only exist now — settle the pointer onto the target one.
+  await expect(async () => {
+    const g = (await gapLocator.boundingBox())!;
+    const cx = g.x + g.width / 2;
+    const cy = g.y + g.height / 2;
+    // Step onto the row just below the gap (a different overKey), then back to
+    // the gap's centre so the move-into is guaranteed to re-fire the update.
+    await page.mouse.move(cx, cy + g.height);
+    await page.mouse.move(cx, cy, { steps: 4 });
+    await expect(gapLocator).toHaveClass(/dnd-over/, { timeout: 750 });
+  }).toPass({ timeout: 10_000 });
   await page.mouse.up();
 }
 
