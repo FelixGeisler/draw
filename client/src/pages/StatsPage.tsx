@@ -6,6 +6,7 @@ import { AchievementCard } from "../components/AchievementCard";
 import { HistoryCalendar } from "../components/HistoryCalendar";
 import { biasStatement } from "../lib/estimationCoach";
 import { partitionAchievements } from "../lib/achievementEdit";
+import { collapseAchievementChains } from "../lib/achievementChains";
 
 // The estimation block is summary-only since #155 (ADR-41): the server no
 // longer ships a per-task array, and the page must not want one back.
@@ -159,28 +160,36 @@ const GRADE_COLORS: Record<string, string> = {
 };
 
 /**
- * The achievement collection (#124, extended #177): a card set, not a panel grid
- * — earned cards face-up with their art and date, unearned ones face-down with a
- * progress bar, so the shelf shows both what you have and what is left to
+ * The achievement collection (#124, extended #177, #183): a card set, not a panel
+ * grid — earned cards face-up with their art and date, unearned ones face-down
+ * with a progress bar, so the shelf shows both what you have and what is left to
  * collect. Each card is name-only on the face; the description reveals on
  * hover/focus, and an ✎ button opens an inline editor to rename/rewrite/hide it
  * (display only — unlock/claim/XP untouched, ADR-44). Hidden cards move OUT of
  * the main grid into a collapsed "Hidden (N)" section — still editable,
- * claimable, and un-hideable there. The count in the heading is the point of a
- * collection; it counts ALL cards (hidden included — hiding is curation, not
- * removal) and is derived from the payload, never asserted on in E2E.
+ * claimable, and un-hideable there.
+ *
+ * A CHAIN (#156) collapses to a single evolving card via
+ * collapseAchievementChains (ADR-48): only the current tier shows — the first
+ * unclaimed level, or the maxed level once all are claimed. Claiming advances it
+ * with no extra code (useClaimAchievement invalidates ['gamification']; the
+ * refetch drops the just-claimed tier and the next becomes current). One-offs
+ * render standalone. The heading counts the COLLAPSED view (one per chain +
+ * one-offs), a chain "collected" once any tier of it has unlocked — derived from
+ * the payload, never asserted on in E2E.
  */
 function AchievementsGrid() {
   const { data } = useGamification();
   if (!data) return null;
-  const collected = data.achievements.filter((a) => a.unlockedAt).length;
-  const { visible, hidden } = partitionAchievements(data.achievements);
+  const collapsed = collapseAchievementChains(data.achievements);
+  const collected = collapsed.filter((c) => c.collected).length;
+  const { visible, hidden } = partitionAchievements(collapsed.map((c) => c.card));
   return (
     <section style={{ marginTop: 24 }}>
       <h3>
         Achievements{" "}
         <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>
-          — {collected}/{data.achievements.length} collected
+          — {collected}/{collapsed.length} collected
         </span>
       </h3>
       <div className="ach-collection">
