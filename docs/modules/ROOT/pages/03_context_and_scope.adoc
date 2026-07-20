@@ -37,7 +37,7 @@ SHOW_LEGEND()
 
 |*User*
 |Tasks, goals, estimates, impact ratings, uploaded materials (PDF/txt/md), draw/timer/completion actions
-|Drawn cards, stats, leverage insights, XP/achievements, AI suggestions
+|Drawn cards, stats, XP/achievements, AI suggestions
 
 |*Anthropic Claude API*
 |Task/goal context + selected materials (as document blocks), structured-output schema

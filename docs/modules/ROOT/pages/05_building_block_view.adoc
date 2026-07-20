@@ -110,7 +110,7 @@ server/src/
 └── services/                Domain logic
     ├── drawService.ts       drawable predicate + weight formula + roulette selection + current draw
     ├── localDay.ts          the server's local calendar day (streaks): pure
-    ├── statsService.ts      SQL aggregations, leverage insights, weekly grade, estimation
+    ├── statsService.ts      SQL aggregations (minutes by impact/category/goal), estimation
     │                        accuracy + per-category bias (coaching input, ADR-27)
     ├── activityService.ts   per-day card derivation for the Stats History calendar (pure core + SQL fetch)
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
