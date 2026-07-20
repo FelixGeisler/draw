@@ -368,7 +368,11 @@ interface ChainSpec {
   target: number;
 }
 
-const CHAIN_SPECS: Partial<Record<AchievementKey, ChainSpec>> = {
+// Exported for the shared chain-map drift guard (#183,
+// server/test/unit/achievement-chains-map.test.ts): shared/achievementChains.ts
+// is a pure projection of this table (chainId = metric, order = target), pinned
+// against it so the client collapse (ADR-48) cannot fall out of sync.
+export const CHAIN_SPECS: Partial<Record<AchievementKey, ChainSpec>> = {
   first_draw: { metric: "draws", target: 1 },
   draw_10: { metric: "draws", target: 10 },
   draw_100: { metric: "draws", target: 100 },
