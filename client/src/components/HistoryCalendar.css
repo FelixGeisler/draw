@@ -6,6 +6,10 @@
    with the rest of Stats; motion sits behind prefers-reduced-motion. */
 
 .cal-section {
+  /* Containing block for the floating day-detail overlay (#182): the detail is
+     mounted here (OUTSIDE the overflow-x scroll box, so it can't clip) and
+     positioned absolute against this box. */
+  position: relative;
   margin-top: 24px;
 }
 
@@ -106,8 +110,9 @@
   box-shadow: inset 0 0 0 1.5px var(--text);
 }
 
-/* Hover / keyboard focus / tap: the tile grows and outlines, its detail docks
-   in the footer. transform + outline only — no reflow of the grid. */
+/* Hover / keyboard focus / tap: the tile grows and outlines, its detail floats
+   in anchored to the tile (#182). transform + outline only — no reflow of the
+   grid. */
 .cal-cell.active,
 .cal-cell:focus-visible {
   outline: 2px solid var(--accent);
@@ -166,23 +171,47 @@
   border-radius: 3px;
 }
 
-/* Docked day-detail: which tasks that day, completed vs unfinished, XP, rarity.
-   A panel, not a floating tooltip — no edge clipping, and it doubles as a live
-   region for keyboard users. */
-.cal-detail {
+/* A static footer hint — one line, constant height, so nothing below reflows as
+   the detail comes and goes (#182). */
+.cal-hint {
   flex: 1;
+  min-width: 240px;
+  margin: 0;
+  align-self: center;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* Floating day-detail (#182): which tasks that day, completed vs unfinished, XP,
+   rarity. Taken OUT of normal flow — absolutely positioned by the component and
+   anchored to the active tile — so its content-driven height reflows nothing
+   below it. Mounted outside the horizontally-scrolling `.cal-scroll`, with
+   `.cal-section { position: relative }` as its containing block, so the scroll
+   box can't clip it. Keeps the docked panel's border/bg/list styling and its
+   role="status" live region; pointer-events are off so it never intercepts hover
+   as the pointer sweeps to a neighbouring tile. The box-shadow lifts it off the
+   grid it now floats over. */
+.cal-detail {
+  position: absolute;
+  z-index: 50;
   min-width: 240px;
   max-width: 380px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--bg);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
   font-size: 13px;
-}
-.cal-detail.idle {
-  display: flex;
-  align-items: center;
-  color: var(--text-dim);
+  pointer-events: none;
+  /* Cap the height so an unusually busy day (many cards) can never grow taller
+     than the viewport and run off the bottom edge — the vertical clamp in
+     reposition() pins top=margin when the panel exceeds the viewport, which
+     would otherwise push the tail off-screen. min(70vh, …) keeps it inside the
+     8px margins the clamp reserves. pointer-events:none means an inner scroll
+     wouldn't be reachable, so we clip; the role="status" DOM keeps every item
+     for screen readers regardless of the visual cap. */
+  max-height: min(70vh, 420px);
+  overflow: hidden;
 }
 .cal-detail-date {
   font-weight: 600;
@@ -238,10 +267,23 @@
   color: #cdd7ea;
 }
 
+@keyframes cal-detail-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .cal-cell {
     transition:
       transform 0.1s ease,
       outline-color 0.1s ease;
+  }
+  /* The floating detail fades in; reduced motion drops the animation entirely. */
+  .cal-detail {
+    animation: cal-detail-in 0.12s ease;
   }
 }

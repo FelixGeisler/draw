@@ -1133,7 +1133,7 @@ mini-cards (#53) and the daily hand (#59) adopt the frame when built.
 follow-up is void; the skyline mini-cards note stands.
 
 *Amendment (#174):* the skyline was itself replaced by the History
-contribution calendar (ADR-45), whose day detail is a plain docked list rather
+contribution calendar (ADR-45), whose day detail is a plain list overlay rather
 than TCG mini-cards — so the mini-cards follow-up is now void too.
 
 == ADR-32: Parent-task lifecycle follows the subtasks — derived effort, auto-complete at a symbolic 1 XP, reopen on new subtasks
@@ -1967,19 +1967,36 @@ One tile per local day in Monday-first week columns, shaded by an intensity
 level (0–4, blending tracked minutes with completion count); a day's rarest
 completion shows as a corner gem (holo/silver) rather than the holo/silver
 sheen; the per-day detail — which tasks, completed vs. worked-but-unfinished,
-XP, rarity — docks into a panel (a keyboard live region), not a floating card,
-so it cannot clip. "Load earlier" widens the window in 26-week steps to the same
-ten-year `MAX_RANGE_DAYS` cap. `Skyline.tsx/.css` and their E2E spec are
-deleted.
+XP, rarity — reveals on hover / keyboard focus / tap as a floating overlay
+(a `role="status"` live region) anchored to the active tile. "Load earlier"
+widens the window in 26-week steps to the same ten-year `MAX_RANGE_DAYS` cap.
+`Skyline.tsx/.css` and their E2E spec are deleted.
+
+*Amendment (#182):* The detail was first a box docked in the calendar footer —
+"a panel, not a floating tooltip" — chosen to sidestep the skyline's edge
+clipping. But because it sat in normal flow with no reserved height, its
+content-driven height (one idle line vs. one row per card) changed the section
+height as the pointer swept across cells, shoving the Achievements grid below it
+up and down: the page jumped. It is now a FLOATING, out-of-flow overlay
+(`position: absolute`) anchored to the active tile, mounted OUTSIDE the
+`overflow-x: auto` scroll box with `.cal-section { position: relative }` as its
+containing block. Out of flow, it reserves no space, so nothing below reflows;
+outside the scroll box (plus a viewport clamp with edge-flip above/below the
+tile), it still cannot clip. The `role="status"` live region, focus handling and
+tap-to-pin are unchanged, and the fade stays behind `prefers-reduced-motion` —
+this corrects the original "docked panel, not a floating tooltip" rationale
+while keeping its no-clipping and accessibility guarantees.
 
 *Rationale:* The calendar reads a year at a glance where the tower metaphor
 never scaled past a few weeks and buried the record it sat on. Because the
 endpoint and derivation are untouched, this is a pure client re-render — no
 migration, no server change, and the local-day and rarity invariants carry over
-verbatim. The docked detail panel is a strictly more robust successor to the
-floating card details (no edge clipping, and it doubles as an accessible live
-region). Supersedes the skyline as the Stats activity view established by
-ADR-41.
+
+verbatim. The floating, out-of-flow detail overlay (#182, see amendment) is a
+strictly more robust successor to the skyline's floating card details — anchored
+to the active tile yet clip-free and reflow-free, and it doubles as an
+accessible live region. Supersedes the skyline as the Stats activity view
+established by ADR-41.
 
 
 == ADR-46: Hall of Fame — always-visible, name-only spotlight showcase, supersedes the #168 cabinet

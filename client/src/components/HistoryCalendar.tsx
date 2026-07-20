@@ -10,9 +10,10 @@ import "./HistoryCalendar.css";
 // house-of-cards skyline (#53). One tile per LOCAL day (ADR-21) laid out in
 // Monday-first week columns, shaded by activity intensity. The per-day detail
 // (which tasks, completed vs worked-but-unfinished, XP, drawn rarity) reveals
-// on hover / keyboard focus / tap into a docked panel — a robust successor to
-// the skyline's floating card details, immune to edge clipping. The layout and
-// derivation are pure (lib/historyCalendar), so this file is DOM + interaction.
+// on hover / keyboard focus / tap into a floating overlay anchored to the active
+// tile (#182): out of normal flow, so its variable height reflows nothing below,
+// and mounted outside the scroll box so it can't clip. The layout and derivation
+// are pure (lib/historyCalendar), so this file is DOM + interaction.
 
 /** Weeks shown before "Load earlier" widens the window. */
 const WEEKS_PER_WINDOW = 26;
@@ -113,20 +114,28 @@ const Cell = memo(function Cell({
   );
 });
 
+// The day-detail is a FLOATING overlay (#182), not a docked footer box: it is
+// taken out of normal flow (absolute, anchored to the active cell by the parent)
+// so its content-driven height reflows nothing below it — sweeping the pointer
+// across cells no longer jostles the Achievements grid. It stays a role="status"
+// live region for keyboard/screen-reader users, and is mounted outside the
+// horizontally-scrolling grid so the scroll container can never clip it.
 function Detail({
   cell,
   categoryNames,
+  panelRef,
+  style,
 }: {
-  cell: CalCell | null;
+  cell: CalCell;
   categoryNames: Map<number, string>;
+  panelRef: React.RefObject<HTMLDivElement | null>;
+  style: React.CSSProperties;
 }) {
-  if (!cell || !cell.day) {
-    return <div className="cal-detail idle">Hover, focus or tap a day to see what you did.</div>;
-  }
-  const { day, date, isToday } = cell;
+  const { date, isToday } = cell;
+  const day = cell.day!;
   const t = day.totals;
   return (
-    <div className="cal-detail" role="status" data-cal-detail={date!}>
+    <div ref={panelRef} className="cal-detail" role="status" data-cal-detail={date!} style={style}>
       <div className="cal-detail-date">
         {formatDay(date!)}
         {isToday && <span className="cal-detail-today"> · today</span>}
@@ -192,6 +201,61 @@ export function HistoryCalendar() {
   const activeCell =
     activeKey == null ? null : columns.flatMap((c) => c.cells).find((c) => c.date === activeKey) ?? null;
 
+  // Float the day-detail over the layout (#182). The overlay is absolutely
+  // positioned inside `.cal-section` (its `position: relative` containing block)
+  // and anchored to the active tile's `data-cal-day` box: measured after render,
+  // preferred ABOVE the tile, edge-flipped BELOW when that would clip the top,
+  // and clamped horizontally so it never leaves the viewport. Because the overlay
+  // is out of flow AND mounted outside the horizontally-scrolling grid, it adds
+  // no height to the footer (nothing below reflows) and the scroll box can't clip
+  // it. `pos === null` keeps it hidden until the first measurement lands.
+  const sectionRef = useRef<HTMLElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+
+  const reposition = useCallback(() => {
+    const section = sectionRef.current;
+    const overlay = overlayRef.current;
+    if (activeKey == null || !section || !overlay) {
+      setPos(null);
+      return;
+    }
+    const anchor = section.querySelector<HTMLElement>(`[data-cal-day="${CSS.escape(activeKey)}"]`);
+    if (!anchor) return;
+    const cellRect = anchor.getBoundingClientRect();
+    const sectionRect = section.getBoundingClientRect();
+    const ovW = overlay.offsetWidth;
+    const ovH = overlay.offsetHeight;
+    const margin = 8;
+    const gap = 8;
+    const vw = document.documentElement.clientWidth;
+    const vh = window.innerHeight;
+    // Centre over the tile, then clamp inside the viewport (the edge-flip).
+    let vLeft = cellRect.left + cellRect.width / 2 - ovW / 2;
+    vLeft = Math.max(margin, Math.min(vLeft, vw - margin - ovW));
+    // Prefer above the tile; drop below if that would run off the top edge.
+    let vTop = cellRect.top - gap - ovH;
+    if (vTop < margin) vTop = cellRect.bottom + gap;
+    vTop = Math.max(margin, Math.min(vTop, vh - margin - ovH));
+    setPos({ left: vLeft - sectionRect.left, top: vTop - sectionRect.top });
+  }, [activeKey]);
+
+  // Measure synchronously (before paint) on every active-day change, and keep the
+  // anchor honest while a pinned day survives page scroll / resize.
+  useLayoutEffect(() => {
+    reposition();
+  }, [reposition]);
+  useEffect(() => {
+    if (activeKey == null) return;
+    const onViewportChange = () => reposition();
+    window.addEventListener("scroll", onViewportChange, true);
+    window.addEventListener("resize", onViewportChange);
+    return () => {
+      window.removeEventListener("scroll", onViewportChange, true);
+      window.removeEventListener("resize", onViewportChange);
+    };
+  }, [activeKey, reposition]);
+
   // Open at the most recent weeks; keep them in view when "Load earlier"
   // prepends older columns (mirrors the skyline's scroll-preservation).
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -223,7 +287,7 @@ export function HistoryCalendar() {
     });
 
   return (
-    <section className="cal-section">
+    <section className="cal-section" ref={sectionRef}>
       <div className="cal-head">
         <h3 style={{ flex: 1 }}>History</h3>
         <button
@@ -302,8 +366,24 @@ export function HistoryCalendar() {
           ))}
           <span>More</span>
         </div>
-        <Detail cell={activeCell} categoryNames={categoryNames} />
+        {/* A static, single-line hint — constant height, so it never reflows.
+            The day-detail itself floats over the layout (below), anchored to the
+            active tile, and adds no height here (#182). */}
+        <p className="cal-hint">Hover, focus or tap a day to see what you did.</p>
       </div>
+
+      {activeCell && activeCell.day && (
+        <Detail
+          cell={activeCell}
+          categoryNames={categoryNames}
+          panelRef={overlayRef}
+          style={{
+            left: pos?.left ?? 0,
+            top: pos?.top ?? 0,
+            visibility: pos ? "visible" : "hidden",
+          }}
+        />
+      )}
     </section>
   );
 }
