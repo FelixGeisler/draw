@@ -172,3 +172,44 @@ test("today's tile is in view, and prefers-reduced-motion drops the tile transit
   // The detail's fade also lives behind no-preference, so it is stilled too.
   await expect(detail(page)).toHaveCSS("animation-duration", "0s");
 });
+
+// Seed enough completed cards on today that, in a short viewport, the detail
+// list would overflow the viewport if its height were uncapped (#182 review:
+// "never clipped by the viewport edge"). Each completed task is one list line.
+async function seedManyDone(request: APIRequestContext, n: number) {
+  const categories: { id: number; name: string }[] = await (
+    await request.get("/api/categories")
+  ).json();
+  for (let i = 0; i < n; i++) {
+    const t = await (
+      await request.post("/api/tasks", {
+        data: { title: `Calendar busy day card ${i}`, categoryId: categories[0].id, effortMinutes: 5 },
+      })
+    ).json();
+    await request.patch(`/api/tasks/${t.id}`, { data: { status: "done" } });
+  }
+}
+
+test("a busy day's detail stays inside the viewport — the height is capped, not clipped off the bottom", async ({
+  page,
+}) => {
+  // A short viewport so the capped max-height (min(70vh, 420px)) actually bites;
+  // with ~20 completed cards the uncapped panel would be far taller than 70vh.
+  await page.setViewportSize({ width: 960, height: 400 });
+  await seedManyDone(page.request, 20);
+  await page.goto("/stats");
+
+  const cell = todayCell(page);
+  await cell.hover();
+  const panel = detail(page);
+  await expect(panel).toBeVisible();
+
+  const box = await panel.boundingBox();
+  const vh = page.viewportSize()!.height;
+  // The whole panel is on-screen: top not above the fold, bottom not past it.
+  expect(box!.y).toBeGreaterThanOrEqual(-1);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(vh + 1);
+  // And the cap is what keeps it there — never taller than the viewport allows.
+  expect(box!.height).toBeLessThanOrEqual(Math.min(vh * 0.7, 420) + 2);
+  await expect(panel).toBeInViewport();
+});

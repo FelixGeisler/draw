@@ -203,6 +203,15 @@
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
   font-size: 13px;
   pointer-events: none;
+  /* Cap the height so an unusually busy day (many cards) can never grow taller
+     than the viewport and run off the bottom edge — the vertical clamp in
+     reposition() pins top=margin when the panel exceeds the viewport, which
+     would otherwise push the tail off-screen. min(70vh, …) keeps it inside the
+     8px margins the clamp reserves. pointer-events:none means an inner scroll
+     wouldn't be reachable, so we clip; the role="status" DOM keeps every item
+     for screen readers regardless of the visual cap. */
+  max-height: min(70vh, 420px);
+  overflow: hidden;
 }
 .cal-detail-date {
   font-weight: 600;
