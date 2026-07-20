@@ -20,8 +20,11 @@ import { drawFromGoal } from "./helpers.js";
 //     whichever spec reaches it first. Nothing earlier can take it: early_bird
 //     needs a due date, and no spec before this one sets one.
 // early_bird is the only tier this file can honestly earn at this point in the
-// run; streak_30 is its mirror — 30 completed days is unreachable in E2E, so
-// it is permanently the locked, face-down example.
+// run. Since #183 each chain COLLAPSES to a single card = its current tier (the
+// first unclaimed level), so the locked, face-down example is streak_7 — the
+// streak chain's level 1, and 7 completed days is unreachable in one E2E run, so
+// it stays the current tier and stays locked. The deeper tiers (streak_30/_100,
+// draw_10000, complete_2500…) are collapsed away, no longer in the DOM.
 test.describe.configure({ mode: "serial" });
 
 const GOAL = "Collectible early bird goal";
@@ -113,14 +116,21 @@ test("the collection shows earned cards face-up and unearned ones face-down, cri
 
   // Unearned: face-down — but the criteria stay readable (the issue's
   // deliberate openness; no "???" mystery cards), now in the reveal panel, and
-  // the art stays behind it as a silhouette rather than being dropped.
-  const unearned = card(page, "streak_30");
+  // the art stays behind it as a silhouette rather than being dropped. Under the
+  // #183 collapse the streak chain shows ONE card — its current tier, streak_7.
+  const unearned = card(page, "streak_7");
   await expect(unearned).toHaveClass(/locked/);
-  await expect(unearned.locator(".ach-name")).toHaveText("Unstoppable");
-  await expect(unearned.locator(".ach-desc")).toHaveText("30 completed days in one unbroken streak.");
+  await expect(unearned.locator(".ach-name")).toHaveText("One week strong");
+  await expect(unearned.locator(".ach-desc")).toHaveText("7 completed days in one unbroken streak.");
   await expect(unearned.locator(".ach-hint")).toHaveCount(0);
   await expect(unearned.locator(".ach-date")).toHaveCount(0);
   await expect(unearned.locator(".ach-art")).toBeVisible();
+
+  // The chain is collapsed: only the current tier is in the grid, the deeper
+  // streak tiers are gone (they reappear one at a time as each is claimed).
+  await expect(card(page, "streak_7")).toHaveCount(1);
+  await expect(card(page, "streak_30")).toHaveCount(0);
+  await expect(card(page, "streak_100")).toHaveCount(0);
 
   // Card-shaped tiles, not panels: portrait, the draw card's 5:7 ratio.
   const box = (await earned.boundingBox())!;
@@ -133,32 +143,34 @@ test("the collection shows earned cards face-up and unearned ones face-down, cri
   await expect(earned).not.toContainText("DEF");
 });
 
-test("rarity grades the sheen across the 5-tier ladder, common plain", async ({ page }) => {
+test("rarity grades the sheen across the tiers, common plain, only earned cards shimmer", async ({
+  page,
+}) => {
   await page.goto("/stats");
 
   // Same assertion style as trophy-rarity.spec.ts: the tier is a class, and
-  // "common" is the ABSENCE of one — plain is no sheen, not a tier of one. The
-  // #156 ladder migrated the old tiers: streak_30 legendary → ultra-rare,
-  // level_10 epic → super-rare.
-  await expect(card(page, "streak_30")).toHaveClass(/rarity-ultra-rare/);
+  // "common" is the ABSENCE of one — plain is no sheen, not a tier of one. Since
+  // #183 collapsed the chains, the deep tiers (streak_30, level_10, draw_10000)
+  // are no longer in the grid; the always-standalone ONE-OFFS anchor the ladder
+  // instead — deck_clearer ultra-rare, leverage_master super-rare, early_bird
+  // rare. secret-rare's distinct treatment is exercised synthetically below.
   await expect(card(page, "deck_clearer")).toHaveClass(/rarity-ultra-rare/);
-  await expect(card(page, "level_10")).toHaveClass(/rarity-super-rare/);
+  await expect(card(page, "leverage_master")).toHaveClass(/rarity-super-rare/);
   await expect(card(page, "early_bird")).toHaveClass(/rarity-rare/);
-  await expect(card(page, "draw_10000")).toHaveClass(/rarity-secret-rare/);
+  // first_draw is the current (unlocked-but-unclaimed) draws tier, and common
+  // carries no rarity class.
   await expect(card(page, "first_draw")).not.toHaveClass(/rarity-/);
-  await expect(card(page, "first_completion")).not.toHaveClass(/rarity-/);
 
   // An EARNED rare paints a real sheen...
   expect((await sheen(page, "early_bird")).image).toContain("linear-gradient");
 
   // ...an earned common paints none at all (first_draw is unlocked by the
-  // core journey's very first click).
+  // run's draws, and never claimed, so it is the draws chain's current card).
   await expect(card(page, "first_draw")).toHaveClass(/unlocked/);
   expect((await sheen(page, "first_draw")).image).toBe("none");
 
-  // An UNEARNED card never shimmers, however legendary it will be: the reward
-  // has not been earned yet.
-  expect((await sheen(page, "streak_30")).image).toBe("none");
+  // An UNEARNED card never shimmers: streak_7 is the locked current streak tier.
+  expect((await sheen(page, "streak_7")).image).toBe("none");
 });
 
 test("reduced motion keeps the sheen painted but still", async ({ page }) => {
@@ -192,14 +204,16 @@ test("reduced motion keeps the sheen painted but still", async ({ page }) => {
 test("a locked chain card shows a progress bar toward its threshold", async ({ page }) => {
   await page.goto("/stats");
 
-  // complete_2500 is a chain end (secret-rare) — unreachable in E2E, so it is a
-  // reliably LOCKED chain card, which is exactly where the progress bar lives.
-  const locked = card(page, "complete_2500");
+  // streak_7 is the streak chain's current tier and stays LOCKED in E2E (7
+  // completed days is unreachable in one run), which is exactly where the
+  // progress bar lives. Since #183 the deeper tiers are collapsed away, so the
+  // current tier is where a chain's bar is now seen.
+  const locked = card(page, "streak_7");
   await expect(locked).toHaveClass(/locked/);
   const bar = locked.locator(".ach-progress");
   await expect(bar).toBeVisible();
   await expect(bar).toHaveAttribute("role", "progressbar");
-  await expect(locked.locator(".ach-progress-label")).toContainText("/2500");
+  await expect(locked.locator(".ach-progress-label")).toContainText("/7");
 
   // A one-off has no running total, so it carries no bar (progress is null).
   await expect(card(page, "early_bird").locator(".ach-progress")).toHaveCount(0);
@@ -265,4 +279,28 @@ test("claiming an unlocked card raises the header XP and is idempotent", async (
   expect(retry.status()).toBe(409);
   const after = await (await page.request.get("/api/gamification")).json();
   expect(after.xp).toBe(before.xp + 50);
+});
+
+// Runs LAST: it claims first_draw, which permanently advances the draws chain
+// for the rest of the shared serial DB — so every earlier test in this file
+// still sees first_draw as the draws chain's current card.
+test("claiming the current chain tier advances the card to the next tier (#183)", async ({
+  page,
+}) => {
+  await page.goto("/stats");
+
+  // The draws chain shows first_draw here — unlocked by the run's many draws,
+  // never claimed, so it is the first UNCLAIMED tier and the collapse's current
+  // card. The higher tiers are collapsed away.
+  const firstDraw = card(page, "first_draw");
+  await expect(firstDraw).toHaveClass(/unlocked/);
+  await expect(card(page, "draw_10")).toHaveCount(0);
+
+  await firstDraw.getByRole("button", { name: /Claim \+/ }).click();
+
+  // The just-claimed tier drops out (once claimedAt is set the collapse skips
+  // it), and the next tier (draw_10) becomes the chain's single card — the
+  // advance happening purely via the claim's refetch, no extra client code.
+  await expect(card(page, "first_draw")).toHaveCount(0);
+  await expect(card(page, "draw_10")).toHaveCount(1);
 });

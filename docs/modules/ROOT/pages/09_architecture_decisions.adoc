@@ -1981,6 +1981,7 @@ floating card details (no edge clipping, and it doubles as an accessible live
 region). Supersedes the skyline as the Stats activity view established by
 ADR-41.
 
+
 == ADR-46: Hall of Fame — always-visible, name-only spotlight showcase, supersedes the #168 cabinet
 
 *Context:* The Hall of Fame (#145/ADR-38, redesigned as a lit trophy cabinet in
@@ -2024,3 +2025,65 @@ in `lib/goalShelf` as a shared helper — only the shelf dropped its delta chip;
 the victory overlay still renders one. This supersedes the #168 trophy-cabinet
 presentation (brass plaques, glass shelves, collapse toggle) as the Hall of Fame
 treatment.
+
+
+== ADR-47: Achievement chains collapse to a single evolving current-tier card — client-side grouping, claim advances
+
+*Context:* Chains (#156, ADR-42) model a running metric as several keyed levels
+— draws `first_draw → draw_10 → … → draw_10000`, and the same shape for
+completions, streak, level, goals and tracked hours. The Stats "Achievements"
+grid (`AchievementsGrid`) rendered one card per KEY, flat, so every tier of a
+chain showed at once: five draw cards, five completion cards, twenty-seven tiles
+for six chains plus four one-offs. The shelf read as a wall of near-duplicate
+locked cards rather than a set of goals, and the user's own framing was to show
+only the level they are on: "only display lvl 1 ... if it's done you can get the
+exp and it turns into lvl 2 etc." (#183).
+
+*Decision:* Collapse each chain to ONE evolving card = its *current tier*,
+client-side, with no server/claim/XP/schema change (the `/api/gamification`
+payload still ships all tiers).
+
+* *Shared chain map.* `shared/achievementChains.ts` — a dependency-free sibling
+of `shared/achievementKeys.ts` / `shared/achievementTiers.ts` — maps each
+CHAINED key to `{ chainId, order }`. It is a pure projection of the server's
+`CHAIN_SPECS` (`gamificationService.ts`): `chainId` = the shared `metric`,
+`order` = the `target`. The client cannot import `gamificationService` (it pulls
+in `db.js`/better-sqlite3), hence the hop; a server drift-guard
+(`server/test/unit/achievement-chains-map.test.ts`) pins the map equal to the
+projection, the same anti-drift treatment the key and tier lists get. Keys with
+no entry are the one-offs (monster_slayer, leverage_master, deck_clearer,
+early_bird).
+
+* *Current-tier selector.* `lib/achievementChains.collapseAchievementChains`
+groups the payload by `chainId` (one-offs each their own slot, first-appearance
+order preserved) and picks, per chain, the CURRENT tier: the first tier
+(ascending `order`) whose `claimedAt` is null, or the last (maxed) tier once
+every level is claimed. `AchievementCard` is unchanged — it already derives
+art/rarity/progress/claim state from whatever key it is handed.
+
+* *Claim advances with no extra code.* `useClaimAchievement` already invalidates
+`['gamification']`; on refetch the just-claimed tier carries `claimedAt`, the
+selector skips it, and the next level becomes current — the card evolves in
+place. A wholly-unearned chain shows level 1 face-down (with its progress bar);
+a fully-claimed chain shows the maxed tier as a claimed card, so the chain never
+vanishes.
+
+* *Defaults.* The heading `{collected}/{total}` reflects the COLLAPSED view
+(one per chain + one-offs, not the raw 27 tiers); a chain counts as collected
+once ANY tier of it has unlocked — monotonic, so claiming can never lower the
+count. Hide (#177) and the ✎ editor act on the currently-shown tier's key
+(unchanged behaviour per visible card): a hidden current tier moves to the
+"Hidden (N)" section as before.
+
+*Rationale:* This is a pure client re-render (ADR-5): unlock, claim, XP, rarity
+(ADR-42), the shared key set, and `CHAIN_SPECS` are all untouched, so the grid
+becomes a ladder-of-goals view without moving any authority off the server. The
+grouping is DERIVED from the payload each render (ADR-2's derived-over-stored
+spirit) rather than a stored "current level" counter — claiming a tier is the
+only state change, and the advance falls out of the existing refetch. Putting
+the chain map in `shared/` with a drift-guard keeps the client's notion of a
+chain from silently diverging from the server's `CHAIN_SPECS`, exactly as the
+key/tier mirrors do. The one deliberate cost is that a specific non-current tier
+is no longer addressable in the grid (its card is only in the DOM while it is
+current) — acceptable, since the point of the change is that a chain presents as
+one moving target, not a shelf of every rung at once.

@@ -10,8 +10,15 @@ import type { Page } from "@playwright/test";
 // This filename sorts FIRST in the alphabetical serial run — BEFORE
 // core-journey.spec.ts, which asserts a pristine "0 XP / Lv 1", and before
 // earned-achievements.spec.ts, which asserts specific DEFAULT names/criteria on
-// streak_30 / early_bird. So every test here operates on other keys and RESETS
+// streak_7 / early_bird. So every test here operates on other keys and RESETS
 // its customization to default before it ends, leaving the shared DB pristine.
+//
+// Since #183 each chain COLLAPSES to a single card = its current tier. On the
+// pristine DB this run sees here, nothing is drawn/completed/claimed, so the
+// current tier of every chain is its LEVEL 1 — first_draw, first_completion,
+// streak_7, level_5, hours_10 are the only chain cards in the grid; the deeper
+// tiers (draw_10, draw_100…) are collapsed away and not in the DOM. These tests
+// operate on those level-1 cards (and the always-standalone one-offs).
 test.describe.configure({ mode: "serial" });
 
 function card(page: Page, key: string) {
@@ -31,44 +38,48 @@ test("rename persists across reload, shows on the collection, and flows to the t
 }) => {
   await page.goto("/stats");
 
-  // draw_10 is a locked chain card here (nothing drawn) — default "Warming the deck".
-  const c = card(page, "draw_10");
-  await expect(c.locator(".ach-name")).toHaveText("Warming the deck");
+  // first_draw is the draws chain's current tier here (nothing drawn yet) —
+  // default "First draw".
+  const c = card(page, "first_draw");
+  await expect(c.locator(".ach-name")).toHaveText("First draw");
 
   // Open the inline editor from the ✎ button, rename, Save.
   await c.hover();
   await c.getByRole("button", { name: /Edit/ }).click();
-  await c.locator(".ach-editor-name").fill("My warmup deck");
+  await c.locator(".ach-editor-name").fill("My first card");
   await c.getByRole("button", { name: "Save" }).click();
 
   // The card face shows the new name (the query invalidated and refetched)...
-  await expect(c.locator(".ach-name")).toHaveText("My warmup deck");
+  await expect(c.locator(".ach-name")).toHaveText("My first card");
   // ...and it survives a full reload (it is a stored override, not local state).
   await page.reload();
-  await expect(card(page, "draw_10").locator(".ach-name")).toHaveText("My warmup deck");
+  await expect(card(page, "first_draw").locator(".ach-name")).toHaveText("My first card");
 
   // The unlock TOAST reads the same /api/gamification payload, so it resolves
   // the custom title automatically. Dispatch an unlock event for the (already
   // loaded) key rather than earning one — this spends no XP and unlocks nothing,
   // it only exercises the toast's rendering path.
   await page.evaluate(() =>
-    window.dispatchEvent(new CustomEvent("achievements-unlocked", { detail: ["draw_10"] })),
+    window.dispatchEvent(new CustomEvent("achievements-unlocked", { detail: ["first_draw"] })),
   );
-  const toast = page.locator(".ach-toast", { has: page.locator('.ach-card[data-key="draw_10"]') });
-  await expect(toast.locator(".ach-card .ach-name")).toHaveText("My warmup deck");
+  const toast = page.locator(".ach-toast", {
+    has: page.locator('.ach-card[data-key="first_draw"]'),
+  });
+  await expect(toast.locator(".ach-card .ach-name")).toHaveText("My first card");
 
   // Reset and confirm the default returns.
-  await reset(page, "draw_10");
+  await reset(page, "first_draw");
   await page.reload();
-  await expect(card(page, "draw_10").locator(".ach-name")).toHaveText("Warming the deck");
+  await expect(card(page, "first_draw").locator(".ach-name")).toHaveText("First draw");
 });
 
 test("hiding moves the card into a 'Hidden (N)' section; un-hiding returns it", async ({ page }) => {
   await page.goto("/stats");
 
-  // No hidden section to start, and draw_100 is in the main collection.
+  // No hidden section to start, and first_completion (the completions chain's
+  // current tier) is in the main collection.
   await expect(page.locator(".ach-hidden-section")).toHaveCount(0);
-  const c = card(page, "draw_100");
+  const c = card(page, "first_completion");
   await c.hover();
   await c.getByRole("button", { name: /Edit/ }).click();
   await c.getByRole("checkbox").check();
@@ -78,11 +89,11 @@ test("hiding moves the card into a 'Hidden (N)' section; un-hiding returns it", 
   // not deletion: still present, still editable there.
   const hiddenSection = page.locator(".ach-hidden-section");
   await expect(hiddenSection.locator("summary")).toHaveText("Hidden (1)");
-  await expect(hiddenSection.locator('.ach-card[data-key="draw_100"]')).toHaveCount(1);
+  await expect(hiddenSection.locator('.ach-card[data-key="first_completion"]')).toHaveCount(1);
 
   // Un-hide it from the Hidden section: expand, edit, uncheck Hide, Save.
   await hiddenSection.locator("summary").click();
-  const hiddenCard = hiddenSection.locator('.ach-card[data-key="draw_100"]');
+  const hiddenCard = hiddenSection.locator('.ach-card[data-key="first_completion"]');
   await hiddenCard.hover();
   await hiddenCard.getByRole("button", { name: /Edit/ }).click();
   await hiddenCard.getByRole("checkbox").uncheck();
@@ -90,9 +101,9 @@ test("hiding moves the card into a 'Hidden (N)' section; un-hiding returns it", 
 
   // Back in the main collection; the Hidden section is gone.
   await expect(page.locator(".ach-hidden-section")).toHaveCount(0);
-  await expect(card(page, "draw_100")).toHaveCount(1);
+  await expect(card(page, "first_completion")).toHaveCount(1);
 
-  await reset(page, "draw_100");
+  await reset(page, "first_completion");
 });
 
 test("the description reveals on hover and is reachable on focus", async ({ page }) => {
@@ -125,24 +136,26 @@ test("the description reveals on hover and is reachable on focus", async ({ page
 test("Reset to default restores the shipped name and description", async ({ page }) => {
   await page.goto("/stats");
 
-  const c = card(page, "draw_1000");
+  const c = card(page, "hours_10");
   await c.hover();
   await c.getByRole("button", { name: /Edit/ }).click();
-  await c.locator(".ach-editor-name").fill("Custom deck name");
+  await c.locator(".ach-editor-name").fill("Custom hours name");
   await c.locator(".ach-editor-desc").fill("Custom criteria");
   await c.getByRole("button", { name: "Save" }).click();
-  await expect(c.locator(".ach-name")).toHaveText("Custom deck name");
+  await expect(c.locator(".ach-name")).toHaveText("Custom hours name");
 
   await page.reload();
-  const c2 = card(page, "draw_1000");
+  const c2 = card(page, "hours_10");
   await c2.hover();
   await c2.getByRole("button", { name: /Edit/ }).click();
   // The Reset affordance appears only because the card is customized.
   await c2.getByRole("button", { name: "Reset to default" }).click();
 
   // Both the name and the reveal description are back to the shipped values.
-  await expect(c2.locator(".ach-name")).toHaveText("Deck devotee");
-  await expect(card(page, "draw_1000").locator(".ach-desc")).toHaveText("Draw 1,000 cards.");
+  await expect(c2.locator(".ach-name")).toHaveText("Ten hours in");
+  await expect(card(page, "hours_10").locator(".ach-desc")).toHaveText(
+    "Track 10 hours of focused work.",
+  );
 });
 
 test("reduced motion keeps the reveal instant (no transition), still functional", async ({
@@ -151,7 +164,9 @@ test("reduced motion keeps the reveal instant (no transition), still functional"
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/stats");
 
-  const c = card(page, "streak_100");
+  // level_5 is the level chain's current tier here (still locked) — its reveal
+  // panel is what this exercises.
+  const c = card(page, "level_5");
   const desc = c.locator(".ach-desc");
 
   // The reveal fade is gated behind prefers-reduced-motion: no-preference, so
