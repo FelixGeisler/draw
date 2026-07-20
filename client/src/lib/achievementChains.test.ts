@@ -4,7 +4,7 @@ import type { AchievementCardData } from "../components/AchievementCard";
 import { ACHIEVEMENT_CHAINS } from "../../../shared/achievementChains";
 import { ACHIEVEMENT_KEYS } from "../../../shared/achievementKeys";
 
-// The current-tier selector + chain collapse of issue #183 (ADR-48). Pure over
+// The current-tier selector + chain collapse of issue #183 (ADR-47). Pure over
 // the /api/gamification payload shape, so it is exercised here with no renderer
 // (the client suite has no DOM) -- the lib/achievementRarity precedent.
 

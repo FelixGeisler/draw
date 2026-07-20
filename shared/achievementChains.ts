@@ -8,7 +8,7 @@
  * pulls in `db.js`/better-sqlite3, so the client cannot import it. This file is
  * the same dependency-free hop as `shared/achievementKeys.ts` /
  * `shared/achievementTiers.ts`: one map here, imported by the client to COLLAPSE
- * a chain's tiers into a single evolving current-tier card (ADR-48), and pinned
+ * a chain's tiers into a single evolving current-tier card (ADR-47), and pinned
  * against `CHAIN_SPECS` by a server drift-guard so the two cannot disagree.
  *
  * The mapping is a pure PROJECTION of `CHAIN_SPECS`:

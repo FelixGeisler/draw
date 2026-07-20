@@ -1,5 +1,5 @@
 // Collapse an achievement payload into ONE evolving card per chain (issue #183,
-// ADR-48). The Stats grid used to render every tier of a chain at once (five
+// ADR-47). The Stats grid used to render every tier of a chain at once (five
 // draw cards, five completion cards...); this groups a chain's tiers and picks
 // the single CURRENT tier to show. Kept out of the component and pure so the
 // selector is unit-testable without a DOM (the client suite has no renderer) --

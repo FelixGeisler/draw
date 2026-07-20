@@ -170,7 +170,7 @@ const GRADE_COLORS: Record<string, string> = {
  * claimable, and un-hideable there.
  *
  * A CHAIN (#156) collapses to a single evolving card via
- * collapseAchievementChains (ADR-48): only the current tier shows — the first
+ * collapseAchievementChains (ADR-47): only the current tier shows — the first
  * unclaimed level, or the maxed level once all are claimed. Claiming advances it
  * with no extra code (useClaimAchievement invalidates ['gamification']; the
  * refetch drops the just-claimed tier and the next becomes current). One-offs
