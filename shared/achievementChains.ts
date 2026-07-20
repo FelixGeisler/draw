@@ -19,10 +19,10 @@
  * projection of `CHAIN_SPECS` exactly — add a chain level server-side and the
  * guard fails until it is mirrored here.
  *
- * Keys with no entry here are the one-offs (monster_slayer, leverage_master,
- * deck_clearer, early_bird) — event unlocks with no running total, which render
- * standalone. `client/src/lib/achievementChains.test.ts` pins that the
- * un-chained keys are exactly those four.
+ * Keys with no entry here are the one-offs (monster_slayer, deck_clearer,
+ * early_bird) — event unlocks with no running total, which render standalone.
+ * `client/src/lib/achievementChains.test.ts` pins that the un-chained keys are
+ * exactly those three.
  *
  * This file must stay dependency-free: it is imported across both workspaces
  * (NodeNext on the server, bundler resolution on the client). It takes only a

@@ -151,11 +151,13 @@ test("rarity grades the sheen across the tiers, common plain, only earned cards 
   // Same assertion style as trophy-rarity.spec.ts: the tier is a class, and
   // "common" is the ABSENCE of one — plain is no sheen, not a tier of one. Since
   // #183 collapsed the chains, the deep tiers (streak_30, level_10, draw_10000)
-  // are no longer in the grid; the always-standalone ONE-OFFS anchor the ladder
-  // instead — deck_clearer ultra-rare, leverage_master super-rare, early_bird
-  // rare. secret-rare's distinct treatment is exercised synthetically below.
+  // are no longer in the grid; the standalone ONE-OFFS anchor the low/high ends
+  // (deck_clearer ultra-rare, early_bird rare), and the goals chain's current
+  // head first_goal — super-rare, and the current tier until a goal is achieved,
+  // so always in the grid — anchors the middle. secret-rare's distinct treatment
+  // is exercised synthetically below.
   await expect(card(page, "deck_clearer")).toHaveClass(/rarity-ultra-rare/);
-  await expect(card(page, "leverage_master")).toHaveClass(/rarity-super-rare/);
+  await expect(card(page, "first_goal")).toHaveClass(/rarity-super-rare/);
   await expect(card(page, "early_bird")).toHaveClass(/rarity-rare/);
   // first_draw is the current (unlocked-but-unclaimed) draws tier, and common
   // carries no rarity class.

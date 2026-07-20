@@ -77,7 +77,6 @@ export const ACHIEVEMENT_KEYS = [
   "hours_1000",
   // One-offs — event unlocks with no running total (progress is null).
   "monster_slayer",
-  "leverage_master",
   "deck_clearer",
   "early_bird",
 ] as const;

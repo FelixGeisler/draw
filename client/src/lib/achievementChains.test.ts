@@ -129,10 +129,10 @@ describe("collapseAchievementChains", () => {
 
 describe("chain map coverage", () => {
   // The one-offs the issue names: keys with no chain entry render standalone.
-  it("leaves exactly the four one-offs un-chained", () => {
+  it("leaves exactly the three one-offs un-chained", () => {
     const oneoffs = ACHIEVEMENT_KEYS.filter((k) => !(k in ACHIEVEMENT_CHAINS));
     expect([...oneoffs].sort()).toEqual(
-      ["deck_clearer", "early_bird", "leverage_master", "monster_slayer"].sort(),
+      ["deck_clearer", "early_bird", "monster_slayer"].sort(),
     );
   });
 
