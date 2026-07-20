@@ -167,6 +167,8 @@
   letter-spacing: 0.14em;
   line-height: 1.4;
   color: #b89a5e;
+  /* A single very long unbroken title breaks instead of spilling the box. */
+  overflow-wrap: anywhere;
 }
 
 /* Reveal strip: absolutely positioned into the reserved padding, so it has
@@ -338,18 +340,23 @@
   font-size: 13.5px;
   letter-spacing: 0.02em;
   color: var(--text-dim);
+  overflow-wrap: anywhere;
 }
 
+/* pointer-events guards the invisible controls from catching stray clicks
+   while hidden — mirrors .goal-cup-reveal. */
 .goal-missed-reveal {
   display: flex;
   align-items: center;
   gap: 12px;
   opacity: 0;
+  pointer-events: none;
 }
 
 .goal-missed-row:hover .goal-missed-reveal,
 .goal-missed-row:focus-within .goal-missed-reveal {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .goal-missed-date {
