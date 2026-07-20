@@ -1980,3 +1980,47 @@ verbatim. The docked detail panel is a strictly more robust successor to the
 floating card details (no edge clipping, and it doubles as an accessible live
 region). Supersedes the skyline as the Stats activity view established by
 ADR-41.
+
+== ADR-46: Hall of Fame — always-visible, name-only spotlight showcase, supersedes the #168 cabinet
+
+*Context:* The Hall of Fame (#145/ADR-38, redesigned as a lit trophy cabinet in
+#168) sat behind a collapse toggle and defaulted closed, so the resolved goals
+were hidden until a click; each achieved goal hung on a brass plaque crowded
+with `Achieved <date>`, `✓ N/M tasks`, and a target-delta chip. Twice the user
+rejected it: the trophies should greet them the moment the Goals page opens, not
+hide, and the wall of metadata cheapened the reward at rest.
+
+*Decision:* #181 rebuilds the shelf as a spotlight showcase, a pure client
+re-render over the unchanged ADR-38 model. (a) ALWAYS visible: the collapse
+toggle and its `useState` are gone; a plain static `🏆 Hall of Fame` heading
+sits above a case that renders unconditionally. The two `useGoals("achieved")`
+/ `useGoals("missed")` queries therefore run on every Goals-page load rather
+than only while a panel is open — intended — and the pending guard stays (render
+nothing until BOTH have answered) so there is no empty-case flash. (b) Name only
+at rest: each achieved goal is a gold cup (the #124/#168 `goal-trophy.svg`)
+standing in its own CSS spotlight — a blurred trapezoidal beam from the top of
+the case, a warm floor pool, and a tight dark contact shadow so it reads as
+standing — with its name below in letter-spaced small-caps dim gold. The brass
+plaque and its whole meta block (date, task count, delta chip) are deleted.
+(c) Hover/focus intensifies the light and fades in a quiet `Achieved <date>`
+caption + Reactivate / Delete strip, absolutely positioned into space the cup
+reserves up front, so revealing NEVER reflows the case; `:focus-within` keeps
+the actions keyboard-reachable, never hover-only. (d) Missed goals stay quiet
+rows below the case, name only at rest, `missed <date>` + actions revealed on
+hover/focus in place (the row reserves the strip, an opacity-only toggle, so it
+never reflows either). (e) All MOTION — the spotlight intensify, the fades, the
+one-hair cup lift — is gated behind `prefers-reduced-motion: no-preference` (the
+#62/#123 pattern); the hover end-states still apply instantly under reduced
+motion, so the information is always reachable, nothing just animates.
+
+*Rationale:* An always-lit case that greets the user answers the twice-repeated
+ask head-on, and the name-only rest state lets each trophy read as a reward
+rather than a report — the metadata is one hover or Tab away, not a permanent
+placard. The reserved-footprint reveal keeps the drama free of layout jank, and
+the reduced-motion gate honours the motion preference without hiding the
+controls behind it. Nothing in the data model or the query contract changes:
+`resolved_at` (ADR-38) still supplies the hover date, and `targetDelta` survives
+in `lib/goalShelf` as a shared helper — only the shelf dropped its delta chip;
+the victory overlay still renders one. This supersedes the #168 trophy-cabinet
+presentation (brass plaques, glass shelves, collapse toggle) as the Hall of Fame
+treatment.

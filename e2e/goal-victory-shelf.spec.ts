@@ -29,17 +29,13 @@ function victoryDialog(page: Page) {
   return page.getByRole("dialog", { name: `Goal achieved: ${WIN_TITLE}` });
 }
 
-async function openShelf(page: Page) {
-  await page.getByRole("button", { name: /Hall of Fame/ }).click();
-}
-
+// The Hall of Fame is ALWAYS visible now (#181, no collapse toggle): reactivate
+// straight from the cup / missed row. Cup actions live in a hover/focus reveal,
+// so hover the item before clicking (a missed row reveals on hover too).
 async function reactivateFromShelf(page: Page, title: string) {
-  await openShelf(page);
-  await page
-    .locator(".goal-trophy, .goal-missed-row")
-    .filter({ hasText: title })
-    .getByRole("button", { name: "↩ Reactivate" })
-    .click();
+  const item = page.locator(".goal-cup, .goal-missed-row").filter({ hasText: title });
+  await item.hover();
+  await item.getByRole("button", { name: "↩ Reactivate" }).click();
   await expect(page.getByRole("heading", { name: `🎯 ${title}` })).toBeVisible();
 }
 
@@ -70,10 +66,22 @@ test("achieving a goal opens the victory overlay; claiming it hangs the trophy",
   // Achieved goals leave the active list…
   await expect(goalHeading(page)).not.toBeVisible();
 
-  // …and hang in the Hall of Fame with the resolution date.
-  await openShelf(page);
-  const trophy = page.locator(".goal-trophy").filter({ hasText: WIN_TITLE });
+  // …and stand as a spotlit cup in the always-visible Hall of Fame, name only.
+  const trophy = page.locator(".goal-cup").filter({ hasText: WIN_TITLE });
   await expect(trophy).toBeVisible();
+  await expect(trophy.locator(".goal-cup-name")).toHaveText(WIN_TITLE);
+
+  // Name only at rest: the date + actions strip is hidden (opacity 0) until
+  // hover/focus, and revealing it reflows nothing. Park the cursor off the
+  // case first — Playwright leaves it wherever "Claim victory" was clicked.
+  await page.mouse.move(0, 0);
+  const reveal = trophy.locator(".goal-cup-reveal");
+  await expect(reveal).toHaveCSS("opacity", "0");
+
+  // Keyboard path: focusing an action reveals the strip via :focus-within —
+  // the actions are never hover-only.
+  await trophy.getByRole("button", { name: "↩ Reactivate" }).focus();
+  await expect(reveal).toHaveCSS("opacity", "1");
   await expect(trophy.getByText(/Achieved \d{1,2} \w{3} \d{4}/)).toBeVisible();
 
   // Reactivate is the shelf's control (no Undo on the overlay): back to active.
@@ -116,11 +124,19 @@ test("marking missed is quiet: confirm, live-region line, subdued shelf row", as
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(page.getByRole("heading", { name: `🎯 ${MISS_TITLE}` })).not.toBeVisible();
 
-  await openShelf(page);
+  // A quiet row below the case, name only at rest.
   const row = page.locator(".goal-missed-row").filter({ hasText: MISS_TITLE });
   await expect(row).toBeVisible();
+  await expect(row.locator(".goal-missed-name")).toHaveText(MISS_TITLE);
+
+  // The `missed <date>` caption + actions stay hidden (opacity 0) until hover.
+  // Park the cursor off the row first (it sits where ⌛ was clicked).
+  await page.mouse.move(0, 0);
+  const reveal = row.locator(".goal-missed-reveal");
+  await expect(reveal).toHaveCSS("opacity", "0");
+  await row.hover();
+  await expect(reveal).toHaveCSS("opacity", "1");
   await expect(row.getByText(/missed \d{1,2} \w{3} \d{4}/)).toBeVisible();
-  await expect(row.getByText(/0\/0 tasks done/)).toBeVisible();
 
   // Reactivating clears the stale notice along with the row.
   await row.getByRole("button", { name: "↩ Reactivate" }).click();
@@ -162,17 +178,18 @@ test("reduced motion suppresses the confetti entirely", async ({ page }) => {
   await page.getByRole("button", { name: "Claim victory" }).click();
 });
 
-// Trophy cabinet redesign (#168): the case shows the committed cup art on a
-// plaque, and missed goals sit in a quiet section BELOW the case — not inside
-// it. Reduced-motion run: the assertions are structural, never animation.
-test("the cabinet shows cup art + plaque, with missed goals below the case", async ({ page }) => {
+// Spotlight-cups redesign (#181): the always-visible case shows the committed
+// cup art under its own spotlight, name only at rest; missed goals sit in a
+// quiet section BELOW the case, never inside it. Reduced-motion run: the
+// assertions are structural, never animation.
+test("the case shows a name-only spotlit cup, with missed goals below it", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/goals");
 
   const CAB_WIN = "Fill the e2e trophy cabinet";
   const CAB_MISS = "Skip the e2e cabinet entry";
 
-  // An achieved goal → a trophy standing in the case.
+  // An achieved goal → a cup standing in the case.
   await addGoal(page, CAB_WIN, "Ship the cabinet");
   await page.locator(".panel").filter({ hasText: CAB_WIN }).getByTitle("Mark achieved").click();
   await expect(page.getByRole("dialog", { name: `Goal achieved: ${CAB_WIN}` })).toBeVisible();
@@ -184,13 +201,22 @@ test("the cabinet shows cup art + plaque, with missed goals below the case", asy
   await page.locator(".panel").filter({ hasText: CAB_MISS }).getByTitle(/Mark missed/).click();
   await expect(page.getByText(`Moved "${CAB_MISS}" to the Hall of Fame as missed.`)).toBeVisible();
 
-  await openShelf(page);
+  // The Hall of Fame header is a plain static heading, not a toggle button.
+  await expect(page.getByRole("heading", { name: /Hall of Fame/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Hall of Fame/ })).toHaveCount(0);
 
-  // The trophy carries the committed cup image and a brass plaque with its facts.
-  const trophy = page.locator(".goal-trophy").filter({ hasText: CAB_WIN });
+  // The cup carries the committed cup image and its name, nothing else at rest.
+  const trophy = page.locator(".goal-cup").filter({ hasText: CAB_WIN });
   await expect(trophy).toBeVisible();
-  await expect(trophy.locator("img.goal-trophy-cup")).toBeVisible();
-  await expect(trophy.locator(".goal-trophy-plaque")).toContainText(CAB_WIN);
+  await expect(trophy.locator("img.goal-cup-art")).toBeVisible();
+  await expect(trophy.locator(".goal-cup-name")).toHaveText(CAB_WIN);
+  // Park the cursor off the case before checking the resting (name-only) state.
+  await page.mouse.move(0, 0);
+  await expect(trophy.locator(".goal-cup-reveal")).toHaveCSS("opacity", "0");
+
+  // Hover reveals the quiet `Achieved <date>` caption.
+  await trophy.hover();
+  await expect(trophy.locator(".goal-cup-reveal")).toHaveCSS("opacity", "1");
   await expect(trophy.getByText(/Achieved \d{1,2} \w{3} \d{4}/)).toBeVisible();
 
   // The missed row lives in the section below the case, never inside the cabinet.
@@ -204,7 +230,7 @@ test("the cabinet shows cup art + plaque, with missed goals below the case", asy
   expect(missedBox).not.toBeNull();
   expect(missedBox!.y).toBeGreaterThanOrEqual(caseBox!.y + caseBox!.height - 4);
 
-  // Reactivate works from the new trophy: back to the active list.
+  // Reactivate works from the cup: back to the active list.
   await trophy.getByRole("button", { name: "↩ Reactivate" }).click();
   await expect(page.getByRole("heading", { name: `🎯 ${CAB_WIN}` })).toBeVisible();
 });
