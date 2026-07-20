@@ -179,8 +179,8 @@ describe("goals chain — exact threshold", () => {
 });
 
 describe("hours chain — exact threshold", () => {
-  /** One closed time entry of `minutes` on the (impact-3) seed task, so the
-   *  leverage_master week check never fires alongside the hours check. */
+  /** One closed time entry of `minutes` on the seed task, advancing only the
+   *  tracked-hours metric the chain checks. */
   function seedTrackedMinutes(minutes: number) {
     const start = new Date();
     const end = new Date(start.getTime() + minutes * 60_000);
@@ -207,7 +207,7 @@ describe("hours chain — exact threshold", () => {
 
 describe("progress payload shape", () => {
   it("reports null progress for the event one-offs", async () => {
-    for (const key of ["early_bird", "monster_slayer", "leverage_master", "deck_clearer"]) {
+    for (const key of ["early_bird", "monster_slayer", "deck_clearer"]) {
       expect(await progressOf(key), key).toBeNull();
     }
   });

@@ -27,7 +27,6 @@ import firstCompletion from "../assets/achievements/first_completion.svg";
 import firstDraw from "../assets/achievements/first_draw.svg";
 import level10 from "../assets/achievements/level_10.svg";
 import level5 from "../assets/achievements/level_5.svg";
-import leverageMaster from "../assets/achievements/leverage_master.svg";
 import monsterSlayer from "../assets/achievements/monster_slayer.svg";
 import streak30 from "../assets/achievements/streak_30.svg";
 import streak7 from "../assets/achievements/streak_7.svg";
@@ -58,7 +57,6 @@ const ART: Record<string, string> = {
   first_draw: firstDraw,
   level_10: level10,
   level_5: level5,
-  leverage_master: leverageMaster,
   monster_slayer: monsterSlayer,
   streak_30: streak30,
   streak_7: streak7,

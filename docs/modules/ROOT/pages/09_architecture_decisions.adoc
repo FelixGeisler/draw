@@ -2050,8 +2050,8 @@ treatment.
 — draws `first_draw → draw_10 → … → draw_10000`, and the same shape for
 completions, streak, level, goals and tracked hours. The Stats "Achievements"
 grid (`AchievementsGrid`) rendered one card per KEY, flat, so every tier of a
-chain showed at once: five draw cards, five completion cards, twenty-seven tiles
-for six chains plus four one-offs. The shelf read as a wall of near-duplicate
+chain showed at once: five draw cards, five completion cards, twenty-six tiles
+for six chains plus three one-offs. The shelf read as a wall of near-duplicate
 locked cards rather than a set of goals, and the user's own framing was to show
 only the level they are on: "only display lvl 1 ... if it's done you can get the
 exp and it turns into lvl 2 etc." (#183).
@@ -2068,8 +2068,7 @@ CHAINED key to `{ chainId, order }`. It is a pure projection of the server's
 in `db.js`/better-sqlite3), hence the hop; a server drift-guard
 (`server/test/unit/achievement-chains-map.test.ts`) pins the map equal to the
 projection, the same anti-drift treatment the key and tier lists get. Keys with
-no entry are the one-offs (monster_slayer, leverage_master, deck_clearer,
-early_bird).
+no entry are the one-offs (monster_slayer, deck_clearer, early_bird).
 
 * *Current-tier selector.* `lib/achievementChains.collapseAchievementChains`
 groups the payload by `chainId` (one-offs each their own slot, first-appearance
@@ -2086,7 +2085,7 @@ a fully-claimed chain shows the maxed tier as a claimed card, so the chain never
 vanishes.
 
 * *Defaults.* The heading `{collected}/{total}` reflects the COLLAPSED view
-(one per chain + one-offs, not the raw 27 tiers); a chain counts as collected
+(one per chain + one-offs, not the raw 26 tiers); a chain counts as collected
 once ANY tier of it has unlocked — monotonic, so claiming can never lower the
 count. Hide (#177) and the ✎ editor act on the currently-shown tier's key
 (unchanged behaviour per visible card): a hidden current tier moves to the
@@ -2104,3 +2103,51 @@ key/tier mirrors do. The one deliberate cost is that a specific non-current tier
 is no longer addressable in the grid (its card is only in the DOM while it is
 current) — acceptable, since the point of the change is that a chain presents as
 one moving target, not a shelf of every rung at once.
+
+== ADR-48: The leverage grade, coaching insights, and `leverage_master` badge are removed — do not grade the user for the algorithm's choice
+
+*Context:* The Stats page carried an A–F "leverage grade" tile and a set of
+rule-based "coaching insights", both computed from `highShare` — the share of a
+week's tracked minutes spent on 4–5★ tasks (≥60% = A). A matching one-off
+achievement, `leverage_master`, unlocked the same "grade A" week. All three
+scored the USER on which tasks got the time.
+
+But the user does not choose the next task — the *draw does*. The weighted-random
+selection is already biased by impact² and deadline urgency (ADR-25 weight
+formula), so the mix of impact levels a week lands on is largely the algorithm's
+output, not a decision to grade. The grade also pinned at F for anyone doing
+non-goal work (impact stars exist only on goal-linked tasks, ADR-4), punishing a
+frame the product itself imposes. Per the user: "the grade is not useful. Because
+it's not the user deciding what task to do next. It's the algorithm."
+
+*Decision:* Remove the grade, the coaching insights, and the badge outright.
+
+* *Server.* `statsService.ts` drops `weeklyGrade`, `leverageInsights`, and the
+`highShare`/`lowShare` intermediates from the `Stats` payload — the aggregation
+now ships only the descriptive breakdowns (minutes by impact, category, goal) and
+the estimation block. `get_stats` (MCP catalog) is reworded to stop naming a
+"weekly leverage grade". `gamificationService` drops the `leverage_master`
+definition and its weekly SQL condition.
+
+* *Shared key set.* `leverage_master` leaves `shared/achievementKeys.ts` and
+`shared/achievementTiers.ts`, taking the shipped set from 27 keys to *26*
+(23 chained + 3 one-offs: `monster_slayer`, `deck_clearer`, `early_bird`). The
+`{collected}/{total}` heading and the #183 chain-collapse (ADR-47) are derived
+from the payload, so the count follows automatically; `leverage_master` was a
+one-off (never in `CHAIN_SPECS`), so the chain map and its drift-guard are
+untouched.
+
+* *Client.* The grade tile, its `GRADE_COLORS`, the insights banners, and the
+`lowImpactDominant` red-bar treatment of the by-impact chart leave `StatsPage`;
+the impact bars stay, now neutrally coloured (dim for 1–2★, accent for 3–5★). The
+`leverage_master` art import and `leverage_master.svg` asset are deleted.
+
+*Rationale:* This is descriptive-over-prescriptive: Draw still shows where the
+time went — the by-impact breakdown is intact — it just stops assigning the user
+a mark for it. XP accounting is unaffected (ADR-5/ADR-42): a never-unlocked key
+had no rows in the append-only `achievements` table, so
+`SUM(completions.xp_awarded) + SUM(achievements.claim_xp)` never referenced it and
+no reader breaks on its absence. Impact input and the draw weighting are
+deliberately KEPT (the user chose to keep impact goal-only) — only the act of
+grading the user is retired. This supersedes the leverage-grade tile and the
+"leverage banners" of the Stats page composition described in ADR-41.

@@ -15,8 +15,8 @@ setup, not of the product itself (see <<vision>>):
 2. *Time spent on low-leverage work.* When studying for an exam it is tempting to
    perfect the introduction chapter instead of practicing past exam questions. Draw
    attaches an _impact_ rating (1–5★) to goal-linked tasks, biases the draw toward
-   high-impact work, tracks where time actually goes, and confronts the user with
-   the result ("80% of your tracked time went to 1–2★ tasks").
+   high-impact work, and tracks where time actually goes — the Stats page breaks
+   the tracked minutes down by impact level so the pattern is visible.
 
 Main features:
 
@@ -33,8 +33,8 @@ Main features:
 |Goals + backward planning
 |Derive tasks from what is actually measured (e.g. the exam)
 
-|Time tracking + leverage stats
-|Minutes by impact level, weekly leverage grade A–F
+|Time tracking + stats
+|Minutes tracked by impact level, category, and goal; estimate-vs-actual accuracy
 
 |Gamification
 |XP, levels, streaks, achievements, trophy deck

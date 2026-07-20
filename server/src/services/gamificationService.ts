@@ -349,7 +349,6 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: "hours_1000", title: "Thousand-hour master", emoji: "🕰️", description: "Track 1,000 hours of focused work." },
   // One-offs — no running total, so no progress bar.
   { key: "monster_slayer", title: "Monster slayer", emoji: "🐉", description: "Finish every subtask of a big task." },
-  { key: "leverage_master", title: "Leverage master", emoji: "🎯", description: "60% of a week's time on 4–5★ tasks." },
   { key: "deck_clearer", title: "Deck clearer", emoji: "🏜", description: "Empty the drawable deck by completing it." },
   { key: "early_bird", title: "Early bird", emoji: "🐦", description: "Finish a 5★ task before its due date." },
 ];
@@ -513,19 +512,6 @@ export function checkAchievements(event: { completedTask?: TaskRow }): string[] 
       event.completedTask.due_date &&
       isoDate(new Date()) <= event.completedTask.due_date,
   );
-
-  // leverage_master is evaluated by statsService weekly-grade logic at read
-  // time; unlocking it here would need the same aggregation — check cheaply:
-  const week = db
-    .prepare(
-      `SELECT
-         COALESCE(SUM(CASE WHEN t.impact >= 4 THEN (julianday(COALESCE(e.ended_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))) - julianday(e.started_at)) END), 0) * 1440.0 AS high,
-         COALESCE(SUM((julianday(COALESCE(e.ended_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))) - julianday(e.started_at))), 0) * 1440.0 AS total
-       FROM time_entries e JOIN tasks t ON t.id = e.task_id
-       WHERE e.started_at >= datetime('now', '-7 days')`,
-    )
-    .get() as { high: number; total: number };
-  conditions.leverage_master = week.total >= 60 && week.high / week.total >= 0.6;
 
   const insert = db.prepare("INSERT INTO achievements (key, unlocked_at) VALUES (?, ?)");
   for (const [key, met] of Object.entries(conditions)) {

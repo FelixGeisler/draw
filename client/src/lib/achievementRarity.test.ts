@@ -46,7 +46,6 @@ const REVIEWED: Record<AchievementKey, AchievementRarity> = {
   hours_1000: "ultra-rare",
   // One-offs
   monster_slayer: "rare",
-  leverage_master: "super-rare",
   deck_clearer: "ultra-rare",
   early_bird: "rare",
 };
@@ -74,7 +73,7 @@ describe("achievementRarity", () => {
     expect(counts).toEqual({
       common: 2,
       rare: 7,
-      "super-rare": 6,
+      "super-rare": 5,
       "ultra-rare": 7,
       "secret-rare": 5,
     });

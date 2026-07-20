@@ -3,7 +3,7 @@
 A local, single-user task planner that fights procrastination two ways:
 
 - **Getting started:** big tasks must be broken into ≤30-minute steps before they enter the deck. Hit **Draw** and a weighted-random card tells you what to do *right now* — no choosing, no stalling.
-- **Leverage:** goal-linked tasks carry an impact rating (1–5★). The draw favors high-impact, low-effort, urgent tasks; the stats page shows where your time really went and grades your week (A–F). AI planning derives tasks backward from what actually gets measured ("the exam tests X — start there").
+- **Leverage:** goal-linked tasks carry an impact rating (1–5★). The draw favors high-impact, low-effort, urgent tasks; the stats page shows where your time really went, broken down by impact, category, and goal. AI planning derives tasks backward from what actually gets measured ("the exam tests X — start there").
 
 Plus: due dates, recurring chores, time tracking, XP + levels, streaks, achievements, confetti.
 

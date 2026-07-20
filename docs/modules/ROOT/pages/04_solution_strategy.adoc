@@ -20,7 +20,7 @@
 |*Snooze/block* (ADR-17): a card can defer itself (`deferred_until`) or leave until manually woken (`blocked`). Both are part of the same derived predicate — an expired snooze re-enters the pool with no write, and staleness counts from the wake time so the card returns without an unfair boost.
 
 |Low-leverage time use
-|Impact ratings only exist on goal-linked tasks (leverage is _toward_ something). Time tracking joins `time_entries × tasks` and aggregates minutes by impact; rule-based insights and a weekly A–F grade make the pattern visible.
+|Impact ratings only exist on goal-linked tasks (leverage is _toward_ something). Time tracking joins `time_entries × tasks` and aggregates minutes by impact, category and goal; the Stats page shows the breakdown so the pattern is visible. The draw already weights impact² and urgency, so the surfacing is descriptive — it does not grade the user for the algorithm's picks (ADR-48).
 
 |Motivation
 |Gamification derived entirely from the `completions` table (XP, streaks, achievements) — no stored counters that can drift. Completing the _drawn_ card pays 1.5× XP, reinforcing the core mechanic.

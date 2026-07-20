@@ -499,8 +499,8 @@ const getStats = defineTool({
   name: "get_stats",
   description:
     "Time and completion statistics for a date range (default: the last 7 days): tracked " +
-    "minutes by category and impact, completions, estimate accuracy, and the weekly leverage " +
-    "grade. Dates are inclusive.",
+    "minutes by category, impact, and goal, completions, and estimate accuracy. " +
+    "Dates are inclusive.",
   inputSchema: {
     from: dateSchema.optional(),
     to: dateSchema.optional(),

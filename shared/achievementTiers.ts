@@ -82,9 +82,8 @@ export const ACHIEVEMENT_TIERS = {
   hours_10: "rare",
   hours_100: "super-rare",
   hours_1000: "ultra-rare",
-  // One-offs — a single deliberate act, or a whole week's behavior.
+  // One-offs — a single deliberate act.
   monster_slayer: "rare",
-  leverage_master: "super-rare",
   deck_clearer: "ultra-rare",
   early_bird: "rare",
   // Exhaustive over AchievementKey, not Record<string, …>: a key added to the

@@ -15,8 +15,8 @@ payouts — since #156 XP has TWO stored sources,
 `SUM(completions.xp_awarded) + SUM(achievements.claim_xp)`, both honest event
 logs so no counter drifts, ADR-42; the streak's rest
 days and freeze consumption are re-derived on every read from the rest-weekday
-setting and the append-only `streak_freezes` earn log — ADR-28), weekly grade
-(aggregation over `time_entries`), and the displayed effort of a broken-down
+setting and the append-only `streak_freezes` earn log — ADR-28), and the
+displayed effort of a broken-down
 task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at query
 time, and NULL while any non-archived subtask exists but none are open: with
 a breakdown the subtasks own the estimate, ADR-32; the stored estimate stays
