@@ -110,7 +110,7 @@ test("timer: start now shows the timer bar across pages and reloads", async ({ p
   await expect(page.getByRole("button", { name: "Stop", exact: true })).not.toBeVisible();
 });
 
-test("stats: the leverage view renders with tracked data", async ({ page }) => {
+test("stats: the time-by-impact view renders with tracked data", async ({ page }) => {
   await page.goto("/stats");
   await expect(page.getByText("minutes tracked")).toBeVisible();
   await expect(page.getByText("tasks completed")).toBeVisible();
