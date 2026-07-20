@@ -36,8 +36,6 @@ interface Stats {
   byGoal: { goalId: number; title: string; minutes: number }[];
   completed: { count: number; avgEffortMinutes: number | null };
   estimation: Estimation;
-  leverageInsights: string[];
-  weeklyGrade: string | null;
 }
 
 type Range = "week" | "month";
@@ -151,14 +149,6 @@ function EstimationSection({ estimation }: { estimation: Estimation }) {
   );
 }
 
-const GRADE_COLORS: Record<string, string> = {
-  A: "#3fbf7f",
-  B: "#8fd14f",
-  C: "#ffb64f",
-  D: "#ff8c5f",
-  F: "#ff5f6b",
-};
-
 /**
  * The achievement collection (#124, extended #177, #183): a card set, not a panel
  * grid — earned cards face-up with their art and date, unearned ones face-down
@@ -227,10 +217,6 @@ export function StatsPage() {
   const s = stats.data;
   const maxImpact = Math.max(1, ...(s?.byImpact.map((r) => r.minutes) ?? []));
   const maxCat = Math.max(1, ...(s?.byCategory.map((r) => r.minutes) ?? []));
-  const lowImpactDominant =
-    s && s.totalMinutes > 0
-      ? s.byImpact.filter((r) => r.impact <= 2).reduce((a, r) => a + r.minutes, 0) / s.totalMinutes > 0.5
-      : false;
 
   return (
     <div className="content">
@@ -263,29 +249,7 @@ export function StatsPage() {
               <div style={{ fontSize: 32, fontWeight: 700 }}>{s.completed.count}</div>
               <div style={{ color: "var(--text-dim)" }}>tasks completed</div>
             </div>
-            <div className="panel" style={{ flex: 1, minWidth: 160, textAlign: "center" }}>
-              <div
-                style={{
-                  fontSize: 32,
-                  fontWeight: 700,
-                  color: s.weeklyGrade ? GRADE_COLORS[s.weeklyGrade] : "var(--text-dim)",
-                }}
-              >
-                {s.weeklyGrade ?? "–"}
-              </div>
-              <div style={{ color: "var(--text-dim)" }}>leverage grade</div>
-            </div>
           </div>
-
-          {s.leverageInsights.map((insight) => (
-            <div
-              key={insight}
-              className="panel"
-              style={{ marginTop: 16, borderColor: "var(--warn)", fontSize: 15 }}
-            >
-              {insight}
-            </div>
-          ))}
 
           <section style={{ marginTop: 24 }}>
             <h3>Where your time went — by impact</h3>
@@ -301,7 +265,7 @@ export function StatsPage() {
                     label={"★".repeat(impact)}
                     minutes={row.minutes}
                     max={maxImpact}
-                    color={isLow && lowImpactDominant ? "var(--danger)" : isLow ? "#7a8093" : "var(--accent)"}
+                    color={isLow ? "#7a8093" : "var(--accent)"}
                   />
                 );
               })}

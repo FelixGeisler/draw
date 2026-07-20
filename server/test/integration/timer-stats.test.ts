@@ -59,7 +59,7 @@ describe("timer invariant", () => {
 });
 
 describe("stats aggregation", () => {
-  it("aggregates minutes by impact and fires leverage insights", async () => {
+  it("aggregates minutes by impact and by goal", async () => {
     const now = Date.now();
     const iso = (ms: number) => new Date(ms).toISOString();
     // 60 minutes on the 1★ task, 15 on the 5★ task
@@ -78,9 +78,6 @@ describe("stats aggregation", () => {
     expect(stats.totalMinutes).toBe(75);
     expect(stats.byImpact).toContainEqual({ impact: 1, minutes: 60 });
     expect(stats.byImpact).toContainEqual({ impact: 5, minutes: 15 });
-    // 80% low-impact share → warning fires, grade is poor
-    expect(stats.leverageInsights.length).toBeGreaterThan(0);
-    expect(["D", "F"]).toContain(stats.weeklyGrade);
     expect(stats.byGoal[0].minutes).toBe(75);
   });
 
@@ -96,7 +93,7 @@ describe("stats aggregation", () => {
       await request(app).get("/api/stats?from=2000-01-01&to=2000-01-02").expect(200)
     ).body;
     expect(stats.totalMinutes).toBe(0);
-    expect(stats.weeklyGrade).toBeNull();
+    expect(stats.byImpact).toEqual([]);
   });
 });
 

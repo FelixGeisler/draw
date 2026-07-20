@@ -7,8 +7,6 @@ export interface Stats {
   byGoal: { goalId: number; title: string; minutes: number }[];
   completed: { count: number; avgEffortMinutes: number | null };
   estimation: Estimation;
-  leverageInsights: string[];
-  weeklyGrade: string | null;
 }
 
 /**
@@ -304,34 +302,6 @@ export function computeStats(from: string, to: string): Stats {
   const estimationRows = estimationRowsInRange(from, to);
 
   const totalMinutes = Math.round(total.minutes);
-  const minutesAt = (pred: (impact: number) => boolean) =>
-    byImpact.filter((r) => pred(r.impact)).reduce((a, r) => a + r.minutes, 0);
-
-  const lowShare = totalMinutes > 0 ? minutesAt((i) => i <= 2) / total.minutes : 0;
-  const highShare = totalMinutes > 0 ? minutesAt((i) => i >= 4) / total.minutes : 0;
-
-  const leverageInsights: string[] = [];
-  if (totalMinutes >= 30 && lowShare > 0.5) {
-    leverageInsights.push(
-      `⚠ ${Math.round(lowShare * 100)}% of your tracked time went to 1–2★ tasks. Is the intro chapter really where the marks are?`,
-    );
-  }
-  if (totalMinutes >= 30 && highShare < 0.1) {
-    leverageInsights.push(
-      `Your 4–5★ tasks got only ${Math.round(minutesAt((i) => i >= 4))} min. Draw from the high-leverage pile first.`,
-    );
-  }
-  if (totalMinutes >= 30 && highShare >= 0.6) {
-    leverageInsights.push(
-      `💪 ${Math.round(highShare * 100)}% of your time went to 4–5★ tasks. That's leverage.`,
-    );
-  }
-
-  let weeklyGrade: string | null = null;
-  if (totalMinutes >= 30) {
-    weeklyGrade =
-      highShare >= 0.6 ? "A" : highShare >= 0.45 ? "B" : highShare >= 0.3 ? "C" : highShare >= 0.15 ? "D" : "F";
-  }
 
   return {
     totalMinutes,
@@ -343,7 +313,5 @@ export function computeStats(from: string, to: string): Stats {
       avgEffortMinutes: completed.avgEffortMinutes ? Math.round(completed.avgEffortMinutes) : null,
     },
     estimation: buildEstimation(estimationRows),
-    leverageInsights,
-    weeklyGrade,
   };
 }
