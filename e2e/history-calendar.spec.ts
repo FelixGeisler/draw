@@ -4,11 +4,14 @@ import type { APIRequestContext, Page } from "@playwright/test";
 // Issue #174: the History contribution calendar — one tile per LOCAL day laid
 // out in Monday-first week columns and shaded by activity intensity, the
 // GitHub-heatmap successor to the house-of-cards skyline (#53). A day's tasks
-// (completed with XP, worked-but-unfinished labelled) reveal in a docked detail
-// panel on hover, keyboard focus and tap. Since #155 the view lives on the
-// merged Stats page and /history is a redirect. Runs against the shared serial
-// E2E database; every assertion scopes to this file's uniquely-titled cards or
-// to today's single tile (never counts).
+// (completed with XP, worked-but-unfinished labelled) reveal on hover, keyboard
+// focus and tap. Since #182 the detail is a FLOATING overlay anchored to the
+// active tile — out of normal flow, so hovering across days reflows nothing
+// below it (the Achievements grid stays put), and mounted outside the scroll box
+// so it can't clip. Since #155 the view lives on the merged Stats page and
+// /history is a redirect. Runs against the shared serial E2E database; every
+// assertion scopes to this file's uniquely-titled cards or to today's single
+// tile (never counts).
 test.describe.configure({ mode: "serial" });
 
 const DONE_TITLE = "Calendar card finished essay";
@@ -46,6 +49,14 @@ function todayCell(page: Page) {
 function detail(page: Page) {
   return page.locator(".cal-detail");
 }
+/** The always-present footer hint — a constant-height stand-in for the floating detail. */
+function hint(page: Page) {
+  return page.locator(".cal-hint");
+}
+/** The Achievements section heading — the thing that used to jump when the detail reflowed. */
+function achievementsHeading(page: Page) {
+  return page.getByRole("heading", { name: /^Achievements/ });
+}
 
 test("/history redirects to the merged Stats page; the nav entry is gone", async ({ page }) => {
   await page.goto("/history");
@@ -69,17 +80,24 @@ test("today's tile reveals its tasks — completed with XP, unfinished labelled 
   await expect(cell).toBeVisible();
   await expect(cell).toHaveAttribute("role", "button");
 
-  // Collapsed: the docked detail shows its idle hint, not a day.
-  await expect(detail(page)).toHaveClass(/idle/);
+  // Collapsed: the floating detail is not mounted; only the static footer hint.
+  await expect(detail(page)).toHaveCount(0);
+  await expect(hint(page)).toBeVisible();
 
-  // Revealing the detail must not reflow the grid — it docks BELOW it. Scroll
-  // first so boundingBox() (viewport-relative) is comparable across the hover.
+  // Revealing the detail must reflow NOTHING below the calendar — the detail
+  // floats out of flow (#182). Scroll the calendar into view first so
+  // boundingBox() (viewport-relative) is comparable across the hover, then pin
+  // the Achievements heading's box as the reflow witness.
   await cell.scrollIntoViewIfNeeded();
   const grid = page.locator(".cal-grid");
-  const before = await grid.boundingBox();
+  await expect(achievementsHeading(page)).toBeVisible();
+  const gridBefore = await grid.boundingBox();
+  const achBefore = await achievementsHeading(page).boundingBox();
 
   await cell.hover();
-  await expect(detail(page)).not.toHaveClass(/idle/);
+  await expect(detail(page)).toBeVisible();
+  // The live region is preserved for keyboard / screen-reader users.
+  await expect(detail(page)).toHaveAttribute("role", "status");
   await expect(detail(page)).toContainText(DONE_TITLE);
   await expect(detail(page)).toContainText(categoryName);
   await expect(detail(page)).toContainText("+10 XP"); // 10 min × impact 3/3, not drawn
@@ -90,9 +108,17 @@ test("today's tile reveals its tasks — completed with XP, unfinished labelled 
   await expect(openLine).not.toContainText("XP");
 
   // The active tile lifts via transform + z-index only (retries settle the
-  // transition), and the grid's own box is unmoved.
+  // transition); NOTHING moves: the grid AND the Achievements grid below keep
+  // their exact boxes across the hover.
   await expect(cell).toHaveCSS("z-index", "2");
-  expect(await grid.boundingBox()).toEqual(before);
+  expect(await grid.boundingBox()).toEqual(gridBefore);
+  expect(await achievementsHeading(page).boundingBox()).toEqual(achBefore);
+
+  // The detail floats free of the horizontally-scrolling grid (so the scroll box
+  // can never clip it) and stays inside the viewport.
+  const clippedByScroll = await detail(page).evaluate((el) => el.closest(".cal-scroll") !== null);
+  expect(clippedByScroll).toBe(false);
+  await expect(detail(page)).toBeInViewport();
 });
 
 test("keyboard focus reveals and Escape lowers; tap toggles; outside tap lowers", async ({
@@ -101,31 +127,32 @@ test("keyboard focus reveals and Escape lowers; tap toggles; outside tap lowers"
   await page.goto("/stats");
 
   const cell = todayCell(page);
-  // Keyboard focus reveals the day, Escape lowers it (and drops focus).
+  // Keyboard focus reveals the day, Escape lowers it (and drops focus). The
+  // floating detail mounts on reveal and unmounts on lower.
   await cell.focus();
-  await expect(detail(page)).not.toHaveClass(/idle/);
+  await expect(detail(page)).toBeVisible();
   await expect(detail(page)).toContainText(DONE_TITLE);
   await page.keyboard.press("Escape");
-  await expect(detail(page)).toHaveClass(/idle/);
+  await expect(detail(page)).toHaveCount(0);
 
   // Tap toggles a sticky pin — park the mouse after each click so no hover
   // keeps the panel open on its own.
   await cell.click();
   await page.mouse.move(0, 0);
-  await expect(detail(page)).not.toHaveClass(/idle/);
+  await expect(detail(page)).toBeVisible();
   await expect(cell).toHaveAttribute("aria-pressed", "true");
 
   await cell.click();
   await page.mouse.move(0, 0);
-  await expect(detail(page)).toHaveClass(/idle/);
+  await expect(detail(page)).toHaveCount(0);
   await expect(cell).toHaveAttribute("aria-pressed", "false");
 
   // Pinned again, a tap outside any tile lowers it.
   await cell.click();
   await page.mouse.move(0, 0);
-  await expect(detail(page)).not.toHaveClass(/idle/);
+  await expect(detail(page)).toBeVisible();
   await page.locator("h1").click();
-  await expect(detail(page)).toHaveClass(/idle/);
+  await expect(detail(page)).toHaveCount(0);
 });
 
 test("today's tile is in view, and prefers-reduced-motion drops the tile transition", async ({
@@ -140,6 +167,8 @@ test("today's tile is in view, and prefers-reduced-motion drops the tile transit
 
   // The calendar opens at its most-recent end: today's tile is reachable.
   await cell.hover();
-  await expect(detail(page)).not.toHaveClass(/idle/);
+  await expect(detail(page)).toBeVisible();
   await expect(cell).toBeInViewport();
+  // The detail's fade also lives behind no-preference, so it is stilled too.
+  await expect(detail(page)).toHaveCSS("animation-duration", "0s");
 });
