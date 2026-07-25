@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { resolveApiPort } from "./config.js";
 import { startServer } from "./server.js";
 
-startServer(Number(process.env.API_PORT) || 3001);
+startServer(resolveApiPort());

@@ -1,3 +1,4 @@
+import path from "node:path";
 import express from "express";
 import { tasksRouter } from "./routes/tasks.js";
 import { categoriesRouter } from "./routes/categories.js";
@@ -17,7 +18,16 @@ import { sweepBackupTemp } from "./services/backupService.js";
 import { bindAgentToolApi } from "./services/agentService.js";
 import { InProcessApiClient } from "./tools/inProcessApi.js";
 
-export function createApp() {
+export interface AppOptions {
+  /**
+   * Absolute path to a built client (client/dist). When set, the app serves
+   * it statically with an SPA fallback — production mode (#189, ADR-49).
+   * Dev keeps this unset: Vite serves the client and proxies /api here.
+   */
+  clientDir?: string;
+}
+
+export function createApp(options: AppOptions = {}) {
   const app = express();
   app.use(express.json());
 
@@ -58,6 +68,24 @@ export function createApp() {
   // every domain invariant and derived payload holds by construction (the
   // ADR-19 argument), with or without a public listener (supertest).
   bindAgentToolApi(new InProcessApiClient(app));
+
+  // Production mode (#189, ADR-49): the built client and the API share one
+  // port. Mounted after every /api router so the API keeps full precedence —
+  // an unknown /api path must stay a JSON-surface 404, never index.html.
+  if (options.clientDir) {
+    const indexHtml = path.join(options.clientDir, "index.html");
+    app.use(express.static(options.clientDir));
+    // SPA fallback: deep links (/stats, /goals) are client-side routes with
+    // no file on disk — a refresh must get index.html, not a 404. Express 5
+    // (path-to-regexp v8) dropped the bare "*" route, so this is a plain
+    // middleware. GET/HEAD only: a stray POST to a client path is an error,
+    // not a page view.
+    app.use((req, res, next) => {
+      if (req.method !== "GET" && req.method !== "HEAD") return next();
+      if (req.path === "/api" || req.path.startsWith("/api/")) return next();
+      res.sendFile(indexHtml);
+    });
+  }
 
   return app;
 }
