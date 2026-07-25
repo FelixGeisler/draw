@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_HOST, resolveApiPort, resolveHost } from "../../src/config.js";
+import { DEFAULT_HOST, resolveApiPort, resolveHost, resolvePassword } from "../../src/config.js";
 
 // Explicit env objects throughout — the resolvers must not fall back to the
 // ambient process.env of the test runner.
@@ -41,5 +41,21 @@ describe("resolveApiPort", () => {
 
   it("ignores PORT — dev tooling injects it", () => {
     expect(resolveApiPort({ PORT: "9999" })).toBe(3001);
+  });
+});
+
+describe("resolvePassword", () => {
+  it("is unset by default — auth off (#190)", () => {
+    expect(resolvePassword({})).toBeUndefined();
+  });
+
+  it("treats empty or whitespace DRAW_PASSWORD as unset", () => {
+    expect(resolvePassword({ DRAW_PASSWORD: "" })).toBeUndefined();
+    expect(resolvePassword({ DRAW_PASSWORD: "   " })).toBeUndefined();
+  });
+
+  it("honors DRAW_PASSWORD, trimming surrounding whitespace", () => {
+    expect(resolvePassword({ DRAW_PASSWORD: "lan-pin" })).toBe("lan-pin");
+    expect(resolvePassword({ DRAW_PASSWORD: " lan-pin\n" })).toBe("lan-pin");
   });
 });
