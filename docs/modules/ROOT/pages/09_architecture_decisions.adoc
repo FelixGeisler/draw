@@ -2151,3 +2151,49 @@ no reader breaks on its absence. Impact input and the draw weighting are
 deliberately KEPT (the user chose to keep impact goal-only) — only the act of
 grading the user is retired. This supersedes the leverage-grade tile and the
 "leverage banners" of the Stats page composition described in ADR-41.
+
+== ADR-49: Production mode — tsx as the production runtime, single-port Express serving `client/dist`, HOST as an env opt-in
+
+*Context:* Until #189 Draw only ran as `npm run dev` (tsx watch + Vite with an
+`/api` proxy); `npm run build -w server` was `tsc --noEmit` and nothing served
+`client/dist`. The 1.0.0 self-hosted deployment (Raspberry Pi container, #191,
+reached from desktop and phone) needs a production mode: one process, one port,
+no dev tooling in the request path.
+
+*Decision:* Production is `npm run build` (vite bundles the client, tsc
+type-checks the server) followed by `npm start` → `tsx src/prod.ts`. The server
+is NOT compiled to JS — tsx stays the runtime in production, promoted from
+devDependency to a runtime dependency. `prod.ts` is a separate entry next to
+`index.ts` (dev): it defaults `NODE_ENV` to production, refuses to boot without
+`client/dist/index.html`, and passes `clientDir` to `createApp()`, which then
+mounts `express.static` plus an SPA-fallback middleware AFTER every `/api`
+router. The listener host comes from `resolveHost()` (`src/config.ts`): the
+`HOST` env var, default `127.0.0.1`.
+
+*Rationale:*
+
+* *tsx over emitted JS.* `server/src` imports sibling workspace code from the
+repo-root `shared/` directory, so tsc's emitted tree would nest as
+`dist/server/src/…` + `dist/shared/…` — breaking every module-relative anchor
+(`db.ts` finds `schema.sql` and defaults the data dir next to itself) and
+adding an asset-copy step, all to avoid a runtime the project already runs
+everywhere else: dev is tsx watch and the MCP adapter (`npm run mcp`) has
+always been plain tsx in normal use. One runtime for every mode means no
+build-drift class of bugs and no second module-resolution regime; the cost is
+one more runtime dependency and a sub-second esbuild transpile at boot (fine on
+a Pi). Revisit if boot time or memory on the Pi ever matters.
+* *A separate entry, not a NODE_ENV switch in `index.ts`.* npm scripts cannot
+set env vars portably on Windows without a helper dependency (`cross-env`);
+`node src/prod.ts` needs no env plumbing and states its intent in the script
+name. Dev behavior is untouched by construction — `index.ts` never mounts the
+static middleware.
+* *Single port.* The client is static files; a second listener (or a reverse
+proxy) would be pure operational surface. Mounting static + fallback after the
+`/api` routers keeps the API surface byte-identical to dev: unknown `/api`
+paths still 404 and are never swallowed by the SPA fallback, which also skips
+non-GET/HEAD methods. Express 5 (path-to-regexp v8) dropped bare `"*"` routes,
+so the fallback is a plain middleware, not `app.get("*")`.
+* *HOST opt-in.* Loopback-only stops being an invariant (section 2) and
+becomes the default posture: a stock install stays unreachable from the LAN,
+and the container explicitly sets `HOST=0.0.0.0`. Draw still has no auth —
+that gap is #190's password gate, a release requirement for 1.0.0.

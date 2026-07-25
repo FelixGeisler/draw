@@ -88,4 +88,5 @@ no notifications. These boundaries describe the current scope, not the product's
 identity — mobile and multi-device use are named as direction (not design) in
 the xref:01_introduction_and_goals.adoc#vision[section 1 vision]. The Claude API
 is the only *remote* system; MCP clients are a second local consumer of the same
-loopback API — nothing becomes reachable from the network (section 2).
+local API — which stays loopback-only unless `HOST` deliberately opens it
+(section 2, ADR-49).

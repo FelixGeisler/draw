@@ -150,9 +150,11 @@ counts its real tokens, so the estimate and the 180K guard stay honest.
 - Upload filenames sanitized; stored under server-generated names; download/delete
   paths resolved and verified against the files directory (no traversal).
 - Upload restricted to PDF/txt/md, 50 MB cap.
-- Localhost only, enforced: the API server binds explicitly to `127.0.0.1`
-  (`server/src/server.ts`), so it is not reachable from the local network.
-  No auth by design (single local user).
+- Localhost by default: the server binds the `HOST` env var, default
+  `127.0.0.1` (`server/src/config.ts`), so a stock install is not reachable
+  from the local network. Setting `HOST` is the explicit opt-in for the
+  self-hosted deployment (#189, ADR-49); until #190 lands there is no auth,
+  so LAN exposure is for trusted networks only.
 - Model-written SVG (card art, ADR-22) is treated as untrusted input:
   allowlist-re-serialized by `svgSanitizer.ts` before storage, and rendered
   only as an `<img>` data URI — never `dangerouslySetInnerHTML`.

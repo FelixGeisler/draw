@@ -18,6 +18,19 @@ Open http://localhost:5173. Data lives in `server/data/app.db` (SQLite).
 
 Requires Node.js 22+ (built with Node 24).
 
+### Production mode
+
+```
+npm run build
+npm start
+```
+
+One process, one port: Express serves the built client (`client/dist`) and the
+API together at http://127.0.0.1:3001 (`API_PORT` to change it). Both modes use
+the same `server/data/`. By default the server is only reachable from the local
+machine; set `HOST=0.0.0.0` in `server/.env` to expose it on your network —
+there is no authentication yet, so only do that on a network you trust.
+
 ## Enable AI features (optional)
 
 Copy `server/.env.example` to `server/.env` and set `ANTHROPIC_API_KEY` (get one at

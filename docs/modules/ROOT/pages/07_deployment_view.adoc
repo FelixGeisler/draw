@@ -1,6 +1,11 @@
 = 7. Deployment View
 
-There is no production deployment — the application runs on the owner's machine.
+Two run modes on the owner's machine (containerization for the Pi is #191):
+*dev* — two processes, Vite serving the client with an `/api` proxy — and
+*production* (#189, xref:09_architecture_decisions.adoc[ADR-49]) — one process,
+one port, Express serving the built client next to the API.
+
+== 7.1 Dev — `npm run dev`
 
 [plantuml,deployment,svg]
 ....
@@ -25,7 +30,7 @@ node "Windows 11 PC" as pc {
     database "app.db\nSQLite, WAL" as db
     folder "files/\ngoal materials" as files
   }
-  artifact "server/.env\nAPI_PORT (default 3001)\nANTHROPIC_API_KEY — fallback\nonly: the Settings-UI key wins" as env
+  artifact "server/.env\nAPI_PORT (default 3001)\nHOST (default 127.0.0.1)\nANTHROPIC_API_KEY — fallback\nonly: the Settings-UI key wins" as env
 }
 cloud "api.anthropic.com" as claude
 
@@ -41,6 +46,44 @@ db -[hidden]right-> files
 @enduml
 ....
 
+== 7.2 Production — `npm run build` + `npm start`
+
+`npm run build` bundles the client to `client/dist` (vite) and type-checks the
+server; `npm start` runs `tsx server/src/prod.ts` — the same Express app as
+dev, plus `client/dist` served statically with an SPA fallback, on the single
+`API_PORT`. There is no separate client process and no proxy; the server is
+deliberately not compiled to JS (ADR-49). The MCP adapter is unchanged — it
+talks to the same `/api` surface on the same port.
+
+[plantuml,deployment-prod,svg]
+....
+@startuml
+skinparam shadowing false
+skinparam wrapWidth 140
+skinparam defaultTextAlignment center
+skinparam componentStyle rectangle
+skinparam nodesep 12
+skinparam ranksep 18
+
+node "Host (PC today, Pi container #191)" as host {
+  component "Browser\nHOST:3001" as browser
+  node "Node.js 22+ — npm start" as prodtree {
+    component "tsx server/src/prod.ts\nExpress on HOST:API_PORT\n/api + static client/dist\n+ SPA fallback" as express
+  }
+  artifact "client/dist\n(vite build, gitignored)" as dist
+  folder "server/data/" as data {
+    database "app.db" as db
+  }
+}
+cloud "api.anthropic.com" as claude
+
+browser --> express : HTTP :3001
+express --> dist : sendFile / static
+express --> db
+express --> claude : HTTPS — only with\na key, on demand
+@enduml
+....
+
 [cols="1,3",options="header"]
 |===
 |Aspect |Detail
@@ -48,17 +91,27 @@ db -[hidden]right-> files
 |Install
 |`npm install` (workspace root)
 
-|Run
+|Run (dev)
 |`npm run dev`; browser at `http://localhost:5173`
 
+|Run (production)
+|`npm run build`, then `npm start`; browser at `http://127.0.0.1:3001` (or
+`http://<HOST>:<API_PORT>`). `npm start` refuses to boot without a client
+build
+
 |Configuration
-|`server/.env`: `ANTHROPIC_API_KEY` (optional), `API_PORT` (default 3001). `PORT` is deliberately not used — dev tooling injects it
+|`server/.env`: `ANTHROPIC_API_KEY` (optional), `API_PORT` (default 3001),
+`HOST` (default `127.0.0.1` = loopback only; set `0.0.0.0` to expose on the
+LAN — no auth until #190, so trusted networks only). `PORT` is deliberately
+not used — dev tooling injects it
 
 |Data
-|Everything under `server/data/` (gitignored); backup = copy that folder
+|Everything under `server/data/` (gitignored); backup = copy that folder.
+Both run modes use the same directory — switching modes keeps the data
 
 |Docs hosting
-|GitHub Pages serves the Antora-built site, deployed by the `Docs` Actions workflow on pushes to `main`
+|GitHub Pages serves the Antora-built site, deployed by the `Docs` Actions
+workflow on pushes to `main`
 |===
 
 *Outbound network:* only `api.anthropic.com`, and only when an AI feature is
