@@ -10,7 +10,8 @@ is the *default*, no longer an invariant (#189,
 xref:09_architecture_decisions.adoc[ADR-49]): a stock install listens on
 `127.0.0.1` only, and the `HOST` env var — honored by the production entry
 only, never by `npm run dev` — is the deliberate opt-in to LAN exposure for
-the self-hosted deployment (container #191, behind #190's password gate). This is the state of the deployment today, not the product's
+the self-hosted deployment (container #191, behind the optional
+`DRAW_PASSWORD` gate, #190/ADR-50). This is the state of the deployment today, not the product's
 identity — the xref:01_introduction_and_goals.adoc#vision[vision] names
 multi-device, mobile, and multi-deck use as the direction. Features that
 further harden single-instance assumptions (the single running timer,
@@ -26,7 +27,12 @@ settings singletons) must explicitly flag the trade-off against that vision
 |`ANTHROPIC_API_KEY` lives in `server/.env`, never reaches the browser
 
 |No over-engineering
-|No auth, no Docker, no ORM, no Redux — deliberate guardrails for a personal project. CI is limited to tests + docs deployment (GitHub Actions)
+|No user accounts, no Docker, no ORM, no Redux — deliberate guardrails for a
+personal project. The original "no auth" guardrail was consciously amended
+for LAN deployments (#190, xref:09_architecture_decisions.adoc[ADR-50]): one
+optional shared-secret password gate, off by default, env-configured — still
+no accounts, roles, or OAuth. CI is limited to tests + docs deployment
+(GitHub Actions)
 
 |Issue-driven workflow
 |Every change via GitHub issue + PR; branches `<IssueID>_Name`; commits `#<IssueId> Message`

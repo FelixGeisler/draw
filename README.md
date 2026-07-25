@@ -29,8 +29,14 @@ One process, one port: Express serves the built client (`client/dist`) and the
 API together at http://127.0.0.1:3001 (`API_PORT` to change it). Both modes use
 the same `server/data/`. By default the server is only reachable from the local
 machine; set `HOST=0.0.0.0` in `server/.env` to expose production mode on your
-network (`npm run dev` always stays local) — there is no authentication yet, so
-only do that on a network you trust.
+network (`npm run dev` always stays local).
+
+When you expose it, also set `DRAW_PASSWORD` in `server/.env`: every page and
+API request then requires logging in once per browser (a signed cookie, valid
+30 days). Without it, anyone on the network can read your tasks — and your
+Anthropic API key. Failed logins are rate-limited. Draw serves plain HTTP;
+if you want TLS, terminate HTTPS in a reverse proxy (Caddy, nginx) in front
+of it.
 
 ## Enable AI features (optional)
 
@@ -54,6 +60,9 @@ the web UI uses (ADR-19), so every domain rule holds identically.
 
 - The app must be running (`npm run dev`); the MCP server talks to
   `http://127.0.0.1:3001` (override with `DRAW_API_URL`).
+- Against a password-protected instance, set `DRAW_PASSWORD` in `server/.env`
+  (or the MCP process env) — the adapter sends it as a header automatically.
+  The committed `.mcp.json` never contains the secret.
 - Needs **no** `ANTHROPIC_API_KEY` — the intelligence is the MCP client's.
 - No delete tools are exposed, and your MCP client asks you to approve each write.
 - Resources for context: `draw://deck` (drawable pool snapshot), `draw://gamification`

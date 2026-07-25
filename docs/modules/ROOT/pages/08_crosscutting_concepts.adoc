@@ -154,8 +154,19 @@ counts its real tokens, so the estimate and the 180K guard stay honest.
   `HOST` export cannot move it — and only the production entry (`prod.ts`)
   honors the `HOST` env var (`server/src/config.ts`, default `127.0.0.1`).
   Setting `HOST` is the explicit opt-in for the self-hosted deployment
-  (#189, ADR-49); until #190 lands there is no auth, so LAN exposure is for
-  trusted networks only.
+  (#189, ADR-49).
+- Access protection (#190, xref:09_architecture_decisions.adoc[ADR-50]): the
+  optional `DRAW_PASSWORD` gate — production entry only, off by default —
+  puts every `/api` route and static asset behind a shared secret, presented
+  either as a 30-day HMAC-signed `HttpOnly` session cookie (server-rendered
+  login page, `server/src/loginPage.ts`) or as the `x-draw-password` header
+  (MCP adapter, scripts). Password comparisons are constant-time
+  (`timingSafeEqual` over SHA-256 digests, `server/src/auth.ts`); failed
+  presentations are rate-limited per IP (5 per 15 minutes, then 429).
+  `GET /api/health` stays credential-free for healthchecks. Threat model:
+  protects the settings-DB API key and task data against casual LAN access;
+  plain HTTP means it does NOT resist an on-path attacker — TLS is a reverse
+  proxy's job, out of scope for Draw itself.
 - Model-written SVG (card art, ADR-22) is treated as untrusted input:
   allowlist-re-serialized by `svgSanitizer.ts` before storage, and rendered
   only as an `<img>` data URI — never `dangerouslySetInnerHTML`.
