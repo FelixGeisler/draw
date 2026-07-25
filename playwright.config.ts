@@ -77,6 +77,10 @@ export default defineConfig({
         // The prod entry DOES honor HOST — pin it so an ambient export
         // cannot move the health URL off 127.0.0.1.
         HOST: "",
+        // Likewise DRAW_PASSWORD (#190): this entry is the NO-auth prod
+        // smoke — an ambient secret (shell or server/.env) must not gate it.
+        // lan-password.spec.ts boots its own protected server instead.
+        DRAW_PASSWORD: "",
         ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
       },
     },

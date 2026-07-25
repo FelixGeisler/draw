@@ -1,5 +1,6 @@
 import path from "node:path";
 import express from "express";
+import { createAuth } from "./auth.js";
 import { tasksRouter } from "./routes/tasks.js";
 import { categoriesRouter } from "./routes/categories.js";
 import { settingsRouter } from "./routes/settings.js";
@@ -25,6 +26,13 @@ export interface AppOptions {
    * Dev keeps this unset: Vite serves the client and proxies /api here.
    */
   clientDir?: string;
+  /**
+   * Shared secret for the optional LAN password gate (#190, ADR-50). When
+   * set, every /api route and static asset requires a session cookie or the
+   * x-draw-password header; only /api/health and the login route stay open.
+   * Unset: no auth anywhere — behavior identical to before #190.
+   */
+  password?: string;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -44,9 +52,21 @@ export function createApp(options: AppOptions = {}) {
     console.log(`[backup] swept ${swept.length} orphaned temp artifact(s): ${swept.join(", ")}`);
   }
 
+  // Deliberately ABOVE the password gate: Playwright's webServer pre-flight
+  // and the container healthcheck (#191) poll it before anyone can log in,
+  // and it leaks nothing but liveness and the server clock (ADR-50).
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, time: new Date().toISOString() });
   });
+
+  // Password gate (#190, ADR-50): the login route first (it must stay
+  // reachable), then the gate as blanket middleware — everything mounted
+  // below, /api routers and static client alike, requires a credential.
+  if (options.password) {
+    const { loginHandler, gate } = createAuth(options.password);
+    app.post("/api/auth/login", loginHandler);
+    app.use(gate);
+  }
 
   app.use("/api/tasks", tasksRouter);
   app.use("/api/categories", categoriesRouter);
