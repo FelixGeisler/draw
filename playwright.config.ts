@@ -47,7 +47,7 @@ export default defineConfig({
       env: {
         DATA_DIR: E2E_DATA_DIR,
         API_PORT,
-        HOST: "", // ambient HOST (#189) must not move the pinned health URLs
+        // No HOST pin needed: the dev entry ignores HOST by design (#189).
         ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
       },
     },
@@ -74,7 +74,9 @@ export default defineConfig({
       env: {
         DATA_DIR: PROD_DATA_DIR,
         API_PORT: PROD_PORT,
-        HOST: "", // ambient HOST (#189) must not move the pinned health URLs
+        // The prod entry DOES honor HOST — pin it so an ambient export
+        // cannot move the health URL off 127.0.0.1.
+        HOST: "",
         ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
       },
     },

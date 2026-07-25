@@ -21,15 +21,15 @@ test.describe("production serve mode", () => {
   test("a deep link survives a full page load", async ({ page }) => {
     // Straight to /stats with no client-side navigation — only the SPA
     // fallback can answer this, and the page must then boot the real app.
-    await page.goto(`${PROD}/stats`);
+    // The query string rides along: shared links carry them.
+    await page.goto(`${PROD}/stats?from=shared-link`);
     await expect(page.getByRole("heading", { name: "Stats" })).toBeVisible();
   });
 
-  test("unknown API paths still 404 as JSON-surface errors, not index.html", async ({
-    request,
-  }) => {
+  test("unknown API paths 404 as JSON, not index.html", async ({ request }) => {
     const res = await request.get(`${PROD}/api/definitely-not-a-route`);
     expect(res.status()).toBe(404);
-    expect(await res.text()).not.toContain('<div id="root">');
+    expect(res.headers()["content-type"]).toContain("application/json");
+    expect(await res.json()).toEqual({ error: "not found" });
   });
 });

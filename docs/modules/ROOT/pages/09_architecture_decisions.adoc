@@ -2167,8 +2167,9 @@ devDependency to a runtime dependency. `prod.ts` is a separate entry next to
 `index.ts` (dev): it defaults `NODE_ENV` to production, refuses to boot without
 `client/dist/index.html`, and passes `clientDir` to `createApp()`, which then
 mounts `express.static` plus an SPA-fallback middleware AFTER every `/api`
-router. The listener host comes from `resolveHost()` (`src/config.ts`): the
-`HOST` env var, default `127.0.0.1`.
+router. The production entry — and only it — resolves the listener host from
+the `HOST` env var (`resolveHost()` in `src/config.ts`, default `127.0.0.1`);
+the dev entry stays pinned to loopback.
 
 *Rationale:*
 
@@ -2184,16 +2185,22 @@ one more runtime dependency and a sub-second esbuild transpile at boot (fine on
 a Pi). Revisit if boot time or memory on the Pi ever matters.
 * *A separate entry, not a NODE_ENV switch in `index.ts`.* npm scripts cannot
 set env vars portably on Windows without a helper dependency (`cross-env`);
-`node src/prod.ts` needs no env plumbing and states its intent in the script
+`tsx src/prod.ts` needs no env plumbing and states its intent in the script
 name. Dev behavior is untouched by construction — `index.ts` never mounts the
 static middleware.
 * *Single port.* The client is static files; a second listener (or a reverse
-proxy) would be pure operational surface. Mounting static + fallback after the
-`/api` routers keeps the API surface byte-identical to dev: unknown `/api`
-paths still 404 and are never swallowed by the SPA fallback, which also skips
-non-GET/HEAD methods. Express 5 (path-to-regexp v8) dropped bare `"*"` routes,
-so the fallback is a plain middleware, not `app.get("*")`.
+proxy) would be pure operational surface. Mounting static + fallback after
+the `/api` routers keeps the API in charge of its namespace: an unknown
+`/api` path is answered by a JSON 404 (the API surface speaks JSON, including
+its misses) and never reaches the SPA fallback. The fallback itself answers
+only GET/HEAD requests for extension-less paths — a missing asset (a stale
+hash after a redeploy) must 404, not arrive as `text/html`. Express 5
+(path-to-regexp v8) dropped bare `"*"` routes, so the fallback is a plain
+middleware, not `app.get("*")`.
 * *HOST opt-in.* Loopback-only stops being an invariant (section 2) and
 becomes the default posture: a stock install stays unreachable from the LAN,
-and the container explicitly sets `HOST=0.0.0.0`. Draw still has no auth —
-that gap is #190's password gate, a release requirement for 1.0.0.
+and the container explicitly sets `HOST=0.0.0.0`. Restricting `HOST` to the
+production entry keeps the opt-in deliberate — an ambient `HOST` export in a
+shell profile must not silently move the auth-less dev API off loopback (the
+same ambient-injection class that keeps `PORT` ignored). Draw still has no
+auth — that gap is #190's password gate, a release requirement for 1.0.0.

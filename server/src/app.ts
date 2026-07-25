@@ -29,6 +29,9 @@ export interface AppOptions {
 
 export function createApp(options: AppOptions = {}) {
   const app = express();
+  // No framework fingerprint — LAN exposure is a supported configuration
+  // since #189.
+  app.disable("x-powered-by");
   app.use(express.json());
 
   // Boot hygiene (#103): drop temp artifacts a previous run was killed before
@@ -69,21 +72,44 @@ export function createApp(options: AppOptions = {}) {
   // ADR-19 argument), with or without a public listener (supertest).
   bindAgentToolApi(new InProcessApiClient(app));
 
+  // The API namespace speaks JSON — including its 404s: an unknown /api path
+  // must never read as HTML, with or without a client mounted below. After
+  // every /api router (they keep full precedence), before the static client.
+  // app.use("/api", ...) matches case-insensitively, like the mounts above.
+  app.use("/api", (_req, res) => {
+    res.status(404).json({ error: "not found" });
+  });
+
   // Production mode (#189, ADR-49): the built client and the API share one
-  // port. Mounted after every /api router so the API keeps full precedence —
-  // an unknown /api path must stay a JSON-surface 404, never index.html.
+  // port.
   if (options.clientDir) {
     const indexHtml = path.join(options.clientDir, "index.html");
-    app.use(express.static(options.clientDir));
+    app.use(
+      express.static(options.clientDir, {
+        setHeaders: (res, filePath) => {
+          // Vite content-hashes everything under assets/ — cache forever.
+          // index.html is the mutable entry document: always revalidate, or
+          // a deploy would strand browsers on a stale asset manifest.
+          res.setHeader(
+            "Cache-Control",
+            filePath.includes(`${path.sep}assets${path.sep}`)
+              ? "public, max-age=31536000, immutable"
+              : "no-cache",
+          );
+        },
+      }),
+    );
     // SPA fallback: deep links (/stats, /goals) are client-side routes with
     // no file on disk — a refresh must get index.html, not a 404. Express 5
     // (path-to-regexp v8) dropped the bare "*" route, so this is a plain
     // middleware. GET/HEAD only: a stray POST to a client path is an error,
-    // not a page view.
+    // not a page view. Paths with an extension are missing FILES (a stale
+    // hash after a redeploy): serving them index.html would hand the browser
+    // text/html for a script tag — let them 404 instead.
     app.use((req, res, next) => {
       if (req.method !== "GET" && req.method !== "HEAD") return next();
-      if (req.path === "/api" || req.path.startsWith("/api/")) return next();
-      res.sendFile(indexHtml);
+      if (path.extname(req.path) !== "") return next();
+      res.sendFile(indexHtml, { headers: { "Cache-Control": "no-cache" } });
     });
   }
 

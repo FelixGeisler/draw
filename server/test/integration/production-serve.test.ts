@@ -41,17 +41,34 @@ describe("production serve mode", () => {
     expect(res.text).toContain(INDEX_MARKER);
   });
 
-  it("serves static assets by path", async () => {
+  it("serves static assets by path, cached as immutable", async () => {
     const res = await request(app).get("/assets/app.js");
     expect(res.status).toBe(200);
     expect(res.text).toBe(ASSET_BODY);
+    // Vite content-hashes assets/* — they may cache forever; the entry
+    // document must not (a redeploy swaps the manifest under it).
+    expect(res.headers["cache-control"]).toBe("public, max-age=31536000, immutable");
+    const index = await request(app).get("/");
+    expect(index.headers["cache-control"]).toBe("no-cache");
+  });
+
+  it("404s a missing asset instead of handing the browser index.html", async () => {
+    // A stale-hash tab after a redeploy requests a script that no longer
+    // exists — 200 text/html here would be a MIME error, not a page view.
+    for (const missing of ["/assets/app-OLDHASH.js", "/favicon-gone.png"]) {
+      const res = await request(app).get(missing);
+      expect(res.status).toBe(404);
+      expect(res.text).not.toContain(INDEX_MARKER);
+    }
   });
 
   it("answers client deep links with index.html (SPA fallback)", async () => {
-    for (const deepLink of ["/stats", "/goals", "/settings"]) {
+    // The query-string case pins req.path (not req.url) as the dispatch key.
+    for (const deepLink of ["/stats", "/goals", "/settings", "/stats?range=30d"]) {
       const res = await request(app).get(deepLink);
       expect(res.status).toBe(200);
       expect(res.text).toContain(INDEX_MARKER);
+      expect(res.headers["cache-control"]).toBe("no-cache");
     }
   });
 
@@ -61,11 +78,14 @@ describe("production serve mode", () => {
     expect(res.body.ok).toBe(true);
   });
 
-  it("keeps 404s for unknown /api paths — never the SPA fallback", async () => {
-    for (const missing of ["/api/definitely-not-a-route", "/api"]) {
+  it("404s unknown /api paths as JSON — never the SPA fallback", async () => {
+    // Express 5 route matching is case-insensitive, so the API namespace
+    // guard must be too: /API/nope is the same miss as /api/nope.
+    for (const missing of ["/api/definitely-not-a-route", "/api", "/API/definitely-not-a-route"]) {
       const res = await request(app).get(missing);
       expect(res.status).toBe(404);
-      expect(res.text).not.toContain(INDEX_MARKER);
+      expect(res.headers["content-type"]).toContain("application/json");
+      expect(res.body).toEqual({ error: "not found" });
     }
   });
 
@@ -74,14 +94,22 @@ describe("production serve mode", () => {
     expect(res.status).toBe(404);
     expect(res.text).not.toContain(INDEX_MARKER);
   });
+
+  it("does not advertise the framework", async () => {
+    const res = await request(app).get("/api/health");
+    expect(res.headers["x-powered-by"]).toBeUndefined();
+  });
 });
 
 describe("dev mode (no clientDir)", () => {
-  it("serves no client — non-API paths 404 as before", async () => {
+  it("serves no client — non-API paths 404, /api misses stay JSON", async () => {
     const { createApp } = await import("../../src/app.js");
     const devApp = createApp();
     expect((await request(devApp).get("/")).status).toBe(404);
     expect((await request(devApp).get("/stats")).status).toBe(404);
     expect((await request(devApp).get("/api/health")).status).toBe(200);
+    const miss = await request(devApp).get("/api/definitely-not-a-route");
+    expect(miss.status).toBe(404);
+    expect(miss.body).toEqual({ error: "not found" });
   });
 });

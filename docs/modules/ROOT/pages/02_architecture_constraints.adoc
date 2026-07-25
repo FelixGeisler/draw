@@ -8,9 +8,9 @@
 |Draw runs for one user on one host; no accounts, no sync. Loopback binding
 is the *default*, no longer an invariant (#189,
 xref:09_architecture_decisions.adoc[ADR-49]): a stock install listens on
-`127.0.0.1` only, and the `HOST` env var is the deliberate opt-in to LAN
-exposure for the self-hosted deployment (container #191, behind #190's
-password gate). This is the state of the deployment today, not the product's
+`127.0.0.1` only, and the `HOST` env var — honored by the production entry
+only, never by `npm run dev` — is the deliberate opt-in to LAN exposure for
+the self-hosted deployment (container #191, behind #190's password gate). This is the state of the deployment today, not the product's
 identity — the xref:01_introduction_and_goals.adoc#vision[vision] names
 multi-device, mobile, and multi-deck use as the direction. Features that
 further harden single-instance assumptions (the single running timer,

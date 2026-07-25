@@ -83,10 +83,11 @@ clib -[hidden]-> hooks
 
 ....
 server/src/
-├── index.ts                 dev entry: loads .env, starts the API server
-├── prod.ts                  production entry (#189): same server + built client, one port
-├── config.ts                HOST/API_PORT env resolution (default 127.0.0.1)
-├── server.ts                startServer() — binds HOST:API_PORT (testable)
+├── index.ts                 dev entry: loads .env, starts the API server (loopback, always)
+├── prod.ts                  production entry (#189): same server + built client, one port;
+│                            the only entry that honors HOST
+├── config.ts                HOST/API_PORT env resolution (default 127.0.0.1; PORT ignored)
+├── server.ts                startServer() — binds the given host (default loopback):API_PORT
 ├── app.ts                   createApp() — Express app + router mounting; serves
 │                            client/dist with SPA fallback in production (ADR-49)
 ├── db.ts                    SQLite bootstrap, PRAGMA user_version migrations

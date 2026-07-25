@@ -30,7 +30,7 @@ node "Windows 11 PC" as pc {
     database "app.db\nSQLite, WAL" as db
     folder "files/\ngoal materials" as files
   }
-  artifact "server/.env\nAPI_PORT (default 3001)\nHOST (default 127.0.0.1)\nANTHROPIC_API_KEY — fallback\nonly: the Settings-UI key wins" as env
+  artifact "server/.env\nAPI_PORT (default 3001)\nANTHROPIC_API_KEY — fallback\nonly: the Settings-UI key wins\n(HOST ignored in dev — always loopback)" as env
 }
 cloud "api.anthropic.com" as claude
 
@@ -101,9 +101,10 @@ build
 
 |Configuration
 |`server/.env`: `ANTHROPIC_API_KEY` (optional), `API_PORT` (default 3001),
-`HOST` (default `127.0.0.1` = loopback only; set `0.0.0.0` to expose on the
-LAN — no auth until #190, so trusted networks only). `PORT` is deliberately
-not used — dev tooling injects it
+`HOST` (production mode only — `npm run dev` always binds loopback; default
+`127.0.0.1`, set `0.0.0.0` to expose on the LAN — no auth until #190, so
+trusted networks only). `PORT` is deliberately not used — dev tooling
+injects it
 
 |Data
 |Everything under `server/data/` (gitignored); backup = copy that folder.
