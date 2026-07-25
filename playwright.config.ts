@@ -9,8 +9,13 @@ import path from "node:path";
 // run their E2E suites side by side without colliding on the defaults. The
 // E2E_ prefix keeps an ambient API_PORT from a dev shell out of E2E isolation.
 const E2E_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "draw-e2e-"));
+const PROD_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "draw-e2e-prod-"));
 const API_PORT = process.env.E2E_API_PORT || "3101";
 const VITE_PORT = process.env.E2E_VITE_PORT || "5273";
+// Production smoke (#189): the built client served by Express on one port.
+// production-serve.spec.ts resolves the same env/default — importing it from
+// here would re-run this module's mkdtemp side effects in the worker.
+const PROD_PORT = process.env.E2E_PROD_PORT || "3102";
 
 export default defineConfig({
   testDir: "e2e",
@@ -42,6 +47,7 @@ export default defineConfig({
       env: {
         DATA_DIR: E2E_DATA_DIR,
         API_PORT,
+        // No HOST pin needed: the dev entry ignores HOST by design (#189).
         ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
       },
     },
@@ -55,6 +61,23 @@ export default defineConfig({
       env: {
         VITE_PORT,
         API_PORT, // proxy target (client/vite.config.ts)
+      },
+    },
+    {
+      // Production mode (#189): the documented commands verbatim — build the
+      // real client bundle, then `npm start` serves it plus the API on one
+      // port. Longer timeout: the health poll spans the vite build too.
+      command: "npm run build && npm start",
+      url: `http://127.0.0.1:${PROD_PORT}/api/health`,
+      reuseExistingServer: false,
+      timeout: 180_000,
+      env: {
+        DATA_DIR: PROD_DATA_DIR,
+        API_PORT: PROD_PORT,
+        // The prod entry DOES honor HOST — pin it so an ambient export
+        // cannot move the health URL off 127.0.0.1.
+        HOST: "",
+        ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
       },
     },
   ],

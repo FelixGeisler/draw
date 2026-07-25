@@ -12,7 +12,7 @@
 Person(user, "User", "Plans work, draws cards, tracks time")
 System_Ext(mcpClient, "MCP client", "Claude Code / Claude Desktop —\nconverses, approves every write")
 
-System_Boundary(draw, "Draw (localhost only)") {
+System_Boundary(draw, "Draw (one host; loopback by default, ADR-49)") {
   Container(client, "Client", "React 19 + Vite SPA", "Draw page, tasks (capture-first),\ngoals, stats (incl. the History contribution calendar)")
   Container(server, "Server", "Express 5 + better-sqlite3", "REST API, domain services,\nSQLite + uploaded files")
   Container(mcpServer, "MCP server", "stdio JSON-RPC adapter", "Domain tools + resources;\nno domain logic, never opens the DB")
@@ -20,8 +20,8 @@ System_Boundary(draw, "Draw (localhost only)") {
 
 System_Ext(claude, "Anthropic Claude API", "Breakdown, backward planning,\ntask generation, card art")
 
-Rel(user, client, "Uses", "browser, HTTP :5173")
-Rel(client, server, "JSON REST /api/*", "HTTP :5173 → proxy → :3001")
+Rel(user, client, "Uses", "browser — :5173 (dev)\nor :3001 (production)")
+Rel(client, server, "JSON REST /api/*", "dev: Vite proxy → :3001\nprod: same origin, one port")
 Rel(user, mcpClient, "Converses,\napproves tool calls")
 Rel(mcpClient, mcpServer, "Tool calls / resource reads", "stdio (JSON-RPC)")
 Rel(mcpServer, server, "The same REST the client uses", "HTTP 127.0.0.1:3001")
@@ -54,12 +54,13 @@ SHOW_LEGEND()
 |===
 |Channel |Protocol |Description
 
-|Browser ↔ Vite dev server
+|Browser ↔ Vite dev server (dev mode only)
 |HTTP :5173
-|UI delivery + HMR
+|UI delivery + HMR; `/api` proxied to Express
 
 |Browser ↔ Express
-|HTTP :5173 → proxy → :3001
+|dev: HTTP :5173 → proxy → :3001; production: HTTP `HOST`:3001 directly —
+static client, SPA fallback, and API on one port (#189, ADR-49)
 |JSON REST under `/api/*`; multipart for material upload
 
 |Express ↔ SQLite
@@ -88,4 +89,5 @@ no notifications. These boundaries describe the current scope, not the product's
 identity — mobile and multi-device use are named as direction (not design) in
 the xref:01_introduction_and_goals.adoc#vision[section 1 vision]. The Claude API
 is the only *remote* system; MCP clients are a second local consumer of the same
-loopback API — nothing becomes reachable from the network (section 2).
+local API — which stays loopback-only unless `HOST` deliberately opens it
+(section 2, ADR-49).

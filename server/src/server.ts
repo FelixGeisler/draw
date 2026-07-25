@@ -1,13 +1,20 @@
 import type { Server } from "node:http";
-import { createApp } from "./app.js";
+import { createApp, type AppOptions } from "./app.js";
+import { DEFAULT_HOST } from "./config.js";
 
-// Loopback only: single local user by design (arc42 8.5), so the API must
-// not be reachable from the LAN. listen(port) without a host would bind
-// all interfaces.
-export const HOST = "127.0.0.1";
+export interface StartOptions extends AppOptions {
+  /**
+   * Listener address. Defaults to loopback — the dev entry never passes one,
+   * so an ambient HOST export cannot silently unpin `npm run dev` from
+   * 127.0.0.1 (the same injection class config.ts ignores PORT for). Only
+   * the production entry resolves HOST deliberately (#189, ADR-49).
+   */
+  host?: string;
+}
 
-export function startServer(port: number): Server {
-  return createApp().listen(port, HOST, () => {
-    console.log(`[server] listening on http://${HOST}:${port}`);
+export function startServer(port: number, options: StartOptions = {}): Server {
+  const { host = DEFAULT_HOST, ...appOptions } = options;
+  return createApp(appOptions).listen(port, host, () => {
+    console.log(`[server] listening on http://${host}:${port}`);
   });
 }
