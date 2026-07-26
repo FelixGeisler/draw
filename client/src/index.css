@@ -374,6 +374,29 @@ textarea:focus {
     max-width: 100%;
   }
 
+  /* Text that must never widen the document. The tab labels and a user-named
+     category are the two strings on a phone whose rendered width we do not
+     control — glyph and emoji metrics differ per platform, and an unclippable
+     string paints past its box and grows the page even when the box itself
+     shrank. Clipping with an ellipsis is the normal tab-bar treatment and keeps
+     the invariant true on any platform. */
+  .sidenav a {
+    overflow: hidden;
+  }
+
+  .nav-label,
+  .cat-name {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .setting-row {
+    min-width: 0;
+  }
+
   /* A file input is the stubborn case: it cannot reflow its internals, so
      min-width alone only shrinks the BOX while the platform-drawn button and
      file name keep painting past it — visible overflow that still widens the

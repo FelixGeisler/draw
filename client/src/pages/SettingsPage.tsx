@@ -396,6 +396,7 @@ function CategoryRow({ category }: { category: Category }) {
         />
       ) : (
         <span
+          className="cat-name"
           style={{ flex: 1, cursor: "pointer" }}
           title="Click to rename"
           onClick={() => {
