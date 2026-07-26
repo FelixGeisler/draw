@@ -2235,10 +2235,27 @@ other request needs one of two equivalent credentials:
 
 All password comparisons are constant-time (`timingSafeEqual` over SHA-256
 digests). Failed presentations — login body or header, which would otherwise
-be an unthrottled side channel — are rate-limited per IP: 5 failures per 15
-minutes, then 429 with `Retry-After`. Unauthenticated `/api` requests get a
-JSON 401; page views get the login page with a 401 status. Like `HOST`, only
-the production entry consumes `DRAW_PASSWORD`.
+be an unthrottled side channel — are rate-limited per client IP: 5 failures
+per 15 minutes, then 429 with `Retry-After`. Two refinements make that
+per-IP guarantee real (both from the #190 security review):
+
+* *The limiter keys on the de-proxied client, and loopback is exempt.* The
+  key is `req.ip`. Behind the recommended reverse proxy every request's
+  socket peer is the proxy, so `req.ip` would collapse to one shared bucket
+  (one attacker could then 429-lock the owner out) unless Express's
+  `trust proxy` is set — hence the `TRUST_PROXY` env var (production entry
+  only; accepts a preset like `loopback`, a hop count, or a subnet list).
+  Requests whose de-proxied `req.ip` is loopback are the host itself — the
+  in-process assistant (ADR-37) and a same-host MCP adapter, both presenting
+  the *real* secret — so they are inside the trust boundary and skip the
+  limiter entirely: they neither trip it nor reset another client's tally.
+* *A present-but-invalid or expired cookie is aging, not attacking.* Only the
+  header path records failures; a lapsed or tampered cookie is never counted,
+  so an owner whose session expired can never be throttled out.
+
+Unauthenticated `/api` requests get a JSON 401; page views get the login page
+with a 401 status. Like `HOST`, only the production entry consumes
+`DRAW_PASSWORD` and `TRUST_PROXY`.
 
 *Rationale:*
 
@@ -2270,6 +2287,17 @@ devices, IoT). It does **not** protect against an on-path attacker: the
 deployment is plain HTTP, so password and cookie travel in cleartext, and
 `Secure` is deliberately not set on the cookie. TLS is explicitly out of
 scope for Draw itself — users who need it should terminate HTTPS in a reverse
-proxy (Caddy, Traefik, nginx) in front of `API_PORT`. The in-memory rate
-limiter resets on restart, which is acceptable because restarting is an
-owner action, not an attacker's.
+proxy (Caddy, Traefik, nginx) in front of `API_PORT`. **Anyone deploying
+behind such a proxy must set `TRUST_PROXY`** (e.g. `loopback` for a same-host
+proxy): leaving it unset makes every request look like it came from the proxy,
+so the rate limiter can no longer tell clients apart — it degrades to a single
+shared bucket, i.e. effectively off. Prefer `loopback` or a hop count over
+`true`: trusting *every* forwarded hop lets a LAN client spoof
+`X-Forwarded-For` to forge its rate-limit key. Residual owner-lockout risk:
+clients that genuinely share one source IP (several devices behind one NAT)
+share a bucket, so one bad actor there can throttle the others for up to 15
+minutes — accepted for a single-secret LAN tool; the fixed window was kept
+over a progressive per-attempt delay for its simplicity, and the loopback
+exemption plus de-proxying removes the same-host-proxy lockout the review
+flagged. The in-memory limiter resets on restart, which is acceptable because
+restarting is an owner action, not an attacker's.

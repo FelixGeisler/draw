@@ -112,8 +112,10 @@ build
 `HOST` (production mode only — `npm run dev` always binds loopback; default
 `127.0.0.1`, set `0.0.0.0` to expose on the LAN), `DRAW_PASSWORD` (production
 mode only — optional password gate for LAN exposure, #190/ADR-50; set it
-whenever `HOST` unpins loopback). `PORT` is deliberately not used — dev
-tooling injects it
+whenever `HOST` unpins loopback), `TRUST_PROXY` (production mode only —
+required if a reverse proxy fronts the app, so the login limiter keys on the
+real client; e.g. `loopback` for a same-host proxy). `PORT` is deliberately
+not used — dev tooling injects it
 
 |Data
 |Everything under `server/data/` (gitignored); backup = copy that folder.

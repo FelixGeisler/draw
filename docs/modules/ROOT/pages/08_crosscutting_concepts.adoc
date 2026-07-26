@@ -162,7 +162,11 @@ counts its real tokens, so the estimate and the 180K guard stay honest.
   login page, `server/src/loginPage.ts`) or as the `x-draw-password` header
   (MCP adapter, scripts). Password comparisons are constant-time
   (`timingSafeEqual` over SHA-256 digests, `server/src/auth.ts`); failed
-  presentations are rate-limited per IP (5 per 15 minutes, then 429).
+  presentations are rate-limited per client IP (5 per 15 minutes, then 429),
+  keyed on the de-proxied `req.ip` (set `TRUST_PROXY` behind a reverse proxy).
+  Loopback clients (the in-process assistant, a same-host MCP adapter) present
+  the real secret from inside the trust boundary and skip the limiter; an
+  expired or tampered cookie is never counted as a failed attempt.
   `GET /api/health` stays credential-free for healthchecks. Threat model:
   protects the settings-DB API key and task data against casual LAN access;
   plain HTTP means it does NOT resist an on-path attacker — TLS is a reverse

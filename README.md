@@ -34,9 +34,10 @@ network (`npm run dev` always stays local).
 When you expose it, also set `DRAW_PASSWORD` in `server/.env`: every page and
 API request then requires logging in once per browser (a signed cookie, valid
 30 days). Without it, anyone on the network can read your tasks — and your
-Anthropic API key. Failed logins are rate-limited. Draw serves plain HTTP;
-if you want TLS, terminate HTTPS in a reverse proxy (Caddy, nginx) in front
-of it.
+Anthropic API key. Failed logins are rate-limited per client. Draw serves
+plain HTTP; if you want TLS, terminate HTTPS in a reverse proxy (Caddy, nginx)
+in front of it — and set `TRUST_PROXY=loopback` so the rate limiter still sees
+each real client.
 
 ## Enable AI features (optional)
 
