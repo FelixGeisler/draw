@@ -1,9 +1,12 @@
 = 7. Deployment View
 
-Two run modes on the owner's machine (containerization for the Pi is #191):
-*dev* — two processes, Vite serving the client with an `/api` proxy — and
-*production* (#189, xref:09_architecture_decisions.adoc[ADR-49]) — one process,
-one port, Express serving the built client next to the API.
+Three deployment modes. On the owner's machine: *dev* — two processes, Vite
+serving the client with an `/api` proxy — and *production* (#189,
+xref:09_architecture_decisions.adoc[ADR-49]) — one process, one port, Express
+serving the built client next to the API. For self-hosting: a *container* (#191,
+xref:09_architecture_decisions.adoc[ADR-51]) — the same production process,
+packaged multi-arch for a Raspberry Pi (linux/arm64) or a linux/amd64 host,
+with data on a named volume.
 
 == 7.1 Dev — `npm run dev`
 
@@ -73,7 +76,7 @@ skinparam componentStyle rectangle
 skinparam nodesep 12
 skinparam ranksep 18
 
-node "Host (PC today, Pi container #191)" as host {
+node "Host (PC, or the #191 container — see 7.3)" as host {
   component "Browser\nHOST:3001" as browser
   node "Node.js 22+ — npm start" as prodtree {
     component "tsx server/src/prod.ts\nExpress on HOST:API_PORT\n/api + static client/dist\n+ SPA fallback" as express
@@ -92,6 +95,66 @@ express --> claude : HTTPS — only with\na key, on demand
 @enduml
 ....
 
+== 7.3 Container — Raspberry Pi self-host (#191)
+
+The 1.0.0 self-hosted deployment (#191,
+xref:09_architecture_decisions.adoc[ADR-51]) packages the *production* process
+above into a multi-arch image. A multi-stage build compiles the native
+`better-sqlite3` binary for the target architecture (`linux/arm64` for the Pi,
+`linux/amd64` for a desktop/server), builds the client with vite, prunes dev
+dependencies, and ships a slim glibc runtime that runs the same tsx entry
+(`node --import tsx src/prod.ts`) as an unprivileged `node` user. Build both
+arches with buildx:
+
+[source,console]
+----
+docker buildx build --platform linux/amd64,linux/arm64 -t draw:latest .
+----
+
+Config is by environment, identical to production mode: `HOST=0.0.0.0` (baked
+in — the container listens on all interfaces so the port mapping is reachable),
+`API_PORT` (default 3001), and the LAN opt-ins `DRAW_PASSWORD` /`TRUST_PROXY`
+(xref:09_architecture_decisions.adoc[ADR-50] — set a password on a real
+network). All persistent state lives under `DATA_DIR=/data` on a *named volume*,
+so tasks, materials, and the database survive `docker compose down`, container
+recreation, and image upgrades. The container `HEALTHCHECK` polls
+`GET /api/health` (above the password gate) with node's global `fetch`.
+
+[plantuml,deployment-container,svg]
+....
+@startuml
+skinparam shadowing false
+skinparam wrapWidth 150
+skinparam defaultTextAlignment center
+skinparam componentStyle rectangle
+skinparam nodesep 12
+skinparam ranksep 18
+
+node "Raspberry Pi / linux host" as pi {
+  component "Browser / phone\nLAN: http://<pi-ip>:3001" as browser
+  node "Docker" as docker {
+    node "draw container (node:22-slim)\nUSER node · tini PID 1" as ctr {
+      component "node --import tsx src/prod.ts\nExpress on 0.0.0.0:API_PORT\n/api + static client/dist\nHEALTHCHECK GET /api/health" as express
+    }
+    database "named volume: draw-data\n→ /data (DATA_DIR)\napp.db (WAL) + files/" as vol
+  }
+}
+cloud "api.anthropic.com" as claude
+
+browser --> express : HTTP :3001\n(DRAW_PASSWORD gate\nwhen set)
+express --> vol : SQLite + materials
+express --> claude : HTTPS — only with\na key, on demand
+@enduml
+....
+
+Registry publishing and release automation are out of scope here (#192); build
+locally, or `docker compose up -d` (the sample `docker-compose.yml` builds the
+image and starts it with the volume and healthcheck wired). *Upgrade:* rebuild
+or pull the new image, then recreate the container — the `draw-data` volume
+carries the data across. *Backup/restore:* unchanged from
+xref:09_architecture_decisions.adoc[ADR-26] — export the zip from Settings, or
+snapshot the `draw-data` volume.
+
 [cols="1,3",options="header"]
 |===
 |Aspect |Detail
@@ -107,6 +170,12 @@ express --> claude : HTTPS — only with\na key, on demand
 `http://<HOST>:<API_PORT>`). `npm start` refuses to boot without a client
 build
 
+|Run (container, #191/ADR-51)
+|`docker compose up -d` (builds the multi-arch image and starts it), or
+`docker buildx build --platform linux/amd64,linux/arm64 -t draw:latest .` then
+`docker run`. Browser at `http://<host-ip>:3001`. Same production process, env
+config, non-root user, `/api/health` healthcheck; data on the `draw-data` volume
+
 |Configuration
 |`server/.env`: `ANTHROPIC_API_KEY` (optional), `API_PORT` (default 3001),
 `HOST` (production mode only — `npm run dev` always binds loopback; default
@@ -118,8 +187,11 @@ real client; e.g. `loopback` for a same-host proxy). `PORT` is deliberately
 not used — dev tooling injects it
 
 |Data
-|Everything under `server/data/` (gitignored); backup = copy that folder.
-Both run modes use the same directory — switching modes keeps the data
+|Everything under `DATA_DIR` (dev/production default `server/data/`, gitignored;
+container `/data` on the `draw-data` named volume): the SQLite `app.db` (WAL)
+and `files/` goal materials. Backup = copy the folder / snapshot the volume, or
+the ADR-26 export zip. All modes share the same `DATA_DIR` layout — switching
+modes keeps the data
 
 |Docs hosting
 |GitHub Pages serves the Antora-built site, deployed by the `Docs` Actions

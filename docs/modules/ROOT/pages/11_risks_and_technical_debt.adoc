@@ -31,8 +31,8 @@
 
 |R6
 |*Single-user assumptions everywhere* (one running timer, loopback default, and at most one shared-secret password — no per-user accounts)
-|Not multi-device/multi-user capable
-|Deliberate for the current deployment; the xref:01_introduction_and_goals.adoc#vision[vision] names multi-device, mobile, and multi-deck use as direction (docs reframing tracked in https://github.com/FelixGeisler/draw/issues/93[#93]). The "no auth" leg was softened for 1.0.0: LAN deployments can opt into the `DRAW_PASSWORD` gate (https://github.com/FelixGeisler/draw/issues/190[#190], xref:09_architecture_decisions.adoc[ADR-50]) — a single shared secret, so still single-user. New features that harden these assumptions must flag the trade-off (xref:02_architecture_constraints.adoc[section 2])
+|Not multi-user capable; multi-*device* now partial
+|Deliberate for the current deployment; the xref:01_introduction_and_goals.adoc#vision[vision] names multi-device, mobile, and multi-deck use as direction (docs reframing tracked in https://github.com/FelixGeisler/draw/issues/93[#93]). Two legs softened for 1.0.0: LAN deployments can opt into the `DRAW_PASSWORD` gate (https://github.com/FelixGeisler/draw/issues/190[#190], xref:09_architecture_decisions.adoc[ADR-50]), and the self-hosted container (https://github.com/FelixGeisler/draw/issues/191[#191], xref:09_architecture_decisions.adoc[ADR-51]) lets several devices/phones on the LAN reach one instance — so *multi-device access is partially current*. It remains single-user (one shared secret, no accounts, one deck) and there is no cross-machine sync. New features that harden these assumptions must flag the trade-off (xref:02_architecture_constraints.adoc[section 2])
 
 |R7
 |*better-sqlite3 native binding* tied to Node major version

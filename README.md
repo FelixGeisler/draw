@@ -39,6 +39,45 @@ plain HTTP; if you want TLS, terminate HTTPS in a reverse proxy (Caddy, nginx)
 in front of it — and set `TRUST_PROXY=loopback` so the rate limiter still sees
 each real client.
 
+### Self-host with Docker (Raspberry Pi)
+
+The 1.0.0 way to run Draw on a home server or Raspberry Pi is a container. The
+image is multi-arch (`linux/arm64` for the Pi, `linux/amd64` for a desktop),
+runs the production server as a non-root user, and keeps all your data on a
+named volume.
+
+The simplest path — build and run in one step:
+
+```
+docker compose up -d
+```
+
+That builds the image locally (arm64 on a Pi), starts it, mounts the
+`draw-data` volume, and wires the healthcheck. Open `http://<host-ip>:3001`.
+Your tasks, materials, and database live on the volume and survive
+`docker compose down`, recreation, and upgrades.
+
+**Set a password.** The container listens on your LAN (`HOST=0.0.0.0`), so
+uncomment `DRAW_PASSWORD` in [`docker-compose.yml`](docker-compose.yml) before
+exposing it — otherwise anyone on the network can read your tasks and your
+Anthropic API key. Behind a reverse proxy, also set `TRUST_PROXY` (e.g.
+`loopback`).
+
+**Build both architectures explicitly** (e.g. to build on a fast amd64 machine
+for a Pi) with buildx:
+
+```
+docker buildx build --platform linux/amd64,linux/arm64 -t draw:latest .
+```
+
+**Upgrade:** rebuild (or, once published in a later release, pull) the image,
+then recreate the container — the `draw-data` volume carries your data across.
+**Backup/restore:** use the export/import zip in Settings, or snapshot the
+`draw-data` volume. Data lives under `/data` (`DATA_DIR`) inside the container.
+
+Pushing a prebuilt image to a registry is a later step; for now the image is
+built locally from this repo.
+
 ## Enable AI features (optional)
 
 Copy `server/.env.example` to `server/.env` and set `ANTHROPIC_API_KEY` (get one at
