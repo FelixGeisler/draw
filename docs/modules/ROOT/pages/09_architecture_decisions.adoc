@@ -107,15 +107,21 @@ UI as well, where the card would wrongly read as sent away by the user. It class
 `all_awaiting_next_occurrence` ("they come back on their own") rather than steering the
 user into a breakdown with `all_too_big`.
 
-Both dates are compared as *UTC* calendar days — the same clock the completion writes
-the next due date in, so what a completion writes is exactly what the deck waits for.
-The arithmetic is date-only string math (`addDays` in `services/localDay.ts`): the
-original `next.setDate(next.getDate() + n)` mixed the local wall clock with a
-`toISOString()` format, so an interval spanning a DST transition shifted the instant by
-an hour and the due date could land a day early (risk R3).
-*Trade-off accepted:* on a machine east of UTC the card wakes at the local equivalent of
-00:00 UTC rather than at local midnight — a few hours the user is asleep for, in
-exchange for one clock across the write and the read.
+Both the write and the read use the *user's local calendar day* (`localDate` in
+`services/localDay.ts`), never UTC. A due date is a local calendar day the user typed,
+and the same `completeTask()` call already attributes its completion to the local day
+for streaks and the History calendar (ADR-21/ADR-28) — so recurrence answers "which day
+was that?" exactly like the rest of the user-day logic, and the card wakes at the user's
+own midnight. A UTC anchor was tried first and rejected in review (PR #206): east of UTC
+it made one completion two different days depending on which subsystem asked, and a
+daily chore finished at 00:30 local was dated to the very day it was done, returning to
+the deck at 02:30 that same night — the #205 symptom surviving for late-night work.
+The arithmetic itself is date-only string math (`addDays`): the original
+`next.setDate(next.getDate() + n)` mixed the local wall clock with a `toISOString()`
+format, so an interval spanning a DST transition shifted the instant by an hour and the
+due date could land a day early (risk R3). Because both bugs are invisible on a UTC
+machine, the server test suite pins `TZ=Europe/Berlin` (`server/vitest.config.ts`) —
+otherwise the regression tests pass against the very arithmetic they reject.
 
 == ADR-7: Whole documents to Claude, no RAG
 

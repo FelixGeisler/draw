@@ -136,7 +136,7 @@ else
     Gam -> DB : INSERT completions (xp = max(1, round(round(effort × impact/3) × multiplier)), was_drawn, was_warmup)
     Gam -> DB : close this task's running time_entry (ADR-12)
     alt recurring
-      Gam -> DB : due_date = completion day + recur_every_days (UTC), clear snooze/block — the task stays open, asleep until that next occurrence (#205)
+      Gam -> DB : due_date = completion's LOCAL day + recur_every_days, clear snooze/block — the task stays open, asleep until that next occurrence (#205)
     else normal
       Gam -> DB : status = 'done', completed_at, clear snooze/block
     end
