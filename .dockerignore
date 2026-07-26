@@ -33,11 +33,13 @@ docs-ui
 build
 antora-playbook.yml
 
-# VCS, editor, CI, and container files themselves.
+# VCS, editor, dev-tooling, CI, and container files themselves.
 .git
 .github
 .idea
 .vscode
+.claude
+.mcp.json
 .dockerignore
 Dockerfile
 docker-compose.yml

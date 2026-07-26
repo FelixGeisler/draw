@@ -2331,7 +2331,9 @@ and a `.dockerignore`, building with `docker buildx` for `linux/amd64` and
 `linux/arm64`. The specifics:
 
 * *tsx is the runtime in the container too.* The image ships node 22 + tsx +
-`server/src/**` + `client/dist` + a pruned `node_modules`, and runs the ADR-49
+`server/src/**` + `shared/**` (the server imports it at runtime, e.g.
+`gamificationService.ts` → `../../../shared/…`) + `client/dist` + a pruned
+`node_modules`, and runs the ADR-49
 entry directly as one process: `node --import tsx src/prod.ts` (equivalent to
 `npm start`, but a single node process so tini can signal it — no npm/tsx
 wrapper layer). There is deliberately no compiled server artifact to build or
