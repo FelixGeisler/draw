@@ -210,7 +210,11 @@ const createTask = defineTool({
     "bigger work should be created as a parent and broken down with create_subtasks. " +
     "Non-neutral impact (≠3) requires a goalId: impact rates leverage toward that goal " +
     "(ADR-4); goal-less tasks keep the neutral default 3. " +
-    "recurEveryDays makes it a recurring chore whose due date advances on completion. " +
+    "recurEveryDays makes it a recurring chore: its dueDate is then the NEXT OCCURRENCE, so " +
+    "the card is excluded from the draw until that day and shows as scheduled — a chore that " +
+    "should be drawable now needs a dueDate of today (or none at all). Completing it keeps the " +
+    "task open and sets dueDate = today + recurEveryDays, sleeping it until then. A dueDate on " +
+    "a NON-recurring task never excludes it: doing something before it is due is the point. " +
     "windowDays + windowStart + windowEnd (all three together) give the task an availability " +
     "window: outside it the card is excluded from the draw and shows as scheduled.",
   inputSchema: {
@@ -275,7 +279,10 @@ const updateTask = defineTool({
     "requires a task that has (or receives) a goalId — the neutral 3 and a no-op resend of the " +
     "stored value are always accepted — and unlinking the goal (goalId: null) resets impact to " +
     "the neutral default 3 on the task and its open subtasks; omit impact when unlinking. An " +
-    "archived task cannot take subtasks (adopting one under it is rejected): un-archive it first.",
+    "archived task cannot take subtasks (adopting one under it is rejected): un-archive it first. " +
+    "On a task with recurEveryDays, dueDate is its NEXT OCCURRENCE: setting a future one takes " +
+    "the card out of the deck until that day (setting today's, or clearing the recurrence, " +
+    "brings it back), while on a non-recurring task a due date never affects drawability.",
   inputSchema: {
     id: idSchema,
     title: z.string().min(1).optional(),
@@ -346,7 +353,10 @@ const completeTask = defineTool({
   description:
     "Mark a task done. Awards XP (relayed as xpAwarded, with levelUp and newAchievements), " +
     "closes the task's own running timer, and — for recurring tasks — keeps the task open and " +
-    "advances its due date (recurring: true in the result). Fails with an explanation if the " +
+    "advances its due date to the next occurrence, today + recurEveryDays (recurring: true in " +
+    "the result). A completed recurring chore then LEAVES the deck until that day: draw_card " +
+    "will not offer it again in the meantime, and no snooze is written — the due date alone " +
+    "decides. Fails with an explanation if the " +
     "task still has open subtasks. Completing the LAST open subtask auto-completes its " +
     "non-recurring parent (a symbolic 1 XP — the subtasks already earned the effort XP); the " +
     "result surfaces that as parentCompletion.",
@@ -455,8 +465,8 @@ const drawCard = defineTool({
             ? "Every ready card is outside its availability window right now — they return on " +
               "their own when a window opens; nothing needs breaking down."
             : body.reason === "all_awaiting_next_occurrence"
-              ? "Every ready card is a recurring task that was already done this cycle — each " +
-                "returns on its own on its next occurrence (its due_date); nothing needs " +
+              ? "Every ready card is a recurring task waiting for its next occurrence — each " +
+                "returns on its own on the day it is next due (its due_date); nothing needs " +
                 "breaking down."
               : "No open task is ready to draw — create_task something small, or check " +
                 "list_tasks for snoozed/blocked cards that come back on their own.";

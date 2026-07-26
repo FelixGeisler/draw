@@ -22,13 +22,16 @@ export function EmptyPoolReason({
     | "all_awaiting_next_occurrence";
 }) {
   if (reason === "all_awaiting_next_occurrence") {
+    // Not "already done this cycle": a recurring card that has NEVER been
+    // completed lands here too — its entered due date is its first
+    // occurrence (PR #206 review).
     return (
       <p>
-        Everything left was already done this cycle — those{" "}
+        Everything left is waiting for its next occurrence — those{" "}
         <Link to="/tasks" style={{ color: "var(--accent)" }}>
           recurring cards
         </Link>{" "}
-        come back on their own on their next occurrence.
+        come back on their own on the day they are next due.
       </p>
     );
   }
