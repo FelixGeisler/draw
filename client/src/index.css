@@ -347,6 +347,19 @@ textarea:focus {
   .setting-row {
     flex-wrap: wrap;
   }
+
+  /* Wrapping is not enough for a control that refuses to shrink. A flex item
+     defaults to min-width: auto, i.e. its min-CONTENT width, and a file input's
+     min-content width is its platform-drawn button plus the file name — text we
+     do not author and whose width differs per platform (it overflowed 360px by
+     38px on the Linux CI while fitting on Windows). min-width: 0 lets these
+     shrink to the row instead of pushing the document sideways. */
+  .setting-row input,
+  .setting-row select,
+  .setting-row button {
+    min-width: 0;
+    max-width: 100%;
+  }
 }
 
 /* The category pill (#123, keeping #120's computed ink): background is the
