@@ -52,10 +52,13 @@ contexts (e.g. different workplaces). The *multi-device* leg is now *partially
 current*: the 1.0.0 self-hosted container (#191,
 xref:09_architecture_decisions.adoc[ADR-51]) with the optional password gate
 (#190, xref:09_architecture_decisions.adoc[ADR-50]) lets several devices and
-phones on the same network reach one instance over the LAN. It is still a
-*single-user, single-deck, one-shared-secret* deployment — genuine
-multi-user/multi-account, sync across machines, mobile-native, and multi-deck
-support are undesigned, with no architecture and no schedule behind them. This
+phones on the same network reach one instance over the LAN. The *mobile* leg is
+current too, as a *web* app: the client is phone-ready and installs from Android
+Chrome as a standalone PWA (#193,
+xref:09_architecture_decisions.adoc[ADR-54]). It is still a *single-user,
+single-deck, one-shared-secret* deployment — genuine multi-user/multi-account,
+sync across machines, a native/store-distributed app, and multi-deck support are
+undesigned, with no architecture and no schedule behind them. This
 subsection states direction, not design: constraints and scope statements
 elsewhere (xref:02_architecture_constraints.adoc[section 2],
 xref:03_context_and_scope.adoc[section 3]) describe the current deployment and

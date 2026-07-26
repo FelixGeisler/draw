@@ -287,6 +287,9 @@
 
 .draw-actions {
   display: flex;
+  /* Five actions in a row overflow a 360px phone — wrapping is invisible on
+     desktop (they fit) and keeps the page from scrolling sideways (#193). */
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: center;
   margin-top: 8px;

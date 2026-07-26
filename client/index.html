@@ -2,7 +2,18 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- viewport-fit=cover: in standalone PWA mode the app draws edge to edge;
+         the bottom nav pads itself with env(safe-area-inset-bottom). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#12141a" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <!-- crossorigin=use-credentials: browsers fetch the manifest WITHOUT
+         cookies by default, even same-origin. With the optional password gate
+         on (#190) an anonymous manifest request answers 401, which would leave
+         a protected instance uninstallable — this makes the fetch carry the
+         session cookie. Harmless when no gate is configured. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
     <title>Draw — Task Planner</title>
   </head>
   <body>

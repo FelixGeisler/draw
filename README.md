@@ -109,6 +109,28 @@ upload it on the Settings page, or `POST /api/backup/import`. Copy
 `server/data/backups/` off-device (rsync, a network share) for real off-site
 safety.
 
+### Install it on your phone
+
+Draw is an installable PWA, so the phone gets an app icon instead of a browser
+tab. On the **same network** as the server, open `http://<server-host>:3001` in
+Android Chrome and use **⋮ → Add to Home screen** (Chrome usually offers
+"Install app" on its own). It launches standalone — no browser chrome — and the
+layout adapts to phone widths.
+
+Two notes: this needs **production mode**, because the client only registers the
+service worker in a production build (`client/src/main.tsx`) — in dev the app
+stays worker-free so a stale worker can never shadow live-reloaded code. And
+browsers only offer install on a *secure context* — `localhost` counts, a
+plain-HTTP LAN address may not, in which case put the server behind a reverse
+proxy with TLS (see
+[deployment](https://felixgeisler.github.io/draw/docs/07_deployment_view.html)).
+
+The app never stores your task data offline: the worker caches the app shell and
+nothing else, so it can never show you stale tasks. It is not an offline app
+either — the cached shell points at the app's JavaScript bundles, which the worker
+deliberately does not cache, so launching out of range works only while your
+browser still has those in its own cache. Assume you need the server.
+
 ## Enable AI features (optional)
 
 Copy `server/.env.example` to `server/.env` and set `ANTHROPIC_API_KEY` (get one at

@@ -23,13 +23,14 @@ const PAGE = `<!doctype html>
   h1 { font-size: 1.4rem; margin-bottom: 0.35rem; }
   p.hint { color: #9aa0b0; font-size: 0.85rem; margin-bottom: 1.25rem; }
   label { display: block; text-align: left; font-size: 0.85rem; color: #9aa0b0; margin-bottom: 0.35rem; }
+  /* min-height 44px: comfortable touch targets on the phone (#193). */
   input {
-    width: 100%; padding: 0.55rem 0.7rem; border-radius: 8px;
+    width: 100%; min-height: 44px; padding: 0.55rem 0.7rem; border-radius: 8px;
     background: #12141a; color: #e8eaf0; border: 1px solid #2c3040; font-size: 1rem;
   }
   input:focus { outline: 2px solid #4f8cff; outline-offset: -1px; }
   button {
-    width: 100%; margin-top: 0.85rem; padding: 0.55rem; border-radius: 8px;
+    width: 100%; min-height: 44px; margin-top: 0.85rem; padding: 0.55rem; border-radius: 8px;
     background: #4f8cff; color: #fff; border: 1px solid #4f8cff;
     font-size: 1rem; cursor: pointer;
   }

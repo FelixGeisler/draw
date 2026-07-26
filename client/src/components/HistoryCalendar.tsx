@@ -224,19 +224,29 @@ export function HistoryCalendar() {
     if (!anchor) return;
     const cellRect = anchor.getBoundingClientRect();
     const sectionRect = section.getBoundingClientRect();
-    const ovW = overlay.offsetWidth;
-    const ovH = overlay.offsetHeight;
     const margin = 8;
     const gap = 8;
     const vw = document.documentElement.clientWidth;
     const vh = window.innerHeight;
+    // On a phone the sidenav is a FIXED bottom bar (index.css, #193) that paints
+    // over this panel (z-index 80 vs 50), so the strip it covers is not usable
+    // space: its measured height (padding and safe-area inset included) becomes
+    // the effective bottom edge for both the height cap and the clamp below.
+    // Zero on desktop, where the nav is a static sidebar. Written BEFORE the
+    // measurement so offsetHeight already reflects the tighter cap.
+    const nav = overlay.ownerDocument.querySelector<HTMLElement>(".sidenav");
+    const bottomInset =
+      nav && getComputedStyle(nav).position === "fixed" ? nav.getBoundingClientRect().height : 0;
+    overlay.style.setProperty("--cal-detail-bottom-inset", `${bottomInset}px`);
+    const ovW = overlay.offsetWidth;
+    const ovH = overlay.offsetHeight;
     // Centre over the tile, then clamp inside the viewport (the edge-flip).
     let vLeft = cellRect.left + cellRect.width / 2 - ovW / 2;
     vLeft = Math.max(margin, Math.min(vLeft, vw - margin - ovW));
     // Prefer above the tile; drop below if that would run off the top edge.
     let vTop = cellRect.top - gap - ovH;
     if (vTop < margin) vTop = cellRect.bottom + gap;
-    vTop = Math.max(margin, Math.min(vTop, vh - margin - ovH));
+    vTop = Math.max(margin, Math.min(vTop, vh - margin - bottomInset - ovH));
     setPos({ left: vLeft - sectionRect.left, top: vTop - sectionRect.top });
   }, [activeKey]);
 

@@ -111,7 +111,7 @@ function GoalCard({
             setEditing(false);
           }}
         >
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
               autoFocus
               title="Goal title"
@@ -127,7 +127,7 @@ function GoalCard({
               onChange={(e) => setEditDate(e.target.value)}
             />
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
               title="Goal outcome"
               placeholder="How is success measured? — e.g. written exam, 60% to pass, past papers available"
@@ -219,8 +219,10 @@ function GoalCard({
           )}
         </>
       )}
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
-        <div style={{ flex: 1, background: "var(--bg)", borderRadius: 6, height: 8 }}>
+      {/* flexWrap: five buttons plus the AI select overflow a phone; the
+          progress bar keeps flex:1 and simply takes the first line (#193). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 120px", background: "var(--bg)", borderRadius: 6, height: 8 }}>
           <div
             style={{
               width: `${progress * 100}%`,
@@ -351,12 +353,12 @@ export function GoalsPage() {
             setTargetDate("");
           }}
         >
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
               placeholder="Goal — e.g. Pass the statistics exam"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              style={{ flex: 1 }}
+              style={{ flex: "1 1 200px" }}
             />
             <input
               type="date"
@@ -365,12 +367,12 @@ export function GoalsPage() {
               title="Target date"
             />
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <input
               placeholder="How is success measured? — e.g. written exam, 60% to pass, past papers available"
               value={outcome}
               onChange={(e) => setOutcome(e.target.value)}
-              style={{ flex: 1 }}
+              style={{ flex: "1 1 200px" }}
             />
             <button type="submit" className="primary">
               Add goal

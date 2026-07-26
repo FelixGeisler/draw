@@ -32,6 +32,13 @@
   padding: 22px 30px 34px;
 }
 
+/* Phone (#193): the case keeps its light, just less furniture around it. */
+@media (max-width: 640px) {
+  .goal-cabinet {
+    padding: 16px 14px 26px;
+  }
+}
+
 .goal-cabinet::before {
   content: "";
   position: absolute;

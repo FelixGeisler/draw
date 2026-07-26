@@ -41,7 +41,11 @@ export default function App() {
             <span className="nav-ico" aria-hidden="true">
               {item.icon}
             </span>
-            {item.label}
+            {/* The label is its own element so the phone tab bar can ellipsis it
+                (#193): a bare text node is an anonymous flex item and cannot be
+                styled, and glyph widths differ per platform, so an unclippable
+                label can widen the whole document. */}
+            <span className="nav-label">{item.label}</span>
           </NavLink>
         ))}
       </nav>

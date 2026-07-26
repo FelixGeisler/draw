@@ -94,6 +94,12 @@ textarea {
   padding: 8px 10px;
 }
 
+/* A native select sizes to its widest option — a long task or goal title
+   would otherwise force the whole page wider than a phone screen (#193). */
+select {
+  max-width: 100%;
+}
+
 input:focus,
 select:focus,
 textarea:focus {
@@ -166,6 +172,36 @@ textarea:focus {
   margin: 0 auto;
 }
 
+/* Gamification header (#193: styles live here, not inline, so the phone
+   block below can compact them). */
+.gami-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+/* Running-timer strip — same deal as the header. */
+.timer-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  background: rgba(79, 140, 255, 0.12);
+  border-bottom: 1px solid var(--accent);
+}
+
+/* The task title takes the strip's elastic share. The flex value lives HERE,
+   not inline on the element, because the phone rule below has to replace it:
+   `flex: 1` means basis 0, which squeezes the title to a few characters and
+   wraps its text into a tower instead of wrapping the strip (#193). */
+.timer-title {
+  flex: 1;
+  min-width: 0;
+}
+
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -189,6 +225,197 @@ textarea:focus {
   height: 10px;
   border-radius: 50%;
   display: inline-block;
+}
+
+/* Task row (TaskRow.tsx keeps the rest of its box inline). The gap lives here
+   because it has to be overridable: an inline `gap` shorthand would beat the
+   phone block's `row-gap`, leaving wrapped rows 10px apart instead of 4 (#193). */
+.task-row {
+  gap: 10px;
+}
+
+/* ---- Phone layout (#193) ------------------------------------------------
+   ONE width breakpoint for the whole client: 640px — its first and only width
+   query (before #193 every @media in the client was prefers-reduced-motion, and
+   this file had none at all).
+   Four component stylesheets hang their own phone rules off the same query
+   (TaskDnd, AchievementToast, GoalShelf, HistoryCalendar) — extend it, don't
+   invent new thresholds. DrawPage.css needs no query: its action row wraps
+   unconditionally, which is invisible on desktop because the buttons fit.
+   The visual identity is untouched: the same cards, colors and type, adapted
+   to a single column with a thumb-reachable bottom nav. */
+@media (max-width: 640px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  /* .main and .content are flex items of .layout, and a flex item defaults to
+     min-width: auto — its MIN-CONTENT width. So a single child that will not
+     shrink (a long button label, a user-named category) widens these boxes past
+     the viewport, the document scrolls sideways, and the fixed nav stretches
+     with the layout viewport. Whether it happens at all depends on platform text
+     metrics, which is why it surfaced only on the Linux CI: /settings overflowed
+     by 38px there while fitting on Windows. min-width: 0 lets them shrink to the
+     phone, so the children wrap or ellipsis instead. */
+  .main,
+  .content {
+    min-width: 0;
+  }
+
+  /* The sidenav becomes a fixed bottom tab bar: icon over label, one flex
+     share per entry (5 entries, 6 with the Assistant). z-index sits above
+     page chrome (dnd overlays top out at 40) but below the fullscreen
+     focus/victory overlays (90) and the achievement toast (100) — focus mode
+     intentionally covers the nav. */
+  .sidenav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 80;
+    width: auto;
+    flex-direction: row;
+    gap: 0;
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px));
+    border-right: none;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .sidenav .brand {
+    display: none;
+  }
+
+  .sidenav a {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-height: 48px;
+    padding: 4px 2px;
+    font-size: 11px;
+  }
+
+  .sidenav .nav-ico {
+    width: auto;
+    font-size: 20px;
+  }
+
+  /* Keep scrolled content clear of the fixed bar. */
+  .main {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .content {
+    padding: 16px 12px;
+  }
+
+  .gami-header {
+    gap: 10px;
+    padding: 8px 12px;
+  }
+
+  .timer-bar {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 8px 12px;
+  }
+
+  /* A basis wide enough to claim the whole first row (minus the ⏱ glyph and
+     its gap) — clock, estimate and buttons wrap underneath. The title stays
+     ONE ellipsised line, so this fixed top strip has a bounded height however
+     long the task name is; the full title is on the card and the tasks list. */
+  .timer-title {
+    flex: 1 1 calc(100% - 40px);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  /* Touch ergonomics: ~44px targets for the controls fingers actually hit.
+     Checkbox/radio/color keep their compact boxes (blowing them up distorts
+     rows), and the art-regen corner button keeps its 30px circle. */
+  button:not(.draw-art-regen) {
+    min-height: 44px;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  select {
+    min-height: 44px;
+  }
+
+  /* Task rows wrap instead of forcing the page wider: title line first, the
+     action buttons flow onto the next line(s). The wrapped rows sit tighter
+     than the 10px column gap — see .task-row above for why that gap is not
+     inline. */
+  .task-row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+
+  /* Settings rows (SettingsPage.tsx): a 280px label plus its control plus the
+     hint text do not fit a phone, so they stack THERE — on desktop each row
+     stays the single line it has always been. */
+  .setting-row {
+    flex-wrap: wrap;
+  }
+
+  /* Wrapping is not enough for a control that refuses to shrink. A flex item
+     defaults to min-width: auto, i.e. its min-CONTENT width, and a file input's
+     min-content width is its platform-drawn button plus the file name — text we
+     do not author and whose width differs per platform (it overflowed 360px by
+     38px on the Linux CI while fitting on Windows). min-width: 0 lets these
+     shrink to the row instead of pushing the document sideways. */
+  .setting-row input,
+  .setting-row select,
+  .setting-row button {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /* Text that must never widen the document. The tab labels and a user-named
+     category are the two strings on a phone whose rendered width we do not
+     control — glyph and emoji metrics differ per platform, and an unclippable
+     string paints past its box and grows the page even when the box itself
+     shrank. Clipping with an ellipsis is the normal tab-bar treatment and keeps
+     the invariant true on any platform. */
+  .sidenav a {
+    overflow: hidden;
+  }
+
+  .nav-label,
+  .cat-name {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .setting-row {
+    min-width: 0;
+  }
+
+  /* A file input is the stubborn case: it cannot reflow its internals, so
+     min-width alone only shrinks the BOX while the platform-drawn button and
+     file name keep painting past it — visible overflow that still widens the
+     document. Give it the whole row and a smaller font (its intrinsic width
+     follows its text), which is what actually makes it fit. */
+  .backup-file {
+    flex-basis: 100%;
+    font-size: 12px;
+    /* Its internals still measure wider than the box on some platforms, and
+       visible overflow would leak back into the page width — clip it. The tail
+       being hidden is the file name, which the control redraws on selection. */
+    overflow: hidden;
+  }
+}
+
+/* Backup restore picker (SettingsPage.tsx): the desktop cap that used to be an
+   inline style, moved here so the phone rule in the 640px query can win. */
+.backup-file {
+  max-width: 380px;
 }
 
 /* The category pill (#123, keeping #120's computed ink): background is the

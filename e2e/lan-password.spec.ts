@@ -71,7 +71,15 @@ test.afterAll(async () => {
     await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
   }
   if (dataDir) {
-    fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 3 });
+    // Best-effort: on Windows the just-killed server can still hold the SQLite
+    // file for a moment, and rmSync then throws EPERM. That is a cleanup race,
+    // not a product failure — an orphaned temp dir must not fail a green spec
+    // (the OS reclaims it), so swallow it after the retries.
+    try {
+      fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // leave it to the OS
+    }
   }
 });
 

@@ -24,7 +24,11 @@ function SettingInput({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
   });
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    // setting-row: the 280px label plus input plus hint overflow a phone, so
+    // index.css wraps these rows inside the 640px query — an inline flexWrap
+    // would have wrapped them on desktop too, where they have always been one
+    // line (#193).
+    <label className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <span style={{ width: 280 }}>{label}</span>
       <input
         type="number"
@@ -90,9 +94,15 @@ function StreakSection() {
   return (
     <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
       <h3 style={{ margin: 0 }}>Streak</h3>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ width: 280 }}>Rest weekdays</span>
-        <div role="group" aria-label="Rest weekdays" style={{ display: "flex", gap: 4 }}>
+        {/* Seven day buttons at finger size need two lines on a phone. */}
+        <div
+          role="group"
+          aria-label="Rest weekdays"
+          className="setting-row"
+          style={{ display: "flex", gap: 4 }}
+        >
           {WEEKDAYS.map(({ day, label }) => {
             const active = current.includes(day);
             return (
@@ -116,7 +126,7 @@ function StreakSection() {
           days that never break the streak — completing on one still counts
         </span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <span style={{ width: 280 }}>Freezes banked</span>
         <span style={{ fontWeight: 700 }}>
           🧊 {g ? `${g.freezesBanked}/${g.freezeBankCap}` : "…"}
@@ -165,7 +175,7 @@ function AiKeySection() {
           backward planning — no restart needed. Everything else works without it.
         </p>
       )}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div className="setting-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
           type="password"
           aria-label="Claude API key"
@@ -241,9 +251,13 @@ function BackupSection() {
           ⬇ Download backup
         </a>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div className="setting-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
           ref={fileInput}
+          // The width lives in index.css, not inline: a file input cannot reflow
+          // its internals, so on a phone it needs to own the row and shrink its
+          // font — an inline max-width would outrank that rule (#193).
+          className="backup-file"
           type="file"
           accept=".zip"
           aria-label="Backup archive"
@@ -254,7 +268,7 @@ function BackupSection() {
             setSummary(null);
             importBackup.reset();
           }}
-          style={{ flex: 1, maxWidth: 380 }}
+          style={{ flex: 1 }}
         />
         <button disabled={!file || armed} onClick={() => setArmed(true)}>
           Restore from backup
@@ -279,7 +293,7 @@ function BackupSection() {
             <code>app.db.bak</code> (and the material files as <code>files.bak</code>) in case
             you need to go back.
           </p>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div className="setting-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <input
               aria-label="Type REPLACE to confirm"
               placeholder="Type REPLACE to confirm"
@@ -354,7 +368,7 @@ function CategoryRow({ category }: { category: Category }) {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
       <input
         type="color"
         title={`Change color of ${category.name}`}
@@ -382,6 +396,7 @@ function CategoryRow({ category }: { category: Category }) {
         />
       ) : (
         <span
+          className="cat-name"
           style={{ flex: 1, cursor: "pointer" }}
           title="Click to rename"
           onClick={() => {
@@ -468,7 +483,10 @@ export function SettingsPage() {
         {categories.data?.map((c) => (
           <CategoryRow key={c.id} category={c} />
         ))}
-        <div style={{ display: "flex", gap: 8 }}>
+        {/* setting-row, like the category rows above it: without it this row
+            neither wraps on a phone nor drops its grid-item min-width: auto, so
+            its three controls set a floor wider than a 360px screen (#193). */}
+        <div className="setting-row" style={{ display: "flex", gap: 8 }}>
           <input
             placeholder="New category"
             value={newCat}

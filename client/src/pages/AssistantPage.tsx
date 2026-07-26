@@ -342,8 +342,8 @@ export function AssistantPage() {
               ),
             )}
           </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <span style={{ flex: 1, fontSize: 12, color: "var(--text-dim)" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ flex: "1 1 200px", fontSize: 12, color: "var(--text-dim)" }}>
               Unchecked rows and rows with an empty title are skipped; dropping a draft parent
               drops its subtasks.
             </span>
@@ -359,7 +359,10 @@ export function AssistantPage() {
       )}
 
       {gated ? (
-        <div className="panel" style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13 }}>
+        <div
+          className="panel"
+          style={{ display: "flex", gap: 10, alignItems: "center", fontSize: 13, flexWrap: "wrap" }}
+        >
           <span>
             First message: ~{gated.inputTokens.toLocaleString()} input tokens ≈ $
             {gated.estimatedUsd.toFixed(3)}
