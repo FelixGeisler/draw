@@ -2,7 +2,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveApiPort, resolveHost, resolvePassword } from "./config.js";
+import { resolveApiPort, resolveHost, resolvePassword, resolveTrustProxy } from "./config.js";
 import { startServer } from "./server.js";
 
 // Production entry (#189, ADR-49): the same API as dev plus the built client,
@@ -35,4 +35,12 @@ if (password) {
   console.log("[server] password protection enabled (DRAW_PASSWORD)");
 }
 
-startServer(resolveApiPort(), { clientDir, host: resolveHost(), password });
+// TRUST_PROXY makes req.ip the de-proxied client so the login limiter keys on
+// the real LAN client behind a reverse proxy (ADR-50). Prod-entry only, like
+// HOST — dev never sits behind a proxy.
+startServer(resolveApiPort(), {
+  clientDir,
+  host: resolveHost(),
+  password,
+  trustProxy: resolveTrustProxy(),
+});

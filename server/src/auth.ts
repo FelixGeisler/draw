@@ -108,6 +108,20 @@ export class LoginRateLimiter {
   }
 }
 
+/**
+ * Is this the loopback host? The effective client address is `req.ip`, which
+ * Express de-proxies when `trust proxy` is configured (ADR-50): a same-host
+ * MCP adapter or the in-process assistant connects over 127.0.0.1 with no
+ * `X-Forwarded-For`, so it stays loopback, while a LAN client arriving
+ * through a same-host reverse proxy resolves to its real forwarded address.
+ * The whole 127.0.0.0/8 block and IPv6 `::1` (incl. the IPv4-mapped form).
+ */
+export function isLoopbackAddress(ip: string | undefined): boolean {
+  if (!ip) return false;
+  const normalized = ip.startsWith("::ffff:") ? ip.slice(7) : ip;
+  return normalized === "::1" || /^127\./.test(normalized);
+}
+
 /** Minimal cookie-header parse — one cookie of our own making, no dependency. */
 export function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = {};
@@ -127,10 +141,20 @@ export interface AuthHandlers {
   gate: RequestHandler;
 }
 
-export function createAuth(
-  password: string,
-  limiter: LoginRateLimiter = new LoginRateLimiter(),
-): AuthHandlers {
+export interface CreateAuthOptions {
+  limiter?: LoginRateLimiter;
+  /**
+   * Password comparator, injectable so a test can prove the login and header
+   * checks route through the constant-time path (a regression to `===` fails
+   * that test). Defaults to the timing-safe compare — production never passes
+   * anything else.
+   */
+  compare?: (a: string, b: string) => boolean;
+}
+
+export function createAuth(password: string, options: CreateAuthOptions = {}): AuthHandlers {
+  const limiter = options.limiter ?? new LoginRateLimiter();
+  const compare = options.compare ?? timingSafeEqualStrings;
   const key = deriveSessionKey(password);
 
   const rejectLimited = (res: Response, retryAfterMs: number) => {
@@ -140,44 +164,68 @@ export function createAuth(
       .json({ error: "too many failed attempts — try again later" });
   };
 
-  const loginHandler: RequestHandler = (req, res) => {
-    const ip = req.ip ?? "unknown";
-    const decision = limiter.check(ip);
-    if (!decision.allowed) {
-      rejectLimited(res, decision.retryAfterMs);
-      return;
-    }
-    const submitted = (req.body as { password?: unknown } | undefined)?.password;
-    if (typeof submitted === "string" && timingSafeEqualStrings(submitted, password)) {
-      limiter.recordSuccess(ip);
-      res.cookie(SESSION_COOKIE, signSession(key, Date.now() + SESSION_TTL_MS), {
-        httpOnly: true,
-        sameSite: "lax",
-        maxAge: SESSION_TTL_MS,
-        path: "/",
-        // No `secure` flag: the LAN deployment is plain HTTP by design —
-        // TLS is a reverse proxy's job (ADR-50 threat model).
-      });
-      res.status(204).end();
-      return;
-    }
-    limiter.recordFailure(ip);
-    res.status(401).json({ error: "invalid password" });
+  const issueSession = (res: Response) => {
+    res.cookie(SESSION_COOKIE, signSession(key, Date.now() + SESSION_TTL_MS), {
+      httpOnly: true,
+      sameSite: "lax",
+      maxAge: SESSION_TTL_MS,
+      path: "/",
+      // No `secure` flag: the LAN deployment is plain HTTP by design —
+      // TLS is a reverse proxy's job (ADR-50 threat model).
+    });
+    res.status(204).end();
   };
 
-  const gate: RequestHandler = (req, res, next) => {
-    // Shared-secret header first (MCP, scripts). Rate-limited like the login
-    // form — otherwise the header would be an unthrottled brute-force
-    // channel around the login limiter.
-    const headerSecret = req.get(PASSWORD_HEADER);
-    if (headerSecret !== undefined) {
-      const ip = req.ip ?? "unknown";
+  const loginHandler: RequestHandler = (req, res) => {
+    // Loopback clients are inside the trust boundary (a browser on the host
+    // itself) — never throttled, never counted (ADR-50). `req.ip` is the
+    // de-proxied client, so a LAN browser through a same-host proxy is still
+    // non-loopback and stays throttled per real IP.
+    const trusted = isLoopbackAddress(req.ip);
+    const ip = req.ip ?? "unknown";
+    if (!trusted) {
       const decision = limiter.check(ip);
       if (!decision.allowed) {
         rejectLimited(res, decision.retryAfterMs);
         return;
       }
-      if (timingSafeEqualStrings(headerSecret, password)) {
+    }
+    const submitted = (req.body as { password?: unknown } | undefined)?.password;
+    if (typeof submitted === "string" && compare(submitted, password)) {
+      if (!trusted) limiter.recordSuccess(ip);
+      issueSession(res);
+      return;
+    }
+    if (!trusted) limiter.recordFailure(ip);
+    res.status(401).json({ error: "invalid password" });
+  };
+
+  const gate: RequestHandler = (req, res, next) => {
+    const trusted = isLoopbackAddress(req.ip);
+    const ip = req.ip ?? "unknown";
+
+    // Shared-secret header first (MCP, scripts, the in-process assistant).
+    const headerSecret = req.get(PASSWORD_HEADER);
+    if (headerSecret !== undefined) {
+      // Loopback header clients present the real secret from inside the trust
+      // boundary: they must neither trip nor RESET the brute-force counter
+      // (an in-process self-request must not wipe an attacker's tally — the
+      // #190 review's finding B). Non-loopback header presentations are a LAN
+      // brute-force channel and are throttled exactly like the login form.
+      if (trusted) {
+        if (compare(headerSecret, password)) {
+          next();
+          return;
+        }
+        res.status(401).json({ error: "invalid password" });
+        return;
+      }
+      const decision = limiter.check(ip);
+      if (!decision.allowed) {
+        rejectLimited(res, decision.retryAfterMs);
+        return;
+      }
+      if (compare(headerSecret, password)) {
         limiter.recordSuccess(ip);
         next();
         return;
@@ -187,13 +235,16 @@ export function createAuth(
       return;
     }
 
+    // A present-but-invalid or expired cookie is aging, not attacking: it is
+    // deliberately NOT counted against the limiter (only the header path
+    // records), so an owner whose cookie lapsed can never be locked out.
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (token && verifySession(key, token)) {
       next();
       return;
     }
 
-    // No credential presented. The API namespace answers JSON (matching the
+    // No valid credential. The API namespace answers JSON (matching the
     // case-insensitive /api mounts); a browser page view gets the login
     // page — with a 401 status, so nothing unauthenticated ever reads as OK.
     if (/^\/api(\/|$)/i.test(req.path)) {

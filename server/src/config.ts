@@ -33,3 +33,26 @@ export function resolvePassword(env: NodeJS.ProcessEnv = process.env): string | 
   const password = env.DRAW_PASSWORD?.trim();
   return password || undefined;
 }
+
+// TRUST_PROXY (#190, ADR-50): what Express's `trust proxy` setting should be,
+// which is what makes `req.ip` the DE-PROXIED client address behind a reverse
+// proxy — the address the login rate limiter keys on. Off by default (direct
+// binding trusts nobody). Behind a same-host TLS proxy, leaving this unset
+// makes every request look like it came from the proxy (loopback), collapsing
+// per-IP throttling — hence the knob. Accepts the shapes Express does:
+//   - "true"/"false"  → boolean
+//   - a whole number  → trusted hop count (e.g. "1" for one proxy)
+//   - anything else    → passed through: a subnet/CSV list or a preset name
+//                        like "loopback" (the recommended same-host setting).
+// Prefer "loopback" or a hop count over "true": trusting every hop lets a LAN
+// client spoof X-Forwarded-For to forge its address.
+export function resolveTrustProxy(
+  env: NodeJS.ProcessEnv = process.env,
+): boolean | number | string {
+  const raw = env.TRUST_PROXY?.trim();
+  if (!raw) return false;
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  return raw;
+}

@@ -33,6 +33,13 @@ export interface AppOptions {
    * Unset: no auth anywhere — behavior identical to before #190.
    */
   password?: string;
+  /**
+   * Value for Express's `trust proxy` setting (#190, ADR-50). Makes `req.ip`
+   * the de-proxied client address so the login rate limiter keys on the real
+   * LAN client behind a reverse proxy, not the proxy itself. Falsy/unset
+   * leaves Express's default (trust nobody).
+   */
+  trustProxy?: boolean | number | string;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -40,6 +47,11 @@ export function createApp(options: AppOptions = {}) {
   // No framework fingerprint — LAN exposure is a supported configuration
   // since #189.
   app.disable("x-powered-by");
+  // Behind a reverse proxy (ADR-50), de-proxy req.ip so the login limiter
+  // throttles the real client, not the proxy. Off unless configured.
+  if (options.trustProxy) {
+    app.set("trust proxy", options.trustProxy);
+  }
   app.use(express.json());
 
   // Boot hygiene (#103): drop temp artifacts a previous run was killed before
