@@ -1,19 +1,34 @@
+import { PASSWORD_HEADER } from "../auth.js";
 import { ApiUnreachableError, type ApiClient, type ApiResponse } from "./catalog.js";
 
 /**
  * Live ApiClient for the tool catalog: plain fetch against the local Draw
  * API (loopback only — arc42 section 2). No MCP or Anthropic imports here
  * either; the MCP binding lives in src/mcpServer.ts.
+ *
+ * `password` (#190, ADR-50): a protected instance accepts the shared secret
+ * as a header equivalently to the browser's session cookie — a stdio adapter
+ * has no cookie jar. Unset against an unprotected instance = no header.
  */
 export class HttpApiClient implements ApiClient {
-  constructor(readonly baseUrl: string) {}
+  constructor(
+    readonly baseUrl: string,
+    private readonly password?: string,
+  ) {}
+
+  private headers(extra?: Record<string, string>): Record<string, string> | undefined {
+    const headers = { ...(this.password ? { [PASSWORD_HEADER]: this.password } : {}), ...extra };
+    return Object.keys(headers).length > 0 ? headers : undefined;
+  }
 
   async request(method: "GET" | "POST" | "PATCH", path: string, body?: unknown): Promise<ApiResponse> {
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}${path}`, {
         method,
-        headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+        headers: this.headers(
+          body !== undefined ? { "content-type": "application/json" } : undefined,
+        ),
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
     } catch {
@@ -37,7 +52,7 @@ export class HttpApiClient implements ApiClient {
   ): Promise<{ status: number; bytes: Uint8Array; contentType: string | null }> {
     let res: Response;
     try {
-      res = await fetch(`${this.baseUrl}${path}`);
+      res = await fetch(`${this.baseUrl}${path}`, { headers: this.headers() });
     } catch {
       throw new ApiUnreachableError(this.baseUrl);
     }

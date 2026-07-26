@@ -2204,3 +2204,114 @@ production entry keeps the opt-in deliberate — an ambient `HOST` export in a
 shell profile must not silently move the auth-less dev API off loopback (the
 same ambient-injection class that keeps `PORT` ignored). Draw still has no
 auth — that gap is #190's password gate, a release requirement for 1.0.0.
+
+== ADR-50: Optional LAN password gate — one env shared secret, HMAC-signed session cookie, header for MCP; a deliberate amendment of the "no auth" guardrail
+
+*Context:* The "no auth" guardrail (section 2) was calibrated to a
+loopback-only app. ADR-49 made LAN exposure a supported configuration
+(`HOST=0.0.0.0` for the 1.0.0 container, #191), and behind that listener sit
+the user's entire task history *and the Anthropic API key* — stored in the
+settings DB and readable via `GET /api/settings` and the Settings UI. Anyone
+on the network could take both. 1.0.0 needs opt-in access protection that
+leaves the localhost experience untouched (#190).
+
+*Decision:* A single shared secret from the `DRAW_PASSWORD` env var switches
+the gate on; unset (the default) means no auth anywhere — byte-for-byte the
+pre-#190 behavior. When set, `createApp()` mounts a blanket middleware behind
+exactly two openings: `GET /api/health` and `POST /api/auth/login`. Every
+other request needs one of two equivalent credentials:
+
+* *Session cookie* (browsers): the server-rendered login page
+  (`loginPage.ts` — the React client is untouched) POSTs the password; a
+  correct one sets `draw_session`, an `HttpOnly`/`SameSite=Lax` cookie
+  holding an HMAC-SHA256-signed expiry token. *Session lifetime: 30 days*
+  (`SESSION_TTL_MS`), after which the next request lands on the login page
+  again. The signing key is derived from the password itself
+  (`scryptSync(password, fixed salt)`).
+* *Shared-secret header* (`x-draw-password`, non-browser clients): the MCP
+  adapter sends it when its own env carries `DRAW_PASSWORD` — both processes
+  read the same `server/.env`, and the committed `.mcp.json` stays
+  secret-free.
+
+All password comparisons are constant-time (`timingSafeEqual` over SHA-256
+digests). Failed presentations — login body or header, which would otherwise
+be an unthrottled side channel — are rate-limited per client IP: 5 failures
+per 15 minutes, then 429 with `Retry-After`. Two refinements make that
+per-IP guarantee real (both from the #190 security review):
+
+* *The limiter keys on the de-proxied client.* The key is `req.ip`. Behind
+  the recommended reverse proxy every request's socket peer is the proxy, so
+  `req.ip` would collapse to one shared bucket (one attacker could then
+  429-lock the owner out) unless Express's `trust proxy` is set — hence the
+  `TRUST_PROXY` env var (production entry only; accepts a preset like
+  `loopback`, a hop count, or a subnet list).
+* *The HEADER path exempts loopback; the login FORM never does.* A header
+  request whose de-proxied `req.ip` is loopback is the host itself — the
+  in-process assistant (ADR-37) or a same-host MCP adapter, presenting the
+  *real* secret — so it is inside the trust boundary and skips the limiter
+  entirely (it neither trips it nor resets another client's tally: finding B).
+  The login form gets no such exemption: no trusted client ever POSTs to it,
+  so a loopback carve-out there would have no legitimate user and would hand a
+  misconfigured same-host proxy (`TRUST_PROXY` unset → every `req.ip`
+  loopback) unlimited brute-force against the shared password. The form is
+  therefore always throttled, keyed on `req.ip`.
+* *A present-but-invalid or expired cookie is aging, not attacking.* Only the
+  header path records failures; a lapsed or tampered cookie is never counted,
+  so an owner whose session expired can never be throttled out.
+
+Unauthenticated `/api` requests get a JSON 401; page views get the login page
+with a 401 status. Like `HOST`, only the production entry consumes
+`DRAW_PASSWORD` and `TRUST_PROXY`.
+
+*Rationale:*
+
+* *Amending the guardrail, minimally.* "No auth" stays true in spirit: no
+user accounts, no roles, no OAuth, no secret in the database. One shared
+secret is the smallest mechanism that closes the LAN gap ADR-49 opened, and
+off-by-default keeps every existing setup identical. The constraint row in
+section 2 now names this exception.
+* *Env, never the settings DB.* The DB is the thing the password protects —
+storing the secret there would be a bootstrapping paradox and would expose it
+through the very settings API it guards.
+* *`node:crypto` over a session dependency.* A stateless signed-expiry token
+needs no store and no `express-session`/`cookie-parser` (the one cookie is
+parsed by hand) — in line with the dependency-security policy and the ~6
+runtime-deps guardrail. Deriving the signing key from the password means
+sessions survive restarts, rotating the password revokes every cookie, and
+forging a token requires the password itself — which already *is* the
+credential, so there is no second secret to manage.
+* *`/api/health` stays open.* Playwright's `webServer` pre-flight and the
+container healthcheck (#191) poll it before anyone can log in; it leaks only
+liveness and the server clock.
+* *Prod-entry-only, like `HOST` (the ambient-injection class).* `npm run dev`
+serves the client through Vite, which the gate could never cover — an
+exported `DRAW_PASSWORD` in a dev shell would half-lock dev (API 401s, no
+login page) while protecting nothing loopback doesn't already.
+* *Threat model — what this protects and what it does not.* It protects the
+API key and task data against *casual LAN access* (roommates, guest-Wi-Fi
+devices, IoT). It does **not** protect against an on-path attacker: the
+deployment is plain HTTP, so password and cookie travel in cleartext, and
+`Secure` is deliberately not set on the cookie. TLS is explicitly out of
+scope for Draw itself — users who need it should terminate HTTPS in a reverse
+proxy (Caddy, Traefik, nginx) in front of `API_PORT`. **Anyone deploying
+behind such a proxy must set `TRUST_PROXY`** (e.g. `loopback` for a same-host
+proxy): leaving it unset makes every request look like it came from the proxy,
+so the rate limiter can no longer tell clients apart — it degrades to a single
+shared bucket, i.e. effectively off. Prefer `loopback` or a hop count over
+`true`: trusting *every* forwarded hop lets a LAN client spoof
+`X-Forwarded-For` to forge its rate-limit key. Residual owner-lockout risk:
+clients that genuinely share one source IP (several devices behind one NAT)
+share a bucket, so one bad actor there can throttle the others for up to 15
+minutes — accepted for a single-secret LAN tool; the fixed window was kept
+over a progressive per-attempt delay for its simplicity. Where loopback trust
+holds and where it doesn't: it is safe in both *supported* deployments —
+direct LAN (no proxy, so `req.ip` is the real, unforgeable socket peer) and a
+reverse proxy *with `TRUST_PROXY` set* (so `req.ip` is the de-proxied client).
+It degrades only in the misconfiguration the docs already warn against — a
+same-host proxy with `TRUST_PROXY` unset — and even then the exposure is
+narrow: every `req.ip` reads as loopback, so the HEADER path's loopback
+exemption makes non-browser (`x-draw-password`) brute-force unthrottled, while
+the browser login FORM stays throttled regardless of proxy config (it has no
+loopback exemption). Setting `TRUST_PROXY` closes even that gap. The in-memory
+limiter resets on restart, which is acceptable because restarting is an owner
+action, not an attacker's.

@@ -1,5 +1,6 @@
 import path from "node:path";
 import express from "express";
+import { createAuth } from "./auth.js";
 import { tasksRouter } from "./routes/tasks.js";
 import { categoriesRouter } from "./routes/categories.js";
 import { settingsRouter } from "./routes/settings.js";
@@ -25,6 +26,20 @@ export interface AppOptions {
    * Dev keeps this unset: Vite serves the client and proxies /api here.
    */
   clientDir?: string;
+  /**
+   * Shared secret for the optional LAN password gate (#190, ADR-50). When
+   * set, every /api route and static asset requires a session cookie or the
+   * x-draw-password header; only /api/health and the login route stay open.
+   * Unset: no auth anywhere — behavior identical to before #190.
+   */
+  password?: string;
+  /**
+   * Value for Express's `trust proxy` setting (#190, ADR-50). Makes `req.ip`
+   * the de-proxied client address so the login rate limiter keys on the real
+   * LAN client behind a reverse proxy, not the proxy itself. Falsy/unset
+   * leaves Express's default (trust nobody).
+   */
+  trustProxy?: boolean | number | string;
 }
 
 export function createApp(options: AppOptions = {}) {
@@ -32,6 +47,11 @@ export function createApp(options: AppOptions = {}) {
   // No framework fingerprint — LAN exposure is a supported configuration
   // since #189.
   app.disable("x-powered-by");
+  // Behind a reverse proxy (ADR-50), de-proxy req.ip so the login limiter
+  // throttles the real client, not the proxy. Off unless configured.
+  if (options.trustProxy) {
+    app.set("trust proxy", options.trustProxy);
+  }
   app.use(express.json());
 
   // Boot hygiene (#103): drop temp artifacts a previous run was killed before
@@ -44,9 +64,21 @@ export function createApp(options: AppOptions = {}) {
     console.log(`[backup] swept ${swept.length} orphaned temp artifact(s): ${swept.join(", ")}`);
   }
 
+  // Deliberately ABOVE the password gate: Playwright's webServer pre-flight
+  // and the container healthcheck (#191) poll it before anyone can log in,
+  // and it leaks nothing but liveness and the server clock (ADR-50).
   app.get("/api/health", (_req, res) => {
     res.json({ ok: true, time: new Date().toISOString() });
   });
+
+  // Password gate (#190, ADR-50): the login route first (it must stay
+  // reachable), then the gate as blanket middleware — everything mounted
+  // below, /api routers and static client alike, requires a credential.
+  if (options.password) {
+    const { loginHandler, gate } = createAuth(options.password);
+    app.post("/api/auth/login", loginHandler);
+    app.use(gate);
+  }
 
   app.use("/api/tasks", tasksRouter);
   app.use("/api/categories", categoriesRouter);
@@ -69,8 +101,9 @@ export function createApp(options: AppOptions = {}) {
   // The assistant's READ tools (#31, ADR-37) execute through the app's own
   // HTTP surface — a lazy private loopback listener on THIS app instance, so
   // every domain invariant and derived payload holds by construction (the
-  // ADR-19 argument), with or without a public listener (supertest).
-  bindAgentToolApi(new InProcessApiClient(app));
+  // ADR-19 argument), with or without a public listener (supertest). The
+  // gate's secret rides along: self-requests must pass the gate too (#190).
+  bindAgentToolApi(new InProcessApiClient(app, options.password));
 
   // The API namespace speaks JSON — including its 404s: an unknown /api path
   // must never read as HTML, with or without a client mounted below. After

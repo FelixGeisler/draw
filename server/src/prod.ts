@@ -2,7 +2,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveApiPort, resolveHost } from "./config.js";
+import { resolveApiPort, resolveHost, resolvePassword, resolveTrustProxy } from "./config.js";
 import { startServer } from "./server.js";
 
 // Production entry (#189, ADR-49): the same API as dev plus the built client,
@@ -28,4 +28,19 @@ if (!fs.existsSync(path.join(clientDir, "index.html"))) {
   process.exit(1);
 }
 
-startServer(resolveApiPort(), { clientDir, host: resolveHost() });
+// The password gate (#190, ADR-50) is a prod-entry concern like HOST: dev
+// serves the client through Vite, which the gate could never cover.
+const password = resolvePassword();
+if (password) {
+  console.log("[server] password protection enabled (DRAW_PASSWORD)");
+}
+
+// TRUST_PROXY makes req.ip the de-proxied client so the login limiter keys on
+// the real LAN client behind a reverse proxy (ADR-50). Prod-entry only, like
+// HOST — dev never sits behind a proxy.
+startServer(resolveApiPort(), {
+  clientDir,
+  host: resolveHost(),
+  password,
+  trustProxy: resolveTrustProxy(),
+});
