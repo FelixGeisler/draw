@@ -2389,3 +2389,55 @@ build step, the volume, and the non-root user (so a rename breaks the test, not
 a Pi deploy), and a runtime test boots the container's exact `node --import tsx
 src/prod.ts` invocation as a real process with `CLIENT_DIR`/`HOST`/`DATA_DIR`
 set and hits `/api/health` and `/`.
+
+== ADR-52: Scheduled automatic backups — an in-process timer writing to DATA_DIR/backups/, retention by count, restore is import
+
+*Context:* Manual backup export/import exists (ADR-26): `GET /api/backup/export`
+streams one zip, `POST /api/backup/import` replaces everything. But nothing runs
+it on a schedule. The 1.0.0 self-hosted deployment (a headless Raspberry Pi,
+#191, #194) needs backups that *just happen* — with no one to click Export and,
+on a minimal appliance image, no guarantee of a system cron either.
+
+*Decision:* An in-process timer, off by default. `BACKUP_INTERVAL_HOURS`
+(unset/0 = disabled) is the period; `BACKUP_RETENTION` (default 7) is how many
+archives to keep. When the interval is set, the production entry starts the
+timer alongside `startServer`; each tick reuses `createBackupArchive()`
+unchanged and moves the result into `DATA_DIR/backups/` under a timestamped name
+(`draw-backup-<ISO-to-the-second>Z.zip`, colons swapped for dashes so it is a
+legal filename everywhere and sorts chronologically), then prunes to the newest
+`BACKUP_RETENTION`. Restore adds *no new code*: a scheduled archive is an
+ordinary export, restored through the existing `POST /api/backup/import`.
+
+*Rationale:*
+
+* *In the server process, not cron.* The Pi image may ship no cron, and the
+server is the one thing guaranteed to be running. `unref`'d so it never keeps
+the process alive on its own, and returned as a stoppable handle so shutdown and
+tests do not leak a timer.
+* *Started next to `startServer`, never inside `createApp()`.* `createApp()`
+runs once per integration test; a live `setInterval` there would leak into every
+test and keep the runner alive. So the timer is a production-entry concern like
+`HOST` and `DRAW_PASSWORD` — and, like them, off unless deliberately configured,
+so dev and every test are byte-for-byte unchanged. The tick
+(`runScheduledBackup`) and the scheduling loop (`startBackupScheduler`) are
+separate and each directly callable, so tests drive one backup without a real
+timer and exercise the interval math with fake timers and an injected tick.
+* *`DATA_DIR/backups/` is a sibling of `files/`, not under it — the recursion
+guard.* `createBackupArchive()` globs `files/` and the DB only, never `DATA_DIR`
+itself, so an archive can never contain `backups/`: no archive-inside-archive
+growth where each backup swallows all the previous ones. This is an invariant of
+where the directory lives, pinned by a test that asserts a produced archive
+holds no `backups/` entry.
+* *Retention by count, pruned by filename.* The timestamped names sort
+lexically == chronologically, so "keep the newest N" is a pure string sort with
+no `mtime` read — deterministic and unit-testable with synthetic inputs. Only
+names the scheduler itself produces are ever pruned, so a file an operator drops
+into `backups/` is never deleted. The new archive is written *before* pruning,
+so for any retention ≥ 1 it is the newest name and survives its own prune;
+`BACKUP_RETENTION` is floored at 1 for the same reason (0 would delete what the
+run just wrote).
+* *A failed backup never crashes the server.* The tick catches and logs
+(filename on success, the error on failure) and the schedule continues — a full
+disk must not take the app down. Off-device targets (S3, rsync) and a Settings
+UI are out of scope (#194): copying `DATA_DIR/backups/` off the box is a
+deployment concern, deliberately left to the operator.

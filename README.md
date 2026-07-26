@@ -78,6 +78,19 @@ then recreate the container — the `draw-data` volume carries your data across.
 Pushing a prebuilt image to a registry is a later step; for now the image is
 built locally from this repo.
 
+### Scheduled backups
+
+For an unattended deployment (e.g. a headless Raspberry Pi), set
+`BACKUP_INTERVAL_HOURS` in `server/.env` and the server writes a backup zip into
+`server/data/backups/` on that schedule — no cron needed, the timer runs inside
+the server (production mode only). `BACKUP_RETENTION` (default 7) caps how many
+archives are kept; older ones are pruned automatically. Unset or `0` disables it
+(the default — nothing runs). Each archive is a normal Draw backup (the SQLite
+snapshot plus your material files), so **restoring one is the usual restore**:
+upload it on the Settings page, or `POST /api/backup/import`. Copy
+`server/data/backups/` off-device (rsync, a network share) for real off-site
+safety.
+
 ## Enable AI features (optional)
 
 Copy `server/.env.example` to `server/.env` and set `ANTHROPIC_API_KEY` (get one at

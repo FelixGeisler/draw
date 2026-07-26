@@ -245,3 +245,16 @@ machine or account it is dangling. This needs no special handling here: the id
 is treated as a cache everywhere (xref:09_architecture_decisions.adoc[ADR-35]),
 so the first AI call after a cross-account restore is rejected, drops the id and
 re-uploads the PDF (which the archive does carry) transparently.
+
+*Scheduled backups* (#194, xref:09_architecture_decisions.adoc[ADR-52]) reuse
+that same export. When `BACKUP_INTERVAL_HOURS` is set (production entry only, off
+by default), an in-process timer writes one archive per tick into
+`DATA_DIR/backups/` and prunes to the newest `BACKUP_RETENTION` (default 7). The
+archives are ordinary exports, so *restoring a scheduled backup is just an
+import* — no separate restore path. The destination is a sibling of `files/`, not
+under it, which is the entire recursion guard: the export globs `files/` and the
+DB only, so an archive can never contain `backups/` (no archive-inside-archive
+growth). A failed scheduled run is logged and swallowed — it never crashes the
+server. The timer is started next to `startServer`, never inside `createApp()`
+(which runs per integration test), and is `unref`'d and stoppable so no test or
+shutdown leaks it.
