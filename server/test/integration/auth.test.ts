@@ -260,19 +260,39 @@ describe("login rate limiting (per de-proxied IP, ADR-50)", () => {
   });
 });
 
-describe("trust proxy off (default): req.ip stays the socket peer", () => {
-  it("ignores X-Forwarded-For — a spoofed header cannot forge the rate-limit key", async () => {
-    // Without trust proxy, every supertest request is loopback (the real
-    // socket peer) regardless of X-Forwarded-For, so the trusted-loopback
-    // exemption applies and a spoofed header buys nothing.
+describe("the login FORM is throttled even from loopback (never exempt)", () => {
+  it("blocks the 6th failed login POST from loopback — no trusted login-form user exists", async () => {
+    // Unlike the header path, the login form has no loopback exemption: the
+    // in-process/MCP clients never POST here, so exempting loopback would only
+    // hand a same-host-proxy-with-TRUST_PROXY-unset misconfig unlimited
+    // brute-force against the shared password. Under supertest req.ip is
+    // loopback, and it MUST still throttle.
     const app = createApp({ password: PASSWORD });
-    for (let i = 0; i < 8; i++) {
-      const res = await request(app)
-        .post("/api/auth/login")
-        .set("X-Forwarded-For", "203.0.113.7")
-        .send({ password: "wrong" });
-      expect(res.status).toBe(401); // never 429: the spoof does not key a bucket
+    for (let i = 0; i < 5; i++) {
+      expect((await request(app).post("/api/auth/login").send({ password: "wrong" })).status).toBe(
+        401,
+      );
     }
+    const blocked = await request(app).post("/api/auth/login").send({ password: PASSWORD });
+    expect(blocked.status).toBe(429);
+  });
+
+  it("ignores a spoofed X-Forwarded-For when trust proxy is off — no fresh bucket per header", async () => {
+    // With trust proxy unset, req.ip is the socket peer regardless of XFF, so
+    // rotating a spoofed XFF does not mint a new bucket — the shared loopback
+    // bucket still trips.
+    const app = createApp({ password: PASSWORD });
+    for (let i = 0; i < 5; i++) {
+      await request(app)
+        .post("/api/auth/login")
+        .set("X-Forwarded-For", `203.0.113.${i}`)
+        .send({ password: "wrong" });
+    }
+    const blocked = await request(app)
+      .post("/api/auth/login")
+      .set("X-Forwarded-For", "203.0.113.99")
+      .send({ password: PASSWORD });
+    expect(blocked.status).toBe(429);
   });
 });
 

@@ -177,26 +177,25 @@ export function createAuth(password: string, options: CreateAuthOptions = {}): A
   };
 
   const loginHandler: RequestHandler = (req, res) => {
-    // Loopback clients are inside the trust boundary (a browser on the host
-    // itself) — never throttled, never counted (ADR-50). `req.ip` is the
-    // de-proxied client, so a LAN browser through a same-host proxy is still
-    // non-loopback and stays throttled per real IP.
-    const trusted = isLoopbackAddress(req.ip);
+    // The login FORM is always throttled, loopback included: no trusted client
+    // ever POSTs here (the in-process assistant and MCP use the header path),
+    // so a loopback exemption would have no legitimate user — it would only
+    // open unlimited brute-force against the shared password whenever req.ip
+    // collapses to loopback (a same-host proxy with TRUST_PROXY unset). A
+    // human logging in on the host getting 5/15min is a fine price (ADR-50).
     const ip = req.ip ?? "unknown";
-    if (!trusted) {
-      const decision = limiter.check(ip);
-      if (!decision.allowed) {
-        rejectLimited(res, decision.retryAfterMs);
-        return;
-      }
+    const decision = limiter.check(ip);
+    if (!decision.allowed) {
+      rejectLimited(res, decision.retryAfterMs);
+      return;
     }
     const submitted = (req.body as { password?: unknown } | undefined)?.password;
     if (typeof submitted === "string" && compare(submitted, password)) {
-      if (!trusted) limiter.recordSuccess(ip);
+      limiter.recordSuccess(ip);
       issueSession(res);
       return;
     }
-    if (!trusted) limiter.recordFailure(ip);
+    limiter.recordFailure(ip);
     res.status(401).json({ error: "invalid password" });
   };
 
