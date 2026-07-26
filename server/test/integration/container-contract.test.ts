@@ -18,6 +18,14 @@ const dockerfile = read("Dockerfile");
 const compose = read("docker-compose.yml");
 const dockerignore = read(".dockerignore");
 
+// The exec-form CMD array the image launches, parsed from the Dockerfile — the
+// same value container-runtime.test.ts spawns, so drift is caught in one place.
+function dockerfileCmd(): string[] {
+  const m = dockerfile.match(/^CMD\s+(\[.*\])\s*$/m);
+  if (!m) throw new Error("Dockerfile has no exec-form CMD");
+  return JSON.parse(m[1]) as string[];
+}
+
 describe("Dockerfile", () => {
   it("is a multi-stage build on Node 22", () => {
     // Native better-sqlite3 is compiled in a full image, shipped in a slim one.
@@ -38,10 +46,29 @@ describe("Dockerfile", () => {
     expect(dockerfile).toContain("npm prune --omit=dev");
   });
 
-  it("runs the ADR-49 production entry — there is no compiled server JS", () => {
-    expect(dockerfile).toMatch(/CMD \[.*"src\/prod\.ts".*\]/);
+  it("runs the ADR-49 entry via the tsx loader — no compiled server JS", () => {
+    const cmd = dockerfileCmd();
+    // `node --import tsx src/prod.ts`: both loader tokens must be present, or
+    // the container would try to run TypeScript with a bare node and crash.
+    expect(cmd[0]).toBe("node");
+    expect(cmd).toContain("--import");
+    expect(cmd).toContain("tsx");
+    expect(cmd).toContain("src/prod.ts");
     // The referenced entry must actually exist.
     expect(fs.existsSync(path.join(repoRoot, "server/src/prod.ts"))).toBe(true);
+  });
+
+  it("keeps tsx a runtime dependency — the pruned image boots on it", () => {
+    // `npm prune --omit=dev` runs in the builder; the container then boots via
+    // `node --import tsx`, which only survives the prune if tsx is a RUNTIME
+    // dependency. Demoting it to devDependencies would silently break the image
+    // (nothing else here would catch it — this is that guard).
+    const pkg = JSON.parse(read("server/package.json")) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    expect(pkg.dependencies?.tsx).toBeDefined();
+    expect(pkg.devDependencies?.tsx).toBeUndefined();
   });
 
   it("configures the runtime env the container relies on", () => {

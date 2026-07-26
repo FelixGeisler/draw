@@ -18,7 +18,21 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const serverRoot = path.resolve(here, "../..");
+const repoRoot = path.resolve(serverRoot, "..");
 const INDEX_MARKER = "draw-container-index-marker";
+
+// Spawn EXACTLY what the Dockerfile CMD launches, parsed from the Dockerfile
+// itself (not hardcoded) so a CMD change — e.g. dropping `--import tsx` — is
+// exercised here: bare `node src/prod.ts` cannot load TypeScript, so the health
+// poll below would never come up and the suite would fail. The leading "node"
+// is dropped; we spawn process.execPath as node.
+function containerCmdArgs(): string[] {
+  const dockerfile = fs.readFileSync(path.join(repoRoot, "Dockerfile"), "utf-8");
+  const m = dockerfile.match(/^CMD\s+(\[.*\])\s*$/m);
+  if (!m) throw new Error("Dockerfile has no exec-form CMD to mirror");
+  const cmd = JSON.parse(m[1]) as string[];
+  return cmd[0] === "node" ? cmd.slice(1) : cmd;
+}
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -62,7 +76,7 @@ describe("container runtime contract", () => {
     dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-cont-data-"));
     port = await freePort();
 
-    child = spawn(process.execPath, ["--import", "tsx", "src/prod.ts"], {
+    child = spawn(process.execPath, containerCmdArgs(), {
       cwd: serverRoot,
       env: {
         ...process.env,
@@ -113,5 +127,11 @@ describe("container runtime contract", () => {
     const res = await fetch(`http://127.0.0.1:${port}/`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain(INDEX_MARKER);
+  });
+
+  it("does not print the LAN-exposure warning on a loopback bind", () => {
+    // Bound to 127.0.0.1 with no DRAW_PASSWORD: the #191 guardrail must stay
+    // silent (config.test.ts covers the firing case for a non-loopback host).
+    expect(stderr).not.toContain("WARNING: bound to");
   });
 });
