@@ -23,7 +23,10 @@ export function TimerBar() {
     // breakpoint can compact and wrap them (#193).
     <div className="timer-bar">
       <span style={{ fontSize: 18 }}>⏱</span>
-      <strong style={{ flex: 1 }}>{task.title}</strong>
+      {/* .timer-title, not an inline flex: 1 — the phone breakpoint has to
+          give the title a real basis so the strip wraps under it instead of
+          squeezing the title into a tower of characters (#193). */}
+      <strong className="timer-title">{task.title}</strong>
       <span style={{ fontVariantNumeric: "tabular-nums", fontSize: 18 }}>
         {formatElapsed(entry.startedAt, now)}
       </span>

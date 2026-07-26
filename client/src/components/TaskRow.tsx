@@ -171,12 +171,13 @@ export function TaskRow({
         // targets — without the attribute the hit-test skips them entirely.
         data-dnd-row={dnd ? task.id : undefined}
         // task-row lets the phone breakpoint wrap the action buttons onto
-        // their own line (index.css, #193) — desktop keeps one line.
+        // their own line (index.css, #193) — desktop keeps one line. The gap
+        // lives in that stylesheet too: inline, it would beat the phone
+        // block's tighter row-gap.
         className={["task-row", dndClass].filter(Boolean).join(" ")}
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 10,
           padding: "8px 10px",
           borderBottom: "1px solid var(--border)",
           opacity: done ? 0.5 : 1,

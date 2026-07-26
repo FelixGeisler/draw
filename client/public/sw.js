@@ -7,19 +7,26 @@
  *     icons. The content-hashed bundles under /assets/ are deliberately NOT
  *     precached: the HTTP layer already serves them immutable (server/src/
  *     app.ts), and a SW copy would be a second cache to invalidate.
- *   - /api: never intercepted. Requests go straight to the network, so API
- *     data can never be served stale by this worker (the issue's hard rule).
+ *   - /api: never intercepted, case-insensitively. Requests go straight to the
+ *     network, so API data can never be served stale by this worker (the
+ *     issue's hard rule).
  *   - Navigations: network-first, cached shell as OFFLINE fallback only —
  *     online users always get the server's index.html (which the server
  *     already sends no-cache), so a deploy is picked up on the next load.
+ *
+ * What this does NOT promise: a working offline app. The precached "/" is
+ * index.html, which references content-hashed /assets/* bundles this worker
+ * deliberately never caches — so an offline launch renders only if the browser
+ * still holds those bundles in its own (evictable) HTTP cache. Treat offline as
+ * best-effort; installability is the goal.
  *
  * Update strategy: this file is served no-cache (it sits outside /assets/),
  * so the browser re-fetches it on navigation; any byte change installs the
  * new worker, skipWaiting()+clients.claim() activate it immediately, and the
  * activate handler drops the previous version's cache. Bump CACHE when the
- * precached shell list changes shape.
+ * precached shell list changes shape or what may become the shell changes.
  */
-const CACHE = "draw-shell-v1";
+const CACHE = "draw-shell-v2";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -45,8 +52,11 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET") return;
   const url = new URL(request.url);
   // Cross-origin and /api requests are not this worker's business — falling
-  // through means the browser handles them exactly as without a SW.
-  if (url.origin !== self.location.origin || url.pathname.startsWith("/api")) return;
+  // through means the browser handles them exactly as without a SW. The path
+  // test is case-insensitive because Express mounts match that way (#189,
+  // server/src/app.ts): /API/tasks IS api traffic, and must not be treated as
+  // a navigation whose JSON body could land in the shell cache.
+  if (url.origin !== self.location.origin || url.pathname.toLowerCase().startsWith("/api")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(
@@ -54,13 +64,19 @@ self.addEventListener("fetch", (event) => {
         .then((response) => {
           // Every SPA navigation answers with index.html (the server's SPA
           // fallback), so refreshing the "/" cache entry from ANY route keeps
-          // the offline shell current without a second request.
-          if (response.ok) {
+          // the offline shell current without a second request. Only an HTML
+          // body qualifies: response.ok alone would let one non-HTML same-origin
+          // navigation (a download, a JSON error page) permanently replace the
+          // offline shell. waitUntil keeps the write alive past the response —
+          // a detached promise dies with the worker.
+          if (response.ok && (response.headers.get("content-type") || "").includes("text/html")) {
             const copy = response.clone();
-            caches
-              .open(CACHE)
-              .then((cache) => cache.put("/", copy))
-              .catch(() => {});
+            event.waitUntil(
+              caches
+                .open(CACHE)
+                .then((cache) => cache.put("/", copy))
+                .catch(() => {}),
+            );
           }
           return response;
         })

@@ -14,12 +14,19 @@
 }
 
 /* Phone (#193, same 640px breakpoint as index.css): the handle IS the touch
-   drag surface — give the finger a real target without changing the glyph. */
+   drag surface, so it gets a real 44px target in BOTH axes — the glyph is only
+   ~12x21, and padding alone left it ~28x41. Centring it with flex keeps the
+   glyph where it looks now; the row itself is already at least 44px tall on a
+   phone (index.css sizes its buttons), so the taller box adds no height. */
 @media (max-width: 640px) {
   .dnd-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
     font-size: 16px;
-    padding: 10px 8px;
-    margin: -6px 0;
+    padding: 0;
   }
 }
 

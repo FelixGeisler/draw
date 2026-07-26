@@ -218,8 +218,13 @@
      would otherwise push the tail off-screen. min(70vh, …) keeps it inside the
      8px margins the clamp reserves. pointer-events:none means an inner scroll
      wouldn't be reachable, so we clip; the role="status" DOM keeps every item
-     for screen readers regardless of the visual cap. */
-  max-height: min(70vh, 420px);
+     for screen readers regardless of the visual cap.
+     --cal-detail-bottom-inset is the height of chrome that PAINTS OVER this
+     panel: on a phone the sidenav is a fixed bottom bar at z-index 80 against
+     this panel's 50 (index.css, #193), so that strip is not usable space.
+     reposition() sets it from the live measurement — 0 on desktop, where the
+     nav is a static sidebar — and applies the same inset to the clamp. */
+  max-height: min(70vh, 420px, calc(100vh - 16px - var(--cal-detail-bottom-inset, 0px)));
   overflow: hidden;
 }
 .cal-detail-date {

@@ -193,6 +193,15 @@ textarea:focus {
   border-bottom: 1px solid var(--accent);
 }
 
+/* The task title takes the strip's elastic share. The flex value lives HERE,
+   not inline on the element, because the phone rule below has to replace it:
+   `flex: 1` means basis 0, which squeezes the title to a few characters and
+   wraps its text into a tower instead of wrapping the strip (#193). */
+.timer-title {
+  flex: 1;
+  min-width: 0;
+}
+
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -218,12 +227,22 @@ textarea:focus {
   display: inline-block;
 }
 
+/* Task row (TaskRow.tsx keeps the rest of its box inline). The gap lives here
+   because it has to be overridable: an inline `gap` shorthand would beat the
+   phone block's `row-gap`, leaving wrapped rows 10px apart instead of 4 (#193). */
+.task-row {
+  gap: 10px;
+}
+
 /* ---- Phone layout (#193) ------------------------------------------------
-   ONE width breakpoint for the whole client: 640px. Component stylesheets
-   (DrawPage, TaskDnd, AchievementToast, GoalShelf, HistoryCalendar) hang
-   their own phone rules off the same query — extend it, don't invent new
-   thresholds. The visual identity is untouched: the same cards, colors and
-   type, adapted to a single column with a thumb-reachable bottom nav. */
+   ONE width breakpoint for the whole client: 640px — the client's first and
+   only width query (before #193 every @media here was prefers-reduced-motion).
+   Four component stylesheets hang their own phone rules off the same query
+   (TaskDnd, AchievementToast, GoalShelf, HistoryCalendar) — extend it, don't
+   invent new thresholds. DrawPage.css needs no query: its action row wraps
+   unconditionally, which is invisible on desktop because the buttons fit.
+   The visual identity is untouched: the same cards, colors and type, adapted
+   to a single column with a thumb-reachable bottom nav. */
 @media (max-width: 640px) {
   .layout {
     flex-direction: column;
@@ -289,6 +308,17 @@ textarea:focus {
     padding: 8px 12px;
   }
 
+  /* A basis wide enough to claim the whole first row (minus the ⏱ glyph and
+     its gap) — clock, estimate and buttons wrap underneath. The title stays
+     ONE ellipsised line, so this fixed top strip has a bounded height however
+     long the task name is; the full title is on the card and the tasks list. */
+  .timer-title {
+    flex: 1 1 calc(100% - 40px);
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
   /* Touch ergonomics: ~44px targets for the controls fingers actually hit.
      Checkbox/radio/color keep their compact boxes (blowing them up distorts
      rows), and the art-regen corner button keeps its 30px circle. */
@@ -302,10 +332,19 @@ textarea:focus {
   }
 
   /* Task rows wrap instead of forcing the page wider: title line first, the
-     action buttons flow onto the next line(s). */
+     action buttons flow onto the next line(s). The wrapped rows sit tighter
+     than the 10px column gap — see .task-row above for why that gap is not
+     inline. */
   .task-row {
     flex-wrap: wrap;
     row-gap: 4px;
+  }
+
+  /* Settings rows (SettingsPage.tsx): a 280px label plus its control plus the
+     hint text do not fit a phone, so they stack THERE — on desktop each row
+     stays the single line it has always been. */
+  .setting-row {
+    flex-wrap: wrap;
   }
 }
 
