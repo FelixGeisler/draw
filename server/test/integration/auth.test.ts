@@ -197,6 +197,34 @@ describe("login rate limiting", () => {
   });
 });
 
+describe("InProcessApiClient against a protected app (assistant tools)", () => {
+  // The assistant's READ tools self-request over a private loopback listener
+  // (ADR-37) — the gate cannot tell that listener from a stranger's socket,
+  // so createApp() hands the client its own secret (see app.ts). Without it,
+  // enabling DRAW_PASSWORD would silently break the assistant.
+
+  it("is locked out without the secret, passes with it", async () => {
+    const { InProcessApiClient } = await import("../../src/tools/inProcessApi.js");
+    const app = createApp({ password: PASSWORD });
+
+    const bare = new InProcessApiClient(app);
+    try {
+      expect((await bare.request("GET", "/api/tasks")).status).toBe(401);
+    } finally {
+      bare.close();
+    }
+
+    const withSecret = new InProcessApiClient(app, PASSWORD);
+    try {
+      const res = await withSecret.request("GET", "/api/tasks");
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+    } finally {
+      withSecret.close();
+    }
+  });
+});
+
 describe("HttpApiClient against a protected instance (MCP)", () => {
   let httpServer: Server;
   let base: string;

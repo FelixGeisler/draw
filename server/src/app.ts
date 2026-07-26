@@ -89,8 +89,9 @@ export function createApp(options: AppOptions = {}) {
   // The assistant's READ tools (#31, ADR-37) execute through the app's own
   // HTTP surface — a lazy private loopback listener on THIS app instance, so
   // every domain invariant and derived payload holds by construction (the
-  // ADR-19 argument), with or without a public listener (supertest).
-  bindAgentToolApi(new InProcessApiClient(app));
+  // ADR-19 argument), with or without a public listener (supertest). The
+  // gate's secret rides along: self-requests must pass the gate too (#190).
+  bindAgentToolApi(new InProcessApiClient(app, options.password));
 
   // The API namespace speaks JSON — including its 404s: an unknown /api path
   // must never read as HTML, with or without a client mounted below. After
