@@ -304,7 +304,11 @@ test("long content stays INSIDE the fixed face — the content block scrolls, no
       goalId: goal.id,
       impact: 5,
       effortMinutes: 10,
-      dueDate: "2026-08-15",
+      // A PAST due date since #205: on a RECURRING task the due date is the
+      // next occurrence and a future one keeps the card out of the deck. The
+      // chips under test (due + ↻) are unchanged — this spec is about
+      // geometry, and it still needs the fullest possible card.
+      dueDate: "2026-01-15",
       recurEveryDays: 7,
     },
   });
@@ -341,7 +345,7 @@ test("long content stays INSIDE the fixed face — the content block scrolls, no
   await content.evaluate((el) => {
     el.scrollTop = el.scrollHeight;
   });
-  await expect(back.locator(".chip", { hasText: "due 2026-08-15" })).toBeVisible();
+  await expect(back.locator(".chip", { hasText: "overdue 2026-01-15" })).toBeVisible();
   await expect(back.locator(".chip", { hasText: "↻ 7d" })).toBeVisible();
   const chanceBox = (await back.locator(".draw-chance").boundingBox())!;
   expect(chanceBox.y).toBeGreaterThanOrEqual(faceBox.y - 1);
