@@ -34,6 +34,32 @@ export function resolvePassword(env: NodeJS.ProcessEnv = process.env): string | 
   return password || undefined;
 }
 
+// BACKUP_INTERVAL_HOURS (#194, ADR-52): the period between automatic backups.
+// Unset, 0, non-numeric, or non-positive = disabled — the production entry
+// starts no timer, so behavior is identical to before (local dev stays silent
+// unless deliberately configured). A positive value (fractional allowed) is
+// the interval in hours; the scheduler writes one archive into
+// DATA_DIR/backups/ each tick. Only the production entry consumes it — dev is
+// a developer's machine, restarted constantly, not the headless Pi this exists
+// for (ADR-52), the same prod-entry-only stance HOST and DRAW_PASSWORD take.
+export function resolveBackupIntervalHours(env: NodeJS.ProcessEnv = process.env): number {
+  const hours = Number(env.BACKUP_INTERVAL_HOURS);
+  return Number.isFinite(hours) && hours > 0 ? hours : 0;
+}
+
+// BACKUP_RETENTION (#194, ADR-52): how many scheduled archives under
+// DATA_DIR/backups/ to keep — older ones are pruned after each run. Defaults
+// to 7. Clamped to a minimum of 1: retention 0 would delete the archive the
+// run just wrote, which no sane operator wants. A blank, non-integer, or
+// out-of-range value falls back to the default rather than failing the boot.
+export const DEFAULT_BACKUP_RETENTION = 7;
+export function resolveBackupRetention(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.BACKUP_RETENTION?.trim();
+  if (!raw) return DEFAULT_BACKUP_RETENTION;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_BACKUP_RETENTION;
+}
+
 // TRUST_PROXY (#190, ADR-50): what Express's `trust proxy` setting should be,
 // which is what makes `req.ip` the DE-PROXIED client address behind a reverse
 // proxy — the address the login rate limiter keys on. Off by default (direct

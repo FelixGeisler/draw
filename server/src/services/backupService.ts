@@ -194,6 +194,93 @@ export function exportFilename(now: Date): string {
   return `draw-backup-${now.toISOString().slice(0, 10)}.zip`;
 }
 
+// Scheduled automatic backups (#194, ADR-52). The archives land here, a
+// SIBLING of files/ under DATA_DIR — deliberately NOT under files/. That is
+// the whole recursion guard: createBackupArchive zips the DB plus the contents
+// of filesDir only (readdirSync(filesDir) above), never dataDir itself, so an
+// archive can never contain backups/ — no archive-inside-archive growth. Pinned
+// by scheduled-backup.test.ts; do not move this directory under files/.
+export const backupsDir = path.join(dataDir, "backups");
+
+// A scheduled archive's name: ISO-8601 to the second with `:` swapped for `-`
+// (colons are illegal in Windows filenames) so the name is a legal filename on
+// every platform AND sorts lexically == chronologically, which is what lets
+// retention pick "the newest N" with a plain string sort — no fs mtime, no
+// clock read at prune time.
+export function scheduledBackupStem(now: Date): string {
+  return `draw-backup-${now.toISOString().slice(0, 19).replaceAll(":", "-")}Z`;
+}
+
+// Matches only names scheduledBackupStem produces (with an optional `-N`
+// de-dupe suffix, see runScheduledBackup). Retention prunes by this predicate,
+// so a foreign file an operator dropped into backups/ is never deleted.
+const SCHEDULED_BACKUP_RE = /^draw-backup-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z(?:-\d+)?\.zip$/;
+export function isScheduledBackupName(name: string): boolean {
+  return SCHEDULED_BACKUP_RE.test(name);
+}
+
+/**
+ * Pure retention selection: given the names present in backups/ and how many
+ * to keep, return the scheduled archives to delete (oldest first, keeping the
+ * newest `retention`). Deterministic and fs-free so it unit-tests without a
+ * real clock or disk. Non-backup names are ignored; `retention` is floored at
+ * 0 defensively, though config guarantees >= 1 so the just-written newest
+ * archive is always kept.
+ */
+export function backupsToPrune(names: string[], retention: number): string[] {
+  const archives = names.filter(isScheduledBackupName).sort(); // lexical == chronological
+  const keep = Math.max(0, retention);
+  return archives.length <= keep ? [] : archives.slice(0, archives.length - keep);
+}
+
+/** Prune backups/ to the retention count, returning the names removed. */
+function pruneScheduledBackups(retention: number): string[] {
+  const pruned = backupsToPrune(fs.readdirSync(backupsDir), retention);
+  for (const name of pruned) fs.rmSync(path.join(backupsDir, name), { force: true });
+  return pruned;
+}
+
+export interface ScheduledBackupResult {
+  /** Absolute path of the archive written under backups/. */
+  path: string;
+  /** Names pruned from backups/ to honor retention. */
+  pruned: string[];
+}
+
+/**
+ * Run ONE scheduled backup: build the archive (reusing createBackupArchive, so
+ * the VACUUM-INTO snapshot and every ADR-26 guarantee carry over), move it into
+ * backups/, then prune to `retention`. This is the scheduler's tick, exported
+ * so a test can invoke it directly instead of waiting on a real timer.
+ *
+ * createBackupArchive writes a `backup-export-*` temp zip in DATA_DIR (swept at
+ * boot if a crash orphans it, #103); the rename into backups/ is a same-volume
+ * atomic commit and gives the archive its timestamped name. `now` is injectable
+ * for deterministic filenames in tests. The archive is written BEFORE pruning,
+ * so it is the newest name in the directory and — for retention >= 1 — always
+ * survives its own prune.
+ */
+export function runScheduledBackup(retention: number, now: Date = new Date()): ScheduledBackupResult {
+  fs.mkdirSync(backupsDir, { recursive: true });
+  const tempZip = createBackupArchive();
+  // Second granularity can collide if two runs land in the same second (a test
+  // driving the tick in a tight loop, never the hourly production timer). Bump
+  // a `-N` suffix rather than overwrite — renameSync onto an existing file
+  // throws EEXIST/EPERM on Windows.
+  const stem = scheduledBackupStem(now);
+  let target = path.join(backupsDir, `${stem}.zip`);
+  for (let n = 1; fs.existsSync(target); n++) {
+    target = path.join(backupsDir, `${stem}-${n}.zip`);
+  }
+  try {
+    fs.renameSync(tempZip, target);
+  } catch (e) {
+    fs.rmSync(tempZip, { force: true }); // don't leave the temp zip behind on a failed move
+    throw e;
+  }
+  return { path: target, pruned: pruneScheduledBackups(retention) };
+}
+
 /**
  * Replace ALL data with the archive's contents. Two phases:
  *  1. Stage + validate — extract into temp paths inside DATA_DIR and reject
