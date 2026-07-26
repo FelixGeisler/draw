@@ -121,6 +121,14 @@ test("touch drag-and-drop: a childless root nests under another root", async ({ 
   // establish pointer capture, and the drag session never commits, so such a
   // test would fail while real touch dragging works. Chromium-only, which is
   // the browser this suite runs.
+  // The suite shares one database, so by now the tree is long and these two
+  // freshly-seeded roots sit near its end — off-screen on a phone. A drag
+  // cannot reach a target outside the viewport (the drop is hit-tested with
+  // elementFromPoint), so bring the pair into view first. They are adjacent:
+  // same category, created back to back.
+  const targetRow = taskTree(page).locator(`[data-dnd-row="${parent.id}"]`);
+  await targetRow.scrollIntoViewIfNeeded();
+
   const points = await page.evaluate(
     ([childId, parentId]) => {
       const handle = document
@@ -134,10 +142,20 @@ test("touch drag-and-drop: a childless root nests under another root", async ({ 
         // The row's own title strip, not its centre: a row that contains
         // nested rows would hit-test to the innermost one at the centre.
         to: { x: target.x + 40, y: target.y + 16 },
+        viewport: { w: window.innerWidth, h: window.innerHeight },
       };
     },
     [child.id, parent.id] as const,
   );
+  // Fail loudly here rather than as a mystifying "no reparent" below: both
+  // ends of the gesture have to be on screen for the drag to be possible.
+  for (const [name, p] of [
+    ["handle", points.from],
+    ["target", points.to],
+  ] as const) {
+    expect(p.y, `${name} must be within the viewport to drag`).toBeGreaterThan(0);
+    expect(p.y, `${name} must be within the viewport to drag`).toBeLessThan(points.viewport.h);
+  }
 
   const cdp = await page.context().newCDPSession(page);
   const touch = (type: "touchStart" | "touchMove" | "touchEnd", at?: { x: number; y: number }) =>
