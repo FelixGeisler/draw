@@ -2,7 +2,13 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveApiPort, resolveHost, resolvePassword, resolveTrustProxy } from "./config.js";
+import {
+  lanExposureWarning,
+  resolveApiPort,
+  resolveHost,
+  resolvePassword,
+  resolveTrustProxy,
+} from "./config.js";
 import { startServer } from "./server.js";
 
 // Production entry (#189, ADR-49): the same API as dev plus the built client,
@@ -35,12 +41,21 @@ if (password) {
   console.log("[server] password protection enabled (DRAW_PASSWORD)");
 }
 
+// LAN-exposure guardrail (#191, ADR-51): warn loudly when bound off loopback
+// with no gate — the container sets HOST=0.0.0.0, so a passwordless LAN
+// deployment must not go unnoticed. Non-fatal: HOST is a deliberate opt-in.
+const host = resolveHost();
+const exposureWarning = lanExposureWarning(host, password);
+if (exposureWarning) {
+  console.error(exposureWarning);
+}
+
 // TRUST_PROXY makes req.ip the de-proxied client so the login limiter keys on
 // the real LAN client behind a reverse proxy (ADR-50). Prod-entry only, like
 // HOST — dev never sits behind a proxy.
 startServer(resolveApiPort(), {
   clientDir,
-  host: resolveHost(),
+  host,
   password,
   trustProxy: resolveTrustProxy(),
 });
