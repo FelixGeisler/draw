@@ -10,8 +10,10 @@
 
 services:
   draw:
-    # Build locally today. After the registry image ships (#192) you can drop
-    # `build:` and use the published image instead:
+    # Build locally, or use the published multi-arch image (#192, ADR-53):
+    # drop `build:` and uncomment the line below to pull a released image
+    # instead of building it. `:latest` tracks the newest final release; pin a
+    # version (e.g. `:1.0.0`) for reproducibility.
     #   image: ghcr.io/felixgeisler/draw:latest
     build: .
     container_name: draw

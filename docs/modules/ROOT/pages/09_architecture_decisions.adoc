@@ -2449,3 +2449,79 @@ cap with a stderr warning.
 disk must not take the app down. Off-device targets (S3, rsync) and a Settings
 UI are out of scope (#194): copying `DATA_DIR/backups/` off the box is a
 deployment concern, deliberately left to the operator.
+
+== ADR-53: Tag-triggered release pipeline — full-test gate, multi-arch GHCR push, GitHub Release, all from one `v*` tag
+
+*Context:* ADR-51 shipped the container image (#191) but explicitly left
+"registry/release automation" out — the image was built locally and had *never
+been built by CI at all*. 1.0.0 needs a repeatable way to cut a release: run the
+tests, publish a pullable image, and record a Release, with no manual packaging.
+Two existing workflows must stay untouched — `ci.yml` (PRs + `main`) and
+`docs.yml` (Pages) — and the build must not fire on ordinary pushes/PRs.
+
+*Decision:* A new `.github/workflows/release.yml` triggered on `push` tags
+matching `v*` (and a `workflow_dispatch` dry run). Two jobs:
+
+* *`test` — the gate.* Reproduces `ci.yml` verbatim (type checks + `npm test` +
+Playwright E2E). The release aborts here on any failure, so a red commit can
+never publish an image or a Release.
+* *`publish` — `needs: test`.* QEMU + Buildx build the `Dockerfile` for
+`linux/amd64,linux/arm64` and push to `ghcr.io/felixgeisler/draw`.
+`docker/metadata-action` derives the tags: `{{version}}` from the git tag
+always, and `latest` *only* for a final release (a tag with no `-` suffix), so a
+pre-release like `v1.0.0-rc.1` publishes `1.0.0-rc.1` without moving `latest`.
+Then `gh release create --generate-notes` cuts the GitHub Release, flagging any
+`-` (pre-release) tag `--prerelease`.
+
+The specifics that matter:
+
+* *Built-in token, least privilege, no PAT.* The workflow default is
+`permissions: contents: read`; the two write scopes (`packages: write` for the
+GHCR push, `contents: write` for the Release) are granted *only on the `publish`
+job*, so the `test` gate — which runs `npm ci` (arbitrary transitive install
+scripts) and Playwright — never holds a token that can publish. Third-party
+`docker/*` actions in that credential-bearing job are pinned to full commit SHAs
+(with a `# vN` comment) so a moved tag cannot inject code beside the token;
+first-party `actions/*` keep major tags, as in `ci.yml`. `docker/login-action`
+and `gh` authenticate with `GITHUB_TOKEN`; the `org.opencontainers.image.source`
+label metadata-action emits links the GHCR package back to this repo.
+* *GHCR package is private on first publish.* A package first created by a
+`GITHUB_TOKEN` push is private, and the token cannot change that — so the
+documented `docker pull` path needs a one-time manual step: after the first
+release the owner flips the package to *Public* in its GHCR settings (or
+consumers `docker login ghcr.io` with a `read:packages` token). This is called
+out in the README, CONTRIBUTING, and 7.3 so the "pullable from GHCR" claim is
+honest.
+* *E2E stays in the gate.* A release is rare and the arm64 native build under
+QEMU dominates the wall-clock anyway, so running the *full* suite (not just a
+"CI already passed" assumption) is the honest reading of "any test failure
+aborts before anything is published" and costs nothing that matters.
+* *`latest` never points at a pre-release.* The `-rc`/`-beta` verification tags
+must not become what `docker pull …:latest` fetches; only a final `vX.Y.Z`
+advances `latest`.
+* *A real dry run without spending a tag.* `workflow_dispatch` runs the same
+gate and pushes to a throwaway `:dryrun` tag (no `latest`, no version tag) and
+creates *no* Release — the way to prove the multi-arch build works before the
+first real `v*` tag. It is only dispatchable once the file is on the default
+branch (a GitHub constraint), so the practical sequence is: merge → dispatch a
+`:dryrun` build to confirm the image builds on both arches → then tag
+`v1.0.0-rc.1` for the end-to-end acceptance check.
+
+*Rationale:*
+
+* *Amends ADR-51's deferral, nothing else.* ADR-51 named "#192" as the excluded
+automation; this is that piece and only that piece. Docker Hub, npm publishing,
+and changelog conventions beyond GitHub's generated notes remain out of scope.
+No production code changes — the version bump to 1.0.0 (the `package.json`
+files) is a separate concern and is *not* performed by this workflow.
+* *Separation of pipelines.* Tag-only triggering means a normal push or PR never
+builds or publishes; `ci.yml` and `docs.yml` are byte-for-byte unchanged.
+* *Verification.* Workflows are not executable in this CI, so (as with the
+container contract) a text-contract test pins the workflow's shape — the `v*`
+trigger, the `needs: test` gate reproducing `ci.yml`'s coverage, the
+`amd64,arm64` platforms, the exact GHCR path (kept in sync with the compose
+`image:` line), the least-privilege split (workflow read-only, write only on
+`publish`, no permissions on the test gate), the SHA-pinned `docker/*` actions,
+the event-gated `latest`-off-pre-release and version tags, and the Release step
+— so a miswire fails a unit run rather than half-publishing on a live tag. The
+image building on both arches is proven by the dispatch dry run described above.
