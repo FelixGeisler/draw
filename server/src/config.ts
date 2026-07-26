@@ -56,3 +56,24 @@ export function resolveTrustProxy(
   if (/^\d+$/.test(raw)) return Number(raw);
   return raw;
 }
+
+// Loopback hosts are unreachable from the LAN, so exposing them needs no
+// password. Everything else — 0.0.0.0, `::`, a specific LAN IP — is reachable.
+export function isLoopbackHost(host: string): boolean {
+  const h = host.trim().toLowerCase();
+  return h === "localhost" || h === "::1" || /^127\./.test(h);
+}
+
+// LAN-exposure guardrail (#191, ADR-51): binding a non-loopback host with no
+// DRAW_PASSWORD (#190, ADR-50) puts the task history AND the Anthropic API key
+// on the network unprotected. The production entry prints this to stderr at
+// boot; the decision is a pure function so it is unit-testable without binding
+// a socket. HOST is a deliberate opt-in, so this warns — it does not refuse.
+export function lanExposureWarning(
+  host: string,
+  password: string | undefined,
+): string | undefined {
+  if (password) return undefined;
+  if (isLoopbackHost(host)) return undefined;
+  return `[server] WARNING: bound to ${host} with no DRAW_PASSWORD — anyone on your network can access this instance (ADR-50)`;
+}

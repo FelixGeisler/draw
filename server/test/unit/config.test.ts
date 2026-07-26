@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_HOST,
+  isLoopbackHost,
+  lanExposureWarning,
   resolveApiPort,
   resolveHost,
   resolvePassword,
@@ -86,5 +88,43 @@ describe("resolveTrustProxy", () => {
   it("passes a preset or subnet spec through to Express", () => {
     expect(resolveTrustProxy({ TRUST_PROXY: "loopback" })).toBe("loopback");
     expect(resolveTrustProxy({ TRUST_PROXY: "127.0.0.1, 10.0.0.0/8" })).toBe("127.0.0.1, 10.0.0.0/8");
+  });
+});
+
+describe("isLoopbackHost", () => {
+  it("treats loopback addresses and localhost as loopback", () => {
+    for (const h of ["127.0.0.1", "127.0.0.2", "::1", "localhost", "LOCALHOST", " 127.0.0.1 "]) {
+      expect(isLoopbackHost(h)).toBe(true);
+    }
+  });
+
+  it("treats 0.0.0.0, `::`, and LAN addresses as non-loopback", () => {
+    for (const h of ["0.0.0.0", "192.168.1.5", "10.0.0.3", "::"]) {
+      expect(isLoopbackHost(h)).toBe(false);
+    }
+  });
+});
+
+describe("lanExposureWarning", () => {
+  it("warns when bound off loopback with no password (#191, ADR-51)", () => {
+    const warning = lanExposureWarning("0.0.0.0", undefined);
+    expect(warning).toContain("0.0.0.0");
+    expect(warning).toContain("DRAW_PASSWORD");
+    expect(warning).toContain("ADR-50");
+  });
+
+  it("names the actual bind host — a specific LAN IP, not just 0.0.0.0", () => {
+    expect(lanExposureWarning("192.168.1.5", undefined)).toContain("192.168.1.5");
+  });
+
+  it("is silent when a password is set — the gate covers the exposure", () => {
+    expect(lanExposureWarning("0.0.0.0", "lan-pin")).toBeUndefined();
+    expect(lanExposureWarning("192.168.1.5", "lan-pin")).toBeUndefined();
+  });
+
+  it("is silent on a loopback bind, password or not", () => {
+    expect(lanExposureWarning("127.0.0.1", undefined)).toBeUndefined();
+    expect(lanExposureWarning("localhost", undefined)).toBeUndefined();
+    expect(lanExposureWarning("::1", "lan-pin")).toBeUndefined();
   });
 });

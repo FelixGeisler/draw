@@ -27,12 +27,18 @@ settings singletons) must explicitly flag the trade-off against that vision
 |`ANTHROPIC_API_KEY` lives in `server/.env`, never reaches the browser
 
 |No over-engineering
-|No user accounts, no Docker, no ORM, no Redux — deliberate guardrails for a
-personal project. The original "no auth" guardrail was consciously amended
-for LAN deployments (#190, xref:09_architecture_decisions.adoc[ADR-50]): one
-optional shared-secret password gate, off by default, env-configured — still
-no accounts, roles, or OAuth. CI is limited to tests + docs deployment
-(GitHub Actions)
+|No user accounts, no ORM, no Redux — deliberate guardrails for a
+personal project. Two guardrails were consciously amended for the 1.0.0
+self-hosted deployment. The "no auth" leg (#190,
+xref:09_architecture_decisions.adoc[ADR-50]): one optional shared-secret
+password gate, off by default, env-configured — still no accounts, roles, or
+OAuth. The "no Docker" leg (#191,
+xref:09_architecture_decisions.adoc[ADR-51]): one multi-arch container image +
+sample `docker-compose.yml` for self-hosting on a Raspberry Pi — a single
+sanctioned container, not orchestration (no Kubernetes/Helm, no HTTPS
+termination in the app). CI is limited to tests + docs deployment (GitHub
+Actions); the container build is verified manually and by the release workflow
+(#192)
 
 |Issue-driven workflow
 |Every change via GitHub issue + PR; branches `<IssueID>_Name`; commits `#<IssueId> Message`

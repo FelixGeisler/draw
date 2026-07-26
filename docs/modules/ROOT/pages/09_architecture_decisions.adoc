@@ -2315,3 +2315,77 @@ the browser login FORM stays throttled regardless of proxy config (it has no
 loopback exemption). Setting `TRUST_PROXY` closes even that gap. The in-memory
 limiter resets on restart, which is acceptable because restarting is an owner
 action, not an attacker's.
+
+== ADR-51: Multi-arch container image — the 1.0.0 self-hosted deployment, a deliberate amendment of the "no Docker" guardrail
+
+*Context:* The 1.0.0 target deployment is a self-hosted container on a
+Raspberry Pi (linux/arm64), also runnable on linux/amd64 (#191). Nothing about
+the app was containerized before — the guardrails (section 2) said "no Docker"
+outright, calibrated to a run-it-on-your-PC tool. Two facts shape the build:
+the production runtime is tsx, not compiled JS (ADR-49 — `npm run build -w
+server` is `tsc --noEmit`, so there is no server `dist`), and `better-sqlite3`
+is a native module that needs an architecture-matched binary.
+
+*Decision:* Ship a multi-stage `Dockerfile` plus a sample `docker-compose.yml`
+and a `.dockerignore`, building with `docker buildx` for `linux/amd64` and
+`linux/arm64`. The specifics:
+
+* *tsx is the runtime in the container too.* The image ships node 22 + tsx +
+`server/src/**` + `shared/**` (the server imports it at runtime, e.g.
+`gamificationService.ts` → `../../../shared/…`) + `client/dist` + a pruned
+`node_modules`, and runs the ADR-49
+entry directly as one process: `node --import tsx src/prod.ts` (equivalent to
+`npm start`, but a single node process so tini can signal it — no npm/tsx
+wrapper layer). There is deliberately no compiled server artifact to build or
+copy; the same runtime serves every mode (dev, MCP, prod, container), which is
+exactly ADR-49's "one runtime, no build-drift" argument carried into packaging.
+* *Multi-stage, native-per-arch.* A full `node:22-bookworm` *builder* runs `npm
+ci` (so `better-sqlite3` installs a prebuilt binary or compiles from source
+with the toolchain present), builds the client with vite, then `npm prune
+--omit=dev`. A slim `node:22-bookworm-slim` *runtime* copies the pruned
+`node_modules` (carrying the compiled `.node`), the sources, and `client/dist`.
+Under buildx the builder runs *as the target architecture* (native amd64, arm64
+via QEMU emulation), so the binary it produces matches the runtime stage — no
+cross-compilation, no per-arch branching in the Dockerfile.
+* *glibc, not musl.* Runtime is Debian slim, not alpine: `better-sqlite3` has
+no musl prebuild, so alpine would force a from-source musl build for no benefit.
+The builder and runtime share the same glibc ABI, so the compiled binary loads.
+* *Single port, non-root.* The container serves the client and the API on one
+port (`API_PORT`, default 3001), `HOST=0.0.0.0` baked in as the whole point of
+the container (ADR-49's opt-in becomes the container's default posture), and
+runs as the base image's unprivileged `node` user (uid 1000) — nothing needs
+root. `tini` is PID 1 for prompt SIGTERM shutdown and zombie reaping.
+* *Data on a named volume.* All persistent state lives under `DATA_DIR=/data`
+(the SQLite `app.db` in WAL mode plus `files/` goal materials, ADR-26), mounted
+from a named volume so it survives container recreation and image upgrades. The
+mount point is pre-owned by `node` in the image so a fresh volume inherits that
+ownership. Backups are unchanged: export the zip (ADR-26), or snapshot the
+volume.
+* *Healthcheck on `/api/health`.* The container `HEALTHCHECK` (and the compose
+one) polls `GET /api/health` with node's global `fetch` (no curl/wget in the
+slim image). That route sits *above* the password gate (ADR-50) precisely so
+the probe stays green with `DRAW_PASSWORD` set.
+
+*Rationale:*
+
+* *Amending the guardrail, deliberately.* "No Docker" was a proxy for "no
+production-deployment complexity" while Draw was a local-only tool. Shipping
+1.0.0 as a Pi container is an explicit owner decision (2026-07-25); it is the
+*one* sanctioned container, not a general embrace of orchestration —
+Kubernetes/Helm, HTTPS termination, and registry/release automation stay out
+(the last is #192). Section 2 now names this exception, exactly as ADR-50 named
+the "no auth" one.
+* *Pairs with the password gate.* The container binds non-loopback by
+construction, so a LAN deployment should set `DRAW_PASSWORD` (ADR-50) — behind
+that listener sit the task history and the Anthropic API key. The sample
+compose carries `DRAW_PASSWORD` and `TRUST_PROXY` as commented opt-ins so a
+deployer finds them.
+* *Verification.* The container build itself is not exercised in CI (the ubuntu
+runner has no guaranteed Docker/buildx, and building under QEMU is slow); it is
+verified manually and by the release workflow (#192). What CI *does* pin is the
+wiring the container depends on: a contract test asserts the Dockerfile/compose
+reference the real `/api/health` route, the `src/prod.ts` entry, the client
+build step, the volume, and the non-root user (so a rename breaks the test, not
+a Pi deploy), and a runtime test boots the container's exact `node --import tsx
+src/prod.ts` invocation as a real process with `CLIENT_DIR`/`HOST`/`DATA_DIR`
+set and hits `/api/health` and `/`.

@@ -1,0 +1,49 @@
+# Keep the build context lean and the image reproducible: everything the
+# multi-stage build needs is source + lockfile — install and client build both
+# happen INSIDE the builder stage (#191, ADR-51). Anything listed here is
+# either rebuilt in-image, host-arch-specific, or irrelevant to the runtime.
+
+# Installed per-arch inside the builder — a host node_modules (win32/glibc of
+# the dev box) would poison the image with the wrong better-sqlite3 binary.
+node_modules
+**/node_modules
+
+# Client bundle is produced by `npm run build -w client` in the builder.
+client/dist
+
+# User data must never bake into the image — it lives on the DATA_DIR volume.
+server/data
+
+# Local secrets — the container takes config via env, never a copied .env.
+server/.env
+**/.env
+
+# Test + tooling artifacts, none of which the runtime needs.
+test-results
+playwright-report
+e2e
+**/*.test.ts
+server/test
+client/src/**/*.test.ts
+coverage
+
+# Docs site build + the arc42 sources (the running app never serves them).
+docs
+docs-ui
+build
+antora-playbook.yml
+
+# VCS, editor, dev-tooling, CI, and container files themselves.
+.git
+.github
+.idea
+.vscode
+.claude
+.mcp.json
+.dockerignore
+Dockerfile
+docker-compose.yml
+bash.exe.stackdump
+
+# Markdown/notes not needed at runtime.
+*.md
