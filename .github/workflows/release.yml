@@ -1,0 +1,137 @@
+# Tag-triggered release pipeline (#192, ADR-53). Pushing a `v*` tag runs the
+# FULL test suite as a gate, then — only if it is green — builds the multi-arch
+# container image (#191, ADR-51), pushes it to GHCR, and cuts a GitHub Release.
+#
+# This is intentionally separate from ci.yml (PRs + main) and docs.yml (Pages):
+# it fires on tags ONLY, so ordinary pushes and PRs never build/publish an image.
+#
+# workflow_dispatch is a DRY RUN: it builds + pushes the image to the throwaway
+# `dryrun` tag (never `latest`, no version tag) and creates NO Release. Use it
+# to prove the multi-arch build works before spending a real `v*` tag.
+name: Release
+
+on:
+  push:
+    tags:
+      # Semver release tags, including pre-releases like v1.0.0-rc.1.
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch/tag/SHA to build for the dry run (default: this branch)."
+        required: false
+        default: ""
+
+# Scoped to this workflow: write packages (GHCR push) and contents (create the
+# Release). The built-in GITHUB_TOKEN carries both — no PAT.
+permissions:
+  contents: write
+  packages: write
+
+# One release per ref at a time; never cancel an in-flight publish midway.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ---- Gate: the same coverage as ci.yml. Nothing publishes if this is red. --
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type checks
+        run: npm run build -w server && npx tsc --noEmit -p client/tsconfig.json
+      - name: Unit + integration tests
+        run: npm test
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # ---- Publish: multi-arch image → GHCR, then the GitHub Release. -----------
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    # arm64 builds better-sqlite3 from source under QEMU emulation — minutes,
+    # not seconds. Generous headroom so a slow native compile is not a timeout.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      # QEMU registers the arm64 emulator so buildx can build linux/arm64 on the
+      # amd64 runner; buildx is the multi-platform builder itself.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Derives image tags + OCI labels from the git tag. On a `v*` push:
+      # {{version}} → the semver (e.g. 1.0.0, 1.0.0-rc.1); `latest` is added
+      # ONLY for a final release (no `-` prerelease suffix). On a dry run
+      # (workflow_dispatch) neither applies, so we tag `dryrun` instead. The
+      # source label metadata-action emits links the GHCR package to this repo.
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/felixgeisler/draw
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && !contains(github.ref_name, '-') }}
+            type=raw,value=dryrun,enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      # The first real build of this image (#191 shipped the Dockerfile but it
+      # had never been built). Both arches get an architecture-matched
+      # better-sqlite3 binary because the builder stage runs AS the target arch.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # A clean multi-arch image index (no extra unknown/unknown provenance
+          # manifest entries in the GHCR package view).
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Tag pushes only — a dry run publishes no Release. Uses the built-in gh
+      # CLI (no third-party action). --generate-notes writes GitHub's auto notes
+      # from the commits/PRs since the previous tag; a semver prerelease (any
+      # tag with a `-`, e.g. -rc.1 / -beta.2) is flagged --prerelease.
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          prerelease=""
+          case "$TAG" in
+            *-*) prerelease="--prerelease" ;;
+          esac
+          gh release create "$TAG" --title "$TAG" --generate-notes $prerelease
