@@ -2417,10 +2417,23 @@ Then `gh release create --generate-notes` cuts the GitHub Release, flagging any
 
 The specifics that matter:
 
-* *Built-in token, no PAT.* `permissions: { contents: write, packages: write }`
-scoped to the workflow; `docker/login-action` and `gh` authenticate with
-`GITHUB_TOKEN`. The `org.opencontainers.image.source` label metadata-action
-emits links the GHCR package back to this repo.
+* *Built-in token, least privilege, no PAT.* The workflow default is
+`permissions: contents: read`; the two write scopes (`packages: write` for the
+GHCR push, `contents: write` for the Release) are granted *only on the `publish`
+job*, so the `test` gate — which runs `npm ci` (arbitrary transitive install
+scripts) and Playwright — never holds a token that can publish. Third-party
+`docker/*` actions in that credential-bearing job are pinned to full commit SHAs
+(with a `# vN` comment) so a moved tag cannot inject code beside the token;
+first-party `actions/*` keep major tags, as in `ci.yml`. `docker/login-action`
+and `gh` authenticate with `GITHUB_TOKEN`; the `org.opencontainers.image.source`
+label metadata-action emits links the GHCR package back to this repo.
+* *GHCR package is private on first publish.* A package first created by a
+`GITHUB_TOKEN` push is private, and the token cannot change that — so the
+documented `docker pull` path needs a one-time manual step: after the first
+release the owner flips the package to *Public* in its GHCR settings (or
+consumers `docker login ghcr.io` with a `read:packages` token). This is called
+out in the README, CONTRIBUTING, and 7.3 so the "pullable from GHCR" claim is
+honest.
 * *E2E stays in the gate.* A release is rare and the arm64 native build under
 QEMU dominates the wall-clock anyway, so running the *full* suite (not just a
 "CI already passed" assumption) is the honest reading of "any test failure
@@ -2449,6 +2462,8 @@ builds or publishes; `ci.yml` and `docs.yml` are byte-for-byte unchanged.
 container contract) a text-contract test pins the workflow's shape — the `v*`
 trigger, the `needs: test` gate reproducing `ci.yml`'s coverage, the
 `amd64,arm64` platforms, the exact GHCR path (kept in sync with the compose
-`image:` line), the `latest`-off-pre-release rule, and the Release step — so a
-miswire fails a unit run rather than half-publishing on a live tag. The image
-building on both arches is proven by the dispatch dry run described above.
+`image:` line), the least-privilege split (workflow read-only, write only on
+`publish`, no permissions on the test gate), the SHA-pinned `docker/*` actions,
+the event-gated `latest`-off-pre-release and version tags, and the Release step
+— so a miswire fails a unit run rather than half-publishing on a live tag. The
+image building on both arches is proven by the dispatch dry run described above.

@@ -78,6 +78,15 @@ docker pull ghcr.io/felixgeisler/draw:latest      # newest final release
 docker pull ghcr.io/felixgeisler/draw:1.0.0       # a specific version
 ```
 
+> **One-time setup — make the package public.** GHCR creates the package
+> *private* on the first release push, and the release workflow's token can't
+> change that. Until the owner flips it, the pulls above fail with
+> `denied`/`not found`. Fix it once, in the package's GitHub page → **Package
+> settings → Danger Zone → Change visibility → Public**. To keep it private
+> instead, authenticate first:
+> `echo $TOKEN | docker login ghcr.io -u <user> --password-stdin` with a token
+> that has `read:packages`.
+
 Point Compose at it by dropping `build:` and setting
 `image: ghcr.io/felixgeisler/draw:latest` in [`docker-compose.yml`](docker-compose.yml),
 or `docker run` it directly (map the port, mount a volume at `/data`).

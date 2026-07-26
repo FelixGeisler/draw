@@ -152,7 +152,10 @@ xref:09_architecture_decisions.adoc[ADR-53]): every `v*` tag runs the full test
 suite, then pushes this image multi-arch to `ghcr.io/felixgeisler/draw`. So a
 self-hoster can `docker pull ghcr.io/felixgeisler/draw:latest` (or a pinned
 version) instead of building — drop `build:` and set `image:` in the sample
-compose. Build-and-run locally still works unchanged: `docker compose up -d`
+compose. One-time caveat: GHCR creates the package *private* on the first
+release push and the workflow token cannot change that, so the owner must flip
+the package to *Public* once (or self-hosters `docker login ghcr.io` with a
+`read:packages` token) before an anonymous pull works. Build-and-run locally still works unchanged: `docker compose up -d`
 (the sample `docker-compose.yml` builds the image and starts it with the volume
 and healthcheck wired). *Upgrade:* pull or rebuild the new image, then recreate
 the container — the `draw-data` volume carries the data across.

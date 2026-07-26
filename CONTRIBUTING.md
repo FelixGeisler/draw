@@ -113,6 +113,12 @@ or `v<x.y.z>-rc.N` / `-beta.N` (pre-release) to `main` runs the
 3. Creates a GitHub Release for the tag with generated notes. `-rc`/`-beta`
    tags (any tag with a `-`) are marked as pre-releases.
 
+**One-time after the first-ever release:** GHCR creates the package *private*,
+and the workflow's `GITHUB_TOKEN` cannot change that. Flip it to **Public** once
+in the package's GitHub page → *Package settings → Change visibility* (or tell
+users to `docker login ghcr.io` with a `read:packages` token), or the
+`docker pull` above fails with `denied`/`not found`.
+
 ```
 git tag v1.0.0 && git push origin v1.0.0     # final → :1.0.0 and :latest
 git tag v1.1.0-rc.1 && git push origin v1.1.0-rc.1   # pre-release → :1.1.0-rc.1 only
