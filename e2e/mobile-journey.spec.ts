@@ -405,16 +405,37 @@ test.describe("at 360px — the narrowest width the acceptance criterion names",
       const { overflow, offenders } = await page.evaluate(() => {
         const root = document.documentElement;
         const vw = root.clientWidth;
-        const offenders: string[] = [];
+        // An element painted past the edge is usually a FOLLOWER: boxes stretch
+        // to the (already widened) content area. The CAUSE is an element whose
+        // own content does not fit its box, so report those — widest first.
+        const causes = [...root.querySelectorAll<HTMLElement>("*")]
+          .map((el) => ({ el, over: el.scrollWidth - el.clientWidth }))
+          .filter((c) => c.over > 1 && c.el.clientWidth > 0)
+          .sort((a, b) => b.over - a.over)
+          .slice(0, 6)
+          .map(({ el, over }) => {
+            const cs = getComputedStyle(el);
+            return `CAUSE ${el.tagName}.${(el.className || "").toString().slice(0, 26)} contentOver=${over} client=${el.clientWidth} scroll=${el.scrollWidth} minW=${cs.minWidth} wrap=${cs.flexWrap} txt=${(el.textContent || "").trim().slice(0, 22)}`;
+          });
+        // Plus the ancestor chain of the widest right edge, for context.
+        let widest: HTMLElement | null = null;
+        let maxRight = 0;
         root.querySelectorAll<HTMLElement>("*").forEach((el) => {
           const r = el.getBoundingClientRect();
-          if (r.right <= vw + 0.5 || el.children.length > 3) return;
-          const cs = getComputedStyle(el);
-          offenders.push(
-            `${el.tagName}.${(el.className || "").toString().slice(0, 30)} w=${Math.round(r.width)} right=${Math.round(r.right)} minW=${cs.minWidth} flex=${cs.flexBasis} txt=${(el.textContent || "").trim().slice(0, 24)}`,
-          );
+          if (r.right > maxRight) {
+            maxRight = r.right;
+            widest = el;
+          }
         });
-        return { overflow: root.scrollWidth - vw, offenders: offenders.slice(0, 8) };
+        const chain: string[] = [];
+        for (let n: HTMLElement | null = widest; n; n = n.parentElement) {
+          const r = n.getBoundingClientRect();
+          const cs = getComputedStyle(n);
+          chain.push(
+            `CHAIN ${n.tagName}.${(n.className || "").toString().slice(0, 22)} w=${Math.round(r.width)} x=${Math.round(r.x)} minW=${cs.minWidth} disp=${cs.display}`,
+          );
+        }
+        return { overflow: root.scrollWidth - vw, offenders: [...causes, ...chain.slice(0, 7)] };
       });
       expect(
         overflow,
