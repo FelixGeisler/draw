@@ -335,6 +335,7 @@ test("touch drag-and-drop: siblings reorder within their parent", async ({ page 
   // pixel off and nothing updates. So step off it and back until the highlight
   // registers, the same hardening dnd-reorder.spec.ts uses for the mouse.
   const gap = page.locator(`[data-dnd-gap="${parent.id}:${alpha.id}"]`);
+  await expectOnScreen(page, "reorder gap", await centre(gap));
   await expect(async () => {
     const target = await centre(gap);
     await touch.move({ x: target.x, y: target.y + 14 });
