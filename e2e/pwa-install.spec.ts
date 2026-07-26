@@ -40,6 +40,19 @@ test.describe("PWA delivery", () => {
     }
   });
 
+  test("the manifest link requests credentials, so a gated instance installs", async ({
+    request,
+  }) => {
+    // With DRAW_PASSWORD set (#190) the gate 401s /manifest.webmanifest, and
+    // browsers fetch manifests without cookies unless the link opts in — drop
+    // this attribute and a password-protected instance silently stops being
+    // installable, which no other assertion would catch.
+    const html = await (await request.get(`${PROD}/`)).text();
+    const link = html.match(/<link[^>]+rel="manifest"[^>]*>/)?.[0] ?? "";
+    expect(link, "index.html must link the manifest").toBeTruthy();
+    expect(link).toContain('crossorigin="use-credentials"');
+  });
+
   test("sw.js is served revalidating, never immutably cached", async ({ request }) => {
     // The whole update strategy rests on this: the worker sits outside
     // /assets/, so app.ts's setHeaders gives it no-cache and the browser

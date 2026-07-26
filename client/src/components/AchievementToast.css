@@ -13,11 +13,20 @@
   z-index: 100;
 }
 
-/* Phone (#193): clear the fixed bottom nav bar (index.css). */
+/* Phone (#193): a bottom-anchored toast has nowhere to go on a 412px screen —
+   it lands on the drawn card's own actions (Start now / ✓ Done) and the fixed
+   nav bar. Dock it under the header instead, spanning the width: the top strip
+   holds no controls, so a celebration never covers the thing you reached for. */
 @media (max-width: 640px) {
   .ach-toast-stack {
-    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    top: calc(48px + env(safe-area-inset-top, 0px) + 8px);
+    bottom: auto;
+    left: 12px;
     right: 12px;
+  }
+
+  .ach-toast {
+    min-width: 0;
   }
 }
 

@@ -2582,6 +2582,15 @@ drives — so touch support reduced to giving the handle a finger-sized target o
 phones. No parallel touch code path, and desktop dragging is byte-for-byte
 unchanged. Had that not been true, the existing "Move under…" menu and keyboard
 paths were the fallback.
+* *The manifest carries credentials, because the password gate covers it.* With
+`DRAW_PASSWORD` set (ADR-50) the gate answers 401 for every path except
+`/api/health` and the login route — including `/manifest.webmanifest`. Browsers
+fetch a manifest *without* cookies by default, even same-origin, so a protected
+instance would advertise no manifest and never offer installation; the link
+therefore carries `crossorigin="use-credentials"`, which is inert when no gate is
+configured. The worker script needs no such flag (a `register()` fetch is
+same-origin-with-credentials already), and the worker never caches the 401 login
+page because the navigation handler stores only `response.ok` bodies.
 * *Verification.* A mobile-viewport spec (Pixel 7 emulation) walks the core
 capture → draw → reveal → complete loop, asserts the document never scrolls
 sideways on any main page, checks the bottom bar hugs the viewport edge with
