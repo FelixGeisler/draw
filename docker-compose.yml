@@ -1,0 +1,57 @@
+# Sample Compose file for self-hosting Draw (#191, ADR-51).
+#
+#   docker compose up -d          # build the image and start
+#   docker compose logs -f        # follow logs
+#   docker compose down           # stop (the draw-data volume is kept)
+#
+# Works as-is on a Raspberry Pi: `up` builds the arm64 image locally and runs
+# it. Your tasks and materials live on the `draw-data` named volume and survive
+# `down`, recreation, and image upgrades.
+
+services:
+  draw:
+    # Build locally today. After the registry image ships (#192) you can drop
+    # `build:` and use the published image instead:
+    #   image: ghcr.io/felixgeisler/draw:latest
+    build: .
+    container_name: draw
+    restart: unless-stopped
+    # Clean SIGTERM shutdown even if the image's tini entrypoint is overridden.
+    init: true
+    ports:
+      # host:container — change only the left side to serve on another port.
+      - "3001:3001"
+    environment:
+      # Listen on all interfaces inside the container so the port mapping is
+      # reachable (ADR-49).
+      HOST: "0.0.0.0"
+      API_PORT: "3001"
+      DATA_DIR: "/data"
+      # On a real LAN, set a shared password (ADR-50): without it, anyone on
+      # the network can read your tasks AND your Anthropic API key.
+      # DRAW_PASSWORD: "change-me"
+      # If a reverse proxy (Caddy/Traefik/nginx) terminates TLS in front of
+      # this, set TRUST_PROXY so the login limiter keys on the real client
+      # (e.g. "loopback" for a same-host proxy). See ADR-50.
+      # TRUST_PROXY: "loopback"
+      # Optional: enables AI features. A key set in the Settings UI wins over
+      # this (ADR-11).
+      # ANTHROPIC_API_KEY: "sk-ant-..."
+    volumes:
+      - draw-data:/data
+    healthcheck:
+      # Same probe as the image HEALTHCHECK: /api/health sits above the
+      # password gate (ADR-50), so it stays green with DRAW_PASSWORD set. Node
+      # global fetch — the slim image has no curl/wget.
+      test:
+        - "CMD"
+        - "node"
+        - "-e"
+        - "fetch('http://127.0.0.1:'+(process.env.API_PORT||3001)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  draw-data:
