@@ -405,6 +405,10 @@ textarea:focus {
   .backup-file {
     flex-basis: 100%;
     font-size: 12px;
+    /* Its internals still measure wider than the box on some platforms, and
+       visible overflow would leak back into the page width — clip it. The tail
+       being hidden is the file name, which the control redraws on selection. */
+    overflow: hidden;
   }
 }
 

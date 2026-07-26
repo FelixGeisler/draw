@@ -483,7 +483,10 @@ export function SettingsPage() {
         {categories.data?.map((c) => (
           <CategoryRow key={c.id} category={c} />
         ))}
-        <div style={{ display: "flex", gap: 8 }}>
+        {/* setting-row, like the category rows above it: without it this row
+            neither wraps on a phone nor drops its grid-item min-width: auto, so
+            its three controls set a floor wider than a 360px screen (#193). */}
+        <div className="setting-row" style={{ display: "flex", gap: 8 }}>
           <input
             placeholder="New category"
             value={newCat}
