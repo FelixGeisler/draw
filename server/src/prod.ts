@@ -5,11 +5,14 @@ import { fileURLToPath } from "node:url";
 import {
   lanExposureWarning,
   resolveApiPort,
+  resolveBackupIntervalHours,
+  resolveBackupRetention,
   resolveHost,
   resolvePassword,
   resolveTrustProxy,
 } from "./config.js";
 import { startServer } from "./server.js";
+import { startBackupScheduler } from "./backupScheduler.js";
 
 // Production entry (#189, ADR-49): the same API as dev plus the built client,
 // one port, run via tsx (`npm start`). A separate entry rather than NODE_ENV
@@ -59,3 +62,18 @@ startServer(resolveApiPort(), {
   password,
   trustProxy: resolveTrustProxy(),
 });
+
+// Scheduled automatic backups (#194, ADR-52): a prod-entry concern like HOST
+// and DRAW_PASSWORD — the headless Pi deployment has no cron, so the timer
+// lives in the server process. Off by default (interval unset/0): starts
+// nothing, behavior unchanged. When configured, archives land in
+// DATA_DIR/backups/ and restore is the existing POST /api/backup/import.
+const backupIntervalHours = resolveBackupIntervalHours();
+const backupRetention = resolveBackupRetention();
+if (backupIntervalHours > 0) {
+  console.log(
+    `[server] scheduled backups every ${backupIntervalHours}h, keeping ${backupRetention} ` +
+      `(DATA_DIR/backups; restore via POST /api/backup/import)`,
+  );
+  startBackupScheduler(backupIntervalHours, backupRetention);
+}

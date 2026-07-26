@@ -1,9 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_BACKUP_RETENTION,
   DEFAULT_HOST,
+  MAX_BACKUP_INTERVAL_HOURS,
   isLoopbackHost,
   lanExposureWarning,
   resolveApiPort,
+  resolveBackupIntervalHours,
+  resolveBackupRetention,
   resolveHost,
   resolvePassword,
   resolveTrustProxy,
@@ -126,5 +130,79 @@ describe("lanExposureWarning", () => {
     expect(lanExposureWarning("127.0.0.1", undefined)).toBeUndefined();
     expect(lanExposureWarning("localhost", undefined)).toBeUndefined();
     expect(lanExposureWarning("::1", "lan-pin")).toBeUndefined();
+  });
+});
+
+describe("resolveBackupIntervalHours", () => {
+  it("is disabled (0) by default — no scheduler, behavior unchanged (#194)", () => {
+    expect(resolveBackupIntervalHours({})).toBe(0);
+    expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "" })).toBe(0);
+    expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "0" })).toBe(0);
+  });
+
+  it("honors a positive interval, fractional included", () => {
+    expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "24" })).toBe(24);
+    expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "0.5" })).toBe(0.5);
+  });
+
+  it("treats non-numeric or non-positive values as disabled", () => {
+    expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "nightly" })).toBe(0);
+    expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "-6" })).toBe(0);
+    expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "NaN" })).toBe(0);
+  });
+
+  describe("caps over-large intervals to avoid setInterval overflow", () => {
+    // setInterval's delay is a signed 32-bit ms int; the cap is the largest
+    // whole-hour interval that still fits (596h). Boundary must hold: at the cap
+    // passes through untouched, just over clamps.
+    afterEach(() => vi.restoreAllMocks());
+
+    it("caps so intervalHours * 3_600_000 never exceeds 2147483647ms", () => {
+      expect(MAX_BACKUP_INTERVAL_HOURS).toBe(596);
+      expect(MAX_BACKUP_INTERVAL_HOURS * 60 * 60 * 1000).toBeLessThanOrEqual(2_147_483_647);
+      expect((MAX_BACKUP_INTERVAL_HOURS + 1) * 60 * 60 * 1000).toBeGreaterThan(2_147_483_647);
+    });
+
+    it("passes the cap value and anything under it through unchanged", () => {
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: String(MAX_BACKUP_INTERVAL_HOURS) })).toBe(
+        MAX_BACKUP_INTERVAL_HOURS,
+      );
+      expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "24" })).toBe(24);
+      expect(err).not.toHaveBeenCalled();
+    });
+
+    it("clamps just-over-cap and monthly values, warning to stderr", () => {
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: String(MAX_BACKUP_INTERVAL_HOURS + 1) })).toBe(
+        MAX_BACKUP_INTERVAL_HOURS,
+      );
+      // 720h ("monthly") is the exact overflow the review flagged.
+      expect(resolveBackupIntervalHours({ BACKUP_INTERVAL_HOURS: "720" })).toBe(MAX_BACKUP_INTERVAL_HOURS);
+      expect(err).toHaveBeenCalledTimes(2);
+      expect(err.mock.calls[0][0]).toContain("clamping");
+    });
+  });
+});
+
+describe("resolveBackupRetention", () => {
+  it("defaults to 7 when unset (#194)", () => {
+    expect(resolveBackupRetention({})).toBe(DEFAULT_BACKUP_RETENTION);
+    expect(DEFAULT_BACKUP_RETENTION).toBe(7);
+    expect(resolveBackupRetention({ BACKUP_RETENTION: "" })).toBe(DEFAULT_BACKUP_RETENTION);
+    expect(resolveBackupRetention({ BACKUP_RETENTION: "   " })).toBe(DEFAULT_BACKUP_RETENTION);
+  });
+
+  it("honors a positive integer count", () => {
+    expect(resolveBackupRetention({ BACKUP_RETENTION: "3" })).toBe(3);
+    expect(resolveBackupRetention({ BACKUP_RETENTION: "30" })).toBe(30);
+  });
+
+  it("falls back to the default on 0, negatives, fractionals, or garbage", () => {
+    // Retention 0 would delete the archive the run just wrote — never honored.
+    expect(resolveBackupRetention({ BACKUP_RETENTION: "0" })).toBe(DEFAULT_BACKUP_RETENTION);
+    expect(resolveBackupRetention({ BACKUP_RETENTION: "-1" })).toBe(DEFAULT_BACKUP_RETENTION);
+    expect(resolveBackupRetention({ BACKUP_RETENTION: "2.5" })).toBe(DEFAULT_BACKUP_RETENTION);
+    expect(resolveBackupRetention({ BACKUP_RETENTION: "lots" })).toBe(DEFAULT_BACKUP_RETENTION);
   });
 });

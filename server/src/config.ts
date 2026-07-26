@@ -34,6 +34,48 @@ export function resolvePassword(env: NodeJS.ProcessEnv = process.env): string | 
   return password || undefined;
 }
 
+// BACKUP_INTERVAL_HOURS (#194, ADR-52): the period between automatic backups.
+// Unset, 0, non-numeric, or non-positive = disabled — the production entry
+// starts no timer, so behavior is identical to before (local dev stays silent
+// unless deliberately configured). A positive value (fractional allowed) is
+// the interval in hours; the scheduler writes one archive into
+// DATA_DIR/backups/ each tick. Only the production entry consumes it — dev is
+// a developer's machine, restarted constantly, not the headless Pi this exists
+// for (ADR-52), the same prod-entry-only stance HOST and DRAW_PASSWORD take.
+//
+// Capped at MAX_BACKUP_INTERVAL_HOURS: setInterval's delay is a signed 32-bit
+// int of milliseconds, so anything over 2147483647ms (~24.85 days) silently
+// WRAPS to a 1ms delay — a runaway backup loop pegging the Pi (e.g. a
+// well-meaning BACKUP_INTERVAL_HOURS=720 for "monthly"). An over-large value is
+// clamped to the cap, not rejected, and the clamp is logged to stderr.
+export const MAX_BACKUP_INTERVAL_HOURS = Math.floor(2_147_483_647 / (60 * 60 * 1000)); // 596
+export function resolveBackupIntervalHours(env: NodeJS.ProcessEnv = process.env): number {
+  const hours = Number(env.BACKUP_INTERVAL_HOURS);
+  if (!(Number.isFinite(hours) && hours > 0)) return 0;
+  if (hours > MAX_BACKUP_INTERVAL_HOURS) {
+    console.error(
+      `[server] BACKUP_INTERVAL_HOURS=${hours} exceeds the ${MAX_BACKUP_INTERVAL_HOURS}h maximum ` +
+        `(setInterval overflows past that) — clamping to ${MAX_BACKUP_INTERVAL_HOURS}h`,
+    );
+    return MAX_BACKUP_INTERVAL_HOURS;
+  }
+  return hours;
+}
+
+// BACKUP_RETENTION (#194, ADR-52): how many scheduled archives under
+// DATA_DIR/backups/ to keep — older ones are pruned after each run. Defaults
+// to 7. A blank, non-integer, zero, negative, or otherwise out-of-range value
+// falls back to the default (7) rather than failing the boot — in particular 0
+// is NOT honored, since keeping zero archives would delete the one the run just
+// wrote.
+export const DEFAULT_BACKUP_RETENTION = 7;
+export function resolveBackupRetention(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.BACKUP_RETENTION?.trim();
+  if (!raw) return DEFAULT_BACKUP_RETENTION;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : DEFAULT_BACKUP_RETENTION;
+}
+
 // TRUST_PROXY (#190, ADR-50): what Express's `trust proxy` setting should be,
 // which is what makes `req.ip` the DE-PROXIED client address behind a reverse
 // proxy — the address the login rate limiter keys on. Off by default (direct

@@ -96,6 +96,19 @@ the `draw-data` volume carries your data across. **Backup/restore:** use the
 export/import zip in Settings, or snapshot the `draw-data` volume. Data lives
 under `/data` (`DATA_DIR`) inside the container.
 
+### Scheduled backups
+
+For an unattended deployment (e.g. a headless Raspberry Pi), set
+`BACKUP_INTERVAL_HOURS` in `server/.env` and the server writes a backup zip into
+`server/data/backups/` on that schedule — no cron needed, the timer runs inside
+the server (production mode only). `BACKUP_RETENTION` (default 7) caps how many
+archives are kept; older ones are pruned automatically. Unset or `0` disables it
+(the default — nothing runs). Each archive is a normal Draw backup (the SQLite
+snapshot plus your material files), so **restoring one is the usual restore**:
+upload it on the Settings page, or `POST /api/backup/import`. Copy
+`server/data/backups/` off-device (rsync, a network share) for real off-site
+safety.
+
 ## Enable AI features (optional)
 
 Copy `server/.env.example` to `server/.env` and set `ANTHROPIC_API_KEY` (get one at

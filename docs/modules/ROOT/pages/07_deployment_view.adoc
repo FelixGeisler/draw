@@ -66,6 +66,14 @@ the MCP adapter sends the same secret as an `x-draw-password` header (it reads
 secret). Unset, the gate does not exist. Draw itself speaks plain HTTP; for
 TLS put a reverse proxy in front (ADR-50 threat model).
 
+With `BACKUP_INTERVAL_HOURS` set (#194,
+xref:09_architecture_decisions.adoc[ADR-52]), the production entry starts an
+in-process timer that writes a backup archive into `DATA_DIR/backups/` on that
+schedule and prunes to the newest `BACKUP_RETENTION` (default 7). No cron — the
+headless Pi keeps backing itself up with the process it already runs. Restore is
+the existing `POST /api/backup/import` (section 8.9); the archives are ordinary
+Draw backups. Unset/0 (the default) starts nothing.
+
 [plantuml,deployment-prod,svg]
 ....
 @startuml
@@ -192,13 +200,18 @@ mode only — optional password gate for LAN exposure, #190/ADR-50; set it
 whenever `HOST` unpins loopback), `TRUST_PROXY` (production mode only —
 required if a reverse proxy fronts the app, so the login limiter keys on the
 real client; e.g. `loopback` for a same-host proxy). `PORT` is deliberately
-not used — dev tooling injects it
+not used — dev tooling injects it. `BACKUP_INTERVAL_HOURS` (production mode
+only — unset/0 disables; hours between automatic backups into
+`DATA_DIR/backups/`) and `BACKUP_RETENTION` (default 7 — how many archives to
+keep, #194/ADR-52)
 
 |Data
 |Everything under `DATA_DIR` (dev/production default `server/data/`, gitignored;
 container `/data` on the `draw-data` named volume): the SQLite `app.db` (WAL)
-and `files/` goal materials. Backup = copy the folder / snapshot the volume, or
-the ADR-26 export zip. All modes share the same `DATA_DIR` layout — switching
+and `files/` goal materials. Backup = copy the folder / snapshot the volume, the
+ADR-26 export zip, or scheduled automatic backups into `DATA_DIR/backups/`
+(`BACKUP_INTERVAL_HOURS`, #194/ADR-52). All modes share the same `DATA_DIR`
+layout — switching
 modes keeps the data
 
 |Docs hosting
