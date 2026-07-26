@@ -2525,3 +2525,72 @@ trigger, the `needs: test` gate reproducing `ci.yml`'s coverage, the
 the event-gated `latest`-off-pre-release and version tags, and the Release step
 — so a miswire fails a unit run rather than half-publishing on a live tag. The
 image building on both arches is proven by the dispatch dry run described above.
+
+== ADR-54: Phone support as an installable PWA — responsive adaptation, app-shell service worker, no native app
+
+*Context:* 1.0.0 is used from an Android phone against the self-hosted container
+(#191, ADR-51), but the client was built desktop-first: about 25 partial media
+queries, no web app manifest, no service worker. The product's own
+one-card-up, hide-the-mountain design suits a phone screen — the UI had to
+follow (#193).
+
+*Decision:* Ship the phone experience as an *installable PWA*, not a native or
+Capacitor app. Three parts: a responsive adaptation at phone widths that leaves
+the TCG card identity untouched; a manifest with regular and maskable icons so
+Android Chrome installs the app and launches it standalone; and a *minimal
+app-shell service worker*, registered in production builds only.
+
+*Rationale:*
+
+* *PWA over native.* The deployment already serves the app over HTTP on the
+LAN, so installability costs a manifest and a worker — no second build
+pipeline, no signing keys, no store review, no divergent codebase. A native or
+Capacitor shell buys push notifications and a store listing, neither of which a
+single-user planner needs; it is a revisit-if-the-PWA-disappoints option, not a
+1.0.0 requirement. The accepted cost: no push notifications, and iOS
+install-to-home-screen is clunkier than Android's prompt — the owner's device is
+Android.
+* *Adaptation, not redesign.* Level stars, card type, ATK and the art window are
+the product's visual language (see the TCG framing in section 1); the phone pass
+re-flows layout (single column, thumb-reachable bottom tab bar, 44px minimum
+touch targets, no horizontal page scroll) and changes none of it. One breakpoint
+at 640px, matching the conventions already in the stylesheets, rather than a new
+scale.
+* *Service-worker scope discipline — the shell, and only the shell.* `/api` is
+never intercepted: requests fall through to the network, so API data can never
+be served stale by the worker. That is the hard rule of #193, and it is what
+keeps the worker from becoming a correctness problem. The content-hashed bundles
+under `/assets/` are deliberately *not* precached either — the HTTP layer
+already serves them immutable (ADR-49), and a worker copy would be a second
+cache to invalidate. Navigations are network-first with the cached shell as an
+*offline fallback only*, so an online user always gets the server's index.html
+and picks up a deploy on the next load.
+* *A documented update strategy, so nobody is stranded on a stale shell.*
+`sw.js` sits outside `/assets/`, so the production server's header rule gives it
+`no-cache` and the browser re-fetches it on navigation; any byte change installs
+the new worker, `skipWaiting()` plus `clients.claim()` activate it immediately,
+and the activate handler deletes the previous version's cache. The cache name is
+bumped when the precached shell list changes shape.
+* *Registered in production builds only.* The Vite dev server and the dev-mode
+E2E suite stay worker-free, so a stale worker can never shadow live-reloaded
+code. Registration is progressive enhancement — an unsupported browser or an
+insecure origin leaves the app fully functional, just not installable.
+* *Touch drag-and-drop needed no rework.* The reorder/reparent gesture was
+already built on pointer events with `setPointerCapture` and
+`touch-action: none` on the handle (ADR-39), which is exactly what a finger
+drives — so touch support reduced to giving the handle a finger-sized target on
+phones. No parallel touch code path, and desktop dragging is byte-for-byte
+unchanged. Had that not been true, the existing "Move under…" menu and keyboard
+paths were the fallback.
+* *Verification.* A mobile-viewport spec (Pixel 7 emulation) walks the core
+capture → draw → reveal → complete loop, asserts the document never scrolls
+sideways on any main page, checks the bottom bar hugs the viewport edge with
+44px targets, and drives a real touch reparent by dispatching the pointer-event
+sequence a finger produces. PWA delivery is asserted against the *production*
+server, since the manifest, icons and worker only exist once vite has copied
+them into `client/dist`: manifest and every declared icon are served, `sw.js`
+comes back revalidating rather than immutable, and the activated worker holds a
+shell entry but no `/api` and no `/assets/` entry in any cache.
+
+*Out of scope:* offline-first data sync, push notifications, and a
+native/Capacitor app — all explicitly deferred past 1.0.0.

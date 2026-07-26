@@ -109,6 +109,22 @@ upload it on the Settings page, or `POST /api/backup/import`. Copy
 `server/data/backups/` off-device (rsync, a network share) for real off-site
 safety.
 
+### Install it on your phone
+
+Draw is an installable PWA, so the phone gets an app icon instead of a browser
+tab. On the **same network** as the server, open `http://<server-host>:3001` in
+Android Chrome and use **⋮ → Add to Home screen** (Chrome usually offers
+"Install app" on its own). It launches standalone — no browser chrome — and the
+layout adapts to phone widths.
+
+Two notes: this needs **production mode** (the manifest and service worker ship
+in the built client, not the Vite dev server), and browsers only offer install on
+a *secure context* — `localhost` counts, a plain-HTTP LAN address may not, in
+which case put the server behind a reverse proxy with TLS (see
+[deployment](https://felixgeisler.github.io/draw/07_deployment_view.html)). The
+app never stores your task data offline: the worker caches only the app shell, so
+opening it out of range shows the shell, not stale tasks.
+
 ## Enable AI features (optional)
 
 Copy `server/.env.example` to `server/.env` and set `ANTHROPIC_API_KEY` (get one at
