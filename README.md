@@ -117,13 +117,19 @@ Android Chrome and use **⋮ → Add to Home screen** (Chrome usually offers
 "Install app" on its own). It launches standalone — no browser chrome — and the
 layout adapts to phone widths.
 
-Two notes: this needs **production mode** (the manifest and service worker ship
-in the built client, not the Vite dev server), and browsers only offer install on
-a *secure context* — `localhost` counts, a plain-HTTP LAN address may not, in
-which case put the server behind a reverse proxy with TLS (see
-[deployment](https://felixgeisler.github.io/draw/07_deployment_view.html)). The
-app never stores your task data offline: the worker caches only the app shell, so
-opening it out of range shows the shell, not stale tasks.
+Two notes: this needs **production mode**, because the client only registers the
+service worker in a production build (`client/src/main.tsx`) — in dev the app
+stays worker-free so a stale worker can never shadow live-reloaded code. And
+browsers only offer install on a *secure context* — `localhost` counts, a
+plain-HTTP LAN address may not, in which case put the server behind a reverse
+proxy with TLS (see
+[deployment](https://felixgeisler.github.io/draw/docs/07_deployment_view.html)).
+
+The app never stores your task data offline: the worker caches the app shell and
+nothing else, so it can never show you stale tasks. It is not an offline app
+either — the cached shell points at the app's JavaScript bundles, which the worker
+deliberately does not cache, so launching out of range works only while your
+browser still has those in its own cache. Assume you need the server.
 
 ## Enable AI features (optional)
 

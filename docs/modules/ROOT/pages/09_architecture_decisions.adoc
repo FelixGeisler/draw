@@ -2529,14 +2529,15 @@ image building on both arches is proven by the dispatch dry run described above.
 == ADR-54: Phone support as an installable PWA — responsive adaptation, app-shell service worker, no native app
 
 *Context:* 1.0.0 is used from an Android phone against the self-hosted container
-(#191, ADR-51), but the client was built desktop-first: about 25 partial media
-queries, no web app manifest, no service worker. The product's own
-one-card-up, hide-the-mountain design suits a phone screen — the UI had to
-follow (#193).
+(#191, ADR-51), but the client was built desktop-first — with no responsive
+baseline at all: before #193 not one stylesheet carried a width-based media
+query (every `@media` in the client was `prefers-reduced-motion`), and there was
+no web app manifest and no service worker. The product's own one-card-up,
+hide-the-mountain design suits a phone screen — the UI had to follow (#193).
 
 *Decision:* Ship the phone experience as an *installable PWA*, not a native or
 Capacitor app. Three parts: a responsive adaptation at phone widths that leaves
-the TCG card identity untouched; a manifest with regular and maskable icons so
+the card's visual identity untouched; a manifest with regular and maskable icons so
 Android Chrome installs the app and launches it standalone; and a *minimal
 app-shell service worker*, registered in production builds only.
 
@@ -2550,38 +2551,63 @@ single-user planner needs; it is a revisit-if-the-PWA-disappoints option, not a
 1.0.0 requirement. The accepted cost: no push notifications, and iOS
 install-to-home-screen is clunkier than Android's prompt — the owner's device is
 Android.
-* *Adaptation, not redesign.* Level stars, card type, ATK and the art window are
-the product's visual language (see the TCG framing in section 1); the phone pass
-re-flows layout (single column, thumb-reachable bottom tab bar, 44px minimum
-touch targets, no horizontal page scroll) and changes none of it. One breakpoint
-at 640px, matching the conventions already in the stylesheets, rather than a new
-scale.
+* *Adaptation, not redesign.* The card face's own language — full-bleed art under
+its legibility scrim, the category pill, the effort chip, the impact stars, the
+holo shimmer on a drawn 5★ (ADR-33, which superseded ADR-31's literal TCG frame;
+the vocabulary is listed in the glossary) — is the product's identity; the phone
+pass re-flows layout (single column, thumb-reachable bottom tab bar, 44px minimum
+touch targets, no horizontal page scroll) and changes none of it. It introduces
+ONE width breakpoint, at 640px — the client's first, and deliberately its only
+one: five stylesheets hang their phone rules off that same query rather than
+growing a scale of thresholds. The tab bar is the one piece of *fixed* chrome the
+phone layout adds, which makes its height a constraint for everything that floats
+over the page: it claims a z-index band above page chrome and below the
+fullscreen overlays, and a floating panel anchored to the viewport (the History
+day-detail, ADR-45) has to subtract the bar's measured height — safe-area inset
+included — from its own clamp, or its tail is painted over.
 * *Service-worker scope discipline — the shell, and only the shell.* `/api` is
 never intercepted: requests fall through to the network, so API data can never
 be served stale by the worker. That is the hard rule of #193, and it is what
-keeps the worker from becoming a correctness problem. The content-hashed bundles
-under `/assets/` are deliberately *not* precached either — the HTTP layer
-already serves them immutable (ADR-49), and a worker copy would be a second
-cache to invalidate. Navigations are network-first with the cached shell as an
-*offline fallback only*, so an online user always gets the server's index.html
-and picks up a deploy on the next load.
+keeps the worker from becoming a correctness problem. The path test is
+case-insensitive, because Express matches its mounts that way (#189) — `/API/…`
+is API traffic too, and a case-sensitive test would have let its body through the
+navigation branch. The content-hashed bundles under `/assets/` are deliberately
+*not* precached either — the HTTP layer already serves them immutable (ADR-49),
+and a worker copy would be a second cache to invalidate. Navigations are
+network-first with the cached shell as an *offline fallback only*, so an online
+user always gets the server's index.html and picks up a deploy on the next load;
+only an `ok` *HTML* response is allowed to become that shell, so no stray
+non-HTML navigation can replace it.
+* *Installable, not offline-capable — and the docs say so.* The precached shell
+is index.html, and index.html references the content-hashed bundles the worker
+deliberately does not cache. An offline launch therefore renders only while the
+browser's own (evictable) HTTP cache still holds those bundles: offline is
+best-effort, not a promise. That trade-off is accepted rather than fixed —
+precaching `/assets/` would buy a genuine offline shell at the cost of the second
+cache to invalidate this ADR just refused, and offline-first data was out of
+scope from the start. What the worker IS for is installability: Android Chrome
+requires a manifest, a registered worker with a fetch handler, and a secure
+context before it offers to install.
 * *A documented update strategy, so nobody is stranded on a stale shell.*
 `sw.js` sits outside `/assets/`, so the production server's header rule gives it
 `no-cache` and the browser re-fetches it on navigation; any byte change installs
 the new worker, `skipWaiting()` plus `clients.claim()` activate it immediately,
 and the activate handler deletes the previous version's cache. The cache name is
-bumped when the precached shell list changes shape.
+bumped when the precached shell list — or what is allowed to become the shell —
+changes shape.
 * *Registered in production builds only.* The Vite dev server and the dev-mode
 E2E suite stay worker-free, so a stale worker can never shadow live-reloaded
 code. Registration is progressive enhancement — an unsupported browser or an
 insecure origin leaves the app fully functional, just not installable.
-* *Touch drag-and-drop needed no rework.* The reorder/reparent gesture was
-already built on pointer events with `setPointerCapture` and
-`touch-action: none` on the handle (ADR-39), which is exactly what a finger
-drives — so touch support reduced to giving the handle a finger-sized target on
-phones. No parallel touch code path, and desktop dragging is byte-for-byte
-unchanged. Had that not been true, the existing "Move under…" menu and keyboard
-paths were the fallback.
+* *Touch drag-and-drop needed no rework.* No ADR records the gesture; the
+mechanism is in the code, and #193 verified it there: `TaskDnd.tsx` drives the
+drag with pointer events and `setPointerCapture`, and `TaskDnd.css` puts
+`touch-action: none` on the handle — which is exactly what a finger produces, so
+touch support reduced to giving that handle a 44px target on phones. (The
+reorder half of the gesture drops onto the gap zones between siblings, whose
+stored `sort_order` is ADR-43.) No parallel touch code path, and desktop dragging
+is byte-for-byte unchanged. Had that not been true, the existing "Move under…"
+menu and keyboard paths were the fallback.
 * *The manifest carries credentials, because the password gate covers it.* With
 `DRAW_PASSWORD` set (ADR-50) the gate answers 401 for every path except
 `/api/health` and the login route — including `/manifest.webmanifest`. Browsers
@@ -2590,16 +2616,29 @@ instance would advertise no manifest and never offer installation; the link
 therefore carries `crossorigin="use-credentials"`, which is inert when no gate is
 configured. The worker script needs no such flag (a `register()` fetch is
 same-origin-with-credentials already), and the worker never caches the 401 login
-page because the navigation handler stores only `response.ok` bodies.
+page because the navigation handler stores only `ok` bodies.
 * *Verification.* A mobile-viewport spec (Pixel 7 emulation) walks the core
-capture → draw → reveal → complete loop, asserts the document never scrolls
-sideways on any main page, checks the bottom bar hugs the viewport edge with
-44px targets, and drives a real touch reparent by dispatching the pointer-event
-sequence a finger produces. PWA delivery is asserted against the *production*
-server, since the manifest, icons and worker only exist once vite has copied
-them into `client/dist`: manifest and every declared icon are served, `sw.js`
-comes back revalidating rather than immutable, and the activated worker holds a
-shell entry but no `/api` and no `/assets/` entry in any cache.
+capture → draw → reveal → complete loop and asserts the document never scrolls
+sideways on any main page — including `/assistant`, which has no tab to tap in
+the AI-degraded suite and is therefore reached by URL. It measures the touch
+targets the 640px rules actually change (the capture form's inputs, selects and
+buttons; the drag handle in both axes), proves the bottom bar is *pinned* by
+re-measuring after a scroll rather than at offset 0, repeats the
+no-sideways-scroll invariant at 360px (the width the acceptance criterion names —
+Pixel 7 is 412px), and drives BOTH halves of the touch gesture, reparent and
+same-parent reorder, through CDP `Input.dispatchTouchEvent`. Real input matters
+here: synthesised `PointerEvent`s never establish pointer capture, so a spec
+built on them fails while the feature works. Everything the spec seeds is
+removed in an `afterEach` with checked statuses — the suite shares one database,
+and a leaked drawable task would change what later specs draw. PWA delivery is
+asserted against the *production* server, since the manifest, icons and worker
+only exist once vite has copied them into `client/dist`: the manifest declares
+regular *and* maskable icons at 192 and 512 (asserted as purpose+size pairs) and
+every one of them resolves, index.html carries the manifest link, the
+`theme-color` and a `width=device-width` viewport, `sw.js` comes back
+revalidating rather than immutable, and the activated worker holds a shell entry
+but no `/api` and no `/assets/` entry in any cache — including after a navigation
+to `/API/tasks`, which answers JSON and must not become the shell.
 
 *Out of scope:* offline-first data sync, push notifications, and a
 native/Capacitor app — all explicitly deferred past 1.0.0.
