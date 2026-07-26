@@ -85,6 +85,21 @@ export const SUBTASK_CATEGORY_ERROR =
   "or pass the parent's own categoryId (a subtask's category stays editable afterwards)";
 
 /**
+ * A real YYYY-MM-DD calendar day — the shape `dueDate` promises and the MCP
+ * schema already enforces (`dateSchema` in tools/catalog.ts). The FORMAT is
+ * load-bearing since #205 (PR #206 review): due dates are compared as
+ * strings, so an unpadded "2026-7-4" sorts AFTER "2026-07-26" and would keep
+ * a recurring card out of the deck for the rest of the millennium while the
+ * draw cheerfully reports that it comes back on its own. The UTC round-trip
+ * also rejects a well-shaped non-day like "2026-02-30".
+ */
+function isCalendarDate(value: unknown): boolean {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/**
  * Request-shape validation (#84): malformed field types used to surface as
  * raw 500s — better-sqlite3 binding TypeErrors or CHECK-constraint
  * violations — instead of honest 400s. Shared by POST /, POST /:id/subtasks
@@ -104,7 +119,7 @@ export function fieldShapeError(body: Record<string, unknown>): string | null {
   ) {
     return "effortMinutes must be a positive integer";
   }
-  if (body.dueDate != null && typeof body.dueDate !== "string") {
+  if (body.dueDate != null && !isCalendarDate(body.dueDate)) {
     return "dueDate must be a YYYY-MM-DD string";
   }
   if ("status" in body && body.status !== "open" && body.status !== "done" && body.status !== "archived") {
