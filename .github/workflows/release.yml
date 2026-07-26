@@ -22,11 +22,12 @@ on:
         required: false
         default: ""
 
-# Scoped to this workflow: write packages (GHCR push) and contents (create the
-# Release). The built-in GITHUB_TOKEN carries both — no PAT.
+# Least privilege at the top: the default token stays read-only, so the `test`
+# gate — which runs `npm ci` (arbitrary transitive install scripts) + Playwright
+# — cannot push an image or cut a Release even if a dependency is compromised.
+# The write scopes are granted ONLY on the `publish` job below.
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 # One release per ref at a time; never cancel an in-flight publish midway.
 concurrency:
@@ -65,6 +66,11 @@ jobs:
   publish:
     needs: test
     runs-on: ubuntu-latest
+    # The only job that needs write, and only these two: packages (GHCR push) +
+    # contents (create the Release), via the built-in GITHUB_TOKEN — no PAT.
+    permissions:
+      contents: write
+      packages: write
     # arm64 builds better-sqlite3 from source under QEMU emulation — minutes,
     # not seconds. Generous headroom so a slow native compile is not a timeout.
     timeout-minutes: 60
@@ -73,33 +79,39 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
+      # Third-party actions in this credential-bearing job are pinned to full
+      # commit SHAs (the trailing comment tracks the human version) so a moved
+      # tag cannot slip new code next to a packages:write token. First-party
+      # actions/* keep major tags, as in ci.yml.
       # QEMU registers the arm64 emulator so buildx can build linux/arm64 on the
       # amd64 runner; buildx is the multi-platform builder itself.
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Derives image tags + OCI labels from the git tag. On a `v*` push:
-      # {{version}} → the semver (e.g. 1.0.0, 1.0.0-rc.1); `latest` is added
-      # ONLY for a final release (no `-` prerelease suffix). On a dry run
-      # (workflow_dispatch) neither applies, so we tag `dryrun` instead. The
-      # source label metadata-action emits links the GHCR package to this repo.
+      # Derives image tags + OCI labels. Every rule is gated on the EVENT, not
+      # just the ref, so a dispatch can never emit a real version tag even when
+      # run from a tag ref (`--ref v1.0.0`). On a `v*` push: {{version}} → the
+      # semver (e.g. 1.0.0, 1.0.0-rc.1), and `latest` ONLY for a final release
+      # (no `-` prerelease suffix). On a dry run (workflow_dispatch): only
+      # `dryrun`. The source label metadata-action emits links the GHCR package
+      # to this repo.
       - name: Image metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/felixgeisler/draw
           flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},enable=${{ github.event_name == 'push' }}
             type=raw,value=latest,enable=${{ github.event_name == 'push' && !contains(github.ref_name, '-') }}
             type=raw,value=dryrun,enable=${{ github.event_name == 'workflow_dispatch' }}
 
@@ -107,7 +119,7 @@ jobs:
       # had never been built). Both arches get an architecture-matched
       # better-sqlite3 binary because the builder stage runs AS the target arch.
       - name: Build and push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64

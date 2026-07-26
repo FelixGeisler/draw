@@ -55,10 +55,24 @@ describe("release workflow gate", () => {
 });
 
 describe("release workflow publish", () => {
-  it("grants exactly the permissions the built-in token needs", () => {
-    // packages:write to push to GHCR, contents:write to create the Release.
-    expect(release).toMatch(/permissions:\s*[\s\S]*?contents:\s*write/);
-    expect(release).toMatch(/permissions:\s*[\s\S]*?packages:\s*write/);
+  it("keeps the token least-privilege: read at workflow scope, write only on publish", () => {
+    // Split at `jobs:` — the write scopes must live on the publish job, never
+    // at workflow scope where the `npm ci`/Playwright test gate would inherit
+    // them (a compromised dependency could push a backdoored :latest).
+    const jobsAt = release.indexOf("\njobs:");
+    const workflowScope = release.slice(0, jobsAt);
+    const jobsScope = release.slice(jobsAt);
+    expect(workflowScope).toMatch(/^permissions:\s*\n\s+contents:\s*read\s*$/m);
+    // No write scope as a real YAML key at workflow level (comment prose that
+    // mentions "write" starts with `#` and is not a `key: write` line).
+    expect(workflowScope).not.toMatch(/^\s*(contents|packages):\s*write/m);
+    // The publish job (and only it) escalates to exactly the two write scopes.
+    const publishJob = jobsScope.slice(jobsScope.indexOf("\n  publish:"));
+    expect(publishJob).toMatch(/permissions:\s*[\s\S]*?contents:\s*write/);
+    expect(publishJob).toMatch(/permissions:\s*[\s\S]*?packages:\s*write/);
+    // The test gate declares no permissions of its own → inherits read-only.
+    const testJob = jobsScope.slice(jobsScope.indexOf("\n  test:"), jobsScope.indexOf("\n  publish:"));
+    expect(testJob).not.toContain("permissions:");
   });
 
   it("logs in to GHCR with the built-in GITHUB_TOKEN (no PAT)", () => {
@@ -74,13 +88,28 @@ describe("release workflow publish", () => {
     expect(release).toContain("docker/setup-buildx-action");
   });
 
+  it("pins every third-party docker/* action to a full commit SHA", () => {
+    // This is the credential-bearing job; a moved tag must not be able to slip
+    // new code next to the packages:write token. Each pin carries a `# vN`
+    // comment so the human version is still legible.
+    const pins = release.match(/uses:\s*docker\/[^\n]+/g) ?? [];
+    expect(pins).toHaveLength(5);
+    for (const pin of pins) {
+      expect(pin).toMatch(/@[0-9a-f]{40} # v\d+/);
+    }
+  });
+
   it("pushes to the real GHCR image path", () => {
     expect(release).toContain(`images: ${IMAGE}`);
     expect(release).toMatch(/push:\s*true/);
   });
 
   it("tags the semver AND latest, but keeps latest off pre-releases", () => {
-    expect(release).toContain("type=semver,pattern={{version}}");
+    // The version tag is push-gated on the EVENT, not the ref: a dispatch dry
+    // run (even one launched from a tag ref) must never emit a real :version.
+    expect(release).toMatch(
+      /type=semver,pattern=\{\{version\}\},enable=\$\{\{ github\.event_name == 'push' \}\}/,
+    );
     // `latest` is gated on a non-prerelease push (no `-` in the tag name).
     expect(release).toMatch(/type=raw,value=latest,enable=.*!contains\(github\.ref_name, '-'\)/);
   });
