@@ -399,10 +399,27 @@ test.describe("at 360px — the narrowest width the acceptance criterion names",
       // Wait for the page's own content, not just the shell — an unrendered
       // route would pass the overflow check vacuously.
       await expect(page.locator(".content")).toBeVisible();
-      const overflow = await page.evaluate(
-        () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      );
-      expect(overflow, `${path} must not scroll sideways at 360px`).toBeLessThanOrEqual(0);
+      // Report the culprits, not just the number: this invariant depends on
+      // platform font and emoji metrics (it first failed on the Linux CI while
+      // passing on Windows), so a bare pixel count is not debuggable from a log.
+      const { overflow, offenders } = await page.evaluate(() => {
+        const root = document.documentElement;
+        const vw = root.clientWidth;
+        const offenders: string[] = [];
+        root.querySelectorAll<HTMLElement>("*").forEach((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.right <= vw + 0.5 || el.children.length > 3) return;
+          const cs = getComputedStyle(el);
+          offenders.push(
+            `${el.tagName}.${(el.className || "").toString().slice(0, 30)} w=${Math.round(r.width)} right=${Math.round(r.right)} minW=${cs.minWidth} flex=${cs.flexBasis} txt=${(el.textContent || "").trim().slice(0, 24)}`,
+          );
+        });
+        return { overflow: root.scrollWidth - vw, offenders: offenders.slice(0, 8) };
+      });
+      expect(
+        overflow,
+        `${path} must not scroll sideways at 360px (vw=360). Widest offenders:\n${offenders.join("\n")}`,
+      ).toBeLessThanOrEqual(0);
     }
   });
 });
