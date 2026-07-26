@@ -3,9 +3,9 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
-import type express from "express";
+import express from "express";
 
 // The optional LAN password gate (#190, ADR-50) over the real app: off means
 // byte-for-byte the pre-#190 surface (regression guard), on means every /api
@@ -16,7 +16,11 @@ const PASSWORD = "correct horse battery staple";
 const INDEX_MARKER = "draw-auth-index-marker";
 
 let clientDir: string;
-let createApp: (options?: { clientDir?: string; password?: string }) => express.Express;
+let createApp: (options?: {
+  clientDir?: string;
+  password?: string;
+  trustProxy?: boolean | number | string;
+}) => express.Express;
 
 beforeAll(async () => {
   clientDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-auth-dist-"));
@@ -147,53 +151,152 @@ describe("auth enabled", () => {
   });
 });
 
-describe("login rate limiting", () => {
-  // Fresh app instances: the limiter is per-app state, and these tests
-  // deliberately exhaust it (default: 5 failures / 15 min per IP).
+describe("login rate limiting (per de-proxied IP, ADR-50)", () => {
+  // Under `trust proxy: "loopback"` — the recommended same-host reverse-proxy
+  // setting — req.ip is the X-Forwarded-For client, so these simulate LAN
+  // clients arriving through the proxy. Fresh app per test: the limiter is
+  // per-app state, deliberately exhausted (default 5 failures / 15 min / IP).
+  const LAN = "203.0.113.7";
+  const OTHER = "198.51.100.9";
+  const proxied = () => createApp({ password: PASSWORD, trustProxy: "loopback" });
+  const login = (app: express.Express, from: string, password: string) =>
+    request(app).post("/api/auth/login").set("X-Forwarded-For", from).send({ password });
 
-  it("blocks the 6th attempt — even with the correct password", async () => {
-    const app = createApp({ password: PASSWORD });
-    for (let i = 0; i < 5; i++) {
-      const res = await request(app).post("/api/auth/login").send({ password: `wrong-${i}` });
-      expect(res.status).toBe(401);
-    }
-    const blocked = await request(app).post("/api/auth/login").send({ password: PASSWORD });
+  it("blocks the 6th failed login from an IP — even with the correct password", async () => {
+    const app = proxied();
+    for (let i = 0; i < 5; i++) expect((await login(app, LAN, `wrong-${i}`)).status).toBe(401);
+    const blocked = await login(app, LAN, PASSWORD);
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers["retry-after"])).toBeGreaterThan(0);
   });
 
-  it("throttles the header channel with the same limiter", async () => {
-    const app = createApp({ password: PASSWORD });
+  it("keys per IP — one attacker cannot lock another client out", async () => {
+    const app = proxied();
+    for (let i = 0; i < 5; i++) await login(app, LAN, "wrong");
+    expect((await login(app, LAN, PASSWORD)).status).toBe(429);
+    // A different de-proxied client has its own bucket, untouched.
+    expect((await login(app, OTHER, PASSWORD)).status).toBe(204);
+  });
+
+  it("throttles the header channel with the same per-IP limiter", async () => {
+    const app = proxied();
     for (let i = 0; i < 5; i++) {
-      const res = await request(app).get("/api/tasks").set("x-draw-password", `wrong-${i}`);
+      const res = await request(app)
+        .get("/api/tasks")
+        .set("X-Forwarded-For", LAN)
+        .set("x-draw-password", `wrong-${i}`);
       expect(res.status).toBe(401);
     }
-    const blocked = await request(app).get("/api/tasks").set("x-draw-password", PASSWORD);
+    const blocked = await request(app)
+      .get("/api/tasks")
+      .set("X-Forwarded-For", LAN)
+      .set("x-draw-password", PASSWORD);
     expect(blocked.status).toBe(429);
   });
 
   it("does not count credential-less requests as attempts", async () => {
-    const app = createApp({ password: PASSWORD });
+    const app = proxied();
     for (let i = 0; i < 10; i++) {
-      expect((await request(app).get("/api/tasks")).status).toBe(401);
+      expect((await request(app).get("/api/tasks").set("X-Forwarded-For", LAN)).status).toBe(401);
     }
-    const login = await request(app).post("/api/auth/login").send({ password: PASSWORD });
-    expect(login.status).toBe(204);
+    expect((await login(app, LAN, PASSWORD)).status).toBe(204);
+  });
+
+  it("does NOT count a present-but-invalid/expired cookie as an attempt (aging, not attacking)", async () => {
+    // A lapsed-cookie browser must never lock the owner out: only the header
+    // path records failures, the cookie path never does (the #190 review's
+    // finding C). Ten bad-cookie hits, then the login still works.
+    const app = proxied();
+    for (let i = 0; i < 10; i++) {
+      const res = await request(app)
+        .get("/api/tasks")
+        .set("X-Forwarded-For", LAN)
+        .set("Cookie", "draw_session=stale.deadbeef");
+      expect(res.status).toBe(401);
+    }
+    expect((await login(app, LAN, PASSWORD)).status).toBe(204);
   });
 
   it("a successful login clears the failure count", async () => {
-    const app = createApp({ password: PASSWORD });
-    for (let i = 0; i < 4; i++) {
-      await request(app).post("/api/auth/login").send({ password: "wrong" });
-    }
-    expect(
-      (await request(app).post("/api/auth/login").send({ password: PASSWORD })).status,
-    ).toBe(204);
+    const app = proxied();
+    for (let i = 0; i < 4; i++) await login(app, LAN, "wrong");
+    expect((await login(app, LAN, PASSWORD)).status).toBe(204);
     // The slate is clean: four more failures fit before the limit again.
-    for (let i = 0; i < 4; i++) {
-      const res = await request(app).post("/api/auth/login").send({ password: "wrong" });
-      expect(res.status).toBe(401);
+    for (let i = 0; i < 4; i++) expect((await login(app, LAN, "wrong")).status).toBe(401);
+  });
+
+  it("exempts the loopback trusted-secret path: it never touches the limiter (finding B)", async () => {
+    // The in-process assistant self-requests from loopback with the real
+    // secret. It must not wipe an attacker's tally (recordSuccess) nor lock
+    // itself out (check) — so on the loopback path the limiter is not
+    // consulted at all. Injected limiter + trust proxy so this is precise.
+    const { createAuth, LoginRateLimiter } = await import("../../src/auth.js");
+    const limiter = new LoginRateLimiter();
+    const check = vi.spyOn(limiter, "check");
+    const recordSuccess = vi.spyOn(limiter, "recordSuccess");
+    const recordFailure = vi.spyOn(limiter, "recordFailure");
+
+    const { loginHandler, gate } = createAuth(PASSWORD, { limiter });
+    const probe = express();
+    probe.set("trust proxy", "loopback");
+    probe.use(express.json());
+    probe.post("/api/auth/login", loginHandler);
+    probe.use(gate);
+    probe.get("/api/tasks", (_req, res) => res.json([]));
+
+    // Loopback header, real secret: unlocked, and the limiter is untouched.
+    expect((await request(probe).get("/api/tasks").set("x-draw-password", PASSWORD)).status).toBe(
+      200,
+    );
+    // Even a loopback WRONG secret must not record against the counter.
+    expect((await request(probe).get("/api/tasks").set("x-draw-password", "nope")).status).toBe(401);
+    expect(check).not.toHaveBeenCalled();
+    expect(recordSuccess).not.toHaveBeenCalled();
+    expect(recordFailure).not.toHaveBeenCalled();
+
+    // Contrast: a non-loopback (LAN) header failure DOES record.
+    await request(probe).get("/api/tasks").set("X-Forwarded-For", LAN).set("x-draw-password", "nope");
+    expect(recordFailure).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("trust proxy off (default): req.ip stays the socket peer", () => {
+  it("ignores X-Forwarded-For — a spoofed header cannot forge the rate-limit key", async () => {
+    // Without trust proxy, every supertest request is loopback (the real
+    // socket peer) regardless of X-Forwarded-For, so the trusted-loopback
+    // exemption applies and a spoofed header buys nothing.
+    const app = createApp({ password: PASSWORD });
+    for (let i = 0; i < 8; i++) {
+      const res = await request(app)
+        .post("/api/auth/login")
+        .set("X-Forwarded-For", "203.0.113.7")
+        .send({ password: "wrong" });
+      expect(res.status).toBe(401); // never 429: the spoof does not key a bucket
     }
+  });
+});
+
+describe("constant-time password comparison is wired in (ADR-50)", () => {
+  // timingSafeEqualStrings is unit-tested in isolation; this pins that the
+  // login handler AND the header gate actually route through it — swapping
+  // either call site to `===` would leave the spy uncalled and fail here
+  // (the #190 review's finding D).
+  it("both the login and header checks call the injected comparator", async () => {
+    const { createAuth, timingSafeEqualStrings } = await import("../../src/auth.js");
+    const compare = vi.fn(timingSafeEqualStrings);
+    const { loginHandler, gate } = createAuth(PASSWORD, { compare });
+    const probe = express();
+    probe.use(express.json());
+    probe.post("/api/auth/login", loginHandler);
+    probe.use(gate);
+    probe.get("/api/tasks", (_req, res) => res.json([]));
+
+    await request(probe).post("/api/auth/login").send({ password: "attempt-login" });
+    await request(probe).get("/api/tasks").set("x-draw-password", "attempt-header");
+
+    const submitted = compare.mock.calls.map((call) => call[0]);
+    expect(submitted).toContain("attempt-login");
+    expect(submitted).toContain("attempt-header");
   });
 });
 

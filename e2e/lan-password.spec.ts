@@ -8,10 +8,15 @@ import { expect, test, type Page } from "@playwright/test";
 // DRAW_PASSWORD set, booted by THIS spec — the shared webServer entries in
 // playwright.config.ts all run without auth, and a fourth entry would race
 // entry #3's `npm run build` for client/dist. By the time specs run, that
-// build is finished, so spawning prod.ts directly here is race-free. The
-// child is a single node process (tsx CLI, same pattern as
-// server/test/integration/prod-entry.test.ts), so kill() cannot orphan a
-// grandchild server on Windows.
+// build is finished, so spawning prod.ts directly here is race-free.
+//
+// Teardown note (Windows): the tsx CLI does NOT run the server in this direct
+// child — it forks a distinct grandchild that actually binds the port.
+// server.kill() reaches only the tsx parent; the grandchild dies with it
+// because libuv puts each spawned process in a Windows job object whose
+// kill-on-close cascades to descendants. So the port is released cleanly here
+// precisely BECAUSE we do not detach — a future `detached: true` would break
+// the child out of that job and orphan the port-holder.
 
 const AUTH_PORT = process.env.E2E_AUTH_PORT || "3103";
 const BASE = `http://127.0.0.1:${AUTH_PORT}`;

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_HOST, resolveApiPort, resolveHost, resolvePassword } from "../../src/config.js";
+import {
+  DEFAULT_HOST,
+  resolveApiPort,
+  resolveHost,
+  resolvePassword,
+  resolveTrustProxy,
+} from "../../src/config.js";
 
 // Explicit env objects throughout — the resolvers must not fall back to the
 // ambient process.env of the test runner.
@@ -57,5 +63,28 @@ describe("resolvePassword", () => {
   it("honors DRAW_PASSWORD, trimming surrounding whitespace", () => {
     expect(resolvePassword({ DRAW_PASSWORD: "lan-pin" })).toBe("lan-pin");
     expect(resolvePassword({ DRAW_PASSWORD: " lan-pin\n" })).toBe("lan-pin");
+  });
+});
+
+describe("resolveTrustProxy", () => {
+  it("trusts nobody by default (#190)", () => {
+    expect(resolveTrustProxy({})).toBe(false);
+    expect(resolveTrustProxy({ TRUST_PROXY: "" })).toBe(false);
+    expect(resolveTrustProxy({ TRUST_PROXY: "  " })).toBe(false);
+  });
+
+  it("parses booleans", () => {
+    expect(resolveTrustProxy({ TRUST_PROXY: "true" })).toBe(true);
+    expect(resolveTrustProxy({ TRUST_PROXY: "false" })).toBe(false);
+  });
+
+  it("parses a whole number as a hop count", () => {
+    expect(resolveTrustProxy({ TRUST_PROXY: "1" })).toBe(1);
+    expect(resolveTrustProxy({ TRUST_PROXY: "2" })).toBe(2);
+  });
+
+  it("passes a preset or subnet spec through to Express", () => {
+    expect(resolveTrustProxy({ TRUST_PROXY: "loopback" })).toBe("loopback");
+    expect(resolveTrustProxy({ TRUST_PROXY: "127.0.0.1, 10.0.0.0/8" })).toBe("127.0.0.1, 10.0.0.0/8");
   });
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   LoginRateLimiter,
   deriveSessionKey,
+  isLoopbackAddress,
   parseCookies,
   signSession,
   timingSafeEqualStrings,
@@ -124,6 +125,25 @@ describe("LoginRateLimiter", () => {
     for (let i = 0; i < 3; i++) limiter.recordFailure("attacker");
     expect(limiter.check("attacker").allowed).toBe(false);
     expect(limiter.check("owner").allowed).toBe(true);
+  });
+});
+
+describe("isLoopbackAddress", () => {
+  it("recognizes the loopback host in its various spellings", () => {
+    for (const ip of ["127.0.0.1", "127.0.0.2", "127.1.2.3", "::1", "::ffff:127.0.0.1"]) {
+      expect(isLoopbackAddress(ip)).toBe(true);
+    }
+  });
+
+  it("rejects LAN and public addresses", () => {
+    for (const ip of ["192.168.1.50", "10.0.0.4", "203.0.113.7", "::ffff:192.168.1.50", "128.0.0.1"]) {
+      expect(isLoopbackAddress(ip)).toBe(false);
+    }
+  });
+
+  it("rejects an absent address", () => {
+    expect(isLoopbackAddress(undefined)).toBe(false);
+    expect(isLoopbackAddress("")).toBe(false);
   });
 });
 
