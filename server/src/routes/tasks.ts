@@ -881,8 +881,15 @@ tasksRouter.patch("/:id", (req, res) => {
   // invalidate the current-draw query). Not gated on the card being the
   // current draw: clearCurrentDraw(id) already no-ops unless the pointer IS
   // this task, so it needs no guard of its own.
+  // dueDate/recurEveryDays join the list with #205: a recurring card whose
+  // next occurrence is in the future is out of the deck the same way, and
+  // the occurrence arriving is another wear-off that needs no write.
   if (
-    ("deferredUntil" in body || "blocked" in body || "parentId" in body) &&
+    ("deferredUntil" in body ||
+      "blocked" in body ||
+      "parentId" in body ||
+      "dueDate" in body ||
+      "recurEveryDays" in body) &&
     !isRestorable(task as unknown as RestorableTask, getSetting("max_draw_effort", 30), new Date())
   ) {
     clearCurrentDraw(id);

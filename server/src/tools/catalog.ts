@@ -429,8 +429,9 @@ const drawCard = defineTool({
     "urgent, stale tasks. NOT read-only: it stamps the task's last_drawn_at (dampening quick " +
     "redraws) and can unlock achievements. If the deck is empty the result says why: " +
     "no_ready_tasks (nothing open and ready), all_too_big (everything needs an estimate or a " +
-    "create_subtasks breakdown), or all_outside_window (every candidate returns on its own when " +
-    "its availability window opens).",
+    "create_subtasks breakdown), all_outside_window (every candidate returns on its own when " +
+    "its availability window opens), or all_awaiting_next_occurrence (every candidate is a " +
+    "recurring task sleeping until its next occurrence).",
   inputSchema: {
     categoryId: idSchema.optional().describe("Only draw from this category"),
     goalId: idSchema.optional().describe("Only draw from this goal"),
@@ -453,8 +454,12 @@ const drawCard = defineTool({
           : body.reason === "all_outside_window"
             ? "Every ready card is outside its availability window right now — they return on " +
               "their own when a window opens; nothing needs breaking down."
-            : "No open task is ready to draw — create_task something small, or check list_tasks " +
-              "for snoozed/blocked cards that come back on their own.";
+            : body.reason === "all_awaiting_next_occurrence"
+              ? "Every ready card is a recurring task that was already done this cycle — each " +
+                "returns on its own on its next occurrence (its due_date); nothing needs " +
+                "breaking down."
+              : "No open task is ready to draw — create_task something small, or check " +
+                "list_tasks for snoozed/blocked cards that come back on their own.";
       return ok({ ...body, hint });
     }
     return ok(body);

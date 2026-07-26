@@ -426,6 +426,13 @@ describe("recurring subtasks are banned under sequential parents (#66, ADR-23)",
     expect(completion.body.recurring).toBe(true);
     expect((await listedTask(first.id)).status).toBe("open");
     expect((await listedTask(second.id)).heldBack).toBe(1);
+    // The completed step now sleeps until its next occurrence (#205), so the
+    // whole breakdown is out of the deck: the first step is scheduled, the
+    // second is still held back behind it.
+    expect((await draw(goalId)).task).toBeNull();
+    // And when the occurrence comes round, the trap re-arms rather than
+    // releasing: it is the recurring step that returns, never the sibling.
+    db.prepare("UPDATE tasks SET due_date = date('now') WHERE id = ?").run(first.id);
     expect((await draw(goalId)).task.id).toBe(first.id);
   });
 });

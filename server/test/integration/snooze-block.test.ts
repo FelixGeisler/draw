@@ -153,7 +153,7 @@ describe("completion and reopening clear snooze state", () => {
     expect(done.task.blocked).toBe(false);
   });
 
-  it("completing a recurring task clears both — the next occurrence must be drawable", async () => {
+  it("completing a recurring task clears both — what follows is the schedule, not a leftover snooze", async () => {
     const { goalId, task } = await seedGoalTask("recurring-clears", { recurEveryDays: 7 });
     await patchTask(task.id, { deferredUntil: inOneHour(), blocked: true });
 
@@ -162,7 +162,15 @@ describe("completion and reopening clear snooze state", () => {
     expect(done.task.status).toBe("open");
     expect(done.task.deferredUntil).toBeNull();
     expect(done.task.blocked).toBe(false);
-    // Back in the deck right away.
+
+    // Out of the deck all the same — but derived from the new due date, not
+    // from stored snooze state (#205, ADR-6 amended; before the fix the card
+    // was re-dealt seconds after being finished).
+    expect((await draw(goalId)).task).toBeNull();
+    // The occurrence arriving puts it back with NO write, which is what
+    // proves the cleared fields are really gone: a surviving snooze/block
+    // would still be holding it out a week later.
+    db.prepare("UPDATE tasks SET due_date = date('now') WHERE id = ?").run(task.id);
     expect((await draw(goalId)).task.id).toBe(task.id);
   });
 

@@ -2,7 +2,8 @@ import { db, getSetting, getSettingString } from "../db.js";
 import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys.js";
 import { claimXpForKey } from "../../../shared/achievementTiers.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
-import { localDate } from "./localDay.js";
+import { localDate, utcDate } from "./localDay.js";
+import { nextOccurrence } from "./recurrence.js";
 import {
   computeStreak,
   FREEZE_BANK_CAP,
@@ -106,10 +107,6 @@ function hasMomentum(taskId: number, now: Date): boolean {
   );
 }
 
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
 export interface CompleteOptions {
   /**
    * Explicit effort override (#111, ADR-32): a parent with >= 1 non-archived
@@ -176,15 +173,20 @@ export function completeTask(
     task.id,
   );
 
-  // Completion clears snooze/block state (ADR-17) — critical for recurring
-  // tasks, which stay open and must be drawable for the next occurrence.
+  // A recurring task never closes: completing it SCHEDULES the next
+  // occurrence (ADR-6, amended by #205). due_date is that occurrence, and the
+  // deck keeps the card out until the day arrives — so the chore the user
+  // just finished cannot be dealt again seconds later. Nothing is stored to
+  // express the sleep: it is derived from the due date at read time
+  // (drawService.isAwaitingNextOccurrence), like every other deck state.
+  // Snooze/block still clear (ADR-17): a manual "not now" must not outlive
+  // the completion it was about, and the schedule — not a stale wake time —
+  // decides when the card comes back.
   const recurring = task.recur_every_days != null && task.recur_every_days > 0;
   if (recurring) {
-    const next = new Date(now);
-    next.setDate(next.getDate() + task.recur_every_days!);
     db.prepare(
       "UPDATE tasks SET due_date = ?, deferred_until = NULL, blocked = 0 WHERE id = ?",
-    ).run(isoDate(next), task.id);
+    ).run(nextOccurrence(now, task.recur_every_days!), task.id);
   } else {
     db.prepare(
       "UPDATE tasks SET status = 'done', completed_at = ?, deferred_until = NULL, blocked = 0 WHERE id = ?",
@@ -510,7 +512,7 @@ export function checkAchievements(event: { completedTask?: TaskRow }): string[] 
     event.completedTask &&
       event.completedTask.impact === 5 &&
       event.completedTask.due_date &&
-      isoDate(new Date()) <= event.completedTask.due_date,
+      utcDate(new Date()) <= event.completedTask.due_date,
   );
 
   const insert = db.prepare("INSERT INTO achievements (key, unlocked_at) VALUES (?, ?)");

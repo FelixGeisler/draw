@@ -1,4 +1,5 @@
 import { db } from "../db.js";
+import { addDays } from "./localDay.js";
 import { MINUTES_EXPR } from "./statsService.js";
 
 // Activity history behind the Stats page's History calendar (#53; a
@@ -53,12 +54,10 @@ export interface ActivityDay {
   totals: { started: number; completed: number; minutes: number; xp: number };
 }
 
-/** Date-only arithmetic in UTC — safe for YYYY-MM-DD strings (stats.ts pattern). */
-export function addDays(dateStr: string, n: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
+// Date-only arithmetic moved to localDay.ts with #205 — the recurrence
+// schedule needs the same helper and must not import this read model. Still
+// exported from here: it has been activityService's helper since #53.
+export { addDays };
 
 /**
  * Local calendar day of a UTC instant. The History calendar is a human-facing
