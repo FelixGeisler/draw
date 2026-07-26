@@ -254,6 +254,10 @@ function BackupSection() {
       <div className="setting-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
           ref={fileInput}
+          // The width lives in index.css, not inline: a file input cannot reflow
+          // its internals, so on a phone it needs to own the row and shrink its
+          // font — an inline max-width would outrank that rule (#193).
+          className="backup-file"
           type="file"
           accept=".zip"
           aria-label="Backup archive"
@@ -264,7 +268,7 @@ function BackupSection() {
             setSummary(null);
             importBackup.reset();
           }}
-          style={{ flex: 1, maxWidth: 380 }}
+          style={{ flex: 1 }}
         />
         <button disabled={!file || armed} onClick={() => setArmed(true)}>
           Restore from backup

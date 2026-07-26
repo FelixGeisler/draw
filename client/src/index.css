@@ -249,6 +249,19 @@ textarea:focus {
     flex-direction: column;
   }
 
+  /* .main and .content are flex items of .layout, and a flex item defaults to
+     min-width: auto — its MIN-CONTENT width. So a single child that will not
+     shrink (a long button label, a user-named category) widens these boxes past
+     the viewport, the document scrolls sideways, and the fixed nav stretches
+     with the layout viewport. Whether it happens at all depends on platform text
+     metrics, which is why it surfaced only on the Linux CI: /settings overflowed
+     by 38px there while fitting on Windows. min-width: 0 lets them shrink to the
+     phone, so the children wrap or ellipsis instead. */
+  .main,
+  .content {
+    min-width: 0;
+  }
+
   /* The sidenav becomes a fixed bottom tab bar: icon over label, one flex
      share per entry (5 entries, 6 with the Assistant). z-index sits above
      page chrome (dnd overlays top out at 40) but below the fullscreen
@@ -360,6 +373,22 @@ textarea:focus {
     min-width: 0;
     max-width: 100%;
   }
+
+  /* A file input is the stubborn case: it cannot reflow its internals, so
+     min-width alone only shrinks the BOX while the platform-drawn button and
+     file name keep painting past it — visible overflow that still widens the
+     document. Give it the whole row and a smaller font (its intrinsic width
+     follows its text), which is what actually makes it fit. */
+  .backup-file {
+    flex-basis: 100%;
+    font-size: 12px;
+  }
+}
+
+/* Backup restore picker (SettingsPage.tsx): the desktop cap that used to be an
+   inline style, moved here so the phone rule in the 640px query can win. */
+.backup-file {
+  max-width: 380px;
 }
 
 /* The category pill (#123, keeping #120's computed ink): background is the
