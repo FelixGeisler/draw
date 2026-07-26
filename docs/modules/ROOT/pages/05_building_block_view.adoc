@@ -203,5 +203,7 @@ categories 1─n tasks n─1 goals 1─n materials
 ....
 
 Central semantics: completing a *recurring* task keeps it `open` and pushes
-`due_date` forward; completing a normal task sets `status='done'`. Both insert a
+`due_date` forward — that date is the task's *next occurrence*, so the card is
+out of the deck until it arrives (ADR-6 amendment, #205); completing a normal
+task sets `status='done'`. Both insert a
 `completions` row — the single source for XP, streaks, trophy deck, and history.

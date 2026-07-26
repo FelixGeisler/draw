@@ -178,8 +178,11 @@ counts its real tokens, so the estimate and the 180K guard stay honest.
 == 8.6 Time handling
 
 Timestamps stored as ISO 8601 UTC strings. Date-only values (due dates) are
-compared as strings. Date-range arithmetic happens in UTC (`addDays` in
-`routes/stats.ts`) — local-timezone `Date` round-trips caused an off-by-one-day bug
+compared as strings — including the recurrence schedule, where the next
+occurrence is written and read in the same UTC clock so a completion cannot
+disagree with the deck about which day the card returns (ADR-6 amendment).
+Date-range arithmetic happens in UTC (`addDays` in `services/localDay.ts`) —
+local-timezone `Date` round-trips caused an off-by-one-day bug
 (see xref:11_risks_and_technical_debt.adoc[section 11]). Streak days use SQLite
 `date(..., 'localtime')` because a "day" is a user-local concept; the History
 calendar's day buckets follow the same rule (`localDayOf` in `activityService`,

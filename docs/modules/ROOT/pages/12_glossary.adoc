@@ -8,7 +8,7 @@
 |The set of currently drawable tasks
 
 |*Drawable*
-|Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks, not snoozed/blocked, not held back, and inside its availability window if it has one — a derived predicate, never stored
+|Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks, not snoozed/blocked, not held back, inside its availability window if it has one, and — if it recurs — not still waiting for its next occurrence; a derived predicate, never stored
 
 |*Quick capture*
 |The always-focused TaskForm pinned on top of the Tasks page (ADR-40): title-only Enter submit, fields reset, focus retained — thought to card in one keystroke
@@ -20,7 +20,10 @@
 |Optional per-task weekdays (`window_days`, JS `getDay()` numbers) plus a daily `[window_start, window_end)` range, local wall clock; outside it the card leaves the deck and returns on its own (ADR-20)
 
 |*Scheduled*
-|An open task currently outside its availability window — out of the deck until the window opens again; derived at query time, shown as the 🕒 chip
+|An open task the calendar has taken out of the deck for now, returning on its own: currently outside its availability window (🕒 chip), or a recurring task waiting for its next occurrence (`next <date>` chip, ADR-6 amendment). Derived at query time — never a snooze, which is the user's own "not now"
+
+|*Recurring task*
+|A task with `recur_every_days`: it never closes. Its `due_date` is its *next occurrence* — the first one as entered, every later one set to `completion date + interval` — and the card is out of the deck until that day (ADR-6, #205). Without a due date it has no schedule to wait for and is always drawable
 
 |*Sequential breakdown*
 |A parent with `subtask_order_mode = 'sequential'`: only its first open subtask in *sibling order* (see below) enters the deck (ADR-18). Recurring subtasks are rejected under it — a step that never closes would gate its siblings forever (ADR-23)

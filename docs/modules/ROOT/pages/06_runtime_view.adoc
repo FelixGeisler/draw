@@ -23,9 +23,10 @@ Route -> Draw : drawTask(filters)
 Draw -> DB : candidates: open leaf, estimated, <= max_draw_effort, not blocked/snoozed, not held back behind a sequential sibling (#23)
 DB --> Draw : rows
 Draw -> Draw : availability-window filter (#33, local wall clock)
+Draw -> Draw : recurrence filter (#205): a recurring task sleeps until its due_date, its next occurrence
 alt pool empty
   Draw -> DB : clear current draw
-  Draw --> Route : {task: null, reason: no_ready_tasks | all_too_big | all_outside_window}
+  Draw --> Route : {task: null, reason: no_ready_tasks | all_too_big | all_outside_window | all_awaiting_next_occurrence}
 else candidates present
   Draw -> Draw : weight = impact²/effort × urgency × staleness × cooldown × siblingDamping(1/√k)
   Draw -> Draw : roulette pick
@@ -53,10 +54,12 @@ UI --> User : a reload restores the revealed card (no shuffle); a pointer cleare
 ....
 
 Empty pool returns
-`{task: null, reason: 'no_ready_tasks' | 'all_too_big' | 'all_outside_window'}` —
+`{task: null, reason: 'no_ready_tasks' | 'all_too_big' | 'all_outside_window' | 'all_awaiting_next_occurrence'}` —
 the UI turns `all_too_big` into a "break something down" call to action, while
 `all_outside_window` (every remaining candidate is outside its availability
-window, ADR-20) says "scheduled for later": those cards return on their own.
+window, ADR-20) and `all_awaiting_next_occurrence` (every remaining candidate
+is a recurring task already done this cycle, ADR-6 amendment) say "scheduled
+for later": those cards return on their own.
 Every call to action links to the Tasks page, where capture, the estimate
 input and the break-down control all live since the Capture merge (ADR-40) —
 each named action exists where the link lands.
@@ -133,7 +136,7 @@ else
     Gam -> DB : INSERT completions (xp = max(1, round(round(effort × impact/3) × multiplier)), was_drawn, was_warmup)
     Gam -> DB : close this task's running time_entry (ADR-12)
     alt recurring
-      Gam -> DB : push due_date += recur_every_days, clear snooze/block — the task stays open
+      Gam -> DB : due_date = completion day + recur_every_days (UTC), clear snooze/block — the task stays open, asleep until that next occurrence (#205)
     else normal
       Gam -> DB : status = 'done', completed_at, clear snooze/block
     end
