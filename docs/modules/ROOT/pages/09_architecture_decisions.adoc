@@ -2084,7 +2084,7 @@ place. A wholly-unearned chain shows level 1 face-down (with its progress bar);
 a fully-claimed chain shows the maxed tier as a claimed card, so the chain never
 vanishes.
 
-* *Defaults.* The heading `{collected}/{total}` reflects the COLLAPSED view
+* *Defaults.* The heading `\{collected}/\{total}` reflects the COLLAPSED view
 (one per chain + one-offs, not the raw 26 tiers); a chain counts as collected
 once ANY tier of it has unlocked — monotonic, so claiming can never lower the
 count. Hide (#177) and the ✎ editor act on the currently-shown tier's key
@@ -2132,7 +2132,7 @@ definition and its weekly SQL condition.
 * *Shared key set.* `leverage_master` leaves `shared/achievementKeys.ts` and
 `shared/achievementTiers.ts`, taking the shipped set from 27 keys to *26*
 (23 chained + 3 one-offs: `monster_slayer`, `deck_clearer`, `early_bird`). The
-`{collected}/{total}` heading and the #183 chain-collapse (ADR-47) are derived
+`\{collected}/\{total}` heading and the #183 chain-collapse (ADR-47) are derived
 from the payload, so the count follows automatically; `leverage_master` was a
 one-off (never in `CHAIN_SPECS`), so the chain map and its drift-guard are
 untouched.
@@ -2467,7 +2467,7 @@ Playwright E2E). The release aborts here on any failure, so a red commit can
 never publish an image or a Release.
 * *`publish` — `needs: test`.* QEMU + Buildx build the `Dockerfile` for
 `linux/amd64,linux/arm64` and push to `ghcr.io/felixgeisler/draw`.
-`docker/metadata-action` derives the tags: `{{version}}` from the git tag
+`docker/metadata-action` derives the tags: `+{{version}}+` from the git tag
 always, and `latest` *only* for a final release (a tag with no `-` suffix), so a
 pre-release like `v1.0.0-rc.1` publishes `1.0.0-rc.1` without moving `latest`.
 Then `gh release create --generate-notes` cuts the GitHub Release, flagging any
