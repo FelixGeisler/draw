@@ -97,3 +97,39 @@ diagram by editing its source in the page; never commit rendered SVGs. Note that
 Antora resolves `url: .` through git, so it builds the **committed** state of
 your branch — commit diagram edits before building, and build from a normal
 clone (Antora cannot read a `git worktree` checkout).
+
+## Releasing
+
+Releases are tag-driven (#192, ADR-53). Pushing a semver tag `v<x.y.z>` (final)
+or `v<x.y.z>-rc.N` / `-beta.N` (pre-release) to `main` runs the
+[`Release`](.github/workflows/release.yml) workflow, which:
+
+1. Runs the **full** test suite (type checks + unit/integration + Playwright
+   E2E — the same coverage as `ci.yml`). Any failure aborts the release before
+   anything is published.
+2. Builds the multi-arch container image (`linux/amd64` + `linux/arm64`, #191)
+   and pushes it to `ghcr.io/felixgeisler/draw`, tagged with the version. A
+   **final** release also updates `:latest`; pre-releases do not.
+3. Creates a GitHub Release for the tag with generated notes. `-rc`/`-beta`
+   tags (any tag with a `-`) are marked as pre-releases.
+
+**One-time after the first-ever release:** GHCR creates the package *private*,
+and the workflow's `GITHUB_TOKEN` cannot change that. Flip it to **Public** once
+in the package's GitHub page → *Package settings → Change visibility* (or tell
+users to `docker login ghcr.io` with a `read:packages` token), or the
+`docker pull` above fails with `denied`/`not found`.
+
+```
+git tag v1.0.0 && git push origin v1.0.0     # final → :1.0.0 and :latest
+git tag v1.1.0-rc.1 && git push origin v1.1.0-rc.1   # pre-release → :1.1.0-rc.1 only
+```
+
+The version numbers in the three `package.json` files are **not** part of this
+workflow — bump them in a normal PR before tagging.
+
+**Dry run (build verification without a tag):** trigger the workflow manually
+(`gh workflow run release.yml --ref <branch>`, or the *Run workflow* button).
+It runs the gate and pushes the image to a throwaway `:dryrun` tag — never
+`:latest`, no version tag, and no Release — so you can confirm the multi-arch
+build actually works before spending a real `v*` tag. `workflow_dispatch` is
+only available once the workflow file is on the default branch.

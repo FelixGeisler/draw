@@ -70,13 +70,31 @@ for a Pi) with buildx:
 docker buildx build --platform linux/amd64,linux/arm64 -t draw:latest .
 ```
 
-**Upgrade:** rebuild (or, once published in a later release, pull) the image,
-then recreate the container — the `draw-data` volume carries your data across.
-**Backup/restore:** use the export/import zip in Settings, or snapshot the
-`draw-data` volume. Data lives under `/data` (`DATA_DIR`) inside the container.
+**Or pull a prebuilt image** instead of building. Every release publishes a
+multi-arch image to the GitHub Container Registry:
 
-Pushing a prebuilt image to a registry is a later step; for now the image is
-built locally from this repo.
+```
+docker pull ghcr.io/felixgeisler/draw:latest      # newest final release
+docker pull ghcr.io/felixgeisler/draw:1.0.0       # a specific version
+```
+
+> **One-time setup — make the package public.** GHCR creates the package
+> *private* on the first release push, and the release workflow's token can't
+> change that. Until the owner flips it, the pulls above fail with
+> `denied`/`not found`. Fix it once, in the package's GitHub page → **Package
+> settings → Danger Zone → Change visibility → Public**. To keep it private
+> instead, authenticate first:
+> `echo $TOKEN | docker login ghcr.io -u <user> --password-stdin` with a token
+> that has `read:packages`.
+
+Point Compose at it by dropping `build:` and setting
+`image: ghcr.io/felixgeisler/draw:latest` in [`docker-compose.yml`](docker-compose.yml),
+or `docker run` it directly (map the port, mount a volume at `/data`).
+
+**Upgrade:** `docker pull` (or rebuild) the image, then recreate the container —
+the `draw-data` volume carries your data across. **Backup/restore:** use the
+export/import zip in Settings, or snapshot the `draw-data` volume. Data lives
+under `/data` (`DATA_DIR`) inside the container.
 
 ## Enable AI features (optional)
 
