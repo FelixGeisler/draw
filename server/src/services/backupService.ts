@@ -224,18 +224,27 @@ export function isScheduledBackupName(name: string): boolean {
  * to keep, return the scheduled archives to delete (oldest first, keeping the
  * newest `retention`). Deterministic and fs-free so it unit-tests without a
  * real clock or disk. Non-backup names are ignored; `retention` is floored at
- * 0 defensively, though config guarantees >= 1 so the just-written newest
- * archive is always kept.
+ * 0 defensively, though config guarantees >= 1.
+ *
+ * `protect` (the just-written archive) is NEVER returned for deletion, whatever
+ * its sort position. Lexical == chronological order normally puts the freshest
+ * archive last, but two cases break that and would otherwise delete the backup
+ * we just made at retention 1: the `-N` dedup suffix sorts a same-second archive
+ * BEFORE the plain `.zip` (`-` 0x2D < `.` 0x2E), and the Pi has no RTC so its
+ * clock can step backward between runs. Excluding `protect` outright is robust
+ * to both; the cost is keeping at most one extra archive in those rare cases.
  */
-export function backupsToPrune(names: string[], retention: number): string[] {
+export function backupsToPrune(names: string[], retention: number, protect?: string): string[] {
   const archives = names.filter(isScheduledBackupName).sort(); // lexical == chronological
   const keep = Math.max(0, retention);
-  return archives.length <= keep ? [] : archives.slice(0, archives.length - keep);
+  if (archives.length <= keep) return [];
+  const candidates = archives.slice(0, archives.length - keep);
+  return protect ? candidates.filter((n) => n !== protect) : candidates;
 }
 
-/** Prune backups/ to the retention count, returning the names removed. */
-function pruneScheduledBackups(retention: number): string[] {
-  const pruned = backupsToPrune(fs.readdirSync(backupsDir), retention);
+/** Prune backups/ to the retention count, never touching `protect`. */
+function pruneScheduledBackups(retention: number, protect: string): string[] {
+  const pruned = backupsToPrune(fs.readdirSync(backupsDir), retention, protect);
   for (const name of pruned) fs.rmSync(path.join(backupsDir, name), { force: true });
   return pruned;
 }
@@ -256,9 +265,9 @@ export interface ScheduledBackupResult {
  * createBackupArchive writes a `backup-export-*` temp zip in DATA_DIR (swept at
  * boot if a crash orphans it, #103); the rename into backups/ is a same-volume
  * atomic commit and gives the archive its timestamped name. `now` is injectable
- * for deterministic filenames in tests. The archive is written BEFORE pruning,
- * so it is the newest name in the directory and — for retention >= 1 — always
- * survives its own prune.
+ * for deterministic filenames in tests. The archive is written BEFORE pruning
+ * and passed to the prune as `protect`, so it always survives its own prune
+ * regardless of sort position (dedup suffix / a backward clock step).
  */
 export function runScheduledBackup(retention: number, now: Date = new Date()): ScheduledBackupResult {
   fs.mkdirSync(backupsDir, { recursive: true });
@@ -278,7 +287,7 @@ export function runScheduledBackup(retention: number, now: Date = new Date()): S
     fs.rmSync(tempZip, { force: true }); // don't leave the temp zip behind on a failed move
     throw e;
   }
-  return { path: target, pruned: pruneScheduledBackups(retention) };
+  return { path: target, pruned: pruneScheduledBackups(retention, path.basename(target)) };
 }
 
 /**

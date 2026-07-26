@@ -2432,10 +2432,18 @@ holds no `backups/` entry.
 lexically == chronologically, so "keep the newest N" is a pure string sort with
 no `mtime` read — deterministic and unit-testable with synthetic inputs. Only
 names the scheduler itself produces are ever pruned, so a file an operator drops
-into `backups/` is never deleted. The new archive is written *before* pruning,
-so for any retention ≥ 1 it is the newest name and survives its own prune;
-`BACKUP_RETENTION` is floored at 1 for the same reason (0 would delete what the
-run just wrote).
+into `backups/` is never deleted. The just-written archive is passed to the
+prune as *protected* and is never a deletion candidate — lexical order normally
+puts it last, but the `-N` same-second dedup suffix (`-` sorts before `.`) and a
+backward clock step on the RTC-less Pi can both make it sort as the oldest, and
+excluding it outright is robust to both (the cost is keeping at most one extra
+archive in those rare cases). `BACKUP_RETENTION` itself is never below 1: a
+blank, zero, negative, or otherwise out-of-range value falls back to the default
+(7) rather than being honored, since keeping zero archives would delete the one
+the run just wrote. The interval is likewise capped (596h): `setInterval`'s
+delay is a signed 32-bit millisecond int, so a larger value would silently wrap
+to a 1ms runaway loop — an over-large `BACKUP_INTERVAL_HOURS` is clamped to the
+cap with a stderr warning.
 * *A failed backup never crashes the server.* The tick catches and logs
 (filename on success, the error on failure) and the schedule continues — a full
 disk must not take the app down. Off-device targets (S3, rsync) and a Settings

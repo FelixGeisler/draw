@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import AdmZip from "adm-zip";
 import fs from "node:fs";
@@ -6,6 +6,7 @@ import path from "node:path";
 import type express from "express";
 import { freshApp } from "../helpers.js";
 import { CURRENT_VERSION } from "../../src/db.js";
+import { startBackupScheduler } from "../../src/backupScheduler.js";
 import {
   backupsDir,
   isScheduledBackupName,
@@ -110,6 +111,67 @@ describe("runScheduledBackup — retention pruning across runs", () => {
     expect(scheduledArchives()).toEqual(
       [path.basename(r2.path), path.basename(r3.path)].sort(),
     );
+  });
+
+  it("never deletes a foreign file during a real prune — only scheduled archives (ADR-52)", () => {
+    wipeBackups();
+    fs.mkdirSync(backupsDir, { recursive: true });
+    // Files an operator might legitimately keep alongside the scheduled ones:
+    // a manual date-only export and an arbitrary note. Neither matches the
+    // scheduled-archive pattern, so the destructive rmSync prune must skip them.
+    fs.writeFileSync(path.join(backupsDir, "keep-me.zip"), "operator's own file");
+    fs.writeFileSync(path.join(backupsDir, "draw-backup-2026-07-26.zip"), "manual date-only export");
+
+    const base = new Date("2026-08-01T00:00:00Z").getTime();
+    const HOUR = 60 * 60 * 1000;
+    runScheduledBackup(1, new Date(base));
+    const r = runScheduledBackup(1, new Date(base + HOUR)); // forces a real prune at retention 1
+
+    expect(r.pruned.length).toBeGreaterThan(0); // a scheduled archive really was deleted
+    expect(r.pruned.every(isScheduledBackupName)).toBe(true);
+    // The foreign files are untouched.
+    expect(fs.existsSync(path.join(backupsDir, "keep-me.zip"))).toBe(true);
+    expect(fs.existsSync(path.join(backupsDir, "draw-backup-2026-07-26.zip"))).toBe(true);
+  });
+
+  it("writes distinct archives for same-second runs and keeps the newer (dedup + protect)", () => {
+    wipeBackups();
+    const now = new Date("2026-09-09T09:09:09Z");
+    const first = runScheduledBackup(1, now);
+    const second = runScheduledBackup(1, now); // same second → the `-1` dedup suffix
+
+    expect(second.path).not.toBe(first.path);
+    expect(fs.existsSync(first.path)).toBe(true);
+    // `-1.zip` sorts BEFORE `.zip`, so the newer archive would be the prune
+    // target at retention 1 — but it survives because it is the protected
+    // just-written result.
+    expect(fs.existsSync(second.path)).toBe(true);
+    expect(second.pruned).toEqual([]);
+    expect(scheduledArchives()).toHaveLength(2);
+  });
+});
+
+describe("startBackupScheduler — the production default tick (no injected runBackup)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("fires the real runScheduledBackup on its interval and honors retention, then stops clean", () => {
+    wipeBackups();
+    vi.useFakeTimers();
+    // No runBackup injected → the exact prod.ts path: () => runScheduledBackup(retention).
+    const handle = startBackupScheduler(1, 2);
+    expect(handle).not.toBeNull();
+    try {
+      vi.advanceTimersByTime(60 * 60 * 1000); // tick 1 → one real archive
+      expect(scheduledArchives()).toHaveLength(1);
+      vi.advanceTimersByTime(60 * 60 * 1000); // tick 2
+      vi.advanceTimersByTime(60 * 60 * 1000); // tick 3 → prune back to retention 2
+      expect(scheduledArchives()).toHaveLength(2);
+    } finally {
+      handle!.stop(); // clear the interval before real timers return — no leak
+    }
+    // Nothing runs after stop().
+    vi.advanceTimersByTime(5 * 60 * 60 * 1000);
+    expect(scheduledArchives()).toHaveLength(2);
   });
 });
 

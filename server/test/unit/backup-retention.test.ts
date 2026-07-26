@@ -82,4 +82,29 @@ describe("backupsToPrune", () => {
       "draw-backup-2026-07-21T00-00-00Z.zip",
     ]);
   });
+
+  it("never prunes the protected (just-written) archive, whatever its sort position", () => {
+    // Backward clock step: the just-written archive sorts as the OLDEST, so
+    // without protection retention 1 would delete the fresh backup.
+    const clockStepped = [
+      "draw-backup-2026-07-20T00-00-00Z.zip", // just written, but earliest by name
+      "draw-backup-2026-07-25T00-00-00Z.zip",
+    ];
+    const justWritten = "draw-backup-2026-07-20T00-00-00Z.zip";
+    // Unprotected would delete it...
+    expect(backupsToPrune(clockStepped, 1)).toEqual([justWritten]);
+    // ...protected leaves it (keeps one extra — safe over deleting a fresh backup).
+    expect(backupsToPrune(clockStepped, 1, justWritten)).toEqual([]);
+  });
+
+  it("protects a same-second dedup sibling (`-1.zip` sorts before `.zip`)", () => {
+    // `-` (0x2D) < `.` (0x2E), so the second same-second write sorts oldest.
+    const sameSecond = [
+      "draw-backup-2026-07-26T09-00-00Z.zip", // first write
+      "draw-backup-2026-07-26T09-00-00Z-1.zip", // second write (newer), sorts first
+    ];
+    const newer = "draw-backup-2026-07-26T09-00-00Z-1.zip";
+    expect(backupsToPrune(sameSecond, 1)).toEqual([newer]); // unprotected drops the newer
+    expect(backupsToPrune(sameSecond, 1, newer)).toEqual([]); // protected keeps it
+  });
 });
