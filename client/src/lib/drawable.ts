@@ -1,4 +1,5 @@
 import type { Task } from "../api/types";
+import { localDay } from "./localDay";
 
 export type DrawGroup =
   | "ready"
@@ -49,9 +50,9 @@ export function isWithinWindow(
  * DRAWABLE_VECTORS. A recurring task's due date IS its next occurrence, so
  * the card is out of the deck until that day; a NON-recurring task with a
  * future due date stays drawable (doing it early is the point), and a
- * recurring task without a due date has no schedule to wait for. Compared as
- * UTC calendar days, the same clock the completion writes the next due date
- * in (and the one `isDueSoon` below already reads "today" in).
+ * recurring task without a due date has no schedule to wait for. Compared on
+ * the LOCAL calendar day, like the server: a due date is the day the user
+ * typed, so the card must come back at the user's midnight.
  */
 export function isAwaitingNextOccurrence(
   task: Pick<Task, "recurEveryDays" | "dueDate">,
@@ -59,7 +60,7 @@ export function isAwaitingNextOccurrence(
 ): boolean {
   if (task.recurEveryDays == null || task.recurEveryDays <= 0) return false;
   if (task.dueDate == null) return false;
-  return task.dueDate > now.toISOString().slice(0, 10);
+  return task.dueDate > localDay(now);
 }
 
 /**

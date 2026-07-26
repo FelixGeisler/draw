@@ -432,7 +432,7 @@ describe("recurring subtasks are banned under sequential parents (#66, ADR-23)",
     expect((await draw(goalId)).task).toBeNull();
     // And when the occurrence comes round, the trap re-arms rather than
     // releasing: it is the recurring step that returns, never the sibling.
-    db.prepare("UPDATE tasks SET due_date = date('now') WHERE id = ?").run(first.id);
+    db.prepare("UPDATE tasks SET due_date = date('now', 'localtime') WHERE id = ?").run(first.id);
     expect((await draw(goalId)).task.id).toBe(first.id);
   });
 });

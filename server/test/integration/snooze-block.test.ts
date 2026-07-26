@@ -170,7 +170,7 @@ describe("completion and reopening clear snooze state", () => {
     // The occurrence arriving puts it back with NO write, which is what
     // proves the cleared fields are really gone: a surviving snooze/block
     // would still be holding it out a week later.
-    db.prepare("UPDATE tasks SET due_date = date('now') WHERE id = ?").run(task.id);
+    db.prepare("UPDATE tasks SET due_date = date('now', 'localtime') WHERE id = ?").run(task.id);
     expect((await draw(goalId)).task.id).toBe(task.id);
   });
 

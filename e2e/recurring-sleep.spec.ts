@@ -15,9 +15,14 @@ const GOAL_TITLE = "E2E recurrence goal";
 const TASK_TITLE = "Empty the office bin";
 const INTERVAL_DAYS = 4;
 
-/** UTC day + n — the clock the schedule is written and read in. */
-function utcDay(n: number): string {
-  const d = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+/** The user's LOCAL calendar day + n — the clock the schedule is written and
+ *  read in (PR #206 review): the browser and the server must agree, and both
+ *  of them ask the machine's own calendar. */
+function day(n: number): string {
+  const now = new Date();
+  const pad = (v: number) => String(v).padStart(2, "0");
+  const localToday = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const d = new Date(`${localToday}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
@@ -63,7 +68,7 @@ test("completing a recurring card puts it to sleep until its next occurrence", a
   // …and the very next draw from the same one-card pool comes up empty, with
   // the honest reason: nothing to break down, the card returns on its own.
   await page.locator(".draw-face.front").click();
-  await expect(page.getByText("Everything left was already done this cycle")).toBeVisible();
+  await expect(page.getByText("Everything left is waiting for its next occurrence")).toBeVisible();
   await expect(page.locator(".draw-face.back h2")).toHaveCount(0);
 
   // A reload cannot resurrect it either (ADR-13 restore validation).
@@ -78,7 +83,7 @@ test("the Tasks page shows it waiting for its next occurrence, not snoozed", asy
   // snoozed one; it wears its state as a chip.
   const row = categorySection(page).getByText(TASK_TITLE).locator("..");
   await expect(row).toBeVisible();
-  await expect(row.locator(".chip", { hasText: `next ${utcDay(INTERVAL_DAYS)}` })).toBeVisible();
+  await expect(row.locator(".chip", { hasText: `next ${day(INTERVAL_DAYS)}` })).toBeVisible();
   await expect(row.locator(".chip", { hasText: `↻ ${INTERVAL_DAYS}d` })).toBeVisible();
 
   // Explicitly NOT the snooze wording — the user never sent this card away.
@@ -92,7 +97,7 @@ test("the occurrence arriving puts the card back in the deck with no user action
   // The next occurrence, seeded rather than waited for — the same thing the
   // calendar does four days later.
   const patched = await page.request.patch(`/api/tasks/${taskId}`, {
-    data: { dueDate: utcDay(0) },
+    data: { dueDate: day(0) },
   });
   expect(patched.ok()).toBe(true);
 
@@ -100,7 +105,7 @@ test("the occurrence arriving puts the card back in the deck with no user action
   const row = categorySection(page).getByText(TASK_TITLE).locator("..");
   // The chip stops saying "next" the moment the day arrives — it is a due
   // date again, and the card is drawable.
-  await expect(row.locator(".chip", { hasText: `due ${utcDay(0)}` })).toBeVisible();
+  await expect(row.locator(".chip", { hasText: `due ${day(0)}` })).toBeVisible();
 
   await drawFromGoal(page, GOAL_TITLE);
   await expect(page.locator(".draw-face.back h2")).toHaveText(TASK_TITLE);

@@ -79,8 +79,10 @@ export interface DrawableVector {
    * Recurrence schedule (#205, ADR-6 amended): `dueDate` is the task's next
    * occurrence, and a RECURRING task sleeps until that day — a non-recurring
    * one stays drawable however far off its due date is. Absent = neither
-   * field set. Dates are compared as UTC calendar days, so the vectors below
-   * stay unambiguous in every timezone (they sit whole days from VECTOR_NOW).
+   * field set. Dates are compared on the LOCAL calendar day, so the vectors
+   * below sit whole days away from VECTOR_NOW (or on it, where every offset
+   * from UTC-12 to UTC+14 still reads them as arrived): the expectations hold
+   * in every timezone the two suites may run in.
    */
   recurEveryDays?: number | null;
   dueDate?: string | null;

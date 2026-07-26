@@ -9,10 +9,16 @@ function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+/** The LOCAL calendar day of an instant — the user's own "which day is it".
+ *  Mirrors the server's `services/localDay.ts` localDate; the recurrence
+ *  schedule (#205) reads due dates against it on both tiers. */
+export function localDay(d: Date): string {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /** Today as a LOCAL date string — activity days are local calendar days. */
 export function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  return localDay(new Date());
 }
 
 /** Date-only arithmetic on YYYY-MM-DD strings (UTC trick avoids DST holes). */

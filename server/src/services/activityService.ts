@@ -1,5 +1,5 @@
 import { db } from "../db.js";
-import { addDays } from "./localDay.js";
+import { addDays, localDate } from "./localDay.js";
 import { MINUTES_EXPR } from "./statsService.js";
 
 // Activity history behind the Stats page's History calendar (#53; a
@@ -67,11 +67,13 @@ export { addDays };
  * stats.ts). `offsetMinutes` is injectable so unit tests can pin the
  * midnight-boundary behavior on any machine; it defaults to the server's own
  * offset at that instant, which is DST-correct per timestamp.
+ *
+ * The rule itself lives in localDay.ts since #205 (PR #206 review): the
+ * recurrence schedule must answer "which day was that completion?" exactly
+ * like the History buckets and the streak, so there is one implementation.
  */
 export function localDayOf(iso: string, offsetMinutes?: number): string {
-  const d = new Date(iso);
-  const offset = offsetMinutes ?? -d.getTimezoneOffset();
-  return new Date(d.getTime() + offset * 60_000).toISOString().slice(0, 10);
+  return localDate(new Date(iso), offsetMinutes);
 }
 
 /** Per-(task, day) accumulator while folding entries and completions. */
