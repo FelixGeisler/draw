@@ -113,44 +113,48 @@ test("touch drag-and-drop: a childless root nests under another root", async ({ 
     await handle.evaluate((el) => getComputedStyle(el).touchAction),
   ).toBe("none");
 
-  // Playwright's touchscreen has no drag primitive, so drive the exact
-  // pointer-event sequence a touch drag produces (pointerdown on the handle,
-  // pointermoves past the 5px threshold, pointerup over the target row) with
-  // pointerType "touch" — the same code path a finger takes on Android.
-  await page.evaluate(
+  // Playwright's touchscreen exposes only tap, so the drag is driven through
+  // CDP's Input.dispatchTouchEvent: that injects REAL browser input, which the
+  // engine turns into genuine pointer events (pointerType "touch", working
+  // pointer capture) — the same path a finger takes on Android. Synthesising
+  // PointerEvents with dispatchEvent instead does NOT work here: those never
+  // establish pointer capture, and the drag session never commits, so such a
+  // test would fail while real touch dragging works. Chromium-only, which is
+  // the browser this suite runs.
+  const points = await page.evaluate(
     ([childId, parentId]) => {
-      const handleEl = document.querySelector<HTMLElement>(
-        `[data-dnd-row="${childId}"] .dnd-handle`,
-      )!;
-      const targetEl = document.querySelector<HTMLElement>(`[data-dnd-row="${parentId}"]`)!;
-      const from = handleEl.getBoundingClientRect();
-      const to = targetEl.getBoundingClientRect();
-      const base = {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        pointerId: 11,
-        pointerType: "touch",
-        isPrimary: true,
+      const handle = document
+        .querySelector<HTMLElement>(`[data-dnd-row="${childId}"] .dnd-handle`)!
+        .getBoundingClientRect();
+      const target = document
+        .querySelector<HTMLElement>(`[data-dnd-row="${parentId}"]`)!
+        .getBoundingClientRect();
+      return {
+        from: { x: handle.x + handle.width / 2, y: handle.y + handle.height / 2 },
+        // The row's own title strip, not its centre: a row that contains
+        // nested rows would hit-test to the innermost one at the centre.
+        to: { x: target.x + 40, y: target.y + 16 },
       };
-      const at = (x: number, y: number) => ({ clientX: x, clientY: y });
-      const fx = from.x + from.width / 2;
-      const fy = from.y + from.height / 2;
-      const tx = to.x + to.width / 2;
-      const ty = to.y + to.height / 2;
-      handleEl.dispatchEvent(
-        new PointerEvent("pointerdown", { ...base, button: 0, buttons: 1, ...at(fx, fy) }),
-      );
-      window.dispatchEvent(
-        new PointerEvent("pointermove", { ...base, buttons: 1, ...at(fx + 8, fy + 8) }),
-      );
-      window.dispatchEvent(
-        new PointerEvent("pointermove", { ...base, buttons: 1, ...at(tx, ty) }),
-      );
-      window.dispatchEvent(new PointerEvent("pointerup", { ...base, buttons: 0, ...at(tx, ty) }));
     },
     [child.id, parent.id] as const,
   );
+
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: "touchStart" | "touchMove" | "touchEnd", at?: { x: number; y: number }) =>
+    cdp.send("Input.dispatchTouchEvent", {
+      type,
+      touchPoints: at ? [{ x: at.x, y: at.y, id: 1 }] : [],
+    });
+
+  await touch("touchStart", points.from);
+  // Past the 5px threshold first, so the press becomes a drag, then onto the
+  // target row.
+  await touch("touchMove", { x: points.from.x + 10, y: points.from.y + 10 });
+  await touch("touchMove", points.to);
+  // The row under the finger reports itself as an eligible drop target — the
+  // same hover feedback the mouse gets.
+  await expect(taskTree(page).locator(`[data-dnd-row="${parent.id}"]`)).toHaveClass(/dnd-over/);
+  await touch("touchEnd");
 
   // The drop issues the same PATCH parentId as the Move under… menu.
   await expect
