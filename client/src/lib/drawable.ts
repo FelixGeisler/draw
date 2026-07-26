@@ -44,6 +44,25 @@ export function isWithinWindow(
 }
 
 /**
+ * Derived recurrence sleep (#205, ADR-6 amended) — mirrors the server's
+ * `isAwaitingNextOccurrence` in services/recurrence.ts, pinned by the shared
+ * DRAWABLE_VECTORS. A recurring task's due date IS its next occurrence, so
+ * the card is out of the deck until that day; a NON-recurring task with a
+ * future due date stays drawable (doing it early is the point), and a
+ * recurring task without a due date has no schedule to wait for. Compared as
+ * UTC calendar days, the same clock the completion writes the next due date
+ * in (and the one `isDueSoon` below already reads "today" in).
+ */
+export function isAwaitingNextOccurrence(
+  task: Pick<Task, "recurEveryDays" | "dueDate">,
+  now: Date = new Date(),
+): boolean {
+  if (task.recurEveryDays == null || task.recurEveryDays <= 0) return false;
+  if (task.dueDate == null) return false;
+  return task.dueDate > now.toISOString().slice(0, 10);
+}
+
+/**
  * Mirrors the server's pool predicate (`drawService.ts`), pinned by the shared
  * vectors in `shared/drawableVectors.ts`. Precedence:
  * container → snoozed → queued → scheduled → needs-estimate → too-big → ready.
@@ -61,6 +80,10 @@ export function classifyTask(task: Task, maxDrawEffort: number, now: Date = new 
   if (isSnoozed(task, now)) return "snoozed";
   if (task.heldBack) return "queued";
   if (!isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, now)) return "scheduled";
+  // A recurring card between occurrences is "scheduled" too, never "snoozed"
+  // (#205): the user did not send it away — its own schedule did, and it
+  // comes back on the due date the badge shows.
+  if (isAwaitingNextOccurrence(task, now)) return "scheduled";
   if (task.effortMinutes == null) return "needs-estimate";
   if (task.effortMinutes > maxDrawEffort) return "too-big";
   return "ready";

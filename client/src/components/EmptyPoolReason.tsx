@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 
 /**
- * Why the candidate pool came up empty, in words — the three reasons the
+ * Why the candidate pool came up empty, in words — the four reasons the
  * SERVER's shared `emptyPoolReason` can return (drawService), kept as one
  * voice for one server-side predicate.
  *
@@ -15,8 +15,23 @@ import { Link } from "react-router-dom";
 export function EmptyPoolReason({
   reason,
 }: {
-  reason?: "no_ready_tasks" | "all_too_big" | "all_outside_window";
+  reason?:
+    | "no_ready_tasks"
+    | "all_too_big"
+    | "all_outside_window"
+    | "all_awaiting_next_occurrence";
 }) {
+  if (reason === "all_awaiting_next_occurrence") {
+    return (
+      <p>
+        Everything left was already done this cycle — those{" "}
+        <Link to="/tasks" style={{ color: "var(--accent)" }}>
+          recurring cards
+        </Link>{" "}
+        come back on their own on their next occurrence.
+      </p>
+    );
+  }
   if (reason === "all_outside_window") {
     return (
       <p>

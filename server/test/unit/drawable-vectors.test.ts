@@ -28,6 +28,9 @@ describe("shared eligibility vectors (parity with classifyTask)", () => {
         blocked: v.blocked,
         deferredUntil: v.deferredUntil,
         heldBack: v.heldBack,
+        // Recurrence schedule (#205): absent means neither field set.
+        recurEveryDays: v.recurEveryDays ?? null,
+        dueDate: v.dueDate ?? null,
         ...window,
       };
       expect(isRestorable(task, v.maxEffort, NOW)).toBe(v.expected === "ready");

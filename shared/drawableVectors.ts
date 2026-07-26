@@ -75,6 +75,15 @@ export interface DrawableVector {
   heldBack: 0 | 1;
   /** Availability window (#33, ADR-20); absent = no window. */
   window?: WindowSpec;
+  /**
+   * Recurrence schedule (#205, ADR-6 amended): `dueDate` is the task's next
+   * occurrence, and a RECURRING task sleeps until that day — a non-recurring
+   * one stays drawable however far off its due date is. Absent = neither
+   * field set. Dates are compared as UTC calendar days, so the vectors below
+   * stay unambiguous in every timezone (they sit whole days from VECTOR_NOW).
+   */
+  recurEveryDays?: number | null;
+  dueDate?: string | null;
   effortMinutes: number | null;
   maxEffort: number;
   /** classifyTask group; the task is in the deck iff this is "ready". */
@@ -428,6 +437,107 @@ export const DRAWABLE_VECTORS: DrawableVector[] = [
     effortMinutes: 10,
     maxEffort: 30,
     expected: "ready",
+  },
+  // --- Recurrence schedule (#205, ADR-6 amended): a recurring task's due
+  // date is its next occurrence and it sleeps until that day, joining the
+  // "scheduled" group — the card returns on its own, the user did not snooze
+  // it. Precedence is the window's: container → snoozed → queued →
+  // scheduled → needs-estimate → too-big → ready.
+  {
+    name: "a recurring task whose next occurrence is still ahead is scheduled, not ready",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    recurEveryDays: 4,
+    dueDate: "2026-08-01",
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "scheduled",
+  },
+  {
+    name: "a recurring task due today is back in the deck (boundary)",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    recurEveryDays: 4,
+    dueDate: "2026-07-14",
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "ready",
+  },
+  {
+    name: "a recurring task past its occurrence stays drawable — a missed chore does not vanish",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    recurEveryDays: 4,
+    dueDate: "2026-07-01",
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "ready",
+  },
+  {
+    name: "a NON-recurring task with a future due date stays drawable — doing it early is the point",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    recurEveryDays: null,
+    dueDate: "2026-08-01",
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "ready",
+  },
+  {
+    name: "a recurring task with no due date has no schedule to wait for and stays drawable",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    recurEveryDays: 4,
+    dueDate: null,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "ready",
+  },
+  {
+    name: "a sleeping recurring task over the limit is still scheduled (precedence)",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    recurEveryDays: 4,
+    dueDate: "2026-08-01",
+    effortMinutes: 99,
+    maxEffort: 30,
+    expected: "scheduled",
+  },
+  {
+    name: "a snoozed sleeping recurring task shows snoozed — the explicit action outranks the schedule",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: "2026-07-14T13:00:00.000Z",
+    heldBack: 0,
+    recurEveryDays: 4,
+    dueDate: "2026-08-01",
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "snoozed",
+  },
+  {
+    name: "queued wins over the next occurrence — the queue explains the exclusion better",
+    hasOpenChildren: 0,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 1,
+    recurEveryDays: 4,
+    dueDate: "2026-08-01",
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "queued",
   },
 ];
 
