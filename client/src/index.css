@@ -94,6 +94,12 @@ textarea {
   padding: 8px 10px;
 }
 
+/* A native select sizes to its widest option — a long task or goal title
+   would otherwise force the whole page wider than a phone screen (#193). */
+select {
+  max-width: 100%;
+}
+
 input:focus,
 select:focus,
 textarea:focus {
@@ -166,6 +172,27 @@ textarea:focus {
   margin: 0 auto;
 }
 
+/* Gamification header (#193: styles live here, not inline, so the phone
+   block below can compact them). */
+.gami-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 24px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+/* Running-timer strip — same deal as the header. */
+.timer-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 24px;
+  background: rgba(79, 140, 255, 0.12);
+  border-bottom: 1px solid var(--accent);
+}
+
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -189,6 +216,97 @@ textarea:focus {
   height: 10px;
   border-radius: 50%;
   display: inline-block;
+}
+
+/* ---- Phone layout (#193) ------------------------------------------------
+   ONE width breakpoint for the whole client: 640px. Component stylesheets
+   (DrawPage, TaskDnd, AchievementToast, GoalShelf, HistoryCalendar) hang
+   their own phone rules off the same query — extend it, don't invent new
+   thresholds. The visual identity is untouched: the same cards, colors and
+   type, adapted to a single column with a thumb-reachable bottom nav. */
+@media (max-width: 640px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  /* The sidenav becomes a fixed bottom tab bar: icon over label, one flex
+     share per entry (5 entries, 6 with the Assistant). z-index sits above
+     page chrome (dnd overlays top out at 40) but below the fullscreen
+     focus/victory overlays (90) and the achievement toast (100) — focus mode
+     intentionally covers the nav. */
+  .sidenav {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 80;
+    width: auto;
+    flex-direction: row;
+    gap: 0;
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px));
+    border-right: none;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+  }
+
+  .sidenav .brand {
+    display: none;
+  }
+
+  .sidenav a {
+    flex: 1 1 0;
+    min-width: 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    min-height: 48px;
+    padding: 4px 2px;
+    font-size: 11px;
+  }
+
+  .sidenav .nav-ico {
+    width: auto;
+    font-size: 20px;
+  }
+
+  /* Keep scrolled content clear of the fixed bar. */
+  .main {
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .content {
+    padding: 16px 12px;
+  }
+
+  .gami-header {
+    gap: 10px;
+    padding: 8px 12px;
+  }
+
+  .timer-bar {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 8px 12px;
+  }
+
+  /* Touch ergonomics: ~44px targets for the controls fingers actually hit.
+     Checkbox/radio/color keep their compact boxes (blowing them up distorts
+     rows), and the art-regen corner button keeps its 30px circle. */
+  button:not(.draw-art-regen) {
+    min-height: 44px;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+  select {
+    min-height: 44px;
+  }
+
+  /* Task rows wrap instead of forcing the page wider: title line first, the
+     action buttons flow onto the next line(s). */
+  .task-row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
 }
 
 /* The category pill (#123, keeping #120's computed ink): background is the

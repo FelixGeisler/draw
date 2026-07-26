@@ -170,7 +170,9 @@ export function TaskRow({
         // Rows outside a DnD context (the triage strip, #151) are not drop
         // targets — without the attribute the hit-test skips them entirely.
         data-dnd-row={dnd ? task.id : undefined}
-        className={dndClass || undefined}
+        // task-row lets the phone breakpoint wrap the action buttons onto
+        // their own line (index.css, #193) — desktop keeps one line.
+        className={["task-row", dndClass].filter(Boolean).join(" ")}
         style={{
           display: "flex",
           alignItems: "center",
@@ -189,6 +191,9 @@ export function TaskRow({
             title="Drag to reorganize (keyboard: the Move under… and ⤴ buttons)"
             aria-hidden="true"
             onPointerDown={(e) => dnd.startDrag(task, e)}
+            // Touch drags (#193): a long-press on the handle must start the
+            // pointer drag, not Android's text-selection context menu.
+            onContextMenu={(e) => e.preventDefault()}
           >
             ⠿
           </span>
@@ -380,6 +385,7 @@ export function TaskRow({
           style={{
             display: "flex",
             alignItems: "center",
+            flexWrap: "wrap", // the select can be title-wide — phone widths wrap (#193)
             gap: 8,
             padding: "8px 10px",
             borderBottom: "1px solid var(--border)",

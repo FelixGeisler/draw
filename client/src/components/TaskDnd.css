@@ -7,9 +7,20 @@
   cursor: grab;
   touch-action: none; /* pointer events own the gesture on touch */
   user-select: none;
+  -webkit-user-select: none; /* Android Chrome long-press selection */
   color: var(--text-dim);
   font-size: 14px;
   padding: 0 2px;
+}
+
+/* Phone (#193, same 640px breakpoint as index.css): the handle IS the touch
+   drag surface — give the finger a real target without changing the glyph. */
+@media (max-width: 640px) {
+  .dnd-handle {
+    font-size: 16px;
+    padding: 10px 8px;
+    margin: -6px 0;
+  }
 }
 
 /* No text selection while a drag sweeps across rows. */

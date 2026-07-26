@@ -27,16 +27,9 @@ export function GamificationHeader() {
   }[flame];
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 16,
-        padding: "10px 24px",
-        borderBottom: "1px solid var(--border)",
-        fontSize: 14,
-      }}
-    >
+    // Container styles live in index.css (.gami-header) so the phone
+    // breakpoint can compact them (#193).
+    <div className="gami-header">
       <span style={{ fontWeight: 700 }}>Lv {data.level}</span>
       <div
         title={`${data.levelProgress.intoLevel} / ${data.levelProgress.needed} XP to level ${data.level + 1}`}

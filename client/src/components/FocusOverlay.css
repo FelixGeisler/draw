@@ -56,6 +56,8 @@
 
 .focus-actions {
   display: flex;
+  flex-wrap: wrap; /* phone widths (#193) — invisible on desktop, they fit */
+  justify-content: center;
   gap: 12px;
   margin-top: 10px;
 }

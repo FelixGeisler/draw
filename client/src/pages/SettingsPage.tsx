@@ -24,7 +24,9 @@ function SettingInput({
     onSuccess: () => qc.invalidateQueries({ queryKey: ["settings"] }),
   });
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    // flexWrap: the 280px label plus input plus hint overflow a phone —
+    // wrapping stacks them there while desktop stays one line (#193).
+    <label style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
       <span style={{ width: 280 }}>{label}</span>
       <input
         type="number"
@@ -90,9 +92,9 @@ function StreakSection() {
   return (
     <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
       <h3 style={{ margin: 0 }}>Streak</h3>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ width: 280 }}>Rest weekdays</span>
-        <div role="group" aria-label="Rest weekdays" style={{ display: "flex", gap: 4 }}>
+        <div role="group" aria-label="Rest weekdays" style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
           {WEEKDAYS.map(({ day, label }) => {
             const active = current.includes(day);
             return (
@@ -116,7 +118,7 @@ function StreakSection() {
           days that never break the streak — completing on one still counts
         </span>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <span style={{ width: 280 }}>Freezes banked</span>
         <span style={{ fontWeight: 700 }}>
           🧊 {g ? `${g.freezesBanked}/${g.freezeBankCap}` : "…"}
@@ -165,7 +167,7 @@ function AiKeySection() {
           backward planning — no restart needed. Everything else works without it.
         </p>
       )}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <input
           type="password"
           aria-label="Claude API key"
@@ -241,7 +243,7 @@ function BackupSection() {
           ⬇ Download backup
         </a>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <input
           ref={fileInput}
           type="file"
@@ -279,7 +281,7 @@ function BackupSection() {
             <code>app.db.bak</code> (and the material files as <code>files.bak</code>) in case
             you need to go back.
           </p>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <input
               aria-label="Type REPLACE to confirm"
               placeholder="Type REPLACE to confirm"
@@ -354,7 +356,7 @@ function CategoryRow({ category }: { category: Category }) {
   }
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
       <input
         type="color"
         title={`Change color of ${category.name}`}

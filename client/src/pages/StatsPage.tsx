@@ -220,7 +220,7 @@ export function StatsPage() {
 
   return (
     <div className="content">
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <h1 style={{ flex: 1 }}>Stats</h1>
         <span
           className={`chip ${range === "week" ? "active" : ""}`}

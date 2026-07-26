@@ -19,17 +19,9 @@ export function TimerBar() {
   const { entry, task } = timer.data;
 
   return (
-    <div
-      className="timer-bar"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 14,
-        padding: "10px 24px",
-        background: "rgba(79, 140, 255, 0.12)",
-        borderBottom: "1px solid var(--accent)",
-      }}
-    >
+    // Container styles live in index.css (.timer-bar) so the phone
+    // breakpoint can compact and wrap them (#193).
+    <div className="timer-bar">
       <span style={{ fontSize: 18 }}>⏱</span>
       <strong style={{ flex: 1 }}>{task.title}</strong>
       <span style={{ fontVariantNumeric: "tabular-nums", fontSize: 18 }}>

@@ -55,6 +55,15 @@
   width: max-content;
 }
 
+/* Phone (#193): slightly larger tiles for finger taps — the grid already
+   lives in its own overflow-x scroll box, so growing it never widens the
+   page. */
+@media (max-width: 640px) {
+  .cal-grid {
+    --cal-cell: 15px;
+  }
+}
+
 .cal-month {
   align-self: end;
   justify-self: start;

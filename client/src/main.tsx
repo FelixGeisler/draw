@@ -11,6 +11,17 @@ const queryClient = new QueryClient({
   },
 });
 
+// Installability (#193, ADR-54): register the app-shell service worker in
+// production builds only — the Vite dev server (and the dev-mode E2E suite)
+// stays SW-free, so a stale worker can never shadow live-reloaded code.
+// Registration is progressive enhancement: failure (unsupported browser,
+// http on a non-localhost origin) leaves the app fully functional.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
