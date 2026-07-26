@@ -235,8 +235,9 @@ textarea:focus {
 }
 
 /* ---- Phone layout (#193) ------------------------------------------------
-   ONE width breakpoint for the whole client: 640px — the client's first and
-   only width query (before #193 every @media here was prefers-reduced-motion).
+   ONE width breakpoint for the whole client: 640px — its first and only width
+   query (before #193 every @media in the client was prefers-reduced-motion, and
+   this file had none at all).
    Four component stylesheets hang their own phone rules off the same query
    (TaskDnd, AchievementToast, GoalShelf, HistoryCalendar) — extend it, don't
    invent new thresholds. DrawPage.css needs no query: its action row wraps
