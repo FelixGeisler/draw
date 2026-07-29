@@ -79,6 +79,9 @@ describe("classifyTask", () => {
           deferredUntil: v.deferredUntil,
           heldBack: v.heldBack,
           effortMinutes: v.effortMinutes,
+          // Recurrence schedule (#205): absent means neither field set.
+          recurEveryDays: v.recurEveryDays ?? null,
+          dueDate: v.dueDate ?? null,
           // Windows are local wall-clock (#33): materialized from offsets
           // relative to `now`, deterministic in every timezone.
           ...(v.window ? materializeWindow(v.window, now) : {}),

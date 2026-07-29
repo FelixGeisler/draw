@@ -1,6 +1,12 @@
 import type { Category, Goal, Task } from "../api/types";
 import { pillInk } from "../lib/cardVisuals";
-import { formatWindow, isDueSoon, isSnoozed, isWithinWindow } from "../lib/drawable";
+import {
+  formatWindow,
+  isAwaitingNextOccurrence,
+  isDueSoon,
+  isSnoozed,
+  isWithinWindow,
+} from "../lib/drawable";
 import { displayEffort } from "../lib/effort";
 
 /** Compact local wake time for the 💤 chip, e.g. "2026-07-15 18:00". */
@@ -50,6 +56,11 @@ export function TaskBadges({
   goals?: Goal[];
 }) {
   const due = isDueSoon(task.dueDate);
+  // Between occurrences (#205) the due date is not a deadline to hurry
+  // toward but the day the card comes back, so the chip says "next" in the
+  // warn color the availability window uses for "out of the deck, returns on
+  // its own" — never the red of a looming deadline the user cannot act on.
+  const awaitingOccurrence = task.status === "open" && isAwaitingNextOccurrence(task);
   const effort = displayEffort(task);
   const goal = task.goalId != null ? goals?.find((g) => g.id === task.goalId) : undefined;
   return (
@@ -58,15 +69,22 @@ export function TaskBadges({
       {task.dueDate && (
         <span
           className="chip"
+          title={
+            awaitingOccurrence
+              ? `Waiting for its next occurrence — out of the deck until ${task.dueDate}`
+              : undefined
+          }
           style={
-            due === "overdue" || due === "today"
-              ? { borderColor: "var(--danger)", color: "var(--danger)" }
-              : due === "soon"
-                ? { borderColor: "var(--warn)", color: "var(--warn)" }
-                : undefined
+            awaitingOccurrence
+              ? { borderColor: "var(--warn)", color: "var(--warn)" }
+              : due === "overdue" || due === "today"
+                ? { borderColor: "var(--danger)", color: "var(--danger)" }
+                : due === "soon"
+                  ? { borderColor: "var(--warn)", color: "var(--warn)" }
+                  : undefined
           }
         >
-          {due === "overdue" ? "overdue " : "due "}
+          {awaitingOccurrence ? "next " : due === "overdue" ? "overdue " : "due "}
           {task.dueDate}
         </span>
       )}

@@ -8,6 +8,7 @@ import {
   WARMUP_DRAW_SETTING,
   WARMUP_LAST_DEALT_SETTING,
 } from "../db.js";
+import { isAwaitingNextOccurrence } from "./recurrence.js";
 
 export interface Candidate {
   id: number;
@@ -43,6 +44,7 @@ export interface DrawResult {
     | "no_ready_tasks"
     | "all_too_big"
     | "all_outside_window"
+    | "all_awaiting_next_occurrence"
     | "cooling_down"
     | "warmup_unavailable";
   poolSize?: number;
@@ -220,18 +222,20 @@ function filterConditions(filters: DrawFilters): { conditions: string[]; params:
 /**
  * The drawable-candidate query — the single home of the drawability
  * predicate (ADR-2). Reused by drawTask() and the side-effect-free
- * drawPool() below so the two can never drift. The availability window
- * (#33) is applied here as a TypeScript post-filter over the SQL rows —
- * local wall-clock semantics that SQLite's UTC time functions cannot
- * express — so both callers share one predicate by construction.
- * `windowExcluded` counts the rows the window filter removed; drawTask's
- * empty-pool dispatch needs it to report `all_outside_window`.
+ * drawPool() below so the two can never drift. Two exclusions are applied
+ * here as TypeScript post-filters over the SQL rows: the availability window
+ * (#33), whose local wall-clock semantics SQLite's UTC time functions cannot
+ * express, and the recurrence sleep (#205), whose exclusion COUNT the
+ * empty-pool dispatch needs. Both callers share one predicate by
+ * construction. `windowExcluded` / `occurrenceExcluded` count the rows each
+ * filter removed; drawTask's empty-pool dispatch turns them into
+ * `all_outside_window` / `all_awaiting_next_occurrence`.
  */
 export function queryCandidates(
   filters: DrawFilters,
   maxEffort: number,
   now: Date,
-): { candidates: PoolCandidate[]; windowExcluded: number } {
+): { candidates: PoolCandidate[]; windowExcluded: number; occurrenceExcluded: number } {
   const filter = filterConditions(filters);
   const conditions = [
     "t.status = 'open'",
@@ -257,10 +261,17 @@ export function queryCandidates(
        FROM tasks t WHERE ${conditions.join(" AND ")}`,
     )
     .all(maxEffort, now.toISOString(), ...filter.params) as PoolCandidate[];
-  const candidates = rows.filter((r) =>
+  const inWindow = rows.filter((r) =>
     isWithinWindow(parseWindowDays(r.windowDays), r.windowStart, r.windowEnd, now),
   );
-  return { candidates, windowExcluded: rows.length - candidates.length };
+  const candidates = inWindow.filter(
+    (r) => !isAwaitingNextOccurrence(r.recurEveryDays, r.dueDate, now),
+  );
+  return {
+    candidates,
+    windowExcluded: rows.length - inWindow.length,
+    occurrenceExcluded: inWindow.length - candidates.length,
+  };
 }
 
 /**
@@ -303,21 +314,26 @@ export function drawPool(filters: DrawFilters): {
  * window candidates take precedence over the anyOpen dispatch (#33): if the
  * SQL query produced candidates and only the window filter emptied the pool,
  * the honest answer is "scheduled for later" — these cards return on their
- * own, so the break-something-down hint would mislead. A task that is
- * oversized AND out-of-window never reaches the window filter (SQL already
- * dropped it) and still counts toward all_too_big: it will not become
- * drawable by waiting. Beyond that, "nothing at all" is distinguished from
- * "only oversized/unestimated tasks": snoozed/blocked cards are not "too
- * big" — they come back on their own (or on wake) — and held-back sequential
- * siblings surface by completing the step in front, never by being broken
- * down (#23), so neither triggers the break-something-down hint.
+ * own, so the break-something-down hint would mislead. Recurring cards
+ * sleeping until their next occurrence (#205) are the same shape and get the
+ * same treatment, one reason further down. A task that is oversized AND
+ * out-of-window (or oversized AND sleeping) never reaches either filter (SQL
+ * already dropped it) and still counts toward all_too_big: it will not
+ * become drawable by waiting. Beyond that, "nothing at all" is distinguished
+ * from "only oversized/unestimated tasks": snoozed/blocked cards are not
+ * "too big" — they come back on their own (or on wake) — and held-back
+ * sequential siblings surface by completing the step in front, never by
+ * being broken down (#23), so neither triggers the break-something-down
+ * hint.
  */
 export function emptyPoolReason(
   filters: DrawFilters,
   windowExcluded: number,
+  occurrenceExcluded: number,
   now: Date,
-): "no_ready_tasks" | "all_too_big" | "all_outside_window" {
+): "no_ready_tasks" | "all_too_big" | "all_outside_window" | "all_awaiting_next_occurrence" {
   if (windowExcluded > 0) return "all_outside_window";
+  if (occurrenceExcluded > 0) return "all_awaiting_next_occurrence";
   const filter = filterConditions(filters);
   const anyOpen = db
     .prepare(
@@ -376,13 +392,17 @@ export function drawTask(filters: DrawFilters): DrawResult {
   const cooldown = getSetting("draw_cooldown_minutes", 60);
   const now = new Date();
 
-  const { candidates, windowExcluded } = queryCandidates(filters, maxEffort, now);
+  const { candidates, windowExcluded, occurrenceExcluded } = queryCandidates(
+    filters,
+    maxEffort,
+    now,
+  );
 
   if (candidates.length === 0) {
     // The draw replaced whatever card was showing — even an empty draw, so a
     // reload doesn't resurrect a card the user already saw disappear.
     clearCurrentDraw();
-    return { task: null, reason: emptyPoolReason(filters, windowExcluded, now) };
+    return { task: null, reason: emptyPoolReason(filters, windowExcluded, occurrenceExcluded, now) };
   }
 
   const weights = poolWeights(candidates, now, cooldown);
@@ -447,6 +467,13 @@ export interface RestorableTask {
   blocked: number | boolean;
   deferredUntil: string | null;
   heldBack: number | boolean;
+  /**
+   * Recurrence schedule (#205): `due_date` is the next occurrence, and a
+   * recurring card sleeps until it arrives. Optional, like the fields above:
+   * a payload shape without them simply skips the check.
+   */
+  recurEveryDays?: number | null;
+  dueDate?: string | null;
   /** Parsed window (#33) — run rows through toTaskPayload() before validating. */
   windowDays: number[] | null;
   windowStart: string | null;
@@ -458,7 +485,8 @@ export interface RestorableTask {
  * `classifyTask` and the candidate WHERE clause above: only an open leaf
  * task with an estimate within the draw limit, neither blocked nor snoozed
  * into the future nor held back behind a sequential sibling (#23) nor
- * outside its availability window (#33), is still in the deck. Like
+ * outside its availability window (#33) nor sleeping until its next
+ * occurrence (#205), is still in the deck. Like
  * snooze wear-off, the window check makes the stale pointer clear lazily —
  * a card whose window closed (or that was edited out of its window) is not
  * resurrected by a reload. Pinned against the same vectors as the client
@@ -473,6 +501,7 @@ export function isRestorable(task: RestorableTask, maxEffort: number, now: Date)
     (task.deferredUntil == null || new Date(task.deferredUntil) <= now) &&
     !task.heldBack &&
     isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, now) &&
+    !isAwaitingNextOccurrence(task.recurEveryDays, task.dueDate, now) &&
     task.effortMinutes != null &&
     task.effortMinutes <= maxEffort
   );
@@ -666,11 +695,15 @@ export function warmupDraw(filters: DrawFilters): DrawResult {
 
   const maxEffort = getSetting("max_draw_effort", 30);
   const cooldown = getSetting("draw_cooldown_minutes", 60);
-  const { candidates, windowExcluded } = queryCandidates(filters, maxEffort, now);
+  const { candidates, windowExcluded, occurrenceExcluded } = queryCandidates(
+    filters,
+    maxEffort,
+    now,
+  );
   if (candidates.length === 0) {
     // Nothing was dealt: the allowance is NOT consumed, and there is no
     // current draw to clear (the route's idle guard already ensured that).
-    return { task: null, reason: emptyPoolReason(filters, windowExcluded, now) };
+    return { task: null, reason: emptyPoolReason(filters, windowExcluded, occurrenceExcluded, now) };
   }
 
   const chosen = pickWarmup(candidates, now, cooldown);

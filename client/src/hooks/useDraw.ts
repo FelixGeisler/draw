@@ -17,6 +17,7 @@ export interface DrawResponse {
     | "no_ready_tasks"
     | "all_too_big"
     | "all_outside_window"
+    | "all_awaiting_next_occurrence"
     | "cooling_down"
     | "warmup_unavailable";
   poolSize?: number;

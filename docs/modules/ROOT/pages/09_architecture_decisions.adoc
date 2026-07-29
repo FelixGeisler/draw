@@ -75,6 +75,54 @@ completion (no XP farming).
 *Rationale:* The task re-enters the deck automatically as urgency ramps up; history
 accumulates naturally in `completions`.
 
+*Amendment (#205): the due date IS the next occurrence, and the card sleeps until it.*
+As originally built, the advanced due date only lowered the card's urgency weight —
+`due_date` was never part of the drawable predicate, so a chore came straight back out
+of the deck seconds after being completed and kept coming back on every draw. That is
+the low-leverage-work failure mode the app exists to prevent: the deck offers a card the
+user just finished, which wastes draws and teaches distrust of the draw. The recurrence
+schedule is now:
+
+* On a task with `recur_every_days`, `due_date` is its *next occurrence*. The date the
+  user entered is therefore the *first* occurrence (semantics (c) of the issue's open
+  question), and the card is *not drawable before it* — a recurring chore due Thursday
+  is not offered on Monday.
+* Completing it sets `due_date = completion date + interval`, so the cycle stays
+  *completion-anchored* ("every 4 days after I actually do it", the pre-existing
+  behaviour), and the card sleeps again until that day.
+* The gate applies *only* when `recur_every_days` is set. A non-recurring task with a
+  future due date stays fully drawable — doing something before it is due is the point
+  of the deck — and a recurring task with *no* due date has no schedule to wait for and
+  stays always-drawable.
+
+The sleep is *derived*, never stored (ADR-2/ADR-17): `isAwaitingNextOccurrence`
+(`server/src/services/recurrence.ts`) is evaluated at read time by the candidate query,
+by `isRestorable`, and by the client's `classifyTask`, so an occurrence arrives with no
+write, exactly like a snooze wearing off. It is deliberately *not* implemented by
+writing `deferred_until`: that column is the user's own "not now" (ADR-17), and
+overloading it with a schedule would make "snoozed" mean two different things — in the
+UI as well, where the card would wrongly read as sent away by the user. It classifies as
+*scheduled* instead, alongside the availability window (ADR-20): the chip reads
+`next <date>`, and an empty pool of only sleeping chores reports
+`all_awaiting_next_occurrence` ("they come back on their own") rather than steering the
+user into a breakdown with `all_too_big`.
+
+Both the write and the read use the *user's local calendar day* (`localDate` in
+`services/localDay.ts`), never UTC. A due date is a local calendar day the user typed,
+and the same `completeTask()` call already attributes its completion to the local day
+for streaks and the History calendar (ADR-21/ADR-28) — so recurrence answers "which day
+was that?" exactly like the rest of the user-day logic, and the card wakes at the user's
+own midnight. A UTC anchor was tried first and rejected in review (PR #206): east of UTC
+it made one completion two different days depending on which subsystem asked, and a
+daily chore finished at 00:30 local was dated to the very day it was done, returning to
+the deck at 02:30 that same night — the #205 symptom surviving for late-night work.
+The arithmetic itself is date-only string math (`addDays`): the original
+`next.setDate(next.getDate() + n)` mixed the local wall clock with a `toISOString()`
+format, so an interval spanning a DST transition shifted the instant by an hour and the
+due date could land a day early (risk R3). Because both bugs are invisible on a UTC
+machine, the server test suite pins `TZ=Europe/Berlin` (`server/vitest.config.ts`) —
+otherwise the regression tests pass against the very arithmetic they reject.
+
 == ADR-7: Whole documents to Claude, no RAG
 
 *Context:* AI planning needs lecture PDFs and past exams as context.
@@ -359,14 +407,21 @@ unfairly boosted weight. The client's "Wake" action PATCHes
 `deferredUntil = now` (not `null`) plus `blocked = false`, giving manually
 woken cards the same staleness treatment. Completing a task — including
 recurring ones, which stay open (ADR-6) — and reopening a done task clear
-both fields. The empty-pool fallback count applies the same predicate, so a
+both fields; on the recurring path the card is nonetheless out of the deck
+afterwards, because its advanced due date is its next occurrence (ADR-6
+amendment, #205) — a *derived* sleep, so no snooze state survives the
+completion that a later cycle would inherit. The empty-pool fallback count
+applies the same predicate, so a
 pool of only snoozed/blocked cards reports `no_ready_tasks` (they come back on
 their own) instead of steering the user into breakdown with `all_too_big`.
 The restore validation for the persisted current draw (ADR-13, `isRestorable`)
 rejects snoozed/blocked cards, so snoozing the drawn card also drops it from
 reload-restore — and because a snooze wears off on its own, the PATCH route
 clears the pointer *eagerly* (the wear-off would otherwise slip past ADR-13's
-lazy validation and resurrect a card the user explicitly sent away). The 💤/⛔
+lazy validation and resurrect a card the user explicitly sent away). A
+`dueDate`/`recurEveryDays` edit joins that eager clear since #205: scheduling
+the drawn card into a future occurrence takes it out of the deck with the same
+wear-off shape. The 💤/⛔
 badges and the client's `classifyTask` group `snoozed` (precedence container →
 snoozed → needs-estimate → too-big → ready) are derived the same way; client
 and server predicates are pinned by shared test vectors

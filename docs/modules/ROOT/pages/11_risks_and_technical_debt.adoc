@@ -17,7 +17,7 @@
 |R3
 |*Timezone handling is subtle* — a local/UTC round-trip bug already occurred in stats date ranges
 |Off-by-one-day stats
-|Fixed with UTC-only `addDays`; concept documented in xref:08_crosscutting_concepts.adoc[8.6]; keep date math in UTC
+|Fixed with UTC-only `addDays`; concept documented in xref:08_crosscutting_concepts.adoc[8.6]; keep date math in UTC. The same shape resurfaced in the recurrence schedule (`setDate` arithmetic formatted with `toISOString`, a day early across a DST transition) and was fixed the same way in https://github.com/FelixGeisler/draw/issues/205[#205] — `addDays` now lives in `services/localDay.ts` so every caller shares it
 
 |R4
 |*Drawn-bonus heuristic* — the primary signal is the server-persisted current draw (ADR-13), but any completion still counts as "drawn" if the task was drawn within 6h, e.g. right after a redraw replaced it. The pointer is equally generous: it pays without re-running the drawable check, so a card edited out of the deck and then completed straight away still gets the bonus (only `GET /api/draw/current` re-validates)

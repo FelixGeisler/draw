@@ -34,6 +34,12 @@ export interface Task {
   impact: number;
   effortMinutes: number | null;
   dueDate: string | null;
+  /**
+   * Recurrence interval in days (ADR-6). On a recurring task `dueDate` is
+   * the NEXT OCCURRENCE (#205): the card classifies as "scheduled" and
+   * leaves the deck until that day, and completing it schedules the one
+   * after. A non-recurring task's due date never keeps it out of the deck.
+   */
   recurEveryDays: number | null;
   status: "open" | "done" | "archived";
   createdAt: string;

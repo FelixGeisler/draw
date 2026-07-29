@@ -7,9 +7,12 @@ Anything that can drift is computed at read time: drawability (SQL predicate),
 re-enters the deck with no write, ADR-17), "held back" (an EARLIER open sibling
 by stored `sort_order` under a `sequential` parent — completing the step in
 front, OR dragging this one ahead of it, frees the next one with no write to
-the freed row, ADR-18/ADR-43), "scheduled" (outside the task's availability window on
-the local wall clock — the window opening re-admits the card with no write,
-ADR-20), "in progress" (running time entry
+the freed row, ADR-18/ADR-43), "scheduled" (the calendar has the card for now and gives it
+back with no write: outside the task's availability window on the local wall
+clock, which re-admits it when the window opens, ADR-20 — or, on a RECURRING
+task, its due date still ahead, that date being its next occurrence, which
+re-admits it on the user's local day it names, ADR-6 amendment/#205),
+"in progress" (running time entry
 exists), XP/level/streak (aggregates over `completions` PLUS claimed-achievement
 payouts — since #156 XP has TWO stored sources,
 `SUM(completions.xp_awarded) + SUM(achievements.claim_xp)`, both honest event
@@ -178,13 +181,19 @@ counts its real tokens, so the estimate and the 180K guard stay honest.
 == 8.6 Time handling
 
 Timestamps stored as ISO 8601 UTC strings. Date-only values (due dates) are
-compared as strings. Date-range arithmetic happens in UTC (`addDays` in
-`routes/stats.ts`) — local-timezone `Date` round-trips caused an off-by-one-day bug
-(see xref:11_risks_and_technical_debt.adoc[section 11]). Streak days use SQLite
-`date(..., 'localtime')` because a "day" is a user-local concept; the History
-calendar's day buckets follow the same rule (`localDayOf` in `activityService`,
-ADR-21), with the UTC offset injectable so unit tests can pin midnight-boundary
-behavior on any machine.
+compared as strings, which makes their format load-bearing — the write paths
+reject anything that is not a real `YYYY-MM-DD` day, because an unpadded
+`2026-7-4` sorts after `2026-07-26`. Date-range *arithmetic* happens in UTC
+(`addDays` in `services/localDay.ts`) — local-timezone `Date` round-trips
+caused an off-by-one-day bug
+(see xref:11_risks_and_technical_debt.adoc[section 11]). Which *day* an
+instant belongs to is the user-local question, and it has exactly one answer
+in the codebase (`localDate`, same file): streak days (SQLite
+`date(..., 'localtime')`), the History calendar's buckets (`localDayOf`,
+ADR-21) and the recurrence schedule's next occurrence (ADR-6 amendment) all
+read it the same way, with the UTC offset injectable so unit tests can pin
+midnight-boundary behavior on any machine. The server suite runs pinned to
+`TZ=Europe/Berlin`: on a UTC runner every local-vs-UTC day bug is invisible.
 
 == 8.7 Testing strategy
 
