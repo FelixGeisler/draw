@@ -12,7 +12,12 @@ test.describe.configure({ mode: "serial" });
 
 const GOAL_TITLE =
   "Publish the complete advanced e2e correspondence course with all supplementary material";
-const TASK_TITLE = "Sand and oil the e2e box";
+// Short enough to fit ONE line inside the title's 11em floor on any
+// platform's fonts: the first CI run of this spec failed on exactly this —
+// a title that fit at Windows glyph widths wrapped on the Linux runner's.
+// The one-line promise is still meaningful: pre-#213 even a title this short
+// was crushed onto multiple lines.
+const TASK_TITLE = "Sand the e2e box";
 
 // A REALISTIC goal-linked row: effort chip, goal chip, impact stars. The
 // badge-heavy extreme (due date + recurrence + window on top) is test 2's

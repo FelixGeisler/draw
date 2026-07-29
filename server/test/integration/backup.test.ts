@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
 import { CURRENT_VERSION } from "../../src/db.js";
+import { localDate } from "../../src/services/localDay.js";
 import { createBackupArchive, MANIFEST_APP } from "../../src/services/backupService.js";
 
 // Backup export/import (#61, ADR-26). User-data-critical: the round trip
@@ -119,11 +120,15 @@ beforeAll(async () => {
 
   // Streak/freeze state (#58, ADR-28) must survive the round trip too. One
   // earned token is banked directly — earning organically needs a 7-day
-  // streak — using the same localtime day convention completeTask writes.
+  // streak — dated with the SAME local-day rule completeTask writes: JS
+  // localDate, never SQLite's date('now','localtime') (#219 — the C-runtime
+  // localtime cannot read the suite's pinned IANA TZ on Windows, so the two
+  // named different days for the two hours after local midnight).
   const db = await testDb();
-  db.prepare(
-    "INSERT INTO streak_freezes (milestone_day, created_at) VALUES (date('now', 'localtime'), ?)",
-  ).run(new Date().toISOString());
+  db.prepare("INSERT INTO streak_freezes (milestone_day, created_at) VALUES (?, ?)").run(
+    localDate(new Date()),
+    new Date().toISOString(),
+  );
 });
 
 describe("GET /api/backup/export", () => {
