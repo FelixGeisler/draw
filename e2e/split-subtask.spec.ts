@@ -46,13 +46,18 @@ test("a too-big subtask offers Split with the even-split pre-fill; accepting rep
   await minutes.nth(1).fill("15");
   await page.getByRole("button", { name: /Add 2 subtasks/ }).click();
 
-  // Only the too-big subtask row offers Split; the root keeps Break down,
-  // the drawable-sized sibling gets neither.
+  // Both subtask rows offer Split (#209 dropped the too-big scoping — a
+  // subtask that already fits still decomposes, and every QUEUED row is a
+  // subtask, so the old gate read as "queued tasks can't be broken down").
+  // The root keeps Break down: ADR-16's two levels are untouched.
   await expect(taskRow(page, BIG_STEP).getByRole("button", { name: "Split" })).toBeVisible();
+  await expect(taskRow(page, SMALL_STEP).getByRole("button", { name: "Split" })).toBeVisible();
   await expect(
     taskRow(page, PARENT_TITLE).getByRole("button", { name: "Break down" }),
   ).toBeVisible();
-  await expect(taskRow(page, SMALL_STEP).getByRole("button", { name: "Split" })).not.toBeVisible();
+  await expect(taskRow(page, SMALL_STEP).getByRole("button", { name: "Break down" })).toHaveCount(
+    0,
+  );
 
   // The editor opens pre-filled with the deterministic even split (45 → 23+22)
   // and no "Do in order" toggle — parts join the parent's existing mode.
@@ -71,6 +76,27 @@ test("a too-big subtask offers Split with the even-split pre-fill; accepting rep
   await expect(page.getByText(BIG_STEP, { exact: true })).toHaveCount(0);
   await expect(taskRow(page, PART_ONE)).toBeVisible();
   await expect(taskRow(page, PART_TWO)).toBeVisible();
+  await expect(taskRow(page, SMALL_STEP)).toBeVisible();
+});
+
+test("a subtask already under the draw limit splits too, seeded with two parts (#209)", async ({
+  page,
+}) => {
+  // The arithmetic says one part for a 15-minute step under a 30-minute
+  // limit; minRows gates accept at two, so the pre-fill has to offer two or
+  // the editor opens in a state it will not accept.
+  await page.goto("/tasks");
+  await taskRow(page, SMALL_STEP).getByRole("button", { name: "Split" }).click();
+  const titles = subtaskEditor(page).getByPlaceholder("Small, concrete step…");
+  const minutes = subtaskEditor(page).getByPlaceholder("min");
+  await expect(titles.nth(0)).toHaveValue(`${SMALL_STEP} (part 1/2)`);
+  await expect(titles.nth(1)).toHaveValue(`${SMALL_STEP} (part 2/2)`);
+  // Splitting never rewrites the estimate: the parts still sum to 15.
+  await expect(minutes.nth(0)).toHaveValue("8");
+  await expect(minutes.nth(1)).toHaveValue("7");
+
+  // Cancel — the later specs in this serial file expect SMALL_STEP intact.
+  await page.getByRole("button", { name: "Cancel" }).click();
   await expect(taskRow(page, SMALL_STEP)).toBeVisible();
 });
 

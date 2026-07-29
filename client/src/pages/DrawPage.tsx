@@ -1,6 +1,13 @@
 import { useState } from "react";
 import { ApiError } from "../api/client";
-import { useCategories, useDeleteTask, useSettings, useTasks, useUpdateTask } from "../hooks/useTasks";
+import {
+  useCategories,
+  useCreateSubtasks,
+  useDeleteTask,
+  useSettings,
+  useTasks,
+  useUpdateTask,
+} from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
 import {
   useCurrentDraw,
@@ -10,11 +17,13 @@ import {
   useWarmupStatus,
   type DrawResponse,
 } from "../hooks/useDraw";
-import { useCardArt, useRegenerateCardArt } from "../hooks/useAi";
+import { useAiStatus, useCardArt, useRegenerateCardArt } from "../hooks/useAi";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
+import { AiBreakdownPanel } from "../components/AiSuggestionPanel";
 import { EmptyPoolReason } from "../components/EmptyPoolReason";
 import { FocusOverlay } from "../components/FocusOverlay";
 import { SnoozeMenu } from "../components/SnoozeMenu";
+import { SubtaskEditor } from "../components/SubtaskEditor";
 import { CategoryPill, TaskBadges } from "../components/TaskBadges";
 import { TaskForm } from "../components/TaskForm";
 import { TrophyDeck } from "../components/TrophyDeck";
@@ -23,7 +32,7 @@ import { celebrate } from "../lib/celebrate";
 import { classifyTask } from "../lib/drawable";
 import { heldCardResolved, resolveDrawnCard } from "../lib/drawnCard";
 import { resolveDrawView } from "../lib/focusView";
-import type { NewTask, Task } from "../api/types";
+import type { NewSubtask, NewTask, Task } from "../api/types";
 import "./DrawPage.css";
 
 type Phase = "idle" | "shuffling" | "revealed";
@@ -36,6 +45,8 @@ export function DrawPage() {
   const warmupStatus = useWarmupStatus();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const createSubtasks = useCreateSubtasks();
+  const aiStatus = useAiStatus();
   const startTimer = useStartTimer();
   const stopTimer = useStopTimer();
   const timer = useCurrentTimer();
@@ -67,6 +78,13 @@ export function DrawPage() {
   const [heldSince, setHeldSince] = useState<number | null>(null);
   const editedOutOfDeck = heldSince !== null;
   const [snoozing, setSnoozing] = useState(false);
+  // Breaking the drawn card down (#209). Realising a card is too coarse the
+  // moment you look at it is the likeliest time to want a breakdown, and
+  // before this the only route was to leave the page and hunt the task down
+  // in the tree. Session-local like `editing` — the panel is a transient
+  // surface, not a fact about the card.
+  const [breakingDown, setBreakingDown] = useState(false);
+  const [breakdownAi, setBreakdownAi] = useState(false);
   // Escape peeked out of the focus view (issue #56). Session-local on
   // purpose: the view itself is DERIVED from timer + current draw (ADR-29),
   // so a reload while the timer runs on the drawn card re-enters focus.
@@ -151,6 +169,8 @@ export function DrawPage() {
     setEdited(false);
     setHeldSince(null);
     setSnoozing(false);
+    setBreakingDown(false);
+    setBreakdownAi(false);
     setFocusExited(false);
     setBonusNote(null);
     try {
@@ -211,6 +231,32 @@ export function DrawPage() {
     }
     setEdited(true);
     setEditing(false);
+  }
+
+  /**
+   * Break the drawn card down (#209). A parent with children is a container,
+   * and a container is never drawable — so this pushes the card out of the
+   * deck exactly the way an effort edit does, and takes the same #88 path:
+   * the pointer is forfeit server-side, and `heldSince` keeps the card on
+   * screen with the resolve hint until it is completed, snoozed or deleted.
+   * A breakdown must not become a hidden re-roll any more than an edit may.
+   *
+   * The optimistic `hasOpenChildren` is what makes the hint appear on this
+   * render rather than on the confirming refetch: nonDrawable reads it
+   * through classifyTask, and the created rows are open by construction.
+   */
+  async function breakDownDrawn(subtasks: NewSubtask[], orderMode?: Task["subtaskOrderMode"]) {
+    if (!task) return;
+    try {
+      await createSubtasks.mutateAsync({ parentId: task.id, subtasks, orderMode });
+    } catch (e) {
+      return dismissIfGone(e);
+    }
+    setResult({ task: { ...task, hasOpenChildren: 1 } });
+    setHeldSince(Date.now());
+    setEdited(true);
+    setBreakingDown(false);
+    setBreakdownAi(false);
   }
 
   // Every on-page resolution ends here: the card leaves and #88's hold goes
@@ -516,9 +562,25 @@ export function DrawPage() {
           >
             💤 Not now
           </button>
+          {/* Too coarse to start? Decompose it here (#209) rather than
+              leaving the page to find the row. Open cards only: the accept
+              reopens a done parent and 400s on an archived one, and an edit
+              can have left the card in either state. */}
+          {task.status === "open" && (
+            <button
+              onClick={() => {
+                setSnoozing(false);
+                setBreakingDown((b) => !b);
+              }}
+              title="Split into small steps — this takes the card out of the deck"
+            >
+              🔨 Break down
+            </button>
+          )}
           <button
             onClick={() => {
               setSnoozing(false);
+              setBreakingDown(false);
               setEditing(true);
             }}
           >
@@ -543,6 +605,38 @@ export function DrawPage() {
           <SnoozeMenu
             onSnooze={(iso) => snoozeDrawn({ deferredUntil: iso })}
             onBlock={() => snoozeDrawn({ blocked: true })}
+          />
+        </div>
+      )}
+
+      {/* The same two editors TaskRow hosts (#209) — not a second breakdown
+          surface. The AI panel keeps its own estimate-cost gate, and is
+          hidden without a configured key exactly as on the Tasks page. */}
+      {phase === "revealed" && task && !editing && breakingDown && (
+        <div style={{ maxWidth: 680, margin: "8px auto 0", textAlign: "left" }}>
+          {aiStatus.data?.configured && !breakdownAi && (
+            <button
+              style={{ borderColor: "var(--accent)" }}
+              onClick={() => setBreakdownAi(true)}
+            >
+              ✨ Suggest with AI
+            </button>
+          )}
+          {breakdownAi && (
+            <AiBreakdownPanel
+              taskId={task.id}
+              goalId={task.goalId}
+              onClose={() => setBreakdownAi(false)}
+              onAccept={breakDownDrawn}
+            />
+          )}
+          <SubtaskEditor
+            maxEffort={maxEffort}
+            onCancel={() => {
+              setBreakingDown(false);
+              setBreakdownAi(false);
+            }}
+            onAccept={breakDownDrawn}
           />
         </div>
       )}

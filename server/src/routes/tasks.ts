@@ -250,8 +250,11 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
 // list (status != 'archived'), the remainingEffortMinutes rollup (open
 // children only), the sequential hold-back (open siblings only) and the
 // parent-completion 409 gate (open-children count). There is deliberately no
-// too-big gate on the original: the UI scopes the affordance to too-big rows,
-// but coupling the endpoint to a settings value buys nothing.
+// too-big gate on the original: coupling the endpoint to a settings value
+// buys nothing. Since #209 the UI agrees — the affordance is offered on any
+// open, estimated, non-recurring subtask, not only too-big ones, because
+// every QUEUED row is a subtask and the old scoping left them looking
+// undecomposable.
 tasksRouter.post("/:id/split", (req, res) => {
   const id = Number(req.params.id);
   const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as

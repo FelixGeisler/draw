@@ -85,9 +85,29 @@ export function TaskRow({
   const moveTargets =
     !done && offersMoveUnder(task) && rootTasks ? reparentTargets(task, rootTasks) : [];
   // Split-in-place (#108): where root rows show Break down, an open subtask
-  // row that classifies too-big offers Split — a subtask cannot be broken
-  // down further (ADR-16), so it is replaced by its parts as siblings.
-  const splittable = !done && task.parentId != null && classifyTask(task, maxEffort) === "too-big";
+  // offers Split — a subtask cannot be broken down further (ADR-16), so it is
+  // replaced by its parts as siblings.
+  //
+  // No longer scoped to too-big rows (#209). That gate had no counterpart in
+  // the domain (routes/tasks.ts says so outright) and left a whole class of
+  // task with no way to decompose at all: every QUEUED row is a subtask, so
+  // "I can't break this down" was the common reading. The remaining
+  // conditions all mirror something the endpoint actually rejects — archived
+  // and done (400 "only an open subtask can be split") and recurring (400,
+  // no part could carry the recurrence) — so the button no longer promises
+  // anything the accept will refuse.
+  //
+  // An estimate IS still required, and that one is a UI judgement: the editor
+  // pre-fills an even split, which divides a total. With no estimate there is
+  // nothing to divide, and the row is already in the triage strip asking for
+  // one. Too-big implies estimated, so this stays a superset of the old gate.
+  const splittable =
+    !done &&
+    task.status !== "archived" &&
+    task.parentId != null &&
+    task.recurEveryDays == null &&
+    task.effortMinutes != null;
+  const splitBecauseTooBig = splittable && classifyTask(task, maxEffort) === "too-big";
 
   // Drag-and-drop (#101): context only exists on the Tasks page. During a
   // drag every row derives its own verdict from the same classifyDrop the
@@ -286,7 +306,11 @@ export function TaskRow({
             breakdown offered as a second way to reopen would duplicate it
             with a stranger gesture. The row is dimmed to 0.5 throughout, so
             the button is subtle by construction. */}
-        {task.parentId == null && (!done || hasSubtasks) && (
+        {/* Archived roots reach this row through the show-done list
+            (status=all), and `done` only tests for "done" — so before #209
+            they offered a Break down whose accept 400s with
+            ARCHIVED_PARENT_ERROR. */}
+        {task.parentId == null && task.status !== "archived" && (!done || hasSubtasks) && (
           <button
             onClick={() => setBreakingDown((b) => !b)}
             title={
@@ -305,7 +329,11 @@ export function TaskRow({
               setMovingUnder(false);
               setSplitting((s) => !s);
             }}
-            title="Too big to draw — replace this step with smaller parts at the same level"
+            title={
+              splitBecauseTooBig
+                ? "Too big to draw — replace this step with smaller parts at the same level"
+                : "Replace this step with smaller parts at the same level"
+            }
           >
             Split
           </button>
@@ -475,7 +503,9 @@ export function TaskRow({
           <SubtaskEditor
             maxEffort={maxEffort}
             heading={`Split into parts — they replace this step at the same level (drawable ≤ ${maxEffort} min, bigger parts can be split again)`}
-            initialRows={evenSplitPlan(task.title, task.effortMinutes ?? 0, maxEffort)}
+            // minRows gates accept at 2, so the pre-fill must offer 2 (#209):
+            // a subtask under maxEffort splits into one part by arithmetic.
+            initialRows={evenSplitPlan(task.title, task.effortMinutes ?? 0, maxEffort, 2)}
             minRows={2}
             requireMinutes
             hideOrderToggle
