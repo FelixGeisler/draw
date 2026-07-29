@@ -49,6 +49,34 @@ db -[hidden]right-> files
 @enduml
 ....
 
+=== Wiring an MCP client
+
+The adapter is a stdio process that talks to the running instance over
+`/api` (ADR-19), so the app must be up and the client just needs to know how
+to launch it. *Claude Code* reads the committed
+https://github.com/FelixGeisler/draw/blob/main/.mcp.json[`.mcp.json`]
+automatically when the repo is opened — approve the `draw` server when
+prompted. *Claude Desktop* needs the server declared in
+`claude_desktop_config.json` with an absolute path to the checkout:
+
+[source,json]
+----
+{
+  "mcpServers": {
+    "draw": {
+      "command": "npm",
+      "args": ["run", "-s", "mcp", "-w", "server", "--prefix", "/path/to/draw"]
+    }
+  }
+}
+----
+
+On Windows the same entry goes through the shell —
+`"command": "cmd"` with `"/c"` prepended to the argument list — because `npm`
+is a `.cmd` shim there and cannot be spawned directly. Point `DRAW_API_URL` at
+a non-default origin, and set `DRAW_PASSWORD` in the client's env when the
+instance is gated (ADR-50); the committed `.mcp.json` never carries a secret.
+
 == 7.2 Production — `npm run build` + `npm start`
 
 `npm run build` bundles the client to `client/dist` (vite) and type-checks the
@@ -63,8 +91,9 @@ everything except `GET /api/health` and the login route requires a credential:
 browsers get a server-rendered login page and a 30-day signed session cookie,
 the MCP adapter sends the same secret as an `x-draw-password` header (it reads
 `DRAW_PASSWORD` from its own env — the committed `.mcp.json` carries no
-secret). Unset, the gate does not exist. Draw itself speaks plain HTTP; for
-TLS put a reverse proxy in front (ADR-50 threat model).
+secret). Unset, the gate does not exist. Draw itself speaks plain HTTP; TLS is
+terminated in front of it — see <<_7_4_tls_tailscale_serve_in_front_of_the_container_207,7.4>>
+(#207, xref:09_architecture_decisions.adoc[ADR-55]).
 
 With `BACKUP_INTERVAL_HOURS` set (#194,
 xref:09_architecture_decisions.adoc[ADR-52]), the production entry starts an
