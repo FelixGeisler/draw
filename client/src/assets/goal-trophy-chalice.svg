@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="112 136 78 156" width="78" height="156">
+  <!-- Trophy variant "chalice" (#204): a tall handle-less goblet — narrow and
+       vertical where the classic cup (goal-trophy.svg) is wide. Same palette,
+       same drop-shadow technique, same shelf floor at y=280, centred on x=150,
+       so it stands on the same surface at the same scale as its siblings. -->
+  <defs>
+    <linearGradient id="goal-trophy-chalice-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffefbe"/>
+      <stop offset=".45" stop-color="#f6bd50"/>
+      <stop offset="1" stop-color="#bf7d25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- drop shadow -->
+  <g transform="translate(4 7)" opacity=".45">
+    <path d="M145 230 L155 230 L156 262 L144 262 Z" fill="#0d1017"/>
+    <ellipse cx="150" cy="248" rx="11" ry="9" fill="#0d1017"/>
+    <path d="M132 262 L168 262 L172 271 L128 271 Z" fill="#0d1017"/>
+    <path d="M118 271 L182 271 L182 280 L118 280 Z" fill="#0d1017"/>
+    <path d="M120 150 C121 192 133 222 150 236 C167 222 179 192 180 150 Z" fill="#0d1017"/>
+    <ellipse cx="150" cy="150" rx="30" ry="8" fill="#0d1017"/>
+  </g>
+
+  <!-- stem, knop, stepped base -->
+  <path d="M145 230 L155 230 L156 262 L144 262 Z" fill="url(#goal-trophy-chalice-gold)"/>
+  <ellipse cx="150" cy="248" rx="11" ry="9" fill="url(#goal-trophy-chalice-gold)"/>
+  <path d="M132 262 L168 262 L172 271 L128 271 Z" fill="url(#goal-trophy-chalice-gold)"/>
+  <path d="M118 271 L182 271 L182 280 L118 280 Z" fill="url(#goal-trophy-chalice-gold)"/>
+
+  <!-- tulip bowl + collar -->
+  <path d="M120 150 C121 192 133 222 150 236 C167 222 179 192 180 150 Z" fill="url(#goal-trophy-chalice-gold)"/>
+  <ellipse cx="150" cy="234" rx="14" ry="5" fill="url(#goal-trophy-chalice-gold)"/>
+
+  <!-- rim -->
+  <ellipse cx="150" cy="150" rx="30" ry="8" fill="url(#goal-trophy-chalice-gold)"/>
+  <ellipse cx="150" cy="149" rx="22" ry="5" fill="#8a5616" opacity=".55"/>
+
+  <!-- highlight / shadow -->
+  <path d="M129 156 C130 190 137 214 146 228 C140 212 136 190 135 158 Z" fill="#fff6dc" opacity=".35"/>
+  <path d="M180 152 C179 190 170 216 158 230 C168 214 175 190 175 154 Z" fill="#000000" opacity=".14"/>
+  <path d="M132 271 L168 271" stroke="#fff6dc" stroke-opacity=".3" stroke-width="2"/>
+  <path d="M118 280 L182 280" stroke="#000000" stroke-opacity=".18" stroke-width="3"/>
+</svg>

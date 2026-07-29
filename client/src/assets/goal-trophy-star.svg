@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="94 138 116 156" width="116" height="156">
+  <!-- Trophy variant "star" (#204): a five-pointed star on a plinth. Each
+       point is split along its centre line into a light and a dark facet so
+       it reads as a cast solid rather than a flat sticker at 122px. Same
+       palette and shadow technique as goal-trophy.svg; base at y=280,
+       centred on x=150. Star geometry: centre (150,196), R=52, r=21. -->
+  <defs>
+    <linearGradient id="goal-trophy-star-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffefbe"/>
+      <stop offset=".45" stop-color="#f6bd50"/>
+      <stop offset="1" stop-color="#bf7d25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- drop shadow -->
+  <g transform="translate(4 7)" opacity=".45">
+    <path d="M141 206 L159 206 L157 262 L143 262 Z" fill="#0d1017"/>
+    <polygon points="150,144 162.3,179 199.5,179.9 170,202.5 180.6,238.1 150,217 119.4,238.1 130,202.5 100.5,179.9 137.7,179" fill="#0d1017"/>
+    <path d="M124 262 L176 262 L180 269 L120 269 Z" fill="#0d1017"/>
+    <path d="M116 269 L184 269 L184 280 L116 280 Z" fill="#0d1017"/>
+  </g>
+
+  <!-- neck + chamfered plinth -->
+  <path d="M141 206 L159 206 L157 262 L143 262 Z" fill="url(#goal-trophy-star-gold)"/>
+  <path d="M124 262 L176 262 L180 269 L120 269 Z" fill="url(#goal-trophy-star-gold)"/>
+  <path d="M116 269 L184 269 L184 280 L116 280 Z" fill="url(#goal-trophy-star-gold)"/>
+
+  <!-- the star -->
+  <polygon points="150,144 162.3,179 199.5,179.9 170,202.5 180.6,238.1 150,217 119.4,238.1 130,202.5 100.5,179.9 137.7,179" fill="url(#goal-trophy-star-gold)"/>
+  <!-- dark half-facets (centre → outer point → trailing inner notch) -->
+  <path d="M150 196 L150 144 L162.3 179 Z M150 196 L199.5 179.9 L170 202.5 Z M150 196 L180.6 238.1 L150 217 Z M150 196 L119.4 238.1 L130 202.5 Z M150 196 L100.5 179.9 L137.7 179 Z" fill="#8a5616" opacity=".4"/>
+  <!-- light half-facets (centre → outer point → leading inner notch) -->
+  <path d="M150 196 L150 144 L137.7 179 Z M150 196 L199.5 179.9 L162.3 179 Z M150 196 L180.6 238.1 L170 202.5 Z M150 196 L119.4 238.1 L150 217 Z M150 196 L100.5 179.9 L130 202.5 Z" fill="#fff6dc" opacity=".2"/>
+
+  <!-- base edges -->
+  <path d="M124 269 L176 269" stroke="#fff6dc" stroke-opacity=".3" stroke-width="2"/>
+  <path d="M116 280 L184 280" stroke="#000000" stroke-opacity=".18" stroke-width="3"/>
+</svg>

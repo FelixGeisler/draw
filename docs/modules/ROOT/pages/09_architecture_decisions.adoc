@@ -2912,3 +2912,63 @@ every page, not only from the Draw page where the chips live.
 *Out of scope:* named or multiple simultaneous contexts, multi-category
 scopes, scoping by goal (the Draw page's goal select stays per-session), and
 any server-side representation of the mode.
+
+== ADR-58: Hall of Fame trophy variety — six designs derived from the goal id, never stored, plain modulo over a hash
+
+*Context:* Every achieved goal hung the same gold cup (#181/ADR-46), so a
+shelf of five wins read as one win, five times. #204 asks for design variants
+"chosen deterministically per goal". The Hall of Fame has been redesigned
+twice already (#168's cabinet, #181's spotlight), so the variants were chosen
+from rendered candidates on a reproduction of the real shelf rather than
+built speculatively; all five candidates were kept, joining the cup for a
+six-design rotation: cup, chalice, star, laurel, obelisk, shield.
+
+*Decision:* The design is *derived at render time from the goal's id* —
+`trophyVariant(goal.id)` in `client/src/lib/trophyVariant.ts`, a plain
+`id % 6` over an ordered list. No column, no setting, no API surface, no
+randomness. Each variant is a committed static SVG in the classic cup's exact
+technique: the same three-stop gold gradient, the same offset drop-shadow
+group, the same shelf floor at `y=280` centred on `x=150`, so all six stand
+on one surface at one scale under the existing spotlight CSS.
+
+*Rationale:*
+
+* *Derived, never stored — the ADR-2 pattern, again.* A stored `trophy_kind`
+column would be one more thing to migrate, back up, and expose over the API,
+buying nothing: the id is already a permanent fact about the goal, so the
+derivation is stable forever and identical on every device. This is the same
+shape as `trophyRarity` (#62), which the Trophy deck derives from
+`(wasDrawn, impact)` — and like it, the pick costs one modulo per render.
+* *Plain modulo over a hash, and that is a considered trade.* Goal ids are
+assigned sequentially, so goals achieved near each other in time sit near
+each other on the shelf — and `id % 6` guarantees any two ids closer than one
+full rotation land on different designs. Two identical trophies can only
+stand together once six goals apart in creation order. A hash would look
+"more random" while silently allowing adjacent duplicates, which is the one
+outcome that makes the feature pointless. The unit tests pin the guarantee,
+not the arithmetic.
+* *The list order is load-bearing, so it is documented as append-only.* The
+mapping has no stored side, which means reordering or inserting mid-list
+reshuffles every existing shelf. New designs go at the end; `cup` stays at
+index 0, matching the empty-state ghost — which deliberately keeps the
+classic cup, since it advertises the archetype, not a variant.
+* *Existing shelves change appearance once, and that is accepted.* Goals
+achieved before #204 all showed the cup; after it, they show their derived
+design. The alternative — grandfathering old goals to the cup — would need
+exactly the stored flag this decision refuses, to protect an aesthetic that
+was never a promise. The E2E instead pins what IS promised: the pick never
+changes across reloads (a trophy that re-rolled on refresh would make the
+shelf feel like a slot machine).
+* *The art is constrained so the shelf stays one composition.* Hard rules for
+every variant, checked in review rather than code: the identical gold
+gradient (unique ids per file, since inline SVGs share a DOM id namespace
+when inlined elsewhere), accents only from the cup's own palette, the same
+`translate(4 7)` shadow technique, silhouette-first detailing (fine
+engraving vanishes at the rendered 122px), and the shared floor line — the
+spotlight beam, pool and contact shadow in GoalShelf.css are positioned
+around that floor and were not touched. ADR-46's name-only-at-rest reveal is
+untouched too; only the `<img>` src varies.
+
+*Out of scope:* user-selectable trophies, rarity-graded designs (the Hall of
+Fame celebrates outcomes, not the algorithm's opinion of them), and variant
+art for missed goals — a defeat stays a quiet row, not a different statue.
