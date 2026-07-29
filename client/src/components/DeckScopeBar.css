@@ -1,0 +1,41 @@
+/* Work-mode strip (#214). Sits under the gamification header, in the same
+   full-bleed strip idiom as .timer-bar — but muted rather than accent-tinted:
+   a running timer is a thing happening now, a deck scope is a standing setting
+   and should not compete with it when both are on screen. */
+.deck-scope-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 24px;
+  font-size: 13px;
+  color: var(--text-dim);
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.deck-scope-bar strong {
+  color: var(--text);
+}
+
+/* The clear button keeps its intrinsic width and is pushed to the far end, so
+   its position is stable no matter how long the category name is. */
+.deck-scope-bar button {
+  margin-left: auto;
+  padding: 2px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* Phones (#193, ADR-54): the one breakpoint the client has. Tighter gutters to
+   match the rest of the phone layout, and a 44px touch target on the button —
+   the ✕ is the only way out of a scope from most pages. */
+@media (max-width: 640px) {
+  .deck-scope-bar {
+    padding: 8px 12px;
+  }
+
+  .deck-scope-bar button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
