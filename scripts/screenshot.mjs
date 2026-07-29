@@ -24,16 +24,27 @@ const outDir = path.join(repoRoot, ".github", "assets");
 const PORT = 3199;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-// One coherent board: a goal worth having, a few real-sounding steps, and one
-// small drawable card that will be the hero shot. Effort/impact are chosen so
-// the drawn card shows a full star row and a short estimate.
-const GOAL = { title: "Ship the woodworking course", outcome: "8 lessons published and paid for" };
+// One coherent board. DELIBERATELY generic workplace examples (#218): these
+// images are the project's shop window, and seed data that reads like
+// somebody's personal life does not belong in it. Effort/impact are chosen so
+// the drawn card shows a star row and a short estimate.
+// Target date ~6 weeks out from whenever the script runs: a fixed date would
+// eventually drift into the past and dress the shot in red overdue chips.
+const targetDate = new Date(Date.now() + 42 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const GOAL = {
+  title: "Launch the next release",
+  outcome: "Shipped to every customer by the target date",
+  targetDate,
+};
 const TASKS = [
-  { title: "Storyboard lesson 3", effortMinutes: 25, impact: 5 },
-  { title: "Record the dovetail demo", effortMinutes: 30, impact: 4 },
-  { title: "Edit the intro titles", effortMinutes: 20, impact: 3 },
-  { title: "Sand and oil the sample box", effortMinutes: 15, impact: 2 },
+  { title: "Rehearse the launch demo", effortMinutes: 30, impact: 5 },
+  { title: "Draft the release notes", effortMinutes: 25, impact: 4 },
+  { title: "Review the pricing page", effortMinutes: 20, impact: 3 },
+  { title: "Update the onboarding email", effortMinutes: 15, impact: 2 },
 ];
+// Two resolved goals so the Goals shot shows the Hall of Fame doing its job —
+// consecutive ids land on different trophy designs by construction (ADR-58).
+const ACHIEVED = ["Pass the security audit", "Migrate the build to the new CI"];
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -101,6 +112,15 @@ try {
   const categoryId = categories[0].id;
   const goal = await post("/api/goals", GOAL);
   for (const t of TASKS) await post("/api/tasks", { ...t, categoryId, goalId: goal.id });
+  for (const title of ACHIEVED) {
+    const g = await post("/api/goals", { title });
+    const res = await fetch(`${BASE}/api/goals/${g.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "achieved" }),
+    });
+    if (!res.ok) throw new Error(`achieve goal → ${res.status}`);
+  }
 
   const browser = await chromium.launch();
   const page = await browser.newPage({
@@ -126,15 +146,22 @@ try {
   await wait(600);
   await page.screenshot({ path: path.join(outDir, "draw.png") });
 
-  // Deliberately only the Draw page. A Tasks-page shot was tried and dropped:
-  // the row's title column has no flex-grow, so it collapses to its minimum
-  // and every title wraps to four or five lines regardless of viewport width
-  // (reproduced at 1280 and 1600). That is a layout defect to fix on its own
-  // terms, not something to hide behind a hand-picked window size — add the
-  // shot back here once the rows read cleanly.
+  // The Tasks page — back in the set now that #213 made the rows read
+  // cleanly (a long goal chip used to crush every title into a tower).
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.goto(`${BASE}/tasks`, { waitUntil: "networkidle" });
+  await wait(400);
+  await page.screenshot({ path: path.join(outDir, "tasks.png") });
+
+  // Goals: the active goal above, the Hall of Fame with its trophy variants
+  // (ADR-58) below — two resolved goals guarantee two different designs.
+  await page.setViewportSize({ width: 1280, height: 960 });
+  await page.goto(`${BASE}/goals`, { waitUntil: "networkidle" });
+  await wait(400);
+  await page.screenshot({ path: path.join(outDir, "goals.png") });
 
   await browser.close();
-  console.log(`wrote ${path.join(outDir, "draw.png")}`);
+  console.log(`wrote draw.png, tasks.png, goals.png to ${outDir}`);
 } finally {
   server?.kill();
   await wait(400);

@@ -4,93 +4,98 @@
 
 # Draw
 
-**Stop choosing. Draw one small task and just start.**
+**A task planner that picks your next task for you.**
 
-A self-hosted task planner for the days when you know exactly what needs doing
-and open a to-do list instead.
+Every task is small and estimated. When you're ready to work, Draw deals one
+as a card — a weighted random pick over everything you could start right now.
 
-<img src=".github/assets/draw.png" alt="A drawn card: a 30-minute task with its category and impact rating, and the actions to start, finish or put it back" width="820">
+<img src=".github/assets/draw.png" alt="A drawn card: a 25-minute task with its category, effort estimate and impact rating, plus the actions to start, finish, break down or put it back" width="820">
 
 </div>
 
-## The idea
-
-Picking the next task *is* the procrastination. So Draw takes the pick away
-from you.
-
-Nothing enters the deck until it is small — an estimate, and under 30 minutes
-by default. Then you hit **Draw** and one card comes up. Not a list, not a
-prioritised backlog, not tomorrow's plan. One card, face up, and the only ways
-out are to do it, put it back, or drop it. **There is no "draw again"** — a
-re-roll would just be choosing with extra steps.
-
-The pick is weighted, so it is random without being stupid:
+## How the pick works
 
 ```
 weight = impact² / effort × urgency × staleness
 ```
 
-A 5★ task is ~25× likelier than a 1★ at the same size, quick wins float up,
-anything with a deadline gets loud in its final week, and neglected chores
-climb on their own. Cards you just drew are damped for an hour, so consecutive
-draws feel different.
+- **impact²** — tasks linked to a goal carry a 1–5★ impact rating; a 5★ task is
+  ~25× likelier than a 1★ of the same size
+- **÷ effort** — smaller tasks surface more often
+- **urgency** — ramps up through the last week before a due date, peaks overdue
+- **staleness** — the longer a task sits untouched, the louder it gets
 
-## What else is in the box
+One card at a time: a drawn card is resolved — done, snoozed, or deleted —
+never re-rolled. Filters for category and goal scope the next draw, and the
+category scope is sticky per device.
 
-- **Goals with a measured outcome.** Not "get better at ML" — *"pass with 80%"*.
-  Tasks link to a goal and carry a 1–5★ impact rating, and a burn-down chip
-  tells you when a goal has quietly become infeasible.
-- **Break anything down.** Split a task into startable steps by hand, or let
-  Claude read the lecture PDFs and past exams you attached and propose the
-  steps that actually move the outcome.
-- **XP, levels, streaks, achievements.** Finishing a card you drew pays more
-  than one you picked. Streaks respect your rest days, and bank a freeze for
-  when life happens.
-- **A trophy deck and a history calendar**, because finishing things should
-  leave a mark.
-- **Time tracking and a focus view** — one card, one clock, and nothing
-  auto-fails when the estimate runs out.
-- **Talk to it from Claude.** Draw ships an MCP server, so *"what should I do
-  right now?"* and *"import this syllabus as tasks"* work from a conversation.
+## The board behind the deck
 
-## Try it
+<div align="center">
+<img src=".github/assets/tasks.png" alt="The Tasks page: quick capture on top, tasks grouped by category with effort, goal and impact badges and per-row actions" width="820">
+</div>
+
+- **Capture fast** — title, Enter, next thought; estimate and categorize later
+- **Keep tasks small** — anything over the draw limit (30 min by default) gets
+  broken into steps, by hand or by Claude; step order can be enforced
+- **Scheduling** — due dates, recurring tasks, and per-weekday availability
+  windows; snoozed and blocked tasks leave the deck and come back on their own
+- **Time tracking** — one running timer, a focus view with a countdown sized to
+  the estimate, and an estimates-vs-reality report on the Stats page
+
+## Goals with a measured outcome
+
+<div align="center">
+<img src=".github/assets/goals.png" alt="The Goals page: an active goal with target date and required daily pace, and the Hall of Fame showing trophies for completed goals" width="820">
+</div>
+
+A goal is a title plus *how success is measured*. Tasks link to it, carry the
+impact rating the draw weights by, and a burn-down chip computes the daily pace
+the remaining work actually requires. Finished goals earn a trophy in the Hall
+of Fame — one of six designs, assigned per goal. Completions also pay XP with
+levels, day streaks with rest days and streak freezes, and collectible
+achievement cards.
+
+## Run it
 
 ```bash
 npm install && npm run dev
 ```
 
-Open http://localhost:5173. Data lives in `server/data/app.db` (SQLite).
+Open http://localhost:5173. Data is a single SQLite file (`server/data/app.db`).
 Requires Node.js 22+.
 
-## Run it for real
-
-Self-host on a Raspberry Pi or any home server — one container, one volume:
+## Self-host it
 
 ```bash
 docker compose up -d
 ```
 
-Set `DRAW_PASSWORD` before putting it on a network, and put
-[Tailscale](https://tailscale.com) in front for HTTPS — which is also what
-makes it installable as a phone app. Both are a few lines in
-[`docker-compose.yml`](docker-compose.yml); the
+One container, one volume, any Docker host — images are published multi-arch
+(amd64/arm64) to `ghcr.io/felixgeisler/draw`. Set `DRAW_PASSWORD` before
+putting it on a network; put [Tailscale](https://tailscale.com) in front for
+HTTPS, which also makes it installable as a phone app (PWA). The
 **[deployment guide](https://felixgeisler.github.io/draw/docs/07_deployment_view.html)**
-has the details, along with backups, upgrades, prebuilt images and the MCP
-client setup.
+covers all of it: TLS, backups, upgrades, and MCP client setup.
 
-AI features stay off until you add an `ANTHROPIC_API_KEY` — and every call
-shows a cost estimate and waits for your confirmation. Everything else works
-without one.
+AI features stay off until an `ANTHROPIC_API_KEY` is configured — every call
+shows a cost estimate first. Everything else works without one.
+
+## Use it from Claude
+
+Draw ships an [MCP](https://modelcontextprotocol.io/) server over the same API
+the UI uses: *"what should I do right now?"*, *"import this syllabus as
+tasks"*, and *"break this down"* work from a conversation in Claude Code or
+Claude Desktop.
 
 ## Under the hood
 
 React · TypeScript · Vite · TanStack Query · Express 5 · SQLite
-(better-sqlite3) · the Claude API for planning · MCP over stdio.
+(better-sqlite3) · Claude API for planning · MCP over stdio.
 
-Derived state over stored state: drawability, XP, levels and streaks are
-computed from the facts, never kept as counters.
+Derived state over stored state: drawability, XP, levels, streaks and trophy
+assignments are computed from the facts, never kept as counters.
 
 **[Architecture documentation](https://felixgeisler.github.io/draw/)** —
-[arc42](https://arc42.org/), a stack of decision records, and why each one went
-the way it did. Contributing conventions are in
-[CONTRIBUTING.md](CONTRIBUTING.md).
+arc42, with a decision record for every non-obvious choice. Contributing
+conventions are in [CONTRIBUTING.md](CONTRIBUTING.md).
