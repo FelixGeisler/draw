@@ -2697,3 +2697,76 @@ to `/API/tasks`, which answers JSON and must not become the shell.
 
 *Out of scope:* offline-first data sync, push notifications, and a
 native/Capacitor app — all explicitly deferred past 1.0.0.
+
+== ADR-56: Decomposition is offered wherever a task is met — split on any estimated subtask, break down on the drawn card, and the breakdown resolves the card
+
+NOTE: Numbered after ADR-55 (#207), which is in flight on its own branch.
+
+*Context:* Breaking work down is the app's central premise — nothing enters
+the deck until it is small — yet the affordance reached one surface. `TaskRow`
+renders only from the Tasks page, and within it Break down was scoped to roots
+while Split (#108, the subtask-level equivalent under ADR-16's two-level cap)
+was scoped to rows classifying *too-big*. Two dead ends followed. An open
+subtask already under `max_draw_effort` offered nothing at all — and since
+every *queued* row is a subtask by definition, this read as "queued tasks
+cannot be broken down", which is not a rule the product has. And the drawn
+card, the one moment you are actually looking at a task and judging it too
+coarse, offered Start / Done / Not now / Edit / Delete and no way to
+decompose.
+
+*Decision:* Offer decomposition wherever the task is met. Split is gated on
+open, non-archived, `parentId != null`, non-recurring, and *estimated* —
+dropping the too-big test. The drawn card gains Break down, reusing
+`SubtaskEditor` and `AiBreakdownPanel` rather than growing a second editor.
+ADR-16 is untouched: no third level appears anywhere.
+
+*Rationale:*
+
+* *The too-big gate had no counterpart in the domain.* The split endpoint
+never had one — `routes/tasks.ts` says outright that coupling it to a settings
+value buys nothing — so the UI was inventing a restriction the server did not
+believe in, and inventing it exactly where it hurt most. The conditions that
+remain each mirror something the endpoint genuinely rejects (done/archived,
+recurring), so the button no longer promises what the accept will refuse. Two
+pre-existing instances of that mismatch are closed at the same time: an
+archived root reached through the show-done list offered a Break down that
+400s with `ARCHIVED_PARENT_ERROR`, and a too-big *recurring* subtask offered a
+Split the endpoint rejects.
+* *Requiring an estimate is a UI judgement, and the only one here.* The split
+editor pre-fills a deterministic even split, which divides a *total*; with no
+estimate there is nothing to divide and the pre-fill collapses to an empty
+plan. An unestimated row is already in the triage strip asking for exactly the
+thing that would unblock it, one inline action away. Because too-big implies
+estimated, the new gate is a strict superset of the old one — nothing that
+offered Split before stops offering it.
+* *`minParts` exists because the arithmetic and the accept rule disagreed.*
+`evenSplitPlan` yields `ceil(minutes / maxEffort)` parts, which is one for a
+subtask under the limit, while `minRows` gates accept at two — so the editor
+would have opened pre-filled with a single "(part 1/1)" row it would then
+refuse to accept. The floor is a parameter defaulting to `1` rather than a
+new behaviour, so the server mirror (`splitPlan` in `aiPostprocess.ts`) stays
+exact for every other caller. The total-preserving invariant is unaffected: a
+floor changes how many parts, never their sum.
+* *Breaking the drawn card down RESOLVES it — this is the load-bearing part.*
+A parent with children is a container and containers are never drawable, so
+the breakdown pushes the card out of the deck. It therefore takes the same
+#88 path an out-of-deck edit takes: the pointer is forfeit server-side and the
+session holds the card on screen with the resolve hint until it is completed,
+snoozed or deleted. Dealing a replacement would have made "break this down"
+the re-roll button ADR-13/#88 spent a whole decision removing — fishing for a
+comfortable card, one indirection away. The optimistic `hasOpenChildren` on
+the session's copy is what surfaces the hint on the same render rather than on
+the confirming refetch; the created rows are open by construction, so it is
+not a guess.
+* *The same two editors, not a third.* The Draw page hosts `SubtaskEditor` and
+`AiBreakdownPanel` directly, keeping the AI cost gate, the degraded-mode
+hiding and the accept semantics identical to the Tasks page. Re-breakdown
+(#67) works there too, so the affordance remains after the card becomes a
+container and reads as "add more steps" — the same meaning it carries on a
+`TaskRow` parent that already has subtasks.
+* *A done leaf still gets nothing, deliberately.* The checkbox is the reopen;
+a breakdown offered as a second route to the same state would duplicate it
+with a stranger gesture. Unchanged from #122/ADR-32.
+
+*Out of scope:* three-level nesting (ADR-16 stands), decomposition from the
+Goals page task section, and any change to the split endpoint's validation.

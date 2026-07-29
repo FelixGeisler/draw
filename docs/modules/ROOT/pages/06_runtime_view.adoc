@@ -267,3 +267,22 @@ the in-face actions are the DrawPage's own (✓ Done = the completion PATCH,
 ■ Stop = the timer stop) — no duplicated controls, no new endpoints, and
 focus sessions are ordinary `time_entries` in the Stats page's
 estimates-vs-tracked block.
+
+== 6.6 Breaking the drawn card down (#209)
+
+"🔨 Break down" on the revealed card opens the same `SubtaskEditor` /
+`AiBreakdownPanel` pair the Tasks page hosts, and accepting posts the ordinary
+`POST /api/tasks/:id/subtasks` — no new endpoint, no second editor. What is
+specific to this surface is the aftermath: the parent now has children, so it
+is a *container* and containers are never drawable (6.1). The card has left
+the deck, and the server clears the current-draw pointer lazily on the next
+`GET /api/draw/current` exactly as it does after an edit that pushes the card
+out.
+
+It therefore takes the #88 hold rather than vanishing or being replaced: the
+session stamps `heldSince`, the card stands on screen carrying the
+out-of-the-deck hint, and it leaves only by being completed, snoozed or
+deleted. No replacement card is dealt — a breakdown that redealt would be the
+re-roll ADR-13 removed, reached by another name (ADR-56). A reload at this
+point finds the pointer already gone and shows the idle deck, since the hold
+is session-local by construction.
