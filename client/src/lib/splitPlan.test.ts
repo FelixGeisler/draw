@@ -33,4 +33,33 @@ describe("evenSplitPlan", () => {
     expect(parts.reduce((sum, p) => sum + p.effortMinutes, 0)).toBe(600);
     expect(parts.every((p) => p.effortMinutes === 60)).toBe(true);
   });
+
+  // #209: Split is no longer scoped to too-big rows, so the pre-fill now has
+  // to cope with an estimate the size arithmetic would satisfy in one part.
+  describe("minParts", () => {
+    it("floors the count so an under-the-limit estimate still seeds a real split", () => {
+      const parts = evenSplitPlan("Upload the assets", 15, 30, 2);
+      expect(parts).toEqual([
+        { title: "Upload the assets (part 1/2)", effortMinutes: 8 },
+        { title: "Upload the assets (part 2/2)", effortMinutes: 7 },
+      ]);
+      // The invariant survives the floor: splitting never rewrites the total.
+      expect(parts.reduce((sum, p) => sum + p.effortMinutes, 0)).toBe(15);
+    });
+
+    it("never LOWERS a count the size arithmetic already justifies", () => {
+      // 90 over a 30 limit needs three parts; asking for two cannot shrink it.
+      expect(evenSplitPlan("Long", 90, 30, 2)).toHaveLength(3);
+    });
+
+    it("still yields to MAX_SPLIT_PARTS", () => {
+      expect(evenSplitPlan("Monster", 600, 30, 20)).toHaveLength(MAX_SPLIT_PARTS);
+    });
+
+    it("defaults to 1, leaving the server mirror's arithmetic untouched", () => {
+      expect(evenSplitPlan("Small", 15, 30)).toEqual([
+        { title: "Small (part 1/1)", effortMinutes: 15 },
+      ]);
+    });
+  });
 });
