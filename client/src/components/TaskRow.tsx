@@ -235,7 +235,14 @@ export function TaskRow({
             {expanded ? "▾" : "▸"}
           </button>
         )}
-        <span style={{ textDecoration: done ? "line-through" : "none", flex: 1 }}>
+        {/* minWidth (#213): the title always had the row's slack (flex: 1),
+            but flex-shrink let a badge-heavy row crush it to min-content —
+            one word per line. The floor flips who yields: past it the badges
+            wrap onto a second line inside their own span instead. ~11em, not
+            px, so it tracks the row's type size. */}
+        <span
+          style={{ textDecoration: done ? "line-through" : "none", flex: 1, minWidth: "11em" }}
+        >
           {category && depth === 0 && (
             <span className="dot" style={{ background: category.color, marginRight: 8 }} />
           )}
