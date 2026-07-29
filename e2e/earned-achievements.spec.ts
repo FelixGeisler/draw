@@ -66,24 +66,24 @@ test("unlocking deals the achievement as a card in the toast", async ({ page }) 
   await expect(page.locator(".draw-face.back h2")).toHaveText(TASK);
   await page.getByRole("button", { name: "✓ Done" }).click();
 
-  // The heading stays real text — the card face is paint, and the toast has to
-  // mean something to a screen reader (core-journey.spec.ts pins it too).
-  await expect(page.getByText("🏆 Achievement unlocked").first()).toBeVisible();
+  // early_bird is RARE, so the unlock takes CENTER STAGE (#224): scrim, the
+  // card dealt large, the flip — not the corner toast (commons keep that).
+  const stage = page.locator(".ach-stage");
+  await expect(stage).toBeVisible();
+  await expect(stage.getByText("★ Achievement unlocked ★")).toBeVisible();
 
-  // The unlock presents the actual card, not a text line. Scoped to THIS
-  // toast: a run where the suite's earlier specs have not already claimed
-  // first_draw / first_completion stacks several toasts at once.
-  const toast = page.locator(".ach-toast", {
-    has: page.locator('.ach-card[data-key="early_bird"]'),
-  });
-  const toastCard = toast.locator(".ach-card");
-  await expect(toastCard).toBeVisible();
-  await expect(toastCard).toHaveAttribute("data-rarity", "rare");
-  await expect(toastCard.locator(".ach-art")).toBeVisible();
-  await expect(toastCard.locator(".ach-name")).toHaveText("Early bird");
+  const stageCard = stage.locator('.ach-card[data-key="early_bird"]');
+  await expect(stageCard).toBeVisible();
+  await expect(stageCard).toHaveAttribute("data-rarity", "rare");
+  await expect(stageCard.locator(".ach-art")).toBeVisible();
+  await expect(stageCard.locator(".ach-name")).toHaveText("Early bird");
 
   // The card is dealt face-down and flipped: it lands face-up.
-  await expect(toast.locator(".ach-toast-flip")).toHaveClass(/revealed/);
+  await expect(stage.locator(".ach-stage-flip")).toHaveClass(/revealed/);
+
+  // Escape dismisses the stage instantly — the celebration is never a trap.
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".ach-stage")).toHaveCount(0);
 
   // Hand the shared DB back as we found it. Reopening deletes the latest
   // completion (the documented undo invariant), which keeps today's trophy
@@ -188,17 +188,50 @@ test("reduced motion keeps the sheen painted but still", async ({ page }) => {
   expect(still.animation).toBe("none");
   expect(still.image).toContain("linear-gradient");
 
-  // The toast's flip is motion too: no transition under reduced motion, so an
-  // unlock is a static appear rather than a spin.
-  const flipTransition = await page.evaluate(() => {
-    const d = document.createElement("div");
-    d.className = "ach-toast-flip";
-    document.body.append(d);
-    const t = getComputedStyle(d).transitionDuration;
-    d.remove();
-    return t;
+  // Both celebration flips are motion too: no transition under reduced
+  // motion, so an unlock is a static appear rather than a spin — on the
+  // corner toast AND the center stage (#224).
+  const flipTransitions = await page.evaluate(() => {
+    return ["ach-toast-flip", "ach-stage-flip"].map((cls) => {
+      const d = document.createElement("div");
+      d.className = cls;
+      document.body.append(d);
+      const t = getComputedStyle(d).transitionDuration;
+      d.remove();
+      return t;
+    });
   });
-  expect(flipTransition).toBe("0s");
+  expect(flipTransitions).toEqual(["0s", "0s"]);
+});
+
+test("unlocks play one at a time — common toast first, then the rare takes the stage (#224)", async ({
+  page,
+}) => {
+  await page.goto("/stats");
+
+  // Synthetic event, the achievement-customize.spec.ts pattern: both keys are
+  // long unlocked in this shared run, so the payload is cached and the
+  // celebration surfaces can be judged without new unlocks.
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new CustomEvent("achievements-unlocked", { detail: ["first_draw", "early_bird"] }),
+    );
+  });
+
+  // Head of the queue: first_draw is COMMON → the corner toast, no scrim.
+  await expect(page.locator(".ach-toast")).toBeVisible();
+  await expect(page.getByText("🏆 Achievement unlocked")).toBeVisible();
+  await expect(page.locator(".ach-stage")).toHaveCount(0);
+
+  // The toast self-dismisses (4s) and the queue advances: early_bird is RARE
+  // → center stage. Generous timeout spans the handoff.
+  await expect(page.locator(".ach-stage")).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator(".ach-toast")).toHaveCount(0);
+  await expect(page.locator('.ach-stage .ach-card[data-key="early_bird"]')).toBeVisible();
+
+  // Click-anywhere is the second manual dismissal (Escape is pinned above).
+  await page.locator(".ach-stage").click({ position: { x: 10, y: 10 } });
+  await expect(page.locator(".ach-stage")).toHaveCount(0);
 });
 
 // --- Chains + claim-for-XP (#156) ------------------------------------------
