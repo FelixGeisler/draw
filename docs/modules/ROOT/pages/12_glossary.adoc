@@ -34,6 +34,9 @@
 |*Queued / held back*
 |An open subtask behind an earlier open sibling (by `sort_order`) under a sequential parent — out of the deck until the steps in front close or this one is dragged ahead of them; derived at query time, shown as the ⏳ chip
 
+|*Deck scope (work mode)*
+|One category the whole app is narrowed to (#214, xref:09_architecture_decisions.adoc[ADR-57]): the Draw page's chips, made sticky. Stored PER DEVICE in `localStorage`, never in `settings` — a phone and a desktop against one instance can sit in different modes. Narrows the deck and the Tasks page; never Stats, streaks or XP, and never retracts a face-up card. An id whose category was deleted resolves back to the whole deck
+
 |*Draw*
 |Weighted random selection of one drawable task, presented as a card — deliberately the ONLY way tasks surface on the Draw page: there is no multi-card day preview (the daily hand of ADR-34 was removed by ADR-39)
 

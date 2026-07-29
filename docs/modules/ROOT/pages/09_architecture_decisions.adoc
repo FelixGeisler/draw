@@ -2845,3 +2845,70 @@ with a stranger gesture. Unchanged from #122/ADR-32.
 
 *Out of scope:* three-level nesting (ADR-16 stands), decomposition from the
 Goals page task section, and any change to the split endpoint's validation.
+
+== ADR-57: Work mode is a sticky per-device deck scope — the existing category chips, remembered in localStorage, applied app-wide
+
+*Context:* There was no way to say "I'm at work, show me work". The Draw page's
+category chips were bare page state: they reset on reload, scoped only the next
+draw, and the Tasks page never saw them. So household chores sat in the deck
+during the work day, and the only remedy was re-picking a chip on every visit.
+The vision (§1) points at "multiple decks for different contexts" but lists it
+as undesigned.
+
+*Decision:* Make the existing selection *sticky* and apply it across the app.
+One category, stored in `localStorage` under `draw.deckScope`, resolved through
+a pure module (`lib/deckScope.ts`) and shared by a small React context. The
+Draw page's chips read and write it; the Tasks page narrows its tree, triage
+strip, snoozed section and reparent targets to it, and quick-capture defaults
+into it. No server change — `POST /api/draw` has always taken a category
+filter.
+
+*Rationale:*
+
+* *A persistence layer on an existing control, not a new concept.* The
+alternatives were a `contexts` table (named decks over sets of categories) and
+an `is_work` flag on categories. Both invent a second grouping next to the one
+that already exists and already works; the chips' only defect was amnesia.
+Doing the small version keeps the door open — if one deck per category proves
+too coarse, named contexts can be built on top — while a `contexts` table
+built speculatively would have to be migrated away from if it were wrong.
+* *Per device, and this is the interesting call.* The obvious home is the
+`settings` table, next to `max_draw_effort`. That is wrong here: once the app
+runs on a Pi with a phone and a desktop pointed at it, a server-side "current
+mode" means switching on the phone silently switches the desktop mid-task. Per
+device is both the behaviour people actually want and the one that does not
+deepen the single-instance assumptions of *R6* — it is the first per-device
+preference in the app, and it moves R6 slightly the right way rather than the
+wrong one. The costs are accepted and
+real: the scope is invisible to the MCP adapter (correct — an agent asking
+"what should I do now?" should see the whole deck), it does not survive
+clearing site data, and it is not in the backup.
+* *A deleted category must not strand the app.* The stored id is resolved
+against the live category list on every render, and an id that no longer
+matches resolves to the whole deck. Without that, deleting a category from
+Settings would leave an empty deck and an empty task list with no visible
+cause — and no chip left on screen to click off. The mirror-image trap is
+pruning too eagerly: an empty category list means "not fetched yet" on the
+first render, not "no categories exist", so pruning against it would drop a
+valid scope on every reload. Both directions are unit-tested.
+* *The scope never retracts a face-up card.* Switching mode while a card is
+revealed leaves it exactly where it is; the scope applies to the next draw.
+The commitment invariant (§8.2) outranks the filter, and a card that could be
+made to disappear by touching a chip would be the re-roll ADR-13 removed. This
+costs nothing to implement — the standing card derives from the current-draw
+pointer, which knows nothing about filters — but it had to be decided and
+pinned, because "filter hides non-matching things" is the obvious reading.
+* *Stats, streaks and XP stay whole-life.* Scoping them would let someone hide
+a broken streak by switching modes, which makes the number mean nothing. The
+scope is about what you are asked to do next, never about what you did.
+* *An empty scoped page names its cause.* "Nothing here — capture something
+above" in front of a full task list is the one way this feature can actively
+mislead, and the scope survives reloads, so there is no natural moment where
+the user is reminded they set it. Hence both the always-visible strip (which
+renders nothing at all when unscoped, so the default app gains no chrome) and
+a distinct empty-state message. The strip's ✕ is deliberately reachable from
+every page, not only from the Draw page where the chips live.
+
+*Out of scope:* named or multiple simultaneous contexts, multi-category
+scopes, scoping by goal (the Draw page's goal select stays per-session), and
+any server-side representation of the mode.
