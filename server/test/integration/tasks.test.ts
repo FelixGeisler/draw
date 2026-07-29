@@ -247,9 +247,17 @@ describe("task CRUD and breakdown rule", () => {
 
     expect(done.body.recurring).toBe(true);
     expect(done.body.task.status).toBe("open");
-    const expected = new Date();
-    expected.setDate(expected.getDate() + 7);
-    expect(done.body.task.dueDate).toBe(expected.toISOString().slice(0, 10));
+    // Formatted from LOCAL components, never toISOString() (#219): the
+    // product counts the next occurrence on the user's calendar (#205), and
+    // toISOString names the UTC day — one day earlier for the two hours
+    // after local midnight under the suite's pinned Europe/Berlin zone,
+    // which made this test fail on CI daily from 22:00 UTC.
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate(),
+    ).padStart(2, "0")}`;
+    expect(done.body.task.dueDate).toBe(expected);
   });
 
   it("reopening removes the latest completion so XP cannot be farmed", async () => {

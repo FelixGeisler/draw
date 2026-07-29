@@ -3,6 +3,7 @@ import request from "supertest";
 import type express from "express";
 import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
+import { localDate } from "../../src/services/localDay.js";
 
 // Issue #19 (ADR-17): snooze and block take cards out of the deck as a
 // derived predicate — blocked = 0 AND (deferred_until IS NULL OR <= now).
@@ -170,7 +171,10 @@ describe("completion and reopening clear snooze state", () => {
     // The occurrence arriving puts it back with NO write, which is what
     // proves the cleared fields are really gone: a surviving snooze/block
     // would still be holding it out a week later.
-    db.prepare("UPDATE tasks SET due_date = date('now', 'localtime') WHERE id = ?").run(task.id);
+    // JS localDate, not date('now','localtime') (#219): SQLite's C localtime
+    // names a different day than the product for the two hours after local
+    // midnight on Windows under the suite's pinned TZ.
+    db.prepare("UPDATE tasks SET due_date = ? WHERE id = ?").run(localDate(new Date()), task.id);
     expect((await draw(goalId)).task.id).toBe(task.id);
   });
 
