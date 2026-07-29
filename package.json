@@ -12,7 +12,8 @@
     "start": "npm run start -w server",
     "test": "npm run test -w server && npm run test -w client",
     "test:e2e": "playwright test",
-    "docs:build": "antora antora-playbook.yml"
+    "docs:build": "antora antora-playbook.yml",
+    "screenshots": "node scripts/screenshot.mjs"
   },
   "devDependencies": {
     "@antora/cli": "^3.1.15",
