@@ -171,6 +171,66 @@ the container — the `draw-data` volume carries the data across.
 xref:09_architecture_decisions.adoc[ADR-26] — export the zip from Settings, or
 snapshot the `draw-data` volume.
 
+== 7.4 TLS — Tailscale Serve in front of the container (#207)
+
+The container above speaks plain HTTP, which is a dead end for two of the
+1.0.0 goals: the shared `DRAW_PASSWORD` (ADR-50) crosses the LAN in clear, and
+the installable PWA (#193, xref:09_architecture_decisions.adoc[ADR-54]) never
+installs, because browsers only register a service worker in a *secure
+context*. Neither a bare LAN IP nor an mDNS `.local` name qualifies — only
+`localhost` and real TLS do.
+
+Draw ships no reverse proxy. TLS is delegated to *Tailscale Serve* (#207,
+xref:09_architecture_decisions.adoc[ADR-55]), which runs on the host, obtains a
+publicly-trusted certificate for the node's `*.ts.net` name, and proxies to
+`127.0.0.1:3001`. No certificate has to be installed on any client, and the
+deployment stays reachable off-LAN.
+
+The two config changes are a *pair*, and the second is unsound without the
+first. The published port moves to `127.0.0.1:3001:3001`, so the container is
+reachable only from the host — i.e. only through Tailscale. Only then is
+`TRUST_PROXY` safe to set, because a LAN client can no longer reach Express
+directly to forge an `X-Forwarded-For`. The value is `1` (one trusted hop),
+*not* the `loopback` preset: a published port arrives at the container from the
+Docker bridge gateway, so the peer address inside is never `127.0.0.1` and
+`loopback` would trust nothing — leaving the login limiter keyed on the proxy
+and one attacker able to lock out everyone.
+
+Cookie scope follows the request rather than the config: `draw_session` gets
+its `Secure` attribute from `req.secure`, which is honest precisely when
+`trust proxy` is set. Plain-HTTP deployments keep working unchanged — a
+hardcoded `Secure` would make the cookie unsettable there and lock the owner
+out of their own server.
+
+[plantuml,deployment-tls,svg]
+....
+@startuml
+skinparam shadowing false
+skinparam wrapWidth 150
+skinparam defaultTextAlignment center
+skinparam componentStyle rectangle
+skinparam nodesep 12
+skinparam ranksep 18
+
+node "Phone / laptop\nTailscale client" as client {
+  component "Browser — installed PWA\nhttps://<node>.<tailnet>.ts.net" as browser
+}
+node "Raspberry Pi" as pi {
+  component "tailscaled — tailscale serve\nTLS termination (Let's Encrypt)\nX-Forwarded-For / -Proto" as ts
+  node "Docker" as docker {
+    node "draw container" as ctr {
+      component "Express on 0.0.0.0:3001\ntrust proxy = 1 (TRUST_PROXY)\nSecure cookie when req.secure" as express
+    }
+    database "draw-data → /data" as vol
+  }
+}
+
+browser --> ts : HTTPS 443\nWireGuard tunnel
+ts --> express : HTTP 127.0.0.1:3001\n(loopback-only published port)
+express --> vol
+@enduml
+....
+
 [cols="1,3",options="header"]
 |===
 |Aspect |Detail
@@ -198,8 +258,10 @@ config, non-root user, `/api/health` healthcheck; data on the `draw-data` volume
 `127.0.0.1`, set `0.0.0.0` to expose on the LAN), `DRAW_PASSWORD` (production
 mode only — optional password gate for LAN exposure, #190/ADR-50; set it
 whenever `HOST` unpins loopback), `TRUST_PROXY` (production mode only —
-required if a reverse proxy fronts the app, so the login limiter keys on the
-real client; e.g. `loopback` for a same-host proxy). `PORT` is deliberately
+required if a proxy fronts the app, so the login limiter keys on the real
+client; `loopback` for a same-host proxy on the bare metal, `1` behind
+Tailscale Serve in front of the container, #207/ADR-55 — and only ever
+together with a loopback-only published port). `PORT` is deliberately
 not used — dev tooling injects it. `BACKUP_INTERVAL_HOURS` (production mode
 only — unset/0 disables; hours between automatic backups into
 `DATA_DIR/backups/`) and `BACKUP_RETENTION` (default 7 — how many archives to

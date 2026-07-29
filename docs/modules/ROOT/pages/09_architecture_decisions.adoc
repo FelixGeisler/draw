@@ -2344,13 +2344,18 @@ exported `DRAW_PASSWORD` in a dev shell would half-lock dev (API 401s, no
 login page) while protecting nothing loopback doesn't already.
 * *Threat model — what this protects and what it does not.* It protects the
 API key and task data against *casual LAN access* (roommates, guest-Wi-Fi
-devices, IoT). It does **not** protect against an on-path attacker: the
-deployment is plain HTTP, so password and cookie travel in cleartext, and
-`Secure` is deliberately not set on the cookie. TLS is explicitly out of
-scope for Draw itself — users who need it should terminate HTTPS in a reverse
-proxy (Caddy, Traefik, nginx) in front of `API_PORT`. **Anyone deploying
-behind such a proxy must set `TRUST_PROXY`** (e.g. `loopback` for a same-host
-proxy): leaving it unset makes every request look like it came from the proxy,
+devices, IoT). On its own it does **not** protect against an on-path attacker:
+a plain-HTTP deployment sends password and cookie in cleartext. TLS remains out
+of scope for the Express app itself — it is terminated in front of `API_PORT`.
+Since #207 that is no longer left to the reader: ADR-55 makes *Tailscale Serve*
+the documented path and ships the compose recipe, and the cookie's `Secure`
+attribute is derived from `req.secure` rather than being permanently off as it
+was when this ADR was written — so a TLS-fronted deployment now gets it
+automatically while the plain-HTTP paths described here are unchanged.
+**Anyone deploying behind such a proxy must set `TRUST_PROXY`** (`loopback` for
+a same-host proxy on bare metal, `1` for the container behind Tailscale — see
+ADR-55 for why the preset is wrong there): leaving it unset makes every request
+look like it came from the proxy,
 so the rate limiter can no longer tell clients apart — it degrades to a single
 shared bucket, i.e. effectively off. Prefer `loopback` or a hop count over
 `true`: trusting *every* forwarded hop lets a LAN client spoof
@@ -2697,3 +2702,75 @@ to `/API/tasks`, which answers JSON and must not become the shell.
 
 *Out of scope:* offline-first data sync, push notifications, and a
 native/Capacitor app — all explicitly deferred past 1.0.0.
+
+== ADR-55: TLS is delegated to Tailscale Serve, not a bundled reverse proxy — loopback-only port plus a one-hop TRUST_PROXY, and a request-derived Secure cookie
+
+*Context:* ADR-54 ends on a requirement it cannot satisfy: Android Chrome offers
+installation only given a manifest, a registered worker, *and a secure context*.
+The container (ADR-51) serves plain HTTP, and neither a bare LAN IP nor an mDNS
+`.local` name is a secure context — so on the very deployment the PWA was built
+for, the worker never registers and the phone gets a bookmark instead of an app.
+The same gap leaves the ADR-50 shared password crossing the LAN in clear. Both
+the README and the deployment view said "put a reverse proxy in front" and
+stopped there: no configuration was ever shipped, so the instruction was a
+dangling pointer rather than a path.
+
+*Decision:* Delegate TLS to *Tailscale Serve* running on the host, and ship the
+recipe as documentation plus one behavioural change. `tailscale serve --bg 3001`
+terminates TLS with a publicly-trusted certificate for the node's `*.ts.net`
+name and proxies to `127.0.0.1:3001`. The compose file gains no service; the
+sample documents a *pair* of changes — publish the container port on the host's
+loopback only, and set `TRUST_PROXY: "1"`. The `draw_session` cookie's `Secure`
+attribute is derived from `req.secure` rather than hardcoded.
+
+*Rationale:*
+
+* *Tailscale over a bundled Caddy/Traefik/nginx.* The alternative was a proxy
+sidecar issuing its own certificate from an internal CA, which pushes a root
+certificate onto every client — and Android has made user-installed CAs
+progressively more hostile, which is precisely the audience this exists for. A
+publicly-trusted `ts.net` certificate needs nothing installed on the phone, and
+carries the app off-LAN as a side effect. It also adds *no* runtime dependency
+and no compose service, so the "~6 runtime deps per package" and the
+no-over-engineering constraint (arc42 §2) survive intact — this is the first
+infrastructure decision in the 1.0.0 series that amends no guardrail at all,
+unlike ADR-50 (auth) and ADR-51 (Docker). The accepted cost is a third-party
+account and a client on every device; a self-hoster who refuses that keeps the
+plain-HTTP LAN path, which is unchanged and still supported.
+* *The two config changes are one decision, and the order matters.* Setting
+`trust proxy` while the container is still reachable on the LAN is a downgrade,
+not a hardening: any client could then forge `X-Forwarded-For` and choose its
+own rate-limit bucket. Binding the published port to `127.0.0.1` first is what
+makes the proxy the only possible peer and therefore makes trusting one hop
+sound. They are documented together, adjacent, and each comment points at the
+other, because splitting them is the failure mode.
+* *The value is `1`, not the `loopback` preset — and this is a real trap.*
+ADR-50 recommends `loopback` for a same-host proxy, which is right on bare
+metal and wrong here: a published Docker port reaches the container from the
+bridge gateway, so the peer inside is a `172.x` address and never `127.0.0.1`.
+The `loopback` preset would therefore trust nothing, silently leaving `req.ip`
+as the gateway for every client — collapsing per-IP throttling exactly as if
+`TRUST_PROXY` had been left unset, and letting one attacker lock out every
+user. Nothing fails loudly; the limiter just quietly stops discriminating.
+* *`Secure` follows the request, never the configuration.* Hardcoding
+`secure: true` would be correct for the Tailscale deployment and catastrophic
+for the others: the plain-HTTP loopback and LAN paths are still supported, and
+there the browser would discard the cookie on arrival, leaving the owner unable
+to log into their own server with no error to read. `req.secure` reports
+`X-Forwarded-Proto` only once `trust proxy` is configured — which is the same
+condition as the terminating proxy existing — so the flag turns itself on in
+exactly the topology that warrants it and stays off everywhere else. This is
+the same derived-over-stored instinct as ADR-2, applied to a cookie attribute.
+* *Verification.* An integration case pins both directions: over TLS the
+`Set-Cookie` carries `Secure`, and over plain HTTP it does not — asserted on
+the attribute rather than the whole header, so the other attributes stay free
+to change. The container contract test pins the loopback-only port form and the
+`TRUST_PROXY: "1"` value as *commented* guidance, so the LAN default is not
+silently changed and the Tailscale recipe cannot rot out of the sample. The
+end-to-end claim — that Chrome offers *Install app* rather than "Add to Home
+screen" — is left to manual verification: it depends on a live tailnet and on
+Chrome's own install heuristics, neither of which CI can host.
+
+*Out of scope:* a bundled reverse-proxy profile, certificates for a
+non-Tailscale LAN, and offline support — the worker still caches only the app
+shell (ADR-54).

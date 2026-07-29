@@ -60,8 +60,15 @@ Your tasks, materials, and database live on the volume and survive
 **Set a password.** The container listens on your LAN (`HOST=0.0.0.0`), so
 uncomment `DRAW_PASSWORD` in [`docker-compose.yml`](docker-compose.yml) before
 exposing it — otherwise anyone on the network can read your tasks and your
-Anthropic API key. Behind a reverse proxy, also set `TRUST_PROXY` (e.g.
-`loopback`).
+Anthropic API key. Note that over plain HTTP that password crosses the network
+in clear; [Reach it over HTTPS](#reach-it-over-https-tailscale) fixes that.
+
+**Building on the Pi takes a while.** `docker compose up -d` compiles
+`better-sqlite3` from source for arm64. On a 1 GB Pi make sure you have swap
+enabled or the build gets OOM-killed; on a 4 GB+ Pi it just takes a few minutes.
+You need a **64-bit** OS — 32-bit Raspberry Pi OS (`armv7l`) is not a published
+target. Check with `uname -m` (expect `aarch64`). To skip the wait, build on a
+faster machine with buildx or pull a prebuilt image (both below).
 
 **Build both architectures explicitly** (e.g. to build on a fast amd64 machine
 for a Pi) with buildx:
@@ -109,21 +116,64 @@ upload it on the Settings page, or `POST /api/backup/import`. Copy
 `server/data/backups/` off-device (rsync, a network share) for real off-site
 safety.
 
+### Reach it over HTTPS (Tailscale)
+
+A plain-HTTP LAN address is **not a secure context**, and that has two
+consequences: the shared `DRAW_PASSWORD` crosses your network in clear, and
+browsers refuse to register a service worker — so the phone can only make a
+dumb bookmark, never a real installed app. Neither a bare IP nor a `.local`
+mDNS name changes this. You need TLS.
+
+Draw does not bundle a reverse proxy. Instead, put [Tailscale](https://tailscale.com)
+on the Pi and let it terminate TLS: it issues a real, publicly-trusted
+certificate for your node, so there is **no root certificate to install on your
+phone** — which is the part that makes a self-signed LAN setup miserable on
+Android. It also means the app keeps working when you leave the house.
+
+On the Pi, once (`--bg` keeps it running across reboots):
+
+```bash
+sudo tailscale up && sudo tailscale serve --bg 3001
+```
+
+`tailscale serve` prints the URL it is now serving — something like
+`https://raspberrypi.tailnet-abcd.ts.net`. That is the address to use from now
+on; `http://<pi-ip>:3001` still works on the LAN but stays insecure.
+
+Then close the LAN port, so the only way in is through TLS. In
+[`docker-compose.yml`](docker-compose.yml), swap the published port for the
+loopback-only form and enable the matching proxy setting:
+
+```yaml
+ports:
+  - "127.0.0.1:3001:3001"
+environment:
+  TRUST_PROXY: "1"
+```
+
+`TRUST_PROXY` is what makes the login rate limiter key on the real client
+rather than on the proxy — without it a single attacker locks out everyone. Use
+`"1"` (one trusted hop), **not** `"loopback"`: published ports reach the
+container from the Docker bridge gateway, so the peer inside is never
+`127.0.0.1`. This is only safe *together with* the loopback-only port binding
+above, which is what stops a LAN client from reaching the container directly
+and forging its address. `docker compose up -d` to apply both.
+
 ### Install it on your phone
 
 Draw is an installable PWA, so the phone gets an app icon instead of a browser
-tab. On the **same network** as the server, open `http://<server-host>:3001` in
-Android Chrome and use **⋮ → Add to Home screen** (Chrome usually offers
-"Install app" on its own). It launches standalone — no browser chrome — and the
-layout adapts to phone widths.
+tab. Install Tailscale on the phone and sign into the same tailnet, open the
+`https://….ts.net` URL in Android Chrome, and use **⋮ → Install app**. It
+launches standalone — no browser chrome — and the layout adapts to phone
+widths.
 
-Two notes: this needs **production mode**, because the client only registers the
-service worker in a production build (`client/src/main.tsx`) — in dev the app
-stays worker-free so a stale worker can never shadow live-reloaded code. And
-browsers only offer install on a *secure context* — `localhost` counts, a
-plain-HTTP LAN address may not, in which case put the server behind a reverse
-proxy with TLS (see
-[deployment](https://felixgeisler.github.io/draw/docs/07_deployment_view.html)).
+If the menu only offers "Add to Home screen", the install criteria were not
+met — you are almost certainly on the plain-HTTP address rather than the
+`ts.net` one. Two other requirements: this needs **production mode**, because
+the client only registers the service worker in a production build
+(`client/src/main.tsx`) — in dev the app stays worker-free so a stale worker
+can never shadow live-reloaded code — and the manifest is fetched with
+credentials, so you must already be logged in.
 
 The app never stores your task data offline: the worker caches the app shell and
 nothing else, so it can never show you stale tasks. It is not an offline app
