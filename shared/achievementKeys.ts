@@ -15,8 +15,9 @@
  *   - server `gamificationService.ts` types `AchievementDef.key` as
  *     `AchievementKey`, so a definition whose key is not listed here fails the
  *     server typecheck;
- *   - `server/test/unit/achievement-keys.test.ts` pins that every key here has
- *     exactly one definition (and no definition is missing);
+ *   - `server/test/integration/gamification.test.ts` pins that the payload
+ *     ships exactly this key set (and `achievement-customization.test.ts`
+ *     pins the ORDER);
  *   - client `achievementRarity.ts` declares its tier table
  *     `satisfies Record<AchievementKey, AchievementRarity>`, so a key here
  *     without a tier fails the CLIENT typecheck;

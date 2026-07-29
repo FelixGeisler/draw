@@ -8,6 +8,9 @@
 import { chainForKey } from "../../../shared/achievementChains";
 import type { AchievementCardData } from "../components/AchievementCard";
 
+/** The display state of one tier in a chain, for the card's pip row (#222). */
+export type TierState = "claimed" | "unlocked" | "locked";
+
 /** One collapsed slot in the grid: the card to render plus whether the
  *  chain/one-off it stands for has been earned at all (for the heading count). */
 export interface CollapsedAchievement {
@@ -20,6 +23,13 @@ export interface CollapsedAchievement {
    * "collected" count, never lower it.
    */
   collected: boolean;
+  /**
+   * Per-tier states in ascending `order`, for the pip row on the collapsed
+   * card (#222) -- the collapse hides a chain's depth, and before the pips
+   * nothing on the card said "this is rung 2 of 5". Absent for one-offs:
+   * a single-tier pip row would be noise pretending to be information.
+   */
+  tierStates?: TierState[];
 }
 
 /**
@@ -69,9 +79,15 @@ export function collapseAchievementChains(
       // One-off: single member, passed through.
       return { card: members[0], collected: members[0].unlockedAt != null };
     }
+    const sorted = [...members].sort(
+      (a, b) => (chainForKey(a.key)?.order ?? 0) - (chainForKey(b.key)?.order ?? 0),
+    );
     return {
       card: selectCurrentTier(members),
       collected: members.some((m) => m.unlockedAt != null),
+      tierStates: sorted.map((m): TierState =>
+        m.claimedAt != null ? "claimed" : m.unlockedAt != null ? "unlocked" : "locked",
+      ),
     };
   });
 }

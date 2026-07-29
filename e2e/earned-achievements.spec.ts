@@ -283,6 +283,47 @@ test("claiming an unlocked card raises the header XP and is idempotent", async (
   expect(after.xp).toBe(before.xp + 50);
 });
 
+test("the heading counts KEYS and chain cards wear tier pips (#222)", async ({ page }) => {
+  await page.goto("/stats");
+
+  // The honest count: unlocked keys over total non-hidden keys, straight from
+  // the payload — never the collapsed slot count, which read "N/9" while
+  // dozens of tiers were still locked.
+  const g = await (await page.request.get("/api/gamification")).json();
+  const countable = g.achievements.filter((a: { hidden: boolean }) => !a.hidden);
+  const unlockedKeys = countable.filter(
+    (a: { unlockedAt: string | null }) => a.unlockedAt != null,
+  ).length;
+  await expect(
+    page.getByText(`— ${unlockedKeys}/${countable.length} collected`),
+  ).toBeVisible();
+  // The two counts genuinely differ in this run's state (slots would be ≤9;
+  // the key total is the whole catalog), so this pin cannot pass by accident.
+  expect(countable.length).toBeGreaterThan(9);
+
+  // Chain cards wear one pip per tier. How many draws-chain tiers are
+  // unlocked here depends on how many draws the whole serial run made before
+  // this file, so the expectation is derived from the payload rather than
+  // hardcoded — the pin is pips ≡ payload, not a brittle count.
+  const DRAWS_CHAIN = ["first_draw", "draw_10", "draw_100", "draw_1000", "draw_10000"];
+  const unlockedTiers = g.achievements.filter(
+    (a: { key: string; unlockedAt: string | null }) =>
+      DRAWS_CHAIN.includes(a.key) && a.unlockedAt != null,
+  ).length;
+  expect(unlockedTiers).toBeGreaterThan(0); // first_draw at minimum
+  const draws = card(page, "first_draw");
+  await expect(draws.locator(".ach-pip")).toHaveCount(5);
+  // Nothing in the draws chain is claimed yet (the claim test below runs
+  // last), so every earned tier shows as unlocked-bright.
+  await expect(draws.locator(".ach-pip-unlocked")).toHaveCount(unlockedTiers);
+  await expect(draws.locator(".ach-pips")).toHaveAccessibleName(
+    `chain level ${unlockedTiers} of 5`,
+  );
+
+  // One-offs carry none — a single pip would be noise.
+  await expect(card(page, "early_bird").locator(".ach-pip")).toHaveCount(0);
+});
+
 // Runs LAST: it claims first_draw, which permanently advances the draws chain
 // for the rest of the shared serial DB — so every earlier test in this file
 // still sees first_draw as the draws chain's current card.
@@ -305,4 +346,10 @@ test("claiming the current chain tier advances the card to the next tier (#183)"
   // advance happening purely via the claim's refetch, no extra client code.
   await expect(card(page, "first_draw")).toHaveCount(0);
   await expect(card(page, "draw_10")).toHaveCount(1);
+
+  // The advanced card's pips carry the history forward (#222): tier 1 claimed,
+  // the shown tier 2 still locked.
+  const advanced = card(page, "draw_10");
+  await expect(advanced.locator(".ach-pip-claimed")).toHaveCount(1);
+  await expect(advanced.locator(".ach-pip")).toHaveCount(5);
 });
