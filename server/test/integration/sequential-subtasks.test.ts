@@ -3,6 +3,7 @@ import request from "supertest";
 import type express from "express";
 import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
+import { localDate } from "../../src/services/localDay.js";
 
 // Issue #23 (ADR-18): a 'sequential' parent exposes only its first open
 // subtask in sibling order to the draw pool; later open siblings are held back
@@ -432,7 +433,10 @@ describe("recurring subtasks are banned under sequential parents (#66, ADR-23)",
     expect((await draw(goalId)).task).toBeNull();
     // And when the occurrence comes round, the trap re-arms rather than
     // releasing: it is the recurring step that returns, never the sibling.
-    db.prepare("UPDATE tasks SET due_date = date('now', 'localtime') WHERE id = ?").run(first.id);
+    // JS localDate, not date('now','localtime') (#219): SQLite's C localtime
+    // names a different day than the product for the two hours after local
+    // midnight on Windows under the suite's pinned TZ.
+    db.prepare("UPDATE tasks SET due_date = ? WHERE id = ?").run(localDate(new Date()), first.id);
     expect((await draw(goalId)).task.id).toBe(first.id);
   });
 });
