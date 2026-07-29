@@ -151,6 +151,61 @@ describe("auth enabled", () => {
   });
 });
 
+describe("session cookie Secure flag follows the request (#207, ADR-55)", () => {
+  // Hardcoding `secure` either way is a trap: omitted, it leaks the session
+  // over a Tailscale-fronted deployment; forced, the browser DISCARDS the
+  // cookie on the still-supported plain-HTTP paths and the owner can never
+  // log into their own server. So it is derived from req.secure.
+  const attributes = (res: request.Response) =>
+    (res.headers["set-cookie"]?.[0] ?? "")
+      .split(";")
+      .map((part) => part.trim().toLowerCase());
+
+  it("omits Secure over plain HTTP — the LAN and loopback deployments still work", async () => {
+    const app = createApp({ password: PASSWORD });
+    const res = await request(app).post("/api/auth/login").send({ password: PASSWORD });
+    expect(res.status).toBe(204);
+    expect(attributes(res)).not.toContain("secure");
+  });
+
+  it("sets Secure when a trusted proxy reports X-Forwarded-Proto: https", async () => {
+    // req.secure reads the forwarded protocol only under `trust proxy` — the
+    // same condition as a terminating proxy actually existing.
+    const app = createApp({ password: PASSWORD, trustProxy: 1 });
+    const res = await request(app)
+      .post("/api/auth/login")
+      .set("X-Forwarded-Proto", "https")
+      .send({ password: PASSWORD });
+    expect(res.status).toBe(204);
+    expect(attributes(res)).toContain("secure");
+  });
+
+  it("ignores a forged X-Forwarded-Proto when no proxy is trusted", async () => {
+    // Without `trust proxy`, the header is attacker-supplied noise: honouring
+    // it would let a LAN client force a Secure cookie onto a plain-HTTP
+    // session and lock itself out.
+    const app = createApp({ password: PASSWORD });
+    const res = await request(app)
+      .post("/api/auth/login")
+      .set("X-Forwarded-Proto", "https")
+      .send({ password: PASSWORD });
+    expect(res.status).toBe(204);
+    expect(attributes(res)).not.toContain("secure");
+  });
+
+  it("leaves the other cookie attributes untouched in both modes", async () => {
+    for (const trustProxy of [undefined, 1] as const) {
+      const app = createApp({ password: PASSWORD, trustProxy });
+      const res = await request(app).post("/api/auth/login").send({ password: PASSWORD });
+      const raw = res.headers["set-cookie"][0];
+      expect(raw).toContain("draw_session=");
+      expect(raw).toContain("HttpOnly");
+      expect(raw).toContain("SameSite=Lax");
+      expect(raw).toContain("Path=/");
+    }
+  });
+});
+
 describe("login rate limiting (per de-proxied IP, ADR-50)", () => {
   // Under `trust proxy: "loopback"` — the recommended same-host reverse-proxy
   // setting — req.ip is the X-Forwarded-For client, so these simulate LAN

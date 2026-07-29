@@ -1,5 +1,5 @@
 import { createHash, createHmac, scryptSync, timingSafeEqual } from "node:crypto";
-import type { RequestHandler, Response } from "express";
+import type { Request, RequestHandler, Response } from "express";
 import { renderLoginPage } from "./loginPage.js";
 
 // Optional LAN password gate (#190, ADR-50). One shared secret from the
@@ -164,14 +164,20 @@ export function createAuth(password: string, options: CreateAuthOptions = {}): A
       .json({ error: "too many failed attempts — try again later" });
   };
 
-  const issueSession = (res: Response) => {
+  const issueSession = (req: Request, res: Response) => {
     res.cookie(SESSION_COOKIE, signSession(key, Date.now() + SESSION_TTL_MS), {
       httpOnly: true,
       sameSite: "lax",
       maxAge: SESSION_TTL_MS,
       path: "/",
-      // No `secure` flag: the LAN deployment is plain HTTP by design —
-      // TLS is a reverse proxy's job (ADR-50 threat model).
+      // `secure` tracks the request, it is never hardcoded (#207, ADR-55).
+      // Plain HTTP is still a supported deployment (loopback, and a LAN
+      // without Tailscale), and a hardcoded `secure` there would make the
+      // cookie unsettable — locking the owner out of their own server. Over
+      // TLS the flag is real protection, so it is set. `req.secure` reads
+      // X-Forwarded-Proto only once `trust proxy` is configured, which is
+      // exactly the topology where a terminating proxy sets it.
+      secure: req.secure,
     });
     res.status(204).end();
   };
@@ -192,7 +198,7 @@ export function createAuth(password: string, options: CreateAuthOptions = {}): A
     const submitted = (req.body as { password?: unknown } | undefined)?.password;
     if (typeof submitted === "string" && compare(submitted, password)) {
       limiter.recordSuccess(ip);
-      issueSession(res);
+      issueSession(req, res);
       return;
     }
     limiter.recordFailure(ip);

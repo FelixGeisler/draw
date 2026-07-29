@@ -119,6 +119,21 @@ describe("docker-compose.yml", () => {
     expect(compose).toMatch(/#\s*TRUST_PROXY:/);
   });
 
+  it("documents the Tailscale recipe as a commented pair (#207, ADR-55)", () => {
+    // Both halves, still commented so the LAN default is unchanged. The
+    // loopback-only port is what makes trusting a hop sound; shipping the
+    // TRUST_PROXY line without it would be a downgrade, not a hardening.
+    expect(compose).toMatch(/#\s*-\s*"127\.0\.0\.1:3001:3001"/);
+    expect(compose).toMatch(/#\s*TRUST_PROXY:\s*"1"/);
+  });
+
+  it("does not recommend the loopback preset for the container", () => {
+    // A published port arrives from the Docker bridge gateway, so the peer is
+    // never 127.0.0.1 and `loopback` would trust nothing — silently collapsing
+    // per-IP throttling. ADR-55; this is the trap the sample must not set.
+    expect(compose).not.toMatch(/TRUST_PROXY:\s*"loopback"/);
+  });
+
   it("healthchecks /api/health", () => {
     const hc = compose.slice(compose.indexOf("healthcheck:"));
     expect(hc).toContain("/api/health");
