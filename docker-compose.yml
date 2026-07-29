@@ -23,6 +23,12 @@ services:
     ports:
       # host:container — change only the left side to serve on another port.
       - "3001:3001"
+      # Behind Tailscale Serve (#207, ADR-55), replace the line above with the
+      # loopback-only form below. `tailscale serve` runs on the host and
+      # proxies to 127.0.0.1:3001, so the container never needs a LAN-visible
+      # port — and closing it is what makes TRUST_PROXY safe to enable (see
+      # the environment block).
+      # - "127.0.0.1:3001:3001"
     environment:
       # Listen on all interfaces inside the container so the port mapping is
       # reachable (ADR-49).
@@ -32,10 +38,17 @@ services:
       # On a real LAN, set a shared password (ADR-50): without it, anyone on
       # the network can read your tasks AND your Anthropic API key.
       # DRAW_PASSWORD: "change-me"
-      # If a reverse proxy (Caddy/Traefik/nginx) terminates TLS in front of
-      # this, set TRUST_PROXY so the login limiter keys on the real client
-      # (e.g. "loopback" for a same-host proxy). See ADR-50.
-      # TRUST_PROXY: "loopback"
+      # If something terminates TLS in front of this, set TRUST_PROXY so the
+      # login limiter keys on the real client instead of collapsing every
+      # attempt onto the proxy's address. See ADR-50.
+      #
+      # For Tailscale Serve (#207, ADR-55) the value is "1", NOT "loopback":
+      # published ports arrive from the Docker bridge gateway, so the peer
+      # inside the container is never 127.0.0.1 and a "loopback" preset would
+      # trust nothing. "1" trusts exactly one hop — which is only sound once
+      # the port is bound loopback-only above, so nothing on the LAN can reach
+      # the container directly and forge X-Forwarded-For.
+      # TRUST_PROXY: "1"
       # Optional: enables AI features. A key set in the Settings UI wins over
       # this (ADR-11).
       # ANTHROPIC_API_KEY: "sk-ant-..."
