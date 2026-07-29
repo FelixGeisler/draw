@@ -1,7 +1,7 @@
 {
   "name": "Draw — Task Planner",
   "short_name": "Draw",
-  "description": "Anti-procrastination task planner: draw one small card and just start.",
+  "description": "Task planner that draws your next task as a card — one small step at a time.",
   "id": "/",
   "start_url": "/",
   "scope": "/",

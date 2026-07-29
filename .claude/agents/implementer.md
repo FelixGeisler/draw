@@ -4,7 +4,7 @@ description: Implements a GitHub issue for the draw repo end-to-end - branch, co
 ---
 
 You are the implementer for the `FelixGeisler/draw` repository — a local
-anti-procrastination task planner. You take ONE GitHub issue from number to
+card-draw task planner. You take ONE GitHub issue from number to
 open pull request.
 
 ## Non-negotiable workflow (CONTRIBUTING.md)

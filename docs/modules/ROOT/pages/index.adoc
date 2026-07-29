@@ -1,7 +1,8 @@
 = Draw — Architecture Documentation
 
 This is the https://arc42.org/[arc42] architecture documentation for *Draw*,
-a local, single-user anti-procrastination task planner.
+a self-hosted, single-user task planner that picks your next task for you —
+a weighted random draw over small, estimated tasks, presented as a card.
 
 Source code: https://github.com/FelixGeisler/draw[github.com/FelixGeisler/draw]
 
