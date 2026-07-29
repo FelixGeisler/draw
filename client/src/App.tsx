@@ -8,6 +8,8 @@ import { AssistantPage } from "./pages/AssistantPage";
 import { TimerBar } from "./components/TimerBar";
 import { GamificationHeader } from "./components/GamificationHeader";
 import { AchievementToast } from "./components/AchievementToast";
+import { DeckScopeBar } from "./components/DeckScopeBar";
+import { DeckScopeProvider } from "./DeckScopeContext";
 import { useAiStatus } from "./hooks/useAi";
 
 // Each entry wears a leading emoji in the app's existing icon idiom (the brand
@@ -33,6 +35,7 @@ export default function App() {
   const aiStatus = useAiStatus();
   const nav = aiStatus.data?.configured ? [...NAV.slice(0, 3), ASSISTANT, ...NAV.slice(3)] : NAV;
   return (
+    <DeckScopeProvider>
     <div className="layout">
       <nav className="sidenav">
         <div className="brand">🃏 Draw</div>
@@ -51,6 +54,10 @@ export default function App() {
       </nav>
       <div className="main">
         <GamificationHeader />
+        {/* Work mode (#214): renders nothing unless a scope is set, so the
+            unscoped app gains no chrome. Above TimerBar — a standing setting
+            reads as context for the running timer, not the other way round. */}
+        <DeckScopeBar />
         <TimerBar />
         <AchievementToast />
         <Routes>
@@ -69,5 +76,6 @@ export default function App() {
         </Routes>
       </div>
     </div>
+    </DeckScopeProvider>
   );
 }
