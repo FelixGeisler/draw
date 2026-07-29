@@ -18,6 +18,14 @@ interface Props {
    * pre-ban row stays editable.
    */
   hideRecur?: boolean;
+  /**
+   * Which category a NEW task starts on (#214). Separate from `initial`
+   * on purpose: `initial` also means "this is an edit", which suppresses the
+   * post-submit reset below — quick capture must keep resetting, so it cannot
+   * express a default category through that prop. Ignored when `initial`
+   * carries a category, since an edit's own value always wins.
+   */
+  defaultCategoryId?: number;
   onSubmit: (task: NewTask) => void | Promise<unknown>;
   onCancel?: () => void;
 }
@@ -33,9 +41,11 @@ const WEEKDAYS: { day: number; label: string }[] = [
   { day: 0, label: "Sun" },
 ];
 
-export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, hideRecur, onSubmit, onCancel }: Props) {
+export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, hideRecur, defaultCategoryId, onSubmit, onCancel }: Props) {
   const [title, setTitle] = useState(initial?.title ?? "");
-  const [categoryId, setCategoryId] = useState<number>(initial?.categoryId ?? categories[0]?.id ?? 1);
+  const [categoryId, setCategoryId] = useState<number>(
+    initial?.categoryId ?? defaultCategoryId ?? categories[0]?.id ?? 1,
+  );
   const [goalId, setGoalId] = useState<number | "">(initial?.goalId ?? "");
   const [impact, setImpact] = useState<number>(initial?.impact ?? 3);
   const [effort, setEffort] = useState<string>(initial?.effortMinutes?.toString() ?? "");

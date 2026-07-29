@@ -19,6 +19,7 @@ import {
 } from "../hooks/useDraw";
 import { useAiStatus, useCardArt, useRegenerateCardArt } from "../hooks/useAi";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
+import { useDeckScope } from "../DeckScopeContext";
 import { AiBreakdownPanel } from "../components/AiSuggestionPanel";
 import { EmptyPoolReason } from "../components/EmptyPoolReason";
 import { FocusOverlay } from "../components/FocusOverlay";
@@ -52,7 +53,11 @@ export function DrawPage() {
   const timer = useCurrentTimer();
 
   const goals = useGoals();
-  const [categoryId, setCategoryId] = useState<number | undefined>();
+  // Work mode (#214): the category chips are now the app-wide, per-device deck
+  // scope rather than page-local state — same control, it just stopped
+  // forgetting. The goal select stays per-session: it is a narrowing you make
+  // for one draw, not a mode you live in.
+  const { scope: categoryId, setScope: setCategoryId } = useDeckScope();
   const [goalId, setGoalId] = useState<number | undefined>();
   const [shuffling, setShuffling] = useState(false);
   // The latest draw response of THIS session: the odds line and the

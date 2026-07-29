@@ -8,6 +8,7 @@ import {
   useUpdateTask,
 } from "../hooks/useTasks";
 import { useGoals } from "../hooks/useGoals";
+import { useDeckScope } from "../DeckScopeContext";
 import { TaskForm } from "../components/TaskForm";
 import { TaskRow } from "../components/TaskRow";
 import { TaskDndContext, TaskDragOverlay, useTaskDnd } from "../components/TaskDnd";
@@ -46,7 +47,16 @@ export function TasksPage() {
   const reorderSubtask = useReorderSubtask();
 
   const maxEffort = Number(settings.data?.max_draw_effort ?? 30);
-  const roots = tasks.data ?? [];
+  // Work mode (#214): one scope for the whole page. Applied to the ROOTS, so
+  // everything downstream — the tree, the triage strip, the snoozed section,
+  // the reparent targets and the drag-and-drop map — narrows from one place
+  // and cannot disagree with itself. Filtering by the root's category is right
+  // even for subtasks: a subtask always shares its parent's category (the
+  // #44 cascade keeps them in step), so a scoped tree never hides a step
+  // whose parent is visible.
+  const { scope } = useDeckScope();
+  const allRoots = tasks.data ?? [];
+  const roots = scope == null ? allRoots : allRoots.filter((t) => t.categoryId === scope);
 
   // Not-deck-ready triage (#151): classify every open task (roots and
   // subtasks) with the same lib/drawable predicate the draw pool mirrors.
@@ -69,6 +79,12 @@ export function TasksPage() {
   // Drag-and-drop reorganize (#101): the pointer alternative to the #100
   // menu — the drop issues the same PATCH parentId, judged by the same
   // eligibility rules. The map resolves hit-tested row ids back to tasks.
+  //
+  // Deliberately built from the UNSCOPED list (#214). It is a lookup table,
+  // not a source of targets: only rendered rows can be dragged or dropped on,
+  // so the scope already bounds the gesture. Scoping the map too would only
+  // break the parentOrderMode lookup below for a strip row whose parent sits
+  // outside the scope.
   const taskById = useMemo(() => {
     const byId = new Map<number, Task>();
     for (const t of tasks.data ?? []) {
@@ -90,7 +106,7 @@ export function TasksPage() {
       categories={categories.data!}
       goals={goals.data}
       maxEffort={maxEffort}
-      rootTasks={tasks.data}
+      rootTasks={roots}
       estimateInput={key === "needs-estimate"}
       // A strip row must offer exactly what its tree rendering offers ("show
       // what's editable"): a sequential parent's subtask hides the ↻
@@ -121,9 +137,14 @@ export function TasksPage() {
       <div className="panel" data-testid="capture-form">
         {categories.data && (
           <TaskForm
+            // Remount on a scope change so the select picks up the new default
+            // (#214) — capturing into a category the page is not showing would
+            // make the new task vanish on submit.
+            key={scope ?? "all"}
             autoFocus
             categories={categories.data}
             goals={goals.data}
+            defaultCategoryId={scope}
             onSubmit={(t) => createTask.mutateAsync(t)}
           />
         )}
@@ -192,9 +213,12 @@ export function TasksPage() {
                       categories={categories.data!}
                       goals={goals.data}
                       maxEffort={maxEffort}
-                      // Reparent targets (#100) span ALL categories — adoption
-                      // moves the task into the target's category anyway.
-                      rootTasks={tasks.data}
+                      // Reparent targets (#100) used to span ALL categories,
+                      // since adoption moves the task into the target's
+                      // category anyway. Scoped since #214: in work mode,
+                      // offering a Household parent would move the task
+                      // straight out of the view you are working in.
+                      rootTasks={roots}
                     />
                   ))}
                 </div>
@@ -214,7 +238,7 @@ export function TasksPage() {
                     categories={categories.data ?? []}
                     goals={goals.data}
                     maxEffort={maxEffort}
-                    rootTasks={tasks.data}
+                    rootTasks={roots}
                   />
                 ))}
               </div>
@@ -222,8 +246,16 @@ export function TasksPage() {
           )}
         </div>
       </TaskDndContext.Provider>
+      {/* An empty scoped page must name its cause (#214). "Nothing here" in
+          front of a full task list is the one way work mode can actively
+          mislead — the strip above says which mode you are in, but the empty
+          state is where the question gets asked. */}
       {roots.length === 0 && (
-        <p style={{ color: "var(--text-dim)" }}>Nothing here — capture something above.</p>
+        <p style={{ color: "var(--text-dim)" }}>
+          {allRoots.length > 0
+            ? "Nothing in this category — capture something above, or clear work mode to see the rest."
+            : "Nothing here — capture something above."}
+        </p>
       )}
       <TaskDragOverlay dnd={dnd} />
     </div>
