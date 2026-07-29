@@ -2,7 +2,7 @@ import { db, getSetting, getSettingString } from "../db.js";
 import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys.js";
 import { claimXpForKey } from "../../../shared/achievementTiers.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
-import { localDate } from "./localDay.js";
+import { localDate, localDayBounds } from "./localDay.js";
 import { nextOccurrence } from "./recurrence.js";
 import {
   computeStreak,
@@ -256,10 +256,15 @@ export function levelFromXp(xp: number): { level: number; intoLevel: number; nee
 // counter anywhere (ADR-2/ADR-5), and reads have no write side effects.
 
 function completionDays(): Set<string> {
-  const rows = db
-    .prepare("SELECT DISTINCT date(completed_at, 'localtime') AS day FROM completions")
-    .all() as { day: string }[];
-  return new Set(rows.map((r) => r.day));
+  // Bucketed in JS, not with SQLite's date(..., 'localtime') (#219): SQLite's
+  // localtime is the C runtime's, which on Windows cannot read an IANA TZ —
+  // under the test suite's pinned zone it disagreed with localDate() about
+  // "today" for the two hours after local midnight. localDay.ts is the one
+  // home of "which day is it"; SQL hands over raw instants.
+  const rows = db.prepare("SELECT completed_at AS completedAt FROM completions").all() as {
+    completedAt: string;
+  }[];
+  return new Set(rows.map((r) => localDate(new Date(r.completedAt))));
 }
 
 function restWeekdays(): Set<number> {
@@ -549,16 +554,20 @@ export function gamificationState() {
   // goalId rides the same live tasks join as title/impact (#115): the trophy
   // mini-frame shows level stars only for goal-linked completions (ADR-4) —
   // impact alone cannot tell a rated card from the neutral default 3.
+  // "Today" as a half-open instant range from localDayBounds (#219), never
+  // date(..., 'localtime'): SQLite's localtime and JS localDate() can name
+  // different days on Windows under a pinned TZ — see completionDays().
+  const { startIso, endIso } = localDayBounds(localDate(new Date()));
   const todayCompletions = db
     .prepare(
       `SELECT co.id, co.completed_at AS completedAt,
               (co.was_drawn AND NOT co.was_warmup) AS wasDrawn, co.xp_awarded AS xpAwarded,
               t.id AS taskId, t.title, t.category_id AS categoryId, t.goal_id AS goalId, t.impact
        FROM completions co JOIN tasks t ON t.id = co.task_id
-       WHERE date(co.completed_at, 'localtime') = date('now', 'localtime')
+       WHERE co.completed_at >= ? AND co.completed_at < ?
        ORDER BY co.completed_at ASC`,
     )
-    .all();
+    .all(startIso, endIso);
 
   const unlocked = db
     .prepare(

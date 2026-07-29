@@ -62,8 +62,8 @@ export { addDays };
 /**
  * Local calendar day of a UTC instant. The History calendar is a human-facing
  * record — a task started 23:30 local belongs to that evening's cell even
- * though its UTC date is already tomorrow (same choice as the streak logic's
- * date(..., 'localtime') in gamificationService, NOT the UTC bucketing of
+ * though its UTC date is already tomorrow (same choice as the streak logic in
+ * gamificationService, NOT the UTC bucketing of
  * stats.ts). `offsetMinutes` is injectable so unit tests can pin the
  * midnight-boundary behavior on any machine; it defaults to the server's own
  * offset at that instant, which is DST-correct per timestamp.
