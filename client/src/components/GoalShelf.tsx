@@ -1,17 +1,37 @@
 import type { Goal } from "../api/types";
 import { useDeleteGoal, useGoals, useUpdateGoal } from "../hooks/useGoals";
 import { formatResolvedDate } from "../lib/goalShelf";
-// The committed gold trophy-cup art (#124), reused here as the shared trophy
-// image — a string URL Vite fingerprints into the bundle (vite-env.d.ts).
+import { trophyVariant, type TrophyVariant } from "../lib/trophyVariant";
+// The trophy art set (#124 cup, #204 variants) — string URLs Vite fingerprints
+// into the bundle (vite-env.d.ts). All six share the cup's palette, shadow
+// technique and shelf floor (y=280), so they stand on one surface at one scale.
 import trophyCup from "../assets/goal-trophy.svg";
+import trophyChalice from "../assets/goal-trophy-chalice.svg";
+import trophyStar from "../assets/goal-trophy-star.svg";
+import trophyLaurel from "../assets/goal-trophy-laurel.svg";
+import trophyObelisk from "../assets/goal-trophy-obelisk.svg";
+import trophyShield from "../assets/goal-trophy-shield.svg";
 import "./GoalShelf.css";
+
+// Which design an achieved goal earns is derived from its id (#204,
+// lib/trophyVariant.ts) — never stored, stable forever. The empty-state ghost
+// below keeps the classic cup: it advertises the archetype, not a variant.
+const TROPHY_ART: Record<TrophyVariant, string> = {
+  cup: trophyCup,
+  chalice: trophyChalice,
+  star: trophyStar,
+  laurel: trophyLaurel,
+  obelisk: trophyObelisk,
+  shield: trophyShield,
+};
 
 /**
  * Hall of Fame (#145 → #168 cabinet → #181 spotlight showcase): resolved goals
  * below the active list. ALWAYS visible now (#181, no collapse toggle) — the
  * user asked twice for the trophies to greet them, not hide behind a click.
- * Each achieved goal is a gold cup standing in its own soft spotlight; at rest
- * ONLY its name shows, and hover/focus reveals a quiet `Achieved <date>` +
+ * Each achieved goal is a gold trophy standing in its own soft spotlight — one
+ * of six designs derived from the goal's id (#204, ADR-58) — and at rest
+ * ONLY its name shows, while hover/focus reveals a quiet `Achieved <date>` +
  * Reactivate / Delete strip, absolutely positioned so revealing never reflows
  * the case. Missed goals sit as deliberately quiet rows beneath. "GoalShelf",
  * not "TrophyShelf": TrophyDeck is already the Draw page's today-completions
@@ -82,7 +102,16 @@ export function GoalShelf({ onReactivated }: { onReactivated?: () => void }) {
                     <span className="goal-cup-beam" aria-hidden="true" />
                     <span className="goal-cup-pool" aria-hidden="true" />
                     <span className="goal-cup-shadow" aria-hidden="true" />
-                    <img className="goal-cup-art" src={trophyCup} alt="" aria-hidden="true" />
+                    {/* data-variant carries the derived pick for the E2E —
+                        asserting on the fingerprinted src would pin Vite's
+                        hashing instead of the behaviour. */}
+                    <img
+                      className="goal-cup-art"
+                      src={TROPHY_ART[trophyVariant(goal.id)]}
+                      data-variant={trophyVariant(goal.id)}
+                      alt=""
+                      aria-hidden="true"
+                    />
                   </div>
                   <div className="goal-cup-name">{goal.title}</div>
                   {/* Reveal strip: absolutely positioned into space the cup
