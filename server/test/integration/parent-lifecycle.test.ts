@@ -362,9 +362,15 @@ describe("recurring parents are excluded from auto-complete (ADR-6 untouched)", 
     expect(manual.recurring).toBe(true);
     expect(manual.xpAwarded).toBe(1);
     expect(manual.task.status).toBe("open");
-    const expected = new Date();
-    expected.setDate(expected.getDate() + 7);
-    expect(manual.task.dueDate).toBe(expected.toISOString().slice(0, 10));
+    // Local components, never toISOString() (#219): the schedule counts on
+    // the user's calendar (#205), and the UTC day is one behind for the two
+    // hours after local midnight under the suite's pinned zone.
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate(),
+    ).padStart(2, "0")}`;
+    expect(manual.task.dueDate).toBe(expected);
   });
 
   it("a recurring SUBTASK never closes, so it never triggers the cascade either", async () => {
