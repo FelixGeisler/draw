@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="86 128 134 166" width="134" height="166">
+  <!-- Trophy variant "laurel" (#204): an open wreath of two branches on a
+       small base — the only variant with a hole in its silhouette, which is
+       what makes it unmistakable at 122px. Leaves are deliberately big and
+       few (seven a side); fine ones vanish at shelf size. Same palette and
+       shadow technique as goal-trophy.svg; base at y=280, centred on x=150. -->
+  <defs>
+    <linearGradient id="goal-trophy-laurel-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffefbe"/>
+      <stop offset=".45" stop-color="#f6bd50"/>
+      <stop offset="1" stop-color="#bf7d25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- drop shadow -->
+  <g transform="translate(4 7)" opacity=".45">
+    <path d="M150 252 C118 247 100 224 102 198 C104 172 116 156 132 146" fill="none" stroke="#0d1017" stroke-width="7" stroke-linecap="round"/>
+    <path d="M150 252 C182 247 200 224 198 198 C196 172 184 156 168 146" fill="none" stroke="#0d1017" stroke-width="7" stroke-linecap="round"/>
+    <ellipse cx="130" cy="244" rx="13" ry="6" transform="rotate(-25 130 244)" fill="#0d1017"/>
+    <ellipse cx="114" cy="229" rx="13" ry="6" transform="rotate(-50 114 229)" fill="#0d1017"/>
+    <ellipse cx="105" cy="209" rx="13" ry="6" transform="rotate(-72 105 209)" fill="#0d1017"/>
+    <ellipse cx="104" cy="188" rx="13" ry="6" transform="rotate(-85 104 188)" fill="#0d1017"/>
+    <ellipse cx="109" cy="169" rx="13" ry="6" transform="rotate(-105 109 169)" fill="#0d1017"/>
+    <ellipse cx="118" cy="155" rx="13" ry="6" transform="rotate(-125 118 155)" fill="#0d1017"/>
+    <ellipse cx="130" cy="145" rx="13" ry="6" transform="rotate(-145 130 145)" fill="#0d1017"/>
+    <ellipse cx="170" cy="244" rx="13" ry="6" transform="rotate(25 170 244)" fill="#0d1017"/>
+    <ellipse cx="186" cy="229" rx="13" ry="6" transform="rotate(50 186 229)" fill="#0d1017"/>
+    <ellipse cx="195" cy="209" rx="13" ry="6" transform="rotate(72 195 209)" fill="#0d1017"/>
+    <ellipse cx="196" cy="188" rx="13" ry="6" transform="rotate(85 196 188)" fill="#0d1017"/>
+    <ellipse cx="191" cy="169" rx="13" ry="6" transform="rotate(105 191 169)" fill="#0d1017"/>
+    <ellipse cx="182" cy="155" rx="13" ry="6" transform="rotate(125 182 155)" fill="#0d1017"/>
+    <ellipse cx="170" cy="145" rx="13" ry="6" transform="rotate(145 170 145)" fill="#0d1017"/>
+    <ellipse cx="150" cy="252" rx="10" ry="6" fill="#0d1017"/>
+    <path d="M144 250 L156 250 L157 264 L143 264 Z" fill="#0d1017"/>
+    <path d="M128 264 L172 264 L176 271 L124 271 Z" fill="#0d1017"/>
+    <path d="M120 271 L180 271 L180 280 L120 280 Z" fill="#0d1017"/>
+  </g>
+
+  <!-- mount + stepped base -->
+  <path d="M144 250 L156 250 L157 264 L143 264 Z" fill="url(#goal-trophy-laurel-gold)"/>
+  <path d="M128 264 L172 264 L176 271 L124 271 Z" fill="url(#goal-trophy-laurel-gold)"/>
+  <path d="M120 271 L180 271 L180 280 L120 280 Z" fill="url(#goal-trophy-laurel-gold)"/>
+
+  <!-- the two branches, meeting at the bottom -->
+  <path d="M150 252 C118 247 100 224 102 198 C104 172 116 156 132 146" fill="none" stroke="url(#goal-trophy-laurel-gold)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M150 252 C182 247 200 224 198 198 C196 172 184 156 168 146" fill="none" stroke="url(#goal-trophy-laurel-gold)" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- leaves — left branch -->
+  <ellipse cx="130" cy="244" rx="13" ry="6" transform="rotate(-25 130 244)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="114" cy="229" rx="13" ry="6" transform="rotate(-50 114 229)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="105" cy="209" rx="13" ry="6" transform="rotate(-72 105 209)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="104" cy="188" rx="13" ry="6" transform="rotate(-85 104 188)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="109" cy="169" rx="13" ry="6" transform="rotate(-105 109 169)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="118" cy="155" rx="13" ry="6" transform="rotate(-125 118 155)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="130" cy="145" rx="13" ry="6" transform="rotate(-145 130 145)" fill="url(#goal-trophy-laurel-gold)"/>
+  <!-- leaves — right branch (mirrored) -->
+  <ellipse cx="170" cy="244" rx="13" ry="6" transform="rotate(25 170 244)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="186" cy="229" rx="13" ry="6" transform="rotate(50 186 229)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="195" cy="209" rx="13" ry="6" transform="rotate(72 195 209)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="196" cy="188" rx="13" ry="6" transform="rotate(85 196 188)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="191" cy="169" rx="13" ry="6" transform="rotate(105 191 169)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="182" cy="155" rx="13" ry="6" transform="rotate(125 182 155)" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="170" cy="145" rx="13" ry="6" transform="rotate(145 170 145)" fill="url(#goal-trophy-laurel-gold)"/>
+
+  <!-- the clasp where the branches meet -->
+  <ellipse cx="150" cy="252" rx="10" ry="6" fill="url(#goal-trophy-laurel-gold)"/>
+  <ellipse cx="150" cy="251" rx="6" ry="3" fill="#8a5616" opacity=".5"/>
+
+  <!-- base edges -->
+  <path d="M128 271 L172 271" stroke="#fff6dc" stroke-opacity=".3" stroke-width="2"/>
+  <path d="M120 280 L180 280" stroke="#000000" stroke-opacity=".18" stroke-width="3"/>
+</svg>

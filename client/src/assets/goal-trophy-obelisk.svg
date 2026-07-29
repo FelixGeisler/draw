@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="102 136 98 156" width="98" height="156">
+  <!-- Trophy variant "obelisk" (#204): a faceted spire on a stepped base —
+       strictly straight lines, a sharp triangle-on-a-box, maximally unlike a
+       vessel. Three flat panels of differing lightness sell it as a solid
+       cut monolith. Same palette and shadow technique as goal-trophy.svg;
+       base at y=280, centred on x=150. -->
+  <defs>
+    <linearGradient id="goal-trophy-obelisk-gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffefbe"/>
+      <stop offset=".45" stop-color="#f6bd50"/>
+      <stop offset="1" stop-color="#bf7d25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- drop shadow -->
+  <g transform="translate(4 7)" opacity=".45">
+    <path d="M150 142 L170 176 L176 252 L124 252 L130 176 Z" fill="#0d1017"/>
+    <path d="M116 252 L184 252 L188 262 L112 262 Z" fill="#0d1017"/>
+    <path d="M108 262 L192 262 L192 280 L108 280 Z" fill="#0d1017"/>
+  </g>
+
+  <!-- stepped base -->
+  <path d="M116 252 L184 252 L188 262 L112 262 Z" fill="url(#goal-trophy-obelisk-gold)"/>
+  <path d="M108 262 L192 262 L192 280 L108 280 Z" fill="url(#goal-trophy-obelisk-gold)"/>
+
+  <!-- the monolith -->
+  <path d="M150 142 L170 176 L176 252 L124 252 L130 176 Z" fill="url(#goal-trophy-obelisk-gold)"/>
+  <!-- facets: bright left face, dark right face, brightest apex face -->
+  <path d="M150 142 L150 252 L124 252 L130 176 Z" fill="#fff6dc" opacity=".2"/>
+  <path d="M150 142 L170 176 L176 252 L150 252 Z" fill="#000000" opacity=".16"/>
+  <path d="M150 142 L150 176 L130 176 Z" fill="#fff6dc" opacity=".28"/>
+  <!-- shoulder seam where the apex meets the shaft -->
+  <path d="M130 176 L170 176" stroke="#8a5616" stroke-opacity=".5" stroke-width="2"/>
+
+  <!-- base edges -->
+  <path d="M116 262 L184 262" stroke="#fff6dc" stroke-opacity=".3" stroke-width="2"/>
+  <path d="M108 280 L192 280" stroke="#000000" stroke-opacity=".18" stroke-width="3"/>
+</svg>
