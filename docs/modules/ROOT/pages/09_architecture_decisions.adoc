@@ -2972,3 +2972,36 @@ untouched too; only the `<img>` src varies.
 *Out of scope:* user-selectable trophies, rarity-graded designs (the Hall of
 Fame celebrates outcomes, not the algorithm's opinion of them), and variant
 art for missed goals — a defeat stays a quiet row, not a different statue.
+
+== ADR-59: The achievements heading counts keys, and chain cards wear tier pips — the collapse stops hiding the climb
+
+*Context:* ADR-47 collapsed each chain to one evolving card, which was right
+for the grid and wrong for the numbers around it. The heading counted
+collapsed SLOTS with a monotonic per-chain "collected" flag, so "9/9
+collected" could stand over a grid of face-down cards with 17 of 26 tiers
+still locked — the owner read it as a bug, and as a metric it was one. And
+nothing on a collapsed card said which rung of its chain it was: the depth
+ADR-47 deliberately hid from the DOM was hidden from the user too.
+
+*Decision:* The heading counts KEYS — unlocked over total, excluding keys
+hidden by their own ADR-44 customization from both sides. Chain cards wear a
+pip row: one dot per tier in ascending order — solid gold claimed, bright
+unlocked-unclaimed, dim locked — derived in `collapseAchievementChains`
+(`tierStates`) and passed to the card as display-only props. One-offs get no
+pips: a single-tier row is noise pretending to be information.
+
+*Rationale:* The key count is the number the collection actually asks about
+("how much of this is mine"), it can still only rise on a claim (unlock rows
+are append-only), and it is now pinned by an E2E in a state where slot- and
+key-counts differ, so the old semantics cannot silently return. The pips are
+NOT the rejected TCG level-star row (ADR-33): they encode chain progress in
+the collection's own dim-gold idiom, sit under the name, and the earlier
+`.trophy-stars`-stays-dead pin holds unchanged. Unlock, claim, XP, rarity and
+the collapse selector are untouched — this is ADR-47's display layer growing
+one honest signal, not a semantics change. Static paint; nothing to gate
+behind reduced motion. The pip states are spoken as one text alternative
+("chain level 2 of 5") rather than five unlabeled dots.
+
+*Out of scope:* per-tier claim buttons on the collapsed card (the current
+tier remains the only claim surface), and any server change — the payload
+already shipped every tier.

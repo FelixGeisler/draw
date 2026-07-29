@@ -4,6 +4,7 @@ import { achievementRarity } from "../lib/achievementRarity";
 import { celebrate } from "../lib/celebrate";
 import { useClaimAchievement, useUpdateAchievement } from "../hooks/useGamification";
 import { buildAchievementPatch, resetAchievementPatch } from "../lib/achievementEdit";
+import type { TierState } from "../lib/achievementChains";
 import { claimXpForKey } from "../../../shared/achievementTiers";
 import "./AchievementCard.css";
 
@@ -55,6 +56,7 @@ export function AchievementCard({
   className,
   claimable = false,
   editable = false,
+  tierPips,
 }: {
   achievement: AchievementCardData;
   className?: string;
@@ -62,6 +64,14 @@ export function AchievementCard({
   claimable?: boolean;
   /** Render the ✎ editor + description reveal. On in the collection, off in the toast. */
   editable?: boolean;
+  /**
+   * Per-tier states of the chain this card stands for (#222), rendered as a
+   * quiet pip row — the rung is part of the card's identity, like its name.
+   * Omitted for one-offs and anywhere the caller has no chain context. NOT
+   * the rejected TCG level-star row (ADR-33): pips are chain PROGRESS, dots
+   * in the collection's own dim-gold idiom, not a stat.
+   */
+  tierPips?: TierState[];
 }) {
   const rarity = achievementRarity(achievement.key);
   const art = achievementArt(achievement.key);
@@ -148,6 +158,20 @@ export function AchievementCard({
 
         <div className="ach-card-body">
           <div className="ach-name">{achievement.title}</div>
+          {tierPips && tierPips.length > 1 && (
+            // Chain rung (#222): visible at rest — before this, nothing on a
+            // collapsed card said "this is level 2 of 5". The count is spoken
+            // as text; the pips themselves are presentation.
+            <div
+              className="ach-pips"
+              role="img"
+              aria-label={`chain level ${tierPips.filter((t) => t !== "locked").length} of ${tierPips.length}`}
+            >
+              {tierPips.map((state, i) => (
+                <span key={i} className={`ach-pip ach-pip-${state}`} />
+              ))}
+            </div>
+          )}
           {unlocked && (
             <div className="ach-date">unlocked {achievement.unlockedAt!.slice(0, 10)}</div>
           )}

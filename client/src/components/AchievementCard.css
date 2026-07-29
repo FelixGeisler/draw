@@ -123,6 +123,37 @@
   text-shadow: 0 1px 3px rgba(18, 20, 26, 0.9);
 }
 
+/* Chain rung pips (#222): one dot per tier, in the collection's dim-gold
+   idiom. Deliberately quiet — dots, not the rejected TCG level-star row
+   (ADR-33): they encode chain PROGRESS, not a stat. Static paint, no motion
+   to gate. */
+.ach-pips {
+  display: flex;
+  gap: 4px;
+  padding: 2px 0 1px;
+}
+
+.ach-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 182, 79, 0.22);
+  box-shadow: 0 1px 2px rgba(18, 20, 26, 0.8);
+}
+
+/* Claimed burns solid gold; unlocked-but-unclaimed glows brighter than the
+   locked stubs so "you have one to claim" reads at a glance. */
+.ach-pip-claimed {
+  background: var(--warn);
+}
+
+.ach-pip-unlocked {
+  background: rgba(255, 182, 79, 0.6);
+  box-shadow:
+    0 1px 2px rgba(18, 20, 26, 0.8),
+    0 0 5px rgba(255, 182, 79, 0.55);
+}
+
 /* Rarity and locked-state are paint; this is the same fact as text, for
    screen readers only (the visible name/date are real DOM already). */
 .ach-sr {

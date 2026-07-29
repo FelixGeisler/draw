@@ -164,27 +164,31 @@ function EstimationSection({ estimation }: { estimation: Estimation }) {
  * unclaimed level, or the maxed level once all are claimed. Claiming advances it
  * with no extra code (useClaimAchievement invalidates ['gamification']; the
  * refetch drops the just-claimed tier and the next becomes current). One-offs
- * render standalone. The heading counts the COLLAPSED view (one per chain +
- * one-offs), a chain "collected" once any tier of it has unlocked — derived from
- * the payload, never asserted on in E2E.
+ * render standalone. The heading counts KEYS, not collapsed slots (#222): the
+ * old slot count read "9/9 collected" with 17 of 26 tiers still locked, since
+ * ADR-47's collected flag is monotonic per chain. Keys hidden by their own
+ * customization are excluded from both sides, so curating the grid never makes
+ * the heading disagree with what is on show.
  */
 function AchievementsGrid() {
   const { data } = useGamification();
   if (!data) return null;
   const collapsed = collapseAchievementChains(data.achievements);
-  const collected = collapsed.filter((c) => c.collected).length;
+  const countable = data.achievements.filter((a) => !a.hidden);
+  const collectedKeys = countable.filter((a) => a.unlockedAt != null).length;
   const { visible, hidden } = partitionAchievements(collapsed.map((c) => c.card));
+  const pipsFor = new Map(collapsed.map((c) => [c.card.key, c.tierStates]));
   return (
     <section style={{ marginTop: 24 }}>
       <h3>
         Achievements{" "}
         <span style={{ color: "var(--text-dim)", fontWeight: 400 }}>
-          — {collected}/{collapsed.length} collected
+          — {collectedKeys}/{countable.length} collected
         </span>
       </h3>
       <div className="ach-collection">
         {visible.map((a) => (
-          <AchievementCard key={a.key} achievement={a} claimable editable />
+          <AchievementCard key={a.key} achievement={a} claimable editable tierPips={pipsFor.get(a.key)} />
         ))}
       </div>
 
@@ -193,7 +197,7 @@ function AchievementsGrid() {
           <summary>Hidden ({hidden.length})</summary>
           <div className="ach-collection" style={{ marginTop: 12 }}>
             {hidden.map((a) => (
-              <AchievementCard key={a.key} achievement={a} claimable editable />
+              <AchievementCard key={a.key} achievement={a} claimable editable tierPips={pipsFor.get(a.key)} />
             ))}
           </div>
         </details>

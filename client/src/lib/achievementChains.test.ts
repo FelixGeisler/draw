@@ -57,6 +57,44 @@ describe("selectCurrentTier", () => {
   });
 });
 
+describe("tierStates (#222 — the pip row)", () => {
+  it("maps each tier to claimed/unlocked/locked in ascending chain order", () => {
+    const collapsed = collapseAchievementChains([
+      card("first_draw", { claimed: true }),
+      card("draw_10", { unlocked: true }),
+      card("draw_100"),
+      card("draw_1000"),
+      card("draw_10000"),
+    ]);
+    expect(collapsed[0].tierStates).toEqual([
+      "claimed",
+      "unlocked",
+      "locked",
+      "locked",
+      "locked",
+    ]);
+  });
+
+  it("sorts by chain order even when the payload arrives shuffled", () => {
+    const collapsed = collapseAchievementChains([
+      card("draw_100"),
+      card("first_draw", { claimed: true }),
+      card("draw_10", { claimed: true }),
+    ]);
+    expect(collapsed[0].tierStates).toEqual(["claimed", "claimed", "locked"]);
+  });
+
+  it("one-offs carry NO tierStates — a single pip would be noise", () => {
+    const [entry] = collapseAchievementChains([card("monster_slayer", { unlocked: true })]);
+    expect(entry.tierStates).toBeUndefined();
+  });
+
+  it("a maxed chain shows every pip claimed", () => {
+    const [entry] = collapseAchievementChains(DRAWS.map((k) => card(k, { claimed: true })));
+    expect(entry.tierStates).toEqual(["claimed", "claimed", "claimed", "claimed", "claimed"]);
+  });
+});
+
 describe("collapseAchievementChains", () => {
   it("renders exactly one card per chain -- the current tier", () => {
     const collapsed = collapseAchievementChains(DRAWS.map((k) => card(k)));
