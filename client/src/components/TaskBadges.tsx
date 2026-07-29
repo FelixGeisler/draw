@@ -133,8 +133,11 @@ export function TaskBadges({
         </span>
       )}
       {goal && (
+        // chip-clip (#213): the goal title is unbounded user text — the one
+        // badge whose width the platform does not decide — and unclamped it
+        // squeezed the task title to min-content. The tooltip carries it whole.
         <span
-          className="chip"
+          className="chip chip-clip"
           style={{ color: "var(--text-dim)" }}
           title={`Linked to goal: ${goal.title}`}
         >

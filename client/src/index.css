@@ -167,7 +167,12 @@ textarea:focus {
 
 .content {
   padding: 24px 32px;
-  max-width: 960px;
+  /* 1080, up from 960 (#213). A task row carries title + badges + five
+     actions on one line, and at 960 a goal-linked row left the title less
+     than its own single-line width — at ANY window size, which is what made
+     the crushed titles look like a bug that resizing should fix but didn't.
+     Every page shares the cap, so all of them get the same breathing room. */
+  max-width: 1080px;
   width: 100%;
   margin: 0 auto;
 }
@@ -218,6 +223,22 @@ textarea:focus {
   border: 1px solid var(--border);
   font-size: 13px;
   color: var(--text-dim);
+}
+
+/* A chip whose text is UNBOUNDED user content (#213: the 🎯 goal chip — a
+   goal title can be any length). Clamped so it can never crowd the task title
+   out of its row: the title is what the row exists to show, and before this a
+   long goal name squeezed it to min-content — five-line title towers next to
+   an ellipsis-less chip. The full text stays one hover away in the chip's
+   title attribute. inline-block (not the .chip inline-flex): text-overflow
+   only elides inline content, never flex items — which is also why this rule
+   must sit AFTER .chip, whose display would win the equal-specificity tie. */
+.chip-clip {
+  display: inline-block;
+  max-width: 150px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dot {
