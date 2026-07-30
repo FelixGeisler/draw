@@ -133,6 +133,9 @@
 |*Weekly run report*
 |The "This week" recap card atop Stats (#233, ADR-65): completions, minutes, XP, minted trophy rarities, best day, and deltas against the previous seven days — folded client-side (`lib/weeklyReport.ts`) from the activity payload over Monday-first LOCAL weeks; no new API, no stored aggregates, hidden when the week is empty
 
+|*Draw Wrapped*
+|The "Your year" panel closing Stats (#234, ADR-66): the calendar year folded client-side (`lib/wrapped.ts`) — cards, hours, XP, holos, deepest streak (frozen days and rest weekdays bridge), rarest achievement pulled, biggest goal felled — rendered to a locally downloaded PNG; nothing stored, nothing leaves the machine
+
 |*Material*
 |A file (PDF/txt/md) or note attached to a goal; selectable context for AI calls
 
