@@ -178,6 +178,12 @@ export interface Goal {
    * these into the on-track/tight/infeasible chip.
    */
   remainingOpenEffortMinutes: number | null;
+  /**
+   * The boss bar's max HP (#229): the same leaf rule over open AND done
+   * leaves, so remaining <= total always holds. NULL when no leaf carries an
+   * estimate — no bar without numbers to mean anything.
+   */
+  totalEffortMinutes: number | null;
   trackedMinutes14d: number;
 }
 

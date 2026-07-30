@@ -21,6 +21,11 @@ const GOAL_STATUSES = ["active", "achieved", "missed", "dropped"];
 //   all done (a recurring parent stays open in that state) has no remaining
 //   work of its own, so its stored estimate stays out too. NULL when no open
 //   leaf is estimated.
+// - totalEffortMinutes (#229) is the same leaf rule over open AND done leaves
+//   — the boss bar's max HP, of which remainingOpenEffortMinutes is what still
+//   stands. Remaining <= total by construction (same leaves, same NULL skips),
+//   so the HP fraction can never overflow. Archived leaves stay out of both:
+//   a split-in-place original (ADR-21) was replaced, not defeated.
 // - trackedMinutes14d reuses the stats MINUTES_EXPR so a running entry counts
 //   up to now (#22); the window filter compares ISO strings lexicographically,
 //   like every stats range filter.
@@ -34,6 +39,10 @@ const GOAL_SELECT = `
             WHERE t.goal_id = g.id AND t.status = 'open'
               AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status != 'archived')
          ) AS remainingOpenEffortMinutes,
+         (SELECT SUM(t.effort_minutes) FROM tasks t
+            WHERE t.goal_id = g.id AND t.status != 'archived'
+              AND NOT EXISTS (SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status != 'archived')
+         ) AS totalEffortMinutes,
          (SELECT CAST(ROUND(COALESCE(SUM(${MINUTES_EXPR}), 0)) AS INTEGER)
             FROM time_entries e JOIN tasks t ON t.id = e.task_id
             WHERE t.goal_id = g.id
