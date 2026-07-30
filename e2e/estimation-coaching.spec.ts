@@ -90,7 +90,7 @@ test("TaskForm shows the passive hint only while its preconditions hold", async 
   // the suggestion is pinned at the 5-minute floor.
   await categorySelect(page).selectOption({ label: COACHED });
   await effortInput(page).fill("40");
-  await expect(hint(page)).toHaveText(
+  await expect(hint(page)).toContainText(
     `history suggests ~5 min (you track 0× your ${COACHED} estimates)`,
   );
   // Advice that appears silently under the field the user is typing in is
@@ -145,6 +145,57 @@ test("the hint never rewrites the field or the submitted estimate", async ({ pag
     title: string;
   }[];
   await page.request.delete(`/api/tasks/${tasks.find((t) => t.title === "Passivity probe")!.id}`);
+});
+
+test("tap-to-apply types the suggestion, dismisses the hint, and the field stays the authority (#232)", async ({
+  page,
+}) => {
+  await page.goto("/tasks");
+  await categorySelect(page).selectOption({ label: COACHED });
+  await effortInput(page).fill("40");
+  await expect(hint(page)).toBeVisible();
+
+  // Applying merely TYPES the number: the field takes the suggestion, and
+  // the hint dismisses — recomputing it off the applied value would scale
+  // the bias again and chase its own tail.
+  await page.getByTestId("estimate-hint-apply").click();
+  await expect(effortInput(page)).toHaveValue("5");
+  await expect(hint(page)).toHaveCount(0);
+
+  // Typing anything else re-arms the coaching.
+  await effortInput(page).fill("40");
+  await expect(hint(page)).toBeVisible();
+});
+
+test("the triage strip's inline estimate gets the same hint (#232)", async ({ page }) => {
+  // A needs-estimate task in the coached category lands in the strip with
+  // the inline Enter-to-save input — the surface where estimates are typed
+  // with the least reflection.
+  const categories: { id: number; name: string }[] = await (
+    await page.request.get("/api/categories")
+  ).json();
+  const coached = categories.find((c) => c.name === COACHED)!;
+  const task = await (
+    await page.request.post("/api/tasks", {
+      data: { title: "Strip coaching probe", categoryId: coached.id },
+    })
+  ).json();
+
+  await page.goto("/tasks");
+  const strip = page.getByTestId("triage-strip");
+  const row = strip.getByText("Strip coaching probe", { exact: true }).locator("..");
+  await row.getByPlaceholder("min").fill("40");
+  await expect(row.getByTestId("estimate-hint")).toContainText("history suggests ~5 min");
+
+  // Apply, then Enter saves the applied value through the same route.
+  await row.getByTestId("estimate-hint-apply").click();
+  await expect(row.getByPlaceholder("min")).toHaveValue("5");
+  await row.getByPlaceholder("min").press("Enter");
+  // 5 min <= the default 30-min limit: the task re-classifies and leaves the
+  // strip — the inline input's whole purpose.
+  await expect(strip.getByText("Strip coaching probe", { exact: true })).toHaveCount(0);
+
+  await page.request.delete(`/api/tasks/${task.id}`);
 });
 
 test("the Stats page states the coached category's bias, threshold met", async ({ page }) => {

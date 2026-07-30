@@ -251,7 +251,7 @@ export function TaskRow({
         {/* Subtasks follow their parent's goal (#76) — repeating the parent's
             goal chip on every step would be noise, so only root rows get it. */}
         <TaskBadges task={task} goals={task.parentId == null ? goals : undefined} />
-        {estimateInput && !done && <EstimateInput task={task} />}
+        {estimateInput && !done && <EstimateInput task={task} categoryName={category?.name} />}
         {snoozed ? (
           // Wake = deferredUntil now, not null (ADR-17): the retained value
           // becomes the wake timestamp, so staleness counts from here.
