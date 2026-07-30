@@ -76,10 +76,26 @@ export const ACHIEVEMENT_KEYS = [
   "hours_10",
   "hours_100",
   "hours_1000",
+  // Drawn-completions chain (#223) — completions of genuinely drawn cards
+  // (was_drawn AND NOT was_warmup, the ADR-30 sense): trusting the deck is
+  // the behaviour this app exists to reward.
+  "drawn_10",
+  "drawn_100",
+  "drawn_1000",
+  // Steps chain (#223) — completed SUBTASKS: decomposition is the product's
+  // premise, so finishing the small steps it produces earns its own ladder.
+  "steps_10",
+  "steps_100",
+  "steps_500",
   // One-offs — event unlocks with no running total (progress is null).
   "monster_slayer",
   "deck_clearer",
   "early_bird",
+  "holo_hunter",
+  "momentum",
+  "well_rounded",
+  "night_shift",
+  "comeback",
 ] as const;
 
 export type AchievementKey = (typeof ACHIEVEMENT_KEYS)[number];

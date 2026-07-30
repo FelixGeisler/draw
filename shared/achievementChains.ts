@@ -76,6 +76,14 @@ export const ACHIEVEMENT_CHAINS = {
   hours_10: { chainId: "hours", order: 10 },
   hours_100: { chainId: "hours", order: 100 },
   hours_1000: { chainId: "hours", order: 1000 },
+  // Drawn-completions chain (#223).
+  drawn_10: { chainId: "drawn", order: 10 },
+  drawn_100: { chainId: "drawn", order: 100 },
+  drawn_1000: { chainId: "drawn", order: 1000 },
+  // Steps chain (#223).
+  steps_10: { chainId: "steps", order: 10 },
+  steps_100: { chainId: "steps", order: 100 },
+  steps_500: { chainId: "steps", order: 500 },
 } satisfies Partial<Record<AchievementKey, ChainPosition>>;
 
 /**

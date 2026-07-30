@@ -237,3 +237,71 @@ describe("progress payload shape", () => {
     expect(level50.progress).toEqual({ current: 1, target: 50 });
   });
 });
+
+// --- The #223 chains: drawn completions and completed steps -----------------
+
+describe("drawn chain — gambled completions only, exact threshold (#223)", () => {
+  function seedDrawnCompletions(count: number, wasWarmup: 0 | 1) {
+    const insert = db.prepare(
+      "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, 1, ?, 1)",
+    );
+    for (let i = 0; i < count; i++) insert.run(taskId, new Date().toISOString(), wasWarmup);
+  }
+
+  it("drawn_10 is locked at 9 drawn completions and unlocks at 10", async () => {
+    resetProgress();
+    seedDrawnCompletions(9, 0);
+    checkAchievements({});
+    expect(isUnlocked("drawn_10")).toBe(false);
+    expect(await progressOf("drawn_10")).toEqual({ current: 9, target: 10 });
+
+    seedDrawnCompletions(1, 0); // → 10
+    const fresh = checkAchievements({});
+    expect(fresh).toContain("drawn_10");
+    expect(await progressOf("drawn_10")).toEqual({ current: 10, target: 10 });
+  });
+
+  it("warm-up completions do not count — dealt, not gambled (ADR-30)", async () => {
+    resetProgress();
+    seedDrawnCompletions(9, 0);
+    seedDrawnCompletions(5, 1); // warm-ups: was_drawn but was_warmup
+    checkAchievements({});
+    expect(isUnlocked("drawn_10")).toBe(false);
+    expect(await progressOf("drawn_10")).toEqual({ current: 9, target: 10 });
+  });
+});
+
+describe("steps chain — completed subtasks, exact threshold (#223)", () => {
+  let subtaskId: number;
+
+  beforeAll(() => {
+    subtaskId = Number(
+      db
+        .prepare(
+          "INSERT INTO tasks (title, category_id, parent_id, impact, created_at) VALUES (?, 1, ?, 3, ?)",
+        )
+        .run("chain seed step", taskId, new Date().toISOString()).lastInsertRowid,
+    );
+  });
+
+  function seedStepCompletions(count: number, ofTask: number) {
+    const insert = db.prepare(
+      "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, 0, 0, 1)",
+    );
+    for (let i = 0; i < count; i++) insert.run(ofTask, new Date().toISOString());
+  }
+
+  it("steps_10 is locked at 9 completed steps and unlocks at 10 — root completions never count", async () => {
+    resetProgress();
+    seedStepCompletions(9, subtaskId);
+    seedStepCompletions(5, taskId); // ROOT completions: not steps
+    checkAchievements({});
+    expect(isUnlocked("steps_10")).toBe(false);
+    expect(await progressOf("steps_10")).toEqual({ current: 9, target: 10 });
+
+    seedStepCompletions(1, subtaskId); // → 10
+    const fresh = checkAchievements({});
+    expect(fresh).toContain("steps_10");
+    expect(await progressOf("steps_10")).toEqual({ current: 10, target: 10 });
+  });
+});

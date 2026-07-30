@@ -44,10 +44,23 @@ const REVIEWED: Record<AchievementKey, AchievementRarity> = {
   hours_10: "rare",
   hours_100: "super-rare",
   hours_1000: "ultra-rare",
+  // Drawn-completions chain (#223)
+  drawn_10: "rare",
+  drawn_100: "super-rare",
+  drawn_1000: "ultra-rare",
+  // Steps chain (#223)
+  steps_10: "rare",
+  steps_100: "super-rare",
+  steps_500: "ultra-rare",
   // One-offs
   monster_slayer: "rare",
   deck_clearer: "ultra-rare",
   early_bird: "rare",
+  holo_hunter: "super-rare",
+  momentum: "rare",
+  well_rounded: "rare",
+  night_shift: "rare",
+  comeback: "super-rare",
 };
 
 describe("achievementRarity", () => {
@@ -72,9 +85,9 @@ describe("achievementRarity", () => {
     }, {});
     expect(counts).toEqual({
       common: 2,
-      rare: 7,
-      "super-rare": 5,
-      "ultra-rare": 7,
+      rare: 12,
+      "super-rare": 9,
+      "ultra-rare": 9,
       "secret-rare": 5,
     });
   });
