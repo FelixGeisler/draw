@@ -61,9 +61,9 @@ beforeAll(async () => {
 });
 
 describe("migration v13 → v14 (#156, ADR-42)", () => {
-  it("runs the chain to the current version (16: v14 draws/claim, v15 sort_order, v16 customizations)", async () => {
+  it("runs the chain to the current version (17: v14 draws/claim, v15 sort_order, v16 customizations, v17 xp_ledger)", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(16);
+    expect(db.pragma("user_version", { simple: true })).toBe(17);
   });
 
   it("creates the draws log with the append-only shape", async () => {

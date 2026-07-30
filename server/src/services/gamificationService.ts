@@ -229,11 +229,15 @@ export function completeTask(
 // facts — a claim is a one-time payout, guarded idempotent by the achievements
 // primary key — so summing them stays within the "derive from logs, never a
 // stored counter" spirit: there is still no `xp` column anywhere.
-function totalXp(): number {
+export function totalXp(): number {
+  // Third source since #230 (ADR-62): the xp_ledger — shop purchases
+  // (negative), duplicate refunds and challenge payouts (positive). Spending
+  // can lower the level; unlocked achievements never re-lock (append-only).
   const row = db
     .prepare(
       `SELECT COALESCE((SELECT SUM(xp_awarded) FROM completions), 0)
-            + COALESCE((SELECT SUM(claim_xp) FROM achievements), 0) AS xp`,
+            + COALESCE((SELECT SUM(claim_xp) FROM achievements), 0)
+            + COALESCE((SELECT SUM(amount) FROM xp_ledger), 0) AS xp`,
     )
     .get() as { xp: number };
   return row.xp;
@@ -294,7 +298,17 @@ function earnedFreezeDays(): string[] {
   const rows = db
     .prepare("SELECT milestone_day AS day FROM streak_freezes ORDER BY milestone_day")
     .all() as { day: string }[];
-  return rows.map((r) => r.day);
+  // Shop-bought tokens (#230, ADR-62): the buy:freeze ledger row IS the
+  // token, banked on its purchase's local day. Kept out of streak_freezes on
+  // purpose — its UNIQUE(milestone_day) holds one row per day, and a shop row
+  // there would make shouldEarnFreeze swallow an organic milestone landing on
+  // the same day. The fold already counts multiple earns per day.
+  const bought = (
+    db
+      .prepare("SELECT created_at AS createdAt FROM xp_ledger WHERE reason = 'buy:freeze'")
+      .all() as { createdAt: string }[]
+  ).map((r) => localDate(new Date(r.createdAt)));
+  return [...rows.map((r) => r.day), ...bought].sort();
 }
 
 export function streakState(): StreakState {

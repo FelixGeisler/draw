@@ -18,6 +18,7 @@ import {
   type DrawResponse,
 } from "../hooks/useDraw";
 import { useAiStatus, useCardArt, useRegenerateCardArt } from "../hooks/useAi";
+import { useShop } from "../hooks/useShop";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
 import { useDeckScope } from "../DeckScopeContext";
 import { AiBreakdownPanel } from "../components/AiSuggestionPanel";
@@ -48,6 +49,7 @@ export function DrawPage() {
   const deleteTask = useDeleteTask();
   const createSubtasks = useCreateSubtasks();
   const aiStatus = useAiStatus();
+  const shop = useShop();
   const startTimer = useStartTimer();
   const stopTimer = useStopTimer();
   const timer = useCurrentTimer();
@@ -437,7 +439,13 @@ export function DrawPage() {
             phase === "shuffling" ? "shuffling" : ""
           }`}
         >
-          <div className="draw-face front" onClick={phase === "idle" ? doDraw : undefined}>
+          <div
+            className="draw-face front"
+            // Equipped card back (#230): classic carries no attribute — the
+            // shipped weave is the CSS default and unknown keys degrade to it.
+            data-back={shop.data && shop.data.equipped !== "classic" ? shop.data.equipped : undefined}
+            onClick={phase === "idle" ? doDraw : undefined}
+          >
             🃏
             <div style={{ fontSize: 15, marginTop: 12, color: "var(--text-dim)" }}>
               {phase === "shuffling" ? "shuffling…" : "click to draw"}

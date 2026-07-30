@@ -121,6 +121,12 @@
 |*Boss bar*
 |A goal's remaining work rendered as an opponent's HP bar (#229, ADR-61): max HP = effort over ALL non-archived leaves (`totalEffortMinutes`), current HP = the open remainder, completions deal the difference as damage. Enrage = the feasibility chip's `infeasible` verdict restyled — one classifier, two costumes. Goals without estimated leaves keep the count-based progress bar
 
+|*XP ledger*
+|Migration v17 (#230, ADR-62): the third stored XP source after completions and claims — shop purchases negative, refunds/payouts positive, `totalXp()` sums all three; `UNIQUE(reason, ref)` makes every purchase/payout idempotent (retry = 409, never a double charge)
+
+|*Booster pack / card back*
+|The XP shop's purchase unit (#230): 250 XP opens two rarity-weighted card-back pulls on the #224 stage; duplicates refund 75 XP. Owned/equipped backs live in settings; the Draw page front face wears the equipped weave via `data-back`, defaulting to the classic for unknown keys. A bought streak freeze is its own `buy:freeze` ledger row — the token derives from the purchase day, never a `streak_freezes` write
+
 |*Material*
 |A file (PDF/txt/md) or note attached to a goal; selectable context for AI calls
 

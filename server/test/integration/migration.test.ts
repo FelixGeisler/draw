@@ -296,10 +296,19 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v16 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal, draws log + claim columns, sibling sort_order, achievement customizations)", () => {
-  it("bumps user_version to 16", async () => {
+describe("migration v2 → v17 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal, draws log + claim columns, sibling sort_order, achievement customizations, xp_ledger)", () => {
+  it("bumps user_version to 17", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(16);
+    expect(db.pragma("user_version", { simple: true })).toBe(17);
+  });
+
+  it("creates the xp_ledger table, empty (#230, ADR-62)", async () => {
+    const db = await testDb();
+    const table = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'xp_ledger'")
+      .get();
+    expect(table).toBeTruthy();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
   });
 
   it("creates the achievement_customizations table, empty (no backfill) (#177)", async () => {

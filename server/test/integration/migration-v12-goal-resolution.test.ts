@@ -90,7 +90,7 @@ describe("migration v11 → v12 rebuilds goals without firing FK actions (#145, 
     // deletes daily-hand rows this fixture never seeds, v14 (#156) adds the
     // draws log + achievements claim columns, v15 (#157) adds sort_order, and
     // v16 (#177) adds the achievement_customizations table.
-    expect(db.pragma("user_version", { simple: true })).toBe(16);
+    expect(db.pragma("user_version", { simple: true })).toBe(17);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'goals_new'").get(),
     ).toBeUndefined();

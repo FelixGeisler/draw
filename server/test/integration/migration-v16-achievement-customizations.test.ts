@@ -44,9 +44,9 @@ beforeAll(async () => {
 });
 
 describe("migration v15 → v16 adds achievement_customizations (#177, ADR-44)", () => {
-  it("bumps user_version to 16", async () => {
+  it("bumps user_version to 17", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(16);
+    expect(db.pragma("user_version", { simple: true })).toBe(17);
   });
 
   it("creates achievement_customizations with the display-override shape", async () => {
