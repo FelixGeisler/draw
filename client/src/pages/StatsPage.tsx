@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ShopPanel } from "../components/ShopPanel";
+import { WeeklyReport } from "../components/WeeklyReport";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
@@ -242,6 +243,9 @@ export function StatsPage() {
           Last 30 days
         </span>
       </div>
+
+      {/* The weekly recap (#233): a closed week, not another dashboard row. */}
+      <WeeklyReport />
 
       {s && (
         <>

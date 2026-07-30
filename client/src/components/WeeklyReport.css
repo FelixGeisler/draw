@@ -1,0 +1,50 @@
+/* The weekly run report (#233, ADR-65): the achievement-card idiom stretched
+   wide — dim-gold small-caps heading, big tabular numbers, quiet deltas. A
+   recap, not a dashboard: four stats, no controls, no charts. */
+
+.week-report {
+  margin-top: 16px;
+  border-color: rgba(255, 182, 79, 0.25);
+}
+
+.week-report-heading {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #9c8858;
+  margin-bottom: 12px;
+}
+
+.week-report-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px;
+}
+
+.week-report-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.week-report-num {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.week-report-label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.week-report-delta {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.week-report-rare {
+  color: var(--warn);
+}
