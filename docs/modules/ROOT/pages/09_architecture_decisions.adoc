@@ -3111,3 +3111,34 @@ charge — a refusal that costs XP is a bug, not a rule.
 
 *Out of scope:* consumable items beyond the freeze, trading/duplicates
 protection beyond the flat refund, and pack pity timers.
+
+== ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
+
+*Context:* The deck deals work but never sets a stake (#231). A small daily
+objective gives each day a shape and gives the #230 economy an income side
+beyond claims.
+
+*Decision:* One challenge per LOCAL day, picked by hashing the day string
+over a fixed pool (complete 3, complete 2 drawn, complete 2 steps, finish
+before noon, track 30 minutes) — derived, no storage, no config; the pool is
+APPEND-ONLY, since reordering would retroactively rename every historical
+day's challenge. Progress derives from the day's own rows via localDayBounds
+(#219 rules; noon is parsed on the local clock, not start+12h, so DST days
+stay honest). The payout is +50 XP as an xp_ledger row with
+UNIQUE(reason='challenge', ref=day) — at most one per calendar day no matter
+how many events re-evaluate it. Two callers land it, both through ONE
+function (payChallengeIfDue): completeTask, and the timer-stop route — the
+track challenge's satisfying event is a stop, not a completion. The R8
+concern (a new event path skipping the check) has a single name to grep for.
+
+*Rationale:* A GET never pays — the route ships a read-only snapshot and the
+payout rides the mutating transaction that satisfied it, so the chip can
+never show XP the ledger does not hold. The before-noon window is
+[day-start, 12:00) EXCLUSIVE — pinned after the first integration run
+failed on a seed at exactly noon. The E2E drives whatever objective the real
+date names through the real API rather than pretending to choose one, and
+sits out the 30-tracked-minutes day: 30 genuine minutes are nobody's E2E
+budget, and the payout path is integration-tested.
+
+*Out of scope:* challenge streaks/history, rerolls, difficulty tiers, and
+pack rewards (the payout stays plain XP; what it buys is the shop's business).
