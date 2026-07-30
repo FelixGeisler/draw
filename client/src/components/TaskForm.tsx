@@ -65,10 +65,15 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
   // key across all of them. The hint is advice only — it never writes into
   // `effort` and the submitted payload below stays exactly what the user typed.
   const bias = useEstimationBias();
-  const hint = estimateHint(
+  // Applying the suggestion must DISMISS the hint (#232): recomputing it off
+  // the just-applied value would scale the bias again and chase its own tail
+  // ("use 42" -> "use 60"). Typing any other value re-arms it.
+  const [appliedHint, setAppliedHint] = useState<number | null>(null);
+  const rawHint = estimateHint(
     bias.data?.find((b) => b.categoryId === categoryId),
     effort === "" ? null : Number(effort),
   );
+  const hint = appliedHint != null && effort === String(appliedHint) ? null : rawHint;
 
   // All-or-none (server-validated): an editor left incomplete submits no
   // window at all — identical to toggling it off.
@@ -248,7 +253,22 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
           aria-live="polite"
           style={{ flexBasis: "100%", color: "var(--text-dim)", fontSize: 12 }}
         >
-          {hintText(hint, categories.find((c) => c.id === categoryId)?.name ?? "")}
+          {hintText(hint, categories.find((c) => c.id === categoryId)?.name ?? "")}{" "}
+          {/* Tap-to-apply (#232): the suggestion becomes actionable, but the
+              FIELD stays the authority — clicking merely types the number for
+              you, and anything you type afterwards wins. Never auto-applied
+              (ADR-48's spirit: inform, don't override). */}
+          <button
+            type="button"
+            data-testid="estimate-hint-apply"
+            style={{ padding: "0 8px", fontSize: 12 }}
+            onClick={() => {
+              setEffort(String(hint.suggestedMinutes));
+              setAppliedHint(hint.suggestedMinutes);
+            }}
+          >
+            use {hint.suggestedMinutes} min
+          </button>
         </div>
       )}
       {error && (
