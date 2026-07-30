@@ -4,6 +4,7 @@ import { claimXpForKey } from "../../../shared/achievementTiers.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
 import { addDays, localDate, localDayBounds } from "./localDay.js";
 import { nextOccurrence } from "./recurrence.js";
+import { payChallengeIfDue } from "./challengeService.js";
 import {
   computeStreak,
   FREEZE_BANK_CAP,
@@ -57,6 +58,8 @@ export interface CompletionResult {
   newAchievements: string[];
   recurring: boolean;
   levelUp: boolean;
+  /** True when THIS completion landed the daily challenge payout (#231). */
+  challengeCompleted: boolean;
 }
 
 /**
@@ -212,13 +215,25 @@ export function completeTask(
     ).run(earnDay, now.toISOString());
   }
 
-  const levelAfter = levelFromXp(totalXp()).level;
   const newAchievements = checkAchievements({
     completedTask: task,
     completion: { wasDrawn, wasWarmup: warmup != null, momentum, now },
   });
+  // The daily challenge (#231): this completion may have satisfied today's
+  // objective — pay it inside the same transaction. The level comparison sits
+  // AFTER the payout so a challenge bonus that crosses a level threshold
+  // reports levelUp honestly.
+  const challengeCompleted = payChallengeIfDue(now);
+  const levelAfter = levelFromXp(totalXp()).level;
 
-  return { xpAwarded: xp, bonus, newAchievements, recurring, levelUp: levelAfter > levelBefore };
+  return {
+    xpAwarded: xp,
+    bonus,
+    newAchievements,
+    recurring,
+    levelUp: levelAfter > levelBefore,
+    challengeCompleted,
+  };
 }
 
 // ---------------------------------------------------------------------------

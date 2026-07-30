@@ -308,7 +308,11 @@ describe("migration v2 → v17 (deferred_until, blocked, subtask_order_mode, win
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'xp_ledger'")
       .get();
     expect(table).toBeTruthy();
-    expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
+    // Only the freshApp neutralizer row (amount-0 challenge pre-pay, #231)
+    // may exist — the migration itself backfills nothing.
+    expect(
+      db.prepare("SELECT COUNT(*) AS n FROM xp_ledger WHERE reason != 'challenge'").get(),
+    ).toEqual({ n: 0 });
   });
 
   it("creates the achievement_customizations table, empty (no backfill) (#177)", async () => {

@@ -127,6 +127,9 @@
 |*Booster pack / card back*
 |The XP shop's purchase unit (#230): 250 XP opens two rarity-weighted card-back pulls on the #224 stage; duplicates refund 75 XP. Owned/equipped backs live in settings; the Draw page front face wears the equipped weave via `data-back`, defaulting to the classic for unknown keys. A bought streak freeze is its own `buy:freeze` ledger row — the token derives from the purchase day, never a `streak_freezes` write
 
+|*Daily challenge*
+|One derived objective per LOCAL day (#231, ADR-63): the day string hashes into an append-only pool; progress derives from the day's rows (localDayBounds); completing it pays +50 XP as an `xp_ledger` row keyed `(challenge, day)` — exactly once, landed by completeTask or timer-stop through one shared function, never by a GET
+
 |*Material*
 |A file (PDF/txt/md) or note attached to a goal; selectable context for AI calls
 

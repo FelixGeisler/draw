@@ -3,10 +3,24 @@ import type express from "express";
 /**
  * The temp DATA_DIR is set by test/setup.ts before any import touches
  * src/db.ts — one fresh database per test file (forked pool).
+ *
+ * Every suite gets today's daily challenge PRE-PAID at 0 XP (#231): which
+ * completion would otherwise trigger the +50 payout depends on what the
+ * calendar day hashes to, so an exact-XP assertion could pass on complete-3
+ * days and fail on drawn-2 days — the #219 green-some-days class of flake.
+ * The neutralizer uses the product's own idempotency row (INSERT OR IGNORE
+ * against UNIQUE(reason, ref)), not a behavior fork; a suite that WANTS the
+ * payout (daily-challenge.test.ts) deletes its ledger rows and takes over.
  */
 export async function freshApp(): Promise<express.Express> {
   const { createApp } = await import("../src/app.js");
-  return createApp();
+  const app = createApp();
+  const { db } = await import("../src/db.js");
+  const { localDate } = await import("../src/services/localDay.js");
+  db.prepare(
+    "INSERT OR IGNORE INTO xp_ledger (amount, reason, ref, created_at) VALUES (0, 'challenge', ?, ?)",
+  ).run(localDate(new Date()), new Date().toISOString());
+  return app;
 }
 
 /** Direct DB access for seeding/asserting (same instance the app uses). */
