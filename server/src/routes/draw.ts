@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { notifyUnlocks } from "../services/notifyService.js";
 import {
   currentDraw,
   drawPool,
@@ -32,6 +33,7 @@ drawRouter.post("/", (req, res) => {
   // the draw chain (first_draw…draw_10000) derives from that count — the
   // event carries nothing (#156).
   const newAchievements = result.task ? checkAchievements({}) : [];
+  notifyUnlocks(newAchievements); // post-commit (#235)
   res.json({ ...result, newAchievements });
 });
 
@@ -59,6 +61,7 @@ drawRouter.post("/warmup", (req, res) => {
   // deliberately excludes (dealt, not gambled) — the count-derived check
   // needs no event flag (#156).
   const newAchievements = result.task ? checkAchievements({}) : [];
+  notifyUnlocks(newAchievements); // post-commit (#235)
   res.json({ ...result, newAchievements });
 });
 

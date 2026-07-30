@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db } from "../db.js";
 import { checkAchievements } from "../services/gamificationService.js";
+import { notifyGoalAchieved, notifyUnlocks } from "../services/notifyService.js";
 import { MINUTES_EXPR } from "../services/statsService.js";
 
 export const goalsRouter = Router();
@@ -119,6 +120,10 @@ goalsRouter.patch("/:id", (req, res) => {
   const achieved = body.status === "achieved" && existing.status !== "achieved";
   const newAchievements = achieved ? checkAchievements({}) : [];
   const goal = getGoal(id) as Record<string, unknown>;
+  // Post-commit (#235): the status write above is done; a felled goal and
+  // any unlock it caused are facts worth a ping.
+  if (achieved) notifyGoalAchieved(String(goal.title));
+  notifyUnlocks(newAchievements);
   res.json(newAchievements.length ? { ...goal, newAchievements } : goal);
 });
 

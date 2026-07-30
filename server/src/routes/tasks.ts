@@ -11,6 +11,7 @@ import {
   type RestorableTask,
 } from "../services/drawService.js";
 import { reorderSibling, spreadBetween } from "../services/siblingOrder.js";
+import { notifyChallengeCompleted, notifyUnlocks } from "../services/notifyService.js";
 import {
   completeTask,
   undoLatestCompletion,
@@ -613,6 +614,15 @@ tasksRouter.patch("/:id", (req, res) => {
         raw.parent_id != null ? maybeAutoCompleteParent(raw.parent_id) : null;
       return { result, parentCompletion };
     })();
+    // Post-commit (#235, ADR-67): the transaction above has committed, so
+    // these events are facts. One unlock batch covers the cascade.
+    notifyUnlocks([
+      ...outcome.result.newAchievements,
+      ...(outcome.parentCompletion?.newAchievements ?? []),
+    ]);
+    if (outcome.result.challengeCompleted || outcome.parentCompletion?.challengeCompleted) {
+      notifyChallengeCompleted();
+    }
     return res.json({
       task: getTask(id),
       ...outcome.result,

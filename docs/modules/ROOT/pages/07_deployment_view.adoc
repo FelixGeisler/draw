@@ -310,5 +310,9 @@ modes keeps the data
 workflow on pushes to `main`
 |===
 
-*Outbound network:* only `api.anthropic.com`, and only when an AI feature is
-explicitly invoked with a configured key.
+*Outbound network:* `api.anthropic.com`, only when an AI feature is
+explicitly invoked with a configured key — and the user-configured
+`notify_url` webhook (#235/ADR-67), only when set in Settings ->
+Notifications: a fire-and-forget plain-text POST (ntfy-compatible) on
+achievement unlocks, achieved goals, and completed daily challenges. Unset
+(the default) means zero outbound calls from the notification path.

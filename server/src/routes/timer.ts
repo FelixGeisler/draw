@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { payChallengeIfDue } from "../services/challengeService.js";
+import { notifyChallengeCompleted } from "../services/notifyService.js";
 import { db } from "../db.js";
 
 export const timerRouter = Router();
@@ -55,5 +56,6 @@ timerRouter.post("/stop", (_req, res) => {
   // exactly-once ledger constraint makes the double coverage harmless.
   const challengeCompleted = payChallengeIfDue();
   const stopped = db.prepare(`${ENTRY_SELECT} WHERE id = ?`).get(entry.id) as Record<string, unknown>;
+  if (challengeCompleted) notifyChallengeCompleted(); // post-commit (#235)
   res.json(challengeCompleted ? { ...stopped, challengeCompleted } : stopped);
 });

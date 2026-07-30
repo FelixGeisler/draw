@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useCategories, useSettings } from "../hooks/useTasks";
 import { useAiStatus, useRemoveApiKey, useSetApiKey } from "../hooks/useAi";
@@ -206,6 +206,113 @@ function AiKeySection() {
       {(setKey.error || removeKey.error) && (
         <div style={{ color: "var(--danger)", fontSize: 13 }}>
           {(setKey.error ?? removeKey.error)?.message}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Outbound notifications (#235, ADR-67): an ntfy-compatible URL, write-only
+ * like the API key — the server stores it privately and GET /api/notify
+ * reports only a presence flag. The test button is the one send the user can
+ * watch answer.
+ */
+function NotifySection() {
+  const qc = useQueryClient();
+  const status = useQuery({
+    queryKey: ["notify"],
+    queryFn: () => api.get<{ configured: boolean }>("/api/notify"),
+  });
+  const [draft, setDraft] = useState("");
+  const [testResult, setTestResult] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (url: string) => api.put("/api/notify/url", { url }),
+    onSuccess: () => {
+      setDraft("");
+      setTestResult(null);
+      qc.invalidateQueries({ queryKey: ["notify"] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api.delete("/api/notify/url"),
+    onSuccess: () => {
+      setTestResult(null);
+      qc.invalidateQueries({ queryKey: ["notify"] });
+    },
+  });
+  const test = useMutation({
+    mutationFn: () => api.post<{ ok: boolean; status?: number; error?: string }>("/api/notify/test", {}),
+    onSuccess: (r) =>
+      setTestResult(r.ok ? `Delivered (HTTP ${r.status})` : `Failed: ${r.error ?? `HTTP ${r.status}`}`),
+  });
+
+  const configured = status.data?.configured;
+  return (
+    <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
+      <h3 style={{ margin: 0 }}>Notifications</h3>
+      {configured ? (
+        <p style={{ margin: 0, color: "var(--ok)" }} data-testid="notify-status">
+          ✓ Webhook configured — unlocks, achieved goals and completed daily challenges will be
+          posted there.
+        </p>
+      ) : (
+        <p style={{ margin: 0, color: "var(--text-dim)" }} data-testid="notify-status">
+          {/* Not "Not configured." — the AI section above owns that exact
+              phrase and the ai-key E2E locates it page-wide (strict mode). */}
+          No webhook configured. Enter an ntfy-compatible URL (e.g.{" "}
+          <code>https://ntfy.sh/your-topic</code>) and Draw will POST a short message on every
+          achievement unlock, achieved goal, and completed daily challenge.
+        </p>
+      )}
+      <div className="setting-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          type="url"
+          aria-label="Notification URL"
+          data-testid="notify-url-input"
+          placeholder={configured ? "Replace URL (https://…)" : "https://ntfy.sh/your-topic"}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && draft.trim()) save.mutate(draft.trim());
+          }}
+          style={{ flex: 1, maxWidth: 380 }}
+        />
+        <button
+          data-testid="notify-save"
+          disabled={!draft.trim() || save.isPending}
+          onClick={() => save.mutate(draft.trim())}
+        >
+          Save URL
+        </button>
+        {configured && (
+          <>
+            <button data-testid="notify-test" disabled={test.isPending} onClick={() => test.mutate()}>
+              Send test
+            </button>
+            <button
+              data-testid="notify-remove"
+              title="Remove the stored URL — notifications turn off"
+              disabled={remove.isPending}
+              onClick={() => remove.mutate()}
+            >
+              Remove
+            </button>
+          </>
+        )}
+      </div>
+      <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
+        Stored in the local database, never shown again after saving. Delivery is
+        fire-and-forget — a dead endpoint never slows the app.
+      </p>
+      {testResult && (
+        <div data-testid="notify-test-result" style={{ fontSize: 13 }}>
+          {testResult}
+        </div>
+      )}
+      {(save.error || remove.error) && (
+        <div style={{ color: "var(--danger)", fontSize: 13 }}>
+          {(save.error ?? remove.error)?.message}
         </div>
       )}
     </section>
@@ -443,6 +550,8 @@ export function SettingsPage() {
       <h1>Settings</h1>
 
       <AiKeySection />
+
+      <NotifySection />
 
       <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
         <h3 style={{ margin: 0 }}>Draw tuning</h3>

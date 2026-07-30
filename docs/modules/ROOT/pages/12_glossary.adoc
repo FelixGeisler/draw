@@ -136,6 +136,9 @@
 |*Draw Wrapped*
 |The "Your year" panel closing Stats (#234, ADR-66): the calendar year folded client-side (`lib/wrapped.ts`) — cards, hours, XP, holos, deepest streak (frozen days and rest weekdays bridge), rarest achievement pulled, biggest goal felled — rendered to a locally downloaded PNG; nothing stored, nothing leaves the machine
 
+|*Outbound notification*
+|A fire-and-forget plain-text POST to the private `notify_url` setting (#235, ADR-67), sent by routes strictly post-commit through the single `notify()` door on achievement unlocks (batched), achieved goals, and completed daily challenges; unset means zero network calls, and a dead endpoint changes nothing but a log line
+
 |*Material*
 |A file (PDF/txt/md) or note attached to a goal; selectable context for AI calls
 
