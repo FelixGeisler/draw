@@ -1,0 +1,84 @@
+/* Boss battles (#229): the HP treatment of a goal's remaining work. Reads as
+   a boss bar — deep track, blood-red fill draining left, gold caption — while
+   staying inside the app's dark idiom. Enrage borrows the danger color and
+   pulses ONLY under no-preference; the end-state colors apply either way. */
+
+.boss-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.boss-bar-track {
+  flex: 1;
+  min-width: 0;
+  height: 12px;
+  border-radius: 7px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.boss-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #e4574f, #a32c2c);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.boss-bar-caption {
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.boss-bar-dmg {
+  color: var(--warn);
+}
+
+.boss-bar-rage {
+  color: var(--danger);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.boss-bar.enraged .boss-bar-track {
+  border-color: var(--danger);
+}
+
+.boss-bar.enraged .boss-bar-fill {
+  background: linear-gradient(180deg, #ff6b5e, #c01f1f);
+}
+
+/* Downed: the empty bar dims and the caption takes over — the kill screen
+   itself is the existing goal-achieved overlay, not this bar. */
+.boss-bar.downed .boss-bar-track {
+  opacity: 0.5;
+}
+
+.boss-bar.downed .boss-bar-caption {
+  color: var(--warn);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .boss-bar-fill {
+    transition: width 0.5s ease;
+  }
+
+  .boss-bar.enraged .boss-bar-track {
+    animation: boss-rage 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes boss-rage {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 95, 107, 0);
+  }
+  50% {
+    box-shadow: 0 0 10px 1px rgba(255, 95, 107, 0.4);
+  }
+}
