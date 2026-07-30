@@ -3074,3 +3074,40 @@ goal-achieved overlay, not a second celebration.
 
 *Out of scope:* boss art/avatars, damage numbers floating off completions,
 and any change to the feasibility classifier itself.
+
+== ADR-62: The XP shop — an append-only ledger, booster packs of card backs, and the purchase row as the freeze token
+
+*Context:* XP was a pure score: levels its only meaning, claiming its only
+decision (#230). Nothing in the economy looped back into the product's card
+identity, and the pack-opening moment #224 built existed only for unlocks.
+
+*Decision:* Migration v17 adds `xp_ledger(amount, reason, ref, created_at,
+UNIQUE(reason, ref))` — the third stored XP source after completions and
+claims (amending ADR-42 exactly as ADR-42 amended ADR-5): purchases are
+negative rows, duplicate refunds and future payouts positive ones, and
+`totalXp()` sums all three. Still no counter column anywhere. The shop
+sells a *booster pack* (250 XP → two card-back pulls, rarity-weighted,
+duplicates refund 75) and a *streak freeze* (500 XP, capped at the #58 bank).
+Cosmetics live in settings (`owned_card_backs`, `equipped_card_back`);
+the Draw page front face wears the equipped weave via a `data-back`
+attribute whose CSS default — and unknown-key fallback — is the shipped
+classic.
+
+*Rationale:* The client mints a `ref` per purchase click and the ledger's
+UNIQUE(reason, ref) turns any replay into a 409 — the claim endpoint's
+double-click safety, generalised. Spending can lower the level (the level
+chain's progress bar may regress — the undo precedent); unlocked
+achievements never re-lock, because that table is append-only. The freeze
+purchase deliberately writes NO streak_freezes row: the milestone table's
+UNIQUE(milestone_day) holds one row per day, and a shop row there would also
+make shouldEarnFreeze see "today already earned" and silently swallow a
+real organic milestone landing on the purchase day. Instead the buy:freeze
+LEDGER ROW IS THE TOKEN — earnedFreezeDays() derives it from the purchase's
+local day, the fold already counts multiple earns per day, and the
+same-day-organic-earn regression is pinned by an integration test. Pull odds
+are a service fact pinned with an injected rng; the HTTP surface promises
+only pack shape and balance arithmetic. A full bank refuses BEFORE the
+charge — a refusal that costs XP is a bug, not a rule.
+
+*Out of scope:* consumable items beyond the freeze, trading/duplicates
+protection beyond the flat refund, and pack pity timers.
