@@ -3164,3 +3164,28 @@ rounding, same silence when the suggestion equals the input.
 
 *Out of scope:* auto-applying, per-task learning, and any change to the
 bias math or its minimum sample.
+
+== ADR-65: The weekly run report — a closed week folded client-side from the activity payload
+
+*Context:* Stats answers "where did the time go" but never closes a week
+(#233); the streak-and-XP loop had no weekly heartbeat.
+
+*Decision:* A "This week" recap card at the top of Stats: completions,
+minutes and XP with deltas against the previous seven days, the best day,
+and the trophy rarities minted (the ADR-45 derivation over completed cards).
+Folded in a pure client lib (`lib/weeklyReport.ts`) from the SAME activity
+payload the History calendar fetches — no new API, no stored aggregates
+(ADR-2). Weeks are LOCAL and Monday-first (the History calendar's
+convention); the fold is pure date-string math over an injected "today",
+so its tests stay green at any wall-clock hour and in any suite timezone
+(#219's rules, applied preemptively). A week with no activity renders
+nothing: a recap of nothing is noise, not encouragement.
+
+*Rationale:* Client-side because every number is already in the activity
+response — a `/api/report` endpoint would be a second aggregation to keep
+honest. Deltas compare exactly the seven days before the week's Monday, not
+a rolling window, so Monday morning's report compares a full closed week.
+
+*Out of scope:* estimate-accuracy trends (the estimates panel below owns
+those), history beyond one week-over-week comparison, and any server-side
+aggregation or storage.

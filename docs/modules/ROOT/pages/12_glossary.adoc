@@ -130,6 +130,9 @@
 |*Daily challenge*
 |One derived objective per LOCAL day (#231, ADR-63): the day string hashes into an append-only pool; progress derives from the day's rows (localDayBounds); completing it pays +50 XP as an `xp_ledger` row keyed `(challenge, day)` — exactly once, landed by completeTask or timer-stop through one shared function, never by a GET
 
+|*Weekly run report*
+|The "This week" recap card atop Stats (#233, ADR-65): completions, minutes, XP, minted trophy rarities, best day, and deltas against the previous seven days — folded client-side (`lib/weeklyReport.ts`) from the activity payload over Monday-first LOCAL weeks; no new API, no stored aggregates, hidden when the week is empty
+
 |*Material*
 |A file (PDF/txt/md) or note attached to a goal; selectable context for AI calls
 
