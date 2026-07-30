@@ -11,6 +11,7 @@ import { activityRouter } from "./routes/activity.js";
 import { gamificationRouter } from "./routes/gamification.js";
 import { achievementsRouter } from "./routes/achievements.js";
 import { goalsRouter } from "./routes/goals.js";
+import { shopRouter } from "./routes/shop.js";
 import { goalMaterialsRouter, materialsRouter } from "./routes/materials.js";
 import { aiRouter } from "./routes/ai.js";
 import { backupRouter } from "./routes/backup.js";
@@ -89,6 +90,7 @@ export function createApp(options: AppOptions = {}) {
   app.use("/api/activity", activityRouter);
   app.use("/api/gamification", gamificationRouter);
   app.use("/api/achievements", achievementsRouter);
+  app.use("/api/shop", shopRouter);
   app.use("/api/goals", goalsRouter);
   app.use("/api/goals/:id/materials", goalMaterialsRouter);
   app.use("/api/materials", materialsRouter);

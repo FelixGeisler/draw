@@ -28,7 +28,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 16;
+export const CURRENT_VERSION = 17;
 
 function migrate() {
   const version = db.pragma("user_version", { simple: true }) as number;
@@ -347,6 +347,26 @@ function migrate() {
         title TEXT,
         description TEXT,
         hidden INTEGER NOT NULL DEFAULT 0
+      )`);
+    }
+
+    if (version < 17) {
+      // XP ledger (#230, ADR-62): the third stored XP source after the
+      // completions log and achievement claims (ADR-42). Every row is an
+      // event fact — a shop purchase (negative amount), a pack-duplicate
+      // refund or a daily-challenge payout (positive) — and totalXp() sums
+      // them, so there is STILL no xp counter column anywhere (ADR-5).
+      //
+      // UNIQUE(reason, ref) is the idempotency spine: "one challenge payout
+      // per local day" and "one purchase per client-supplied ref" are both
+      // INSERT OR IGNORE against it, the streak_freezes milestone pattern.
+      db.exec(`CREATE TABLE xp_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        amount INTEGER NOT NULL,
+        reason TEXT NOT NULL,
+        ref TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(reason, ref)
       )`);
     }
   }

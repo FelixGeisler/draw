@@ -102,9 +102,9 @@ beforeAll(async () => {
 });
 
 describe("migration v14 → v15 adds tasks.sort_order (#157, ADR-43)", () => {
-  it("bumps user_version to 16 (v15 sort_order, then v16 customizations ride the same chain)", async () => {
+  it("bumps user_version to 17 (v15 sort_order, then v16 customizations ride the same chain)", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(16);
+    expect(db.pragma("user_version", { simple: true })).toBe(17);
   });
 
   it("adds sort_order as REAL NOT NULL DEFAULT 0", async () => {

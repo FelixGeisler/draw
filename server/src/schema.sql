@@ -188,6 +188,18 @@ CREATE TABLE streak_freezes (
 -- all-default row). USER STATE, not derivable (ADR-2 bans stored derivables,
 -- not stored facts — it stands with resolved_at, ADR-38, and sort_order,
 -- ADR-43). Unlock/claim/XP/rarity and the shared key set stay untouched.
+-- XP ledger (#230, ADR-62): purchases (negative), refunds and challenge
+-- payouts (positive). Third XP source after completions and claims; summed by
+-- totalXp(), never a counter. UNIQUE(reason, ref) = idempotency spine.
+CREATE TABLE xp_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  amount INTEGER NOT NULL,
+  reason TEXT NOT NULL,
+  ref TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(reason, ref)
+);
+
 CREATE TABLE achievement_customizations (
   key TEXT PRIMARY KEY,
   title TEXT,
