@@ -3189,3 +3189,28 @@ a rolling window, so Monday morning's report compares a full closed week.
 *Out of scope:* estimate-accuracy trends (the estimates panel below owns
 those), history beyond one week-over-week comparison, and any server-side
 aggregation or storage.
+
+== ADR-66: Draw Wrapped — a year folded client-side, shipped as a local PNG
+
+*Context:* A year of use produces nothing shareable (#234); self-hosters
+love artifacts.
+
+*Decision:* A "Your year" panel closing the Stats page, folding the
+CALENDAR year from payloads the page already holds: activity days (cards,
+hours, XP, holos), the gamification snapshot (achievements + full-history
+frozen days), the achieved-goals list, and the rest-weekday setting. The
+fold lives in `lib/wrapped.ts` — pure date-string math over an injected
+"today" (#219 rules). "Deepest streak" replays the live streak's
+semantics over the year: completion days count, recorded frozen days and
+the configured rest weekdays bridge, nothing else does. The CURRENT
+rest-weekday set applies to the whole year, because config history is not
+recorded and pretending otherwise would be a second streak implementation.
+The shareable is a 1080×1350 PNG drawn on a local canvas with the palette
+inlined (canvas cannot read CSS variables, and Wrapped keeps the dark card
+ground even if a theme ever changes the live tokens), saved via an
+`<a download>` — no data leaves the machine, nothing is stored. The panel
+opens from a one-line teaser (§8's hide-the-mountain rule) and the reveal
+animates only under `prefers-reduced-motion: no-preference`.
+
+*Out of scope:* month-by-month breakdowns, multi-year history, social
+integrations, and any server-side aggregation.

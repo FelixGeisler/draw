@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ShopPanel } from "../components/ShopPanel";
 import { WeeklyReport } from "../components/WeeklyReport";
+import { WrappedCard } from "../components/WrappedCard";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
@@ -313,6 +314,10 @@ export function StatsPage() {
           /api/gamification — a failing or refetching stats query must never
           take either down with it. */}
       <HistoryCalendar />
+
+      {/* Draw Wrapped (#234): the year panel closes the page — a keepsake,
+          not a metric, so it sits after the working views. */}
+      <WrappedCard />
 
       <AchievementsGrid />
       <ShopPanel />
