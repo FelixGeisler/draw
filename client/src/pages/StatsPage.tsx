@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ShopPanel } from "../components/ShopPanel";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
@@ -310,6 +311,7 @@ export function StatsPage() {
       <HistoryCalendar />
 
       <AchievementsGrid />
+      <ShopPanel />
     </div>
   );
 }
