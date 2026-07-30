@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="nsh-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#151a33"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="nsh-glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#6d84e8" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#6d84e8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="nsh-moonhalo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#aebcff" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#aebcff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="nsh-moon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#c9d6f2"/>
+    </linearGradient>
+    <linearGradient id="nsh-wall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2c3462"/>
+      <stop offset="1" stop-color="#171b31"/>
+    </linearGradient>
+    <radialGradient id="nsh-spill" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffb64f" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#ffb64f" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="nsh-room" cx="40%" cy="62%" r="80%">
+      <stop offset="0" stop-color="#ffd98f"/>
+      <stop offset=".38" stop-color="#dd9440"/>
+      <stop offset=".72" stop-color="#70431f"/>
+      <stop offset="1" stop-color="#2b1a10"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#nsh-bg)"/>
+  <ellipse cx="150" cy="184" rx="150" ry="160" fill="url(#nsh-glow)"/>
+
+  <!-- sky: crescent moon upper left, quiet stars, thin night clouds -->
+  <circle cx="82" cy="96" r="62" fill="url(#nsh-moonhalo)"/>
+  <g transform="rotate(18 82 96)">
+    <path d="M82 58 A38 38 0 0 0 82 134 A52 52 0 0 1 82 58 Z" fill="url(#nsh-moon)"/>
+    <circle cx="54" cy="86" r="5" fill="#c3cfec" opacity=".8"/>
+    <circle cx="58" cy="108" r="3.4" fill="#c3cfec" opacity=".8"/>
+    <circle cx="63" cy="70" r="2.8" fill="#c3cfec" opacity=".8"/>
+  </g>
+  <g fill="#232b52" opacity=".85">
+    <ellipse cx="58" cy="128" rx="30" ry="10"/>
+    <ellipse cx="92" cy="122" rx="34" ry="12"/>
+    <ellipse cx="126" cy="130" rx="26" ry="9"/>
+  </g>
+  <g fill="#202848" opacity=".7">
+    <ellipse cx="212" cy="66" rx="26" ry="8"/>
+    <ellipse cx="240" cy="60" rx="20" ry="7"/>
+  </g>
+  <g fill="#f4f8ff">
+    <path d="M168 53 Q168 60 175 60 Q168 60 168 67 Q168 60 161 60 Q168 60 168 53 Z" opacity=".95"/>
+    <path d="M238 93 Q238 98 243 98 Q238 98 238 103 Q238 98 233 98 Q238 98 238 93 Z" opacity=".8"/>
+    <path d="M54 46 Q54 50 58 50 Q54 50 54 54 Q54 50 50 50 Q54 50 54 46 Z" opacity=".7"/>
+    <circle cx="128" cy="86" r="2" opacity=".7"/>
+    <circle cx="206" cy="132" r="1.8" opacity=".55"/>
+    <circle cx="258" cy="148" r="2.2" opacity=".65"/>
+    <circle cx="36" cy="152" r="1.6" opacity=".5"/>
+    <circle cx="196" cy="44" r="1.5" opacity=".5"/>
+  </g>
+
+  <!-- the building wall: cornice catching moonlight, brick joints below -->
+  <rect x="0" y="189" width="300" height="231" fill="url(#nsh-wall)"/>
+  <rect x="0" y="176" width="300" height="13" fill="#3a4374"/>
+  <rect x="0" y="176" width="300" height="3.5" fill="#5a64a0"/>
+  <rect x="0" y="189" width="300" height="5" fill="#0d1017" opacity=".45"/>
+  <g fill="#0d1017" opacity=".3">
+    <rect x="0" y="219" width="300" height="2.5"/>
+    <rect x="0" y="249" width="300" height="2.5"/>
+    <rect x="0" y="279" width="300" height="2.5"/>
+    <rect x="54" y="192" width="2.5" height="26"/>
+    <rect x="268" y="192" width="2.5" height="26"/>
+    <rect x="30" y="221" width="2.5" height="27"/>
+    <rect x="108" y="221" width="2.5" height="27"/>
+    <rect x="262" y="221" width="2.5" height="27"/>
+    <rect x="76" y="251" width="2.5" height="27"/>
+    <rect x="256" y="251" width="2.5" height="27"/>
+    <rect x="44" y="281" width="2.5" height="27"/>
+    <rect x="120" y="281" width="2.5" height="27"/>
+    <rect x="270" y="281" width="2.5" height="27"/>
+  </g>
+  <rect x="42" y="222" width="34" height="25" fill="#3d4780" opacity=".4"/>
+  <rect x="254" y="252" width="34" height="25" fill="#3d4780" opacity=".35"/>
+  <rect x="88" y="282" width="34" height="25" fill="#3d4780" opacity=".3"/>
+
+  <!-- warm lamplight spilling from the window onto the brick -->
+  <ellipse cx="195" cy="258" rx="118" ry="105" fill="url(#nsh-spill)"/>
+
+  <!-- the tall window: stone surround, lintel and sill -->
+  <rect x="141" y="195" width="108" height="130" fill="#333c6b"/>
+  <rect x="136" y="189" width="118" height="11" rx="2" fill="#3d4780"/>
+  <rect x="134" y="316" width="122" height="11" rx="2" fill="#3d4780"/>
+  <rect x="134" y="316" width="122" height="3" fill="#59639f" opacity=".8"/>
+
+  <!-- inside: one lamp still burning over a desk, someone at work -->
+  <rect x="150" y="204" width="90" height="112" fill="url(#nsh-room)"/>
+  <rect x="150" y="293" width="90" height="23" fill="#1c1209"/>
+  <rect x="150" y="204" width="90" height="24" fill="#150e08" opacity=".5"/>
+  <!-- the worker, hunched toward the lamp -->
+  <path d="M199 286 Q200 268 212 264 L222 264 Q231 270 231 286 Z" fill="#0d1017"/>
+  <circle cx="215" cy="253" r="10" fill="#0d1017"/>
+  <path d="M203 272 Q192 277 185 284" fill="none" stroke="#0d1017" stroke-width="7" stroke-linecap="round"/>
+  <rect x="233" y="258" width="5" height="28" fill="#0d1017"/>
+  <!-- cone of lamplight falling on the papers -->
+  <path d="M175 262 L191 264 L203 286 L163 286 Z" fill="#ffe3a1" opacity=".4"/>
+  <g transform="rotate(-3 188 283)">
+    <rect x="179" y="280" width="17" height="4.5" rx="1" fill="#ffe6b0"/>
+    <rect x="195" y="281.5" width="11" height="3" rx="1" fill="#ffd98f" opacity=".9"/>
+  </g>
+  <rect x="150" y="286" width="90" height="7" fill="#0d1017"/>
+  <!-- the desk lamp -->
+  <rect x="169.5" y="258" width="3" height="27" fill="#0d1017"/>
+  <path d="M171 259 L184 250" fill="none" stroke="#0d1017" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M172 245 L197 251 L190 264 L173 258 Z" fill="#0d1017"/>
+  <ellipse cx="184" cy="261" rx="8" ry="3.5" fill="#ffefc4" opacity=".95"/>
+  <ellipse cx="171" cy="285" rx="7.5" ry="3" fill="#0d1017"/>
+  <!-- glazing bars framing the scene -->
+  <rect x="150" y="228" width="90" height="6" fill="#0d1017"/>
+  <rect x="150" y="204" width="90" height="112" fill="none" stroke="#0d1017" stroke-width="6"/>
+</svg>

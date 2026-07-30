@@ -49,6 +49,17 @@ import goals25 from "../assets/achievements/goals_25.svg";
 import hours10 from "../assets/achievements/hours_10.svg";
 import hours100 from "../assets/achievements/hours_100.svg";
 import hours1000 from "../assets/achievements/hours_1000.svg";
+import drawn10 from "../assets/achievements/drawn_10.svg";
+import drawn100 from "../assets/achievements/drawn_100.svg";
+import drawn1000 from "../assets/achievements/drawn_1000.svg";
+import steps10 from "../assets/achievements/steps_10.svg";
+import steps100 from "../assets/achievements/steps_100.svg";
+import steps500 from "../assets/achievements/steps_500.svg";
+import holoHunter from "../assets/achievements/holo_hunter.svg";
+import momentumArt from "../assets/achievements/momentum.svg";
+import wellRounded from "../assets/achievements/well_rounded.svg";
+import nightShift from "../assets/achievements/night_shift.svg";
+import comebackArt from "../assets/achievements/comeback.svg";
 
 const ART: Record<string, string> = {
   deck_clearer: deckClearer,
@@ -77,6 +88,17 @@ const ART: Record<string, string> = {
   hours_10: hours10,
   hours_100: hours100,
   hours_1000: hours1000,
+  drawn_10: drawn10,
+  drawn_100: drawn100,
+  drawn_1000: drawn1000,
+  steps_10: steps10,
+  steps_100: steps100,
+  steps_500: steps500,
+  holo_hunter: holoHunter,
+  momentum: momentumArt,
+  well_rounded: wellRounded,
+  night_shift: nightShift,
+  comeback: comebackArt,
 };
 
 /** Undefined for an unknown key — the card falls back to its gradient face

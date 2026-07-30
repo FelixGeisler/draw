@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="cb-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#14222e"/><stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="cb-glow" cx="50%" cy="42%" r="55%">
+      <stop offset="0" stop-color="#ffb64f" stop-opacity=".3"/><stop offset="1" stop-color="#ffb64f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="cb-flame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e8571f"/><stop offset=".55" stop-color="#ff8c33"/><stop offset="1" stop-color="#ffb64f"/>
+    </linearGradient>
+    <linearGradient id="cb-icetop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eaf8ff"/><stop offset="1" stop-color="#9adcff"/>
+    </linearGradient>
+    <linearGradient id="cb-iceL" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fd8ff"/><stop offset="1" stop-color="#2e6d99"/>
+    </linearGradient>
+    <linearGradient id="cb-iceR" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5cb5e6"/><stop offset="1" stop-color="#1d4a6b"/>
+    </linearGradient>
+  </defs>
+  <rect width="300" height="420" fill="url(#cb-bg)"/>
+  <ellipse cx="150" cy="178" rx="150" ry="160" fill="url(#cb-glow)"/>
+  <ellipse cx="150" cy="258" rx="128" ry="66" fill="#7fd0ff" opacity=".06"/>
+  <ellipse cx="150" cy="294" rx="112" ry="14" fill="#0d1017" opacity=".5"/>
+  <!-- cracked ice block -->
+  <polygon points="66,214 150,236 150,298 66,276" fill="url(#cb-iceL)"/>
+  <polygon points="150,236 234,214 234,276 150,298" fill="url(#cb-iceR)"/>
+  <polygon points="66,214 150,192 234,214 150,236" fill="url(#cb-icetop)"/>
+  <polygon points="84,226 96,230 86,268 76,262" fill="#f4f8ff" opacity=".15"/>
+  <polygon points="204,227 214,223 222,256 212,260" fill="#f4f8ff" opacity=".1"/>
+  <polygon points="116,202 122,206 116,210 110,206" fill="#f4f8ff" opacity=".5"/>
+  <polygon points="190,217 195,220 190,223 185,220" fill="#f4f8ff" opacity=".35"/>
+  <path d="M150 236 L146 252 L153 266 L147 282 L151 298" fill="none" stroke="#143c59" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M98 234 L112 249 L103 262 L116 276" fill="none" stroke="#10344f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+  <path d="M112 249 L121 246" fill="none" stroke="#10344f" stroke-width="1.8" stroke-linecap="round" opacity=".9"/>
+  <path d="M196 231 L183 246 L191 259 L178 273" fill="none" stroke="#10344f" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity=".9"/>
+  <path d="M183 246 L174 243" fill="none" stroke="#10344f" stroke-width="1.8" stroke-linecap="round" opacity=".9"/>
+  <path d="M128 214 L108 212 L98 217" fill="none" stroke="#2a6d99" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
+  <path d="M172 216 L192 212 L204 218" fill="none" stroke="#2a6d99" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>
+  <!-- melt water -->
+  <path d="M128 246 L128 256" stroke="#a8e4ff" stroke-width="2" stroke-linecap="round" opacity=".4" fill="none"/>
+  <ellipse cx="128" cy="260" rx="3" ry="5.5" fill="#a8e4ff" opacity=".7"/>
+  <path d="M170 254 L170 264" stroke="#a8e4ff" stroke-width="2" stroke-linecap="round" opacity=".35" fill="none"/>
+  <ellipse cx="170" cy="268" rx="2.5" ry="5" fill="#a8e4ff" opacity=".6"/>
+  <path d="M243 229 C246.5 235 249 238 249 242 C249 246.5 246.4 249.5 243 249.5 C239.6 249.5 237 246.5 237 242 C237 238 239.5 235 243 229 Z" fill="#a8e4ff" opacity=".95"/>
+  <circle cx="241" cy="242" r="1.6" fill="#f4f8ff" opacity=".8"/>
+  <path d="M57 238 C59.6 242.5 61.5 245 61.5 248 C61.5 251.4 59.5 253.5 57 253.5 C54.5 253.5 52.5 251.4 52.5 248 C52.5 245 54.4 242.5 57 238 Z" fill="#7fd0ff" opacity=".95"/>
+  <circle cx="250" cy="222" r="2.5" fill="#a8e4ff" opacity=".7"/>
+  <circle cx="54" cy="228" r="2" fill="#a8e4ff" opacity=".6"/>
+  <!-- steam where fire meets ice -->
+  <path d="M112 194 C104 184 112 174 106 162" fill="none" stroke="#f4f8ff" stroke-width="3" stroke-linecap="round" opacity=".22"/>
+  <path d="M192 196 C200 186 192 176 198 164" fill="none" stroke="#f4f8ff" stroke-width="3" stroke-linecap="round" opacity=".18"/>
+  <!-- warm glow pooling on the ice top edge -->
+  <ellipse cx="150" cy="212" rx="62" ry="13" fill="#ffb64f" opacity=".28"/>
+  <ellipse cx="150" cy="210" rx="40" ry="9" fill="#ffb64f" opacity=".3"/>
+  <path d="M78 211 L150 193 L222 211" fill="none" stroke="#ffcf7a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" opacity=".75"/>
+  <!-- the flame, re-ignited -->
+  <path d="M150 210 C126 208 103 192 103 163 C103 140 116 128 123 106 C128 118 135 124 135 134 C141 116 139 94 152 64 C158 92 181 108 191 134 C199 154 195 172 184 182 C187 169 182 159 173 154 C180 173 177 196 157 207 C155 208.5 152.5 210 150 210 Z" fill="url(#cb-flame)"/>
+  <path d="M150 205 C133 203 118 191 118 170 C118 152 128 142 134 126 C138 136 143 141 143 148 C148 134 146 116 156 94 C161 116 177 128 184 148 C189 163 186 176 178 183 C180 173 176 165 169 162 C174 177 171 194 156 202 C154 204 152 205 150 205 Z" fill="#ffb64f"/>
+  <path d="M152 124 C158 144 175 154 175 173 C175 189 164 199 150 199 C136 199 125 189 125 173 C125 154 146 144 152 124 Z" fill="#ffe9a8"/>
+  <path d="M151 158 C155 168 164 172 164 182 C164 191 158 196 150 196 C142 196 136 191 136 182 C136 172 147 168 151 158 Z" fill="#f4f8ff" opacity=".9"/>
+  <!-- embers -->
+  <circle cx="104" cy="116" r="3" fill="#ffb64f"/>
+  <circle cx="96" cy="152" r="2" fill="#ff8c33" opacity=".9"/>
+  <circle cx="198" cy="100" r="2.6" fill="#ffd27a"/>
+  <circle cx="208" cy="132" r="2" fill="#ff8c33" opacity=".8"/>
+  <circle cx="176" cy="66" r="2" fill="#f4f8ff" opacity=".85"/>
+  <circle cx="132" cy="84" r="1.8" fill="#ffd27a" opacity=".9"/>
+</svg>

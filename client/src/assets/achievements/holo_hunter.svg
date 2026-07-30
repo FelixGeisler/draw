@@ -1,0 +1,125 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="hh-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a1428"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="hh-glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#a875ff" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#a875ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hh-fan" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#f4f8ff" stop-opacity=".14"/>
+      <stop offset="1" stop-color="#f4f8ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hh-red" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ff5a6e" stop-opacity=".95"/>
+      <stop offset=".7" stop-color="#ff5a6e" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#ff5a6e" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hh-gld" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#ffb64f" stop-opacity=".95"/>
+      <stop offset=".7" stop-color="#ffb64f" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#ffb64f" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hh-grn" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#4fd884" stop-opacity=".95"/>
+      <stop offset=".7" stop-color="#4fd884" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#4fd884" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hh-cyn" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#45d8e8" stop-opacity=".95"/>
+      <stop offset=".7" stop-color="#45d8e8" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#45d8e8" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hh-vio" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#a875ff" stop-opacity=".95"/>
+      <stop offset=".7" stop-color="#a875ff" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#a875ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hh-wht" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#f4f8ff" stop-opacity=".8"/>
+      <stop offset="1" stop-color="#f4f8ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="hh-hand" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5a6690"/>
+      <stop offset="1" stop-color="#313852"/>
+    </linearGradient>
+    <radialGradient id="hh-glint" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#cfd8ff" stop-opacity=".5"/>
+      <stop offset="1" stop-color="#cfd8ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#hh-bg)"/>
+  <ellipse cx="150" cy="184" rx="150" ry="160" fill="url(#hh-glow)"/>
+
+  <!-- soft unified fan of light behind the prismatic slivers -->
+  <path d="M136 142 L24 48 L270 66 Z" fill="url(#hh-fan)"/>
+
+  <!-- the rainbow refraction: thin slivers fanning off the card's top edge -->
+  <path d="M100 150 L40 66 L56 60 Z" fill="url(#hh-red)"/>
+  <path d="M113 147 L72 46 L86 41 Z" fill="url(#hh-gld)"/>
+  <path d="M131 142 L114 33 L128 32 Z" fill="url(#hh-grn)"/>
+  <path d="M141 140 L143 34 L150 35 Z" fill="url(#hh-wht)"/>
+  <path d="M149 138 L164 37 L178 42 Z" fill="url(#hh-cyn)"/>
+  <path d="M167 133 L214 55 L227 64 Z" fill="url(#hh-vio)"/>
+  <path d="M174 132 L246 88 L253 97 Z" fill="url(#hh-wht)"/>
+
+  <!-- star sparkles drifting around the catch -->
+  <path d="M58 91 Q58 96 63 96 Q58 96 58 101 Q58 96 53 96 Q58 96 58 91 Z" fill="#f4f8ff"/>
+  <path d="M92 48 Q92 52 96 52 Q92 52 92 56 Q92 52 88 52 Q92 52 92 48 Z" fill="#f4f8ff"/>
+  <path d="M128 57 Q128 60 131 60 Q128 60 128 63 Q128 60 125 60 Q128 60 128 57 Z" fill="#f4f8ff" opacity=".85"/>
+  <path d="M206 61 Q206 66 211 66 Q206 66 206 71 Q206 66 201 66 Q206 66 206 61 Z" fill="#f4f8ff"/>
+  <path d="M241 112 Q241 118 247 118 Q241 118 241 124 Q241 118 235 118 Q241 118 241 112 Z" fill="#ffb64f"/>
+  <path d="M38 144 Q38 148 42 148 Q38 148 38 152 Q38 148 34 148 Q38 148 38 144 Z" fill="#f4f8ff" opacity=".9"/>
+  <path d="M224 172 Q224 176 228 176 Q224 176 224 180 Q224 176 220 176 Q224 176 224 172 Z" fill="#f4f8ff" opacity=".8"/>
+  <path d="M70 187 Q70 192 75 192 Q70 192 70 197 Q70 192 65 192 Q70 192 70 187 Z" fill="#f4f8ff" opacity=".75"/>
+
+  <!-- the hand and its prize, tilted as one -->
+  <g transform="rotate(-14 150 200)">
+
+    <!-- forearm and palm behind the card -->
+    <path d="M206 252 L226 320" fill="none" stroke="#262c44" stroke-width="36" stroke-linecap="round"/>
+    <ellipse cx="205" cy="240" rx="24" ry="34" fill="#313852"/>
+    <path d="M196 288 L232 278" fill="none" stroke="#ffb64f" stroke-width="6" stroke-linecap="round" opacity=".9"/>
+
+    <!-- the 5-star card -->
+    <rect x="104" y="136" width="92" height="128" rx="10" fill="#ffb64f"/>
+    <rect x="109" y="141" width="82" height="118" rx="7" fill="#151a28"/>
+    <!-- five level stars -->
+    <path d="M126 145 L129 150 L126 155 L123 150 Z" fill="#ffb64f"/>
+    <path d="M138 145 L141 150 L138 155 L135 150 Z" fill="#ffb64f"/>
+    <path d="M150 145 L153 150 L150 155 L147 150 Z" fill="#ffb64f"/>
+    <path d="M162 145 L165 150 L162 155 L159 150 Z" fill="#ffb64f"/>
+    <path d="M174 145 L177 150 L174 155 L171 150 Z" fill="#ffb64f"/>
+    <!-- art window -->
+    <rect x="115" y="160" width="70" height="68" fill="#0d1017"/>
+    <rect x="115" y="160" width="70" height="68" fill="none" stroke="#ffb64f" stroke-width="1.2" opacity=".55"/>
+    <ellipse cx="150" cy="196" rx="28" ry="22" fill="#a875ff" opacity=".12"/>
+    <!-- holo sheen across the face -->
+    <path d="M120 252 L152 146 L166 146 L134 252 Z" fill="#f4f8ff" opacity=".06"/>
+    <!-- the glint that says rare -->
+    <circle cx="150" cy="193" r="24" fill="url(#hh-glint)"/>
+    <path d="M150 176 Q150 193 167 193 Q150 193 150 210 Q150 193 133 193 Q150 193 150 176 Z" fill="#f4f8ff"/>
+    <path d="M136 172 Q136 178 142 178 Q136 178 136 184 Q136 178 130 178 Q136 178 136 172 Z" fill="#f4f8ff" opacity=".85"/>
+    <!-- caption plate -->
+    <rect x="115" y="234" width="70" height="16" rx="3" fill="#0d1017" opacity=".9"/>
+    <rect x="121" y="239" width="26" height="3" rx="1.5" fill="#ffb64f" opacity=".85"/>
+    <rect x="121" y="244.5" width="40" height="2.5" rx="1.25" fill="#39415c"/>
+    <!-- the refracting edge burns white -->
+    <path d="M110 137 L190 137" fill="none" stroke="#f4f8ff" stroke-width="3" stroke-linecap="round" opacity=".9"/>
+
+    <!-- fingers wrapping the corner in front -->
+    <rect x="156" y="206" width="48" height="16" rx="8" fill="url(#hh-hand)" stroke="#10141f" stroke-width="2.5"/>
+    <rect x="150" y="224" width="54" height="16" rx="8" fill="url(#hh-hand)" stroke="#10141f" stroke-width="2.5"/>
+    <rect x="155" y="242" width="49" height="16" rx="8" fill="url(#hh-hand)" stroke="#10141f" stroke-width="2.5"/>
+    <rect x="162" y="259" width="42" height="15" rx="7.5" fill="url(#hh-hand)" stroke="#10141f" stroke-width="2.5"/>
+    <path d="M160 210 L194 210" fill="none" stroke="#8b96c2" stroke-width="2.5" stroke-linecap="round" opacity=".5"/>
+
+    <!-- thumb pressing the face -->
+    <path d="M202 212 L174 196" fill="none" stroke="#10141f" stroke-width="21" stroke-linecap="round"/>
+    <path d="M202 212 L174 196" fill="none" stroke="#4d5880" stroke-width="17" stroke-linecap="round"/>
+    <circle cx="176" cy="197" r="6" fill="#8b96c2"/>
+  </g>
+</svg>

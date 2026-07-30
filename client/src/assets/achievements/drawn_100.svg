@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="dh100-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#151a2e"/><stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="dh100-glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#6f78ff" stop-opacity=".32"/><stop offset="1" stop-color="#6f78ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="dh100-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#bcd4ff" stop-opacity=".45"/><stop offset="1" stop-color="#bcd4ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="dh100-face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f8ff"/><stop offset="1" stop-color="#c9d8ff"/>
+    </linearGradient>
+    <linearGradient id="dh100-art" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8a63ff"/><stop offset=".55" stop-color="#4f56c4"/><stop offset="1" stop-color="#2c3684"/>
+    </linearGradient>
+    <linearGradient id="dh100-back" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8a63ff"/><stop offset="1" stop-color="#333c8f"/>
+    </linearGradient>
+    <linearGradient id="dh100-robe" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3e49a2"/><stop offset="1" stop-color="#12162e"/>
+    </linearGradient>
+    <linearGradient id="dh100-hood" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5a63c8"/><stop offset="1" stop-color="#232a5c"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#dh100-bg)"/>
+  <ellipse cx="150" cy="182" rx="150" ry="160" fill="url(#dh100-glow)"/>
+
+  <!-- gentle rays from the great card -->
+  <g fill="#dbe6ff">
+    <polygon points="150,120 141,32 159,32" opacity=".16"/>
+    <polygon points="150,122 74,40 92,34" opacity=".12"/>
+    <polygon points="150,122 208,34 226,40" opacity=".12"/>
+    <polygon points="150,124 34,92 34,108" opacity=".10"/>
+    <polygon points="150,124 266,92 266,108" opacity=".10"/>
+    <polygon points="150,126 66,214 76,224" opacity=".08"/>
+    <polygon points="150,126 224,224 234,214" opacity=".08"/>
+  </g>
+
+  <!-- orbit ring -->
+  <ellipse cx="150" cy="132" rx="102" ry="36" transform="rotate(-9 150 132)" fill="none" stroke="#4f8cff" stroke-opacity=".22" stroke-width="1.5"/>
+
+  <!-- orbiting card, left -->
+  <g transform="translate(62 150) rotate(-16)">
+    <rect x="-18" y="-25" width="36" height="50" rx="4" fill="#ffb64f"/>
+    <rect x="-15.5" y="-22.5" width="31" height="45" rx="3" fill="url(#dh100-back)"/>
+    <polygon points="0,-9 7.5,0 0,9 -7.5,0" fill="#ffb64f"/>
+    <polygon points="0,-9 7.5,0 0,0" fill="#f4f8ff" opacity=".35"/>
+  </g>
+
+  <!-- orbiting card, right -->
+  <g transform="translate(240 118) rotate(13)">
+    <rect x="-16" y="-22" width="32" height="44" rx="4" fill="#ffb64f"/>
+    <rect x="-13.5" y="-19.5" width="27" height="39" rx="3" fill="url(#dh100-back)"/>
+    <polygon points="0,-8 6.5,0 0,8 -6.5,0" fill="#ffb64f"/>
+    <polygon points="0,-8 6.5,0 0,0" fill="#f4f8ff" opacity=".35"/>
+  </g>
+
+  <!-- the great floating card -->
+  <ellipse cx="150" cy="124" rx="82" ry="96" fill="url(#dh100-halo)"/>
+  <rect x="106" y="62" width="88" height="124" rx="9" fill="#ffb64f"/>
+  <rect x="110" y="66" width="80" height="116" rx="6" fill="url(#dh100-face)"/>
+  <rect x="117" y="74" width="66" height="62" rx="3" fill="url(#dh100-art)"/>
+  <circle cx="150" cy="105" r="20" fill="#f4f8ff" opacity=".18"/>
+  <polygon points="150,92.5 153.5,102.6 164.3,102.9 155.7,109.4 158.8,119.6 150,113.5 141.2,119.6 144.3,109.4 135.7,102.9 146.5,102.6" fill="#0d1017" opacity=".35"/>
+  <polygon points="150,91 153.5,101.1 164.3,101.4 155.7,107.9 158.8,118.1 150,112 141.2,118.1 144.3,107.9 135.7,101.4 146.5,101.1" fill="#ffb64f"/>
+  <circle cx="134" cy="88" r="1.2" fill="#f4f8ff" opacity=".8"/>
+  <circle cx="166" cy="121" r="1" fill="#f4f8ff" opacity=".6"/>
+  <rect x="118" y="146" width="50" height="5" rx="2.5" fill="#8fa3d9"/>
+  <rect x="118" y="156" width="64" height="5" rx="2.5" fill="#aebde4" opacity=".8"/>
+  <rect x="118" y="166" width="38" height="5" rx="2.5" fill="#aebde4" opacity=".6"/>
+  <circle cx="181" cy="171" r="4.5" fill="#ffb64f"/>
+
+  <!-- light motes -->
+  <circle cx="88" cy="92" r="2" fill="#f4f8ff" opacity=".7"/>
+  <circle cx="216" cy="74" r="1.6" fill="#ffb64f" opacity=".8"/>
+  <circle cx="60" cy="196" r="1.8" fill="#bcd4ff" opacity=".6"/>
+  <circle cx="238" cy="178" r="2" fill="#f4f8ff" opacity=".5"/>
+  <circle cx="192" cy="52" r="1.4" fill="#bcd4ff" opacity=".7"/>
+  <circle cx="116" cy="48" r="1.5" fill="#ffb64f" opacity=".6"/>
+
+  <!-- hooded disciple, seen from behind, head bowed -->
+  <path d="M 94 344 C 92 302, 98 268, 116 246 C 120 222, 131 202, 150 198 C 169 202, 180 222, 184 246 C 202 268, 208 302, 206 344 Z" fill="url(#dh100-robe)"/>
+  <path d="M 122 252 C 120 222, 133 203, 150 200 C 167 203, 180 222, 178 252 C 166 262, 134 262, 122 252 Z" fill="url(#dh100-hood)"/>
+  <path d="M 150 201 C 145 216, 144 234, 148 254 C 150 258, 152 258, 153 254 C 156 234, 154 216, 150 201 Z" fill="#0d1017" opacity=".55"/>
+  <path d="M 124 254 C 138 264, 162 264, 176 254 C 164 272, 136 272, 124 254 Z" fill="#0d1017" opacity=".5"/>
+  <path d="M 128 268 C 124 292, 122 316, 123 344 L 132 344 C 130 314, 132 292, 136 270 Z" fill="#0d1017" opacity=".35"/>
+  <path d="M 172 268 C 176 292, 178 316, 177 344 L 168 344 C 170 314, 168 292, 164 270 Z" fill="#0d1017" opacity=".35"/>
+  <path d="M 146 262 C 143 290, 143 318, 145 344 L 156 344 C 158 318, 158 290, 155 262 C 152 260, 149 260, 146 262 Z" fill="#0d1017" opacity=".3"/>
+  <path d="M 122 250 C 121 232, 126 215, 134 206 C 128 218, 126 234, 127 250 Z" fill="#8a63ff" opacity=".35"/>
+  <path d="M 130 212 C 136 202, 142 198, 150 198 C 158 198, 165 202, 170 211 C 165 205, 158 202, 150 202 C 142 202, 136 206, 130 212 Z" fill="#bcd4ff" opacity=".95"/>
+  <path d="M 111 254 C 114 244, 119 238, 125 236 C 119 242, 115 249, 113 258 Z" fill="#8a63ff" opacity=".9"/>
+  <path d="M 189 254 C 186 244, 181 238, 175 236 C 181 242, 185 249, 187 258 Z" fill="#8a63ff" opacity=".9"/>
+  <path d="M 103 282 C 101 300, 100 318, 100 336 L 104 336 C 103 318, 104 300, 107 284 Z" fill="#4f8cff" opacity=".35"/>
+  <path d="M 197 282 C 199 300, 200 318, 200 336 L 196 336 C 197 318, 196 300, 193 284 Z" fill="#4f8cff" opacity=".35"/>
+</svg>

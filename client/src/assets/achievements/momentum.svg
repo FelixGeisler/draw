@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="mtm-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26140f"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="mtm-glow" cx="50%" cy="42%" r="55%">
+      <stop offset="0" stop-color="#ff7a45" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#ff7a45" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mtm-trail" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff5f3b"/>
+      <stop offset=".55" stop-color="#d94b2c" stop-opacity=".85"/>
+      <stop offset="1" stop-color="#8f2b1c" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="mtm-hot" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9b8"/>
+      <stop offset=".5" stop-color="#ffb64f"/>
+      <stop offset="1" stop-color="#ff7a45" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="mtm-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffd9a0" stop-opacity=".45"/>
+      <stop offset="1" stop-color="#ffd9a0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="mtm-face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fdf7ec"/>
+      <stop offset="1" stop-color="#ffc06a"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#mtm-bg)"/>
+  <ellipse cx="150" cy="180" rx="150" ry="160" fill="url(#mtm-glow)"/>
+
+  <!-- the comet climbs from lower-left to upper-right; the caption band
+       covers everything below y=300, so the tail dies out above it -->
+
+  <!-- outermost trail: cooling red, fading toward the tail -->
+  <path d="M150 122
+           C 110 168, 78 216, 50 290
+           C 85 250, 128 214, 194 168
+           C 182 150, 166 136, 150 122 Z"
+        fill="url(#mtm-trail)"/>
+
+  <!-- inner trail: still burning gold -->
+  <path d="M157 132
+           C 122 172, 94 214, 68 268
+           C 96 232, 132 200, 188 162
+           C 178 148, 168 140, 157 132 Z"
+        fill="url(#mtm-hot)"/>
+
+  <!-- white-hot core right behind the card -->
+  <path d="M165 141
+           C 140 170, 118 198, 98 238
+           C 122 208, 146 188, 182 158
+           C 176 150, 171 146, 165 141 Z"
+        fill="#fff3c4" opacity=".85"/>
+
+  <!-- detached speed streaks running parallel to the flight line -->
+  <path d="M236 200 C 214 226, 196 248, 182 266" fill="none"
+        stroke="#ff7a45" stroke-width="4" stroke-linecap="round" opacity=".45"/>
+  <path d="M112 218 C 98 238, 88 254, 80 268" fill="none"
+        stroke="#ffb64f" stroke-width="4" stroke-linecap="round" opacity=".45"/>
+  <path d="M252 62 L265 47" fill="none"
+        stroke="#f4f8ff" stroke-width="3" stroke-linecap="round" opacity=".6"/>
+
+  <!-- embers shed along the climb -->
+  <g>
+    <circle cx="224" cy="196" r="4" fill="#ffb64f" opacity=".9"/>
+    <circle cx="243" cy="164" r="2.5" fill="#ff7a45" opacity=".7"/>
+    <circle cx="192" cy="240" r="3" fill="#ff7a45" opacity=".8"/>
+    <circle cx="162" cy="276" r="3.5" fill="#ffb64f" opacity=".75"/>
+    <circle cx="128" cy="262" r="2" fill="#ffb64f" opacity=".55"/>
+    <circle cx="96" cy="292" r="3" fill="#ff7a45" opacity=".6"/>
+    <circle cx="66" cy="254" r="2.5" fill="#ffb64f" opacity=".5"/>
+    <circle cx="108" cy="170" r="2" fill="#ff7a45" opacity=".5"/>
+    <circle cx="188" cy="42" r="2.5" fill="#f4f8ff" opacity=".8"/>
+    <circle cx="268" cy="84" r="2" fill="#ffb64f" opacity=".7"/>
+  </g>
+
+  <!-- heat halo around the head -->
+  <ellipse cx="200" cy="108" rx="88" ry="88" fill="url(#mtm-halo)"/>
+
+  <!-- the card itself is the comet's head, nose-first into the climb -->
+  <g transform="rotate(39 200 108)">
+    <rect x="163" y="56" width="74" height="104" rx="11" fill="#0d1017" opacity=".5" transform="translate(5 9)"/>
+    <rect x="163" y="56" width="74" height="104" rx="11" fill="url(#mtm-face)" stroke="#ffe6bd"/>
+    <rect x="170" y="63" width="60" height="90" rx="7" fill="none" stroke="#ff7a45" stroke-opacity=".55"/>
+    <!-- pip: the app's lightning-quick suit, glowing hot -->
+    <path d="M209 72 L186 114 h14 l-6 32 23 -41 h-14 z" fill="#ff7a45"/>
+  </g>
+</svg>

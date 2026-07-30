@@ -1,0 +1,181 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="s100-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1a142e"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="s100-glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#8a63ff" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#8a63ff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="s100-coreglow" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#4fd8ff" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#4fd8ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s100-top" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5d47a6"/>
+      <stop offset="1" stop-color="#3b2b78"/>
+    </linearGradient>
+    <linearGradient id="s100-left" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#352461"/>
+      <stop offset="1" stop-color="#221743"/>
+    </linearGradient>
+    <linearGradient id="s100-right" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#241a44"/>
+      <stop offset="1" stop-color="#140f28"/>
+    </linearGradient>
+    <linearGradient id="s100-core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#eafcff"/>
+      <stop offset=".45" stop-color="#66e3ff"/>
+      <stop offset="1" stop-color="#8a63ff"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#s100-bg)"/>
+  <ellipse cx="150" cy="184" rx="150" ry="160" fill="url(#s100-glow)"/>
+  <ellipse cx="210" cy="160" rx="80" ry="66" fill="url(#s100-coreglow)"/>
+
+  <!-- ordered spiral the fragments follow, gap to up-right, over the top, down the left -->
+  <path d="M210 188 C 244 176 254 138 246 104 C 240 74 220 52 192 46
+           C 160 40 126 48 100 66 C 72 84 52 108 44 138
+           C 38 164 46 194 62 212 C 68 219 74 225 80 230"
+        fill="none" stroke="#8a63ff" stroke-width="2" stroke-linecap="round" opacity=".22"/>
+
+  <!-- ground shadow -->
+  <ellipse cx="150" cy="268" rx="95" ry="16" fill="#0d1017" opacity=".55"/>
+
+  <!-- the master cube, corner freshly decomposed -->
+  <!-- left face -->
+  <polygon points="88,168 150,199 150,261 88,230" fill="url(#s100-left)"/>
+  <!-- right face, top corner broken away -->
+  <polygon points="196,176 150,199 150,261 212,230 212,198 202,192 206,184" fill="url(#s100-right)"/>
+  <!-- top face, corner broken away -->
+  <polygon points="150,137 187,156 179,163 190,169 196,176 150,199 88,168" fill="url(#s100-top)"/>
+
+  <!-- score lines: the cube is already divided into its smaller units -->
+  <g fill="none" stroke="#9d7bff" stroke-width="1" opacity=".3">
+    <path d="M129.3 147.3 L191.3 178.3"/>
+    <path d="M108.7 157.7 L170.7 188.7"/>
+    <path d="M170.7 147.3 L108.7 178.3"/>
+    <path d="M191.3 157.7 L129.3 188.7"/>
+    <path d="M108.7 178.3 L108.7 240.3"/>
+    <path d="M129.3 188.7 L129.3 250.7"/>
+    <path d="M88 188.7 L150 219.7"/>
+    <path d="M88 209.3 L150 240.3"/>
+    <path d="M170.7 188.7 L170.7 250.7"/>
+    <path d="M191.3 178.3 L191.3 240.3"/>
+    <path d="M150 219.7 L212 188.7"/>
+    <path d="M150 240.3 L212 209.7"/>
+  </g>
+
+  <!-- exposed glowing core where the corner unit came out -->
+  <polygon points="187,156 212,168 212,198 202,192 206,184 196,176 190,169 179,163"
+           fill="url(#s100-core)" opacity=".95"/>
+
+  <!-- edge light -->
+  <path d="M150 137 L88 168 L88 230 L150 261 L212 230 L212 198 L202 192 L206 184 L196 176 L190 169 L179 163 L187 156 Z"
+        fill="none" stroke="#8a63ff" stroke-width="2" stroke-linejoin="round" opacity=".85"/>
+  <path d="M88 168 L150 199 L150 261 M150 199 L196 176" fill="none" stroke="#8a63ff" stroke-width="1.5" opacity=".6"/>
+  <path d="M187 156 L179 163 L190 169 L196 176 L206 184 L202 192 L212 198"
+        fill="none" stroke="#b7f3ff" stroke-width="2" stroke-linejoin="round" opacity=".9"/>
+
+  <!-- motion streaks out of the gap -->
+  <g stroke="#66e3ff" stroke-width="1.5" stroke-linecap="round" opacity=".55">
+    <path d="M212 172 L222 162"/>
+    <path d="M216 186 L228 176"/>
+    <path d="M200 160 L209 150"/>
+  </g>
+
+  <!-- twelve neat units drifting along the spiral -->
+  <!-- 1: the freed corner cube -->
+  <g stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="220,135 238,144 238,162 220,153" fill="#4a3590"/>
+    <polygon points="256,135 238,144 238,162 256,153" fill="#281c50"/>
+    <polygon points="238,126 256,135 238,144 220,135" fill="#7e61d8"/>
+  </g>
+  <path d="M220 153 L238 162 L256 153" fill="none" stroke="#66e3ff" stroke-width="1.5" stroke-linecap="round" opacity=".8"/>
+  <!-- 2 -->
+  <g stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="232,96 248,104 248,120 232,112" fill="#4a3590"/>
+    <polygon points="264,96 248,104 248,120 264,112" fill="#281c50"/>
+    <polygon points="248,88 264,96 248,104 232,96" fill="#7e61d8"/>
+  </g>
+  <!-- 3 -->
+  <g stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="218,59 232,66 232,80 218,73" fill="#4a3590"/>
+    <polygon points="246,59 232,66 232,80 246,73" fill="#281c50"/>
+    <polygon points="232,52 246,59 232,66 218,59" fill="#7e61d8"/>
+  </g>
+  <!-- 4 -->
+  <g stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="184,44 196,50 196,62 184,56" fill="#4a3590"/>
+    <polygon points="208,44 196,50 196,62 208,56" fill="#281c50"/>
+    <polygon points="196,38 208,44 196,50 184,44" fill="#7e61d8"/>
+  </g>
+  <!-- 5 -->
+  <g stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="143,46.5 154,52 154,63 143,57.5" fill="#4a3590"/>
+    <polygon points="165,46.5 154,52 154,63 165,57.5" fill="#281c50"/>
+    <polygon points="154,41 165,46.5 154,52 143,46.5" fill="#7e61d8"/>
+  </g>
+  <!-- 6 -->
+  <g stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="104,57 114,62 114,72 104,67" fill="#4a3590"/>
+    <polygon points="124,57 114,62 114,72 124,67" fill="#281c50"/>
+    <polygon points="114,52 124,57 114,62 104,57" fill="#7e61d8"/>
+  </g>
+  <!-- 7 -->
+  <g stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="71,77.5 80,82 80,91 71,86.5" fill="#4a3590"/>
+    <polygon points="89,77.5 80,82 80,91 89,86.5" fill="#281c50"/>
+    <polygon points="80,73 89,77.5 80,82 71,77.5" fill="#7e61d8"/>
+  </g>
+  <!-- 8 -->
+  <g opacity=".92" stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="48,104 56,108 56,116 48,112" fill="#4a3590"/>
+    <polygon points="64,104 56,108 56,116 64,112" fill="#281c50"/>
+    <polygon points="56,100 64,104 56,108 48,104" fill="#7e61d8"/>
+  </g>
+  <!-- 9 -->
+  <g opacity=".9" stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="37,136.5 44,140 44,147 37,143.5" fill="#4a3590"/>
+    <polygon points="51,136.5 44,140 44,147 51,143.5" fill="#281c50"/>
+    <polygon points="44,133 51,136.5 44,140 37,136.5" fill="#7e61d8"/>
+  </g>
+  <!-- 10 -->
+  <g opacity=".88" stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="40,169 46,172 46,178 40,175" fill="#4a3590"/>
+    <polygon points="52,169 46,172 46,178 52,175" fill="#281c50"/>
+    <polygon points="46,166 52,169 46,172 40,169" fill="#7e61d8"/>
+  </g>
+  <!-- 11 -->
+  <g opacity=".85" stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="53,199.5 58,202 58,207 53,204.5" fill="#4a3590"/>
+    <polygon points="63,199.5 58,202 58,207 63,204.5" fill="#281c50"/>
+    <polygon points="58,197 63,199.5 58,202 53,199.5" fill="#7e61d8"/>
+  </g>
+  <!-- 12 -->
+  <g opacity=".82" stroke="#7ce6ff" stroke-opacity=".5" stroke-width="1" stroke-linejoin="round">
+    <polygon points="72,226 76,228 76,232 72,230" fill="#4a3590"/>
+    <polygon points="80,226 76,228 76,232 80,230" fill="#281c50"/>
+    <polygon points="76,224 80,226 76,228 72,226" fill="#7e61d8"/>
+  </g>
+
+  <!-- splinters and light chips riding the spiral -->
+  <g fill="#f4f8ff" opacity=".85">
+    <polygon points="222,115 226,117 222,119 218,117"/>
+    <polygon points="256,83 260,85 256,87 252,85"/>
+    <polygon points="172,43 176,45 172,47 168,45"/>
+    <polygon points="94,67 98,69 94,71 90,69"/>
+    <polygon points="48,121 51,122.5 48,124 45,122.5"/>
+    <polygon points="64,187 67,188.5 64,190 61,188.5"/>
+  </g>
+  <g fill="#ffb64f">
+    <circle cx="230" cy="128" r="2.2"/>
+    <circle cx="250" cy="78" r="1.7"/>
+    <circle cx="150" cy="70" r="1.8"/>
+    <circle cx="66" cy="98" r="1.6"/>
+    <circle cx="40" cy="158" r="1.4"/>
+    <circle cx="70" cy="216" r="1.5"/>
+  </g>
+</svg>
