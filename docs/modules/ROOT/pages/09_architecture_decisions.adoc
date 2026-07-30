@@ -3142,3 +3142,25 @@ budget, and the payout path is integration-tested.
 
 *Out of scope:* challenge streaks/history, rerolls, difficulty tiers, and
 pack rewards (the payout stays plain XP; what it buys is the shop's business).
+
+== ADR-64: The estimation hint becomes tap-to-apply and reaches the triage strip — and applying dismisses it
+
+*Context:* The #55 hint whispered per-category bias in TaskForm but was
+display-only, and the triage strip's inline estimate — where estimates are
+typed with the LEAST reflection — had no hint at all (#232).
+
+*Decision:* The hint gains a "use N min" button on both surfaces. Applying
+merely TYPES the number: the field stays the authority, anything typed
+afterwards wins, and nothing is ever auto-applied (ADR-48's spirit — inform,
+never override). The strip's EstimateInput becomes a controlled input
+carrying the same hint, aria-live semantics included (#103).
+
+*Rationale:* The one non-obvious rule: APPLYING DISMISSES THE HINT.
+Recomputing it off the just-applied value would scale the bias again and
+chase its own tail ("use 42" → "use 60") — advice that never settles.
+The dismissal keys on the applied value, so typing any other number re-arms
+the coaching. estimateHint() itself is untouched: same preconditions, same
+rounding, same silence when the suggestion equals the input.
+
+*Out of scope:* auto-applying, per-task learning, and any change to the
+bias math or its minimum sample.
