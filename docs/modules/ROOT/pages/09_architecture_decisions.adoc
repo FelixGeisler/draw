@@ -3214,3 +3214,33 @@ animates only under `prefers-reduced-motion: no-preference`.
 
 *Out of scope:* month-by-month breakdowns, multi-year history, social
 integrations, and any server-side aggregation.
+
+== ADR-67: Outbound notifications — one post-commit fire-and-forget door
+
+*Context:* A self-hosted Draw is invisible when closed (#235); unlocks and
+felled goals deserve a phone ping without shipping a push service.
+
+*Decision:* One `notify_url` setting, ntfy-compatible (plain-text POST with
+Title/Tags headers). Empty means OFF, and the module makes ZERO network
+calls. Every send goes through ONE function — `notify()` in
+notifyService.ts — so a new event path has a single name to grep for (the
+R8 rule, same as payChallengeIfDue). Callers are ROUTES, never services,
+and they call it strictly AFTER the write transaction commits: a
+notification about a rolled-back unlock would be a lie, and a slow webhook
+must never hold a SQLite write lock. Delivery is fire-and-forget with a 3s
+abort; failures log one warning and are swallowed — the app must feel
+identical with a dead endpoint. Events: achievement unlocks (batched per
+action, so a completion cascade is one ping, from the tasks, draw, goals
+and claim routes), goal achieved, and daily challenge completed. The URL is
+PRIVATE like the Claude API key — an ntfy URL embeds the topic, and knowing
+the topic means posting to the user's phone — so it is excluded from
+GET /api/settings and managed write-only via /api/notify (presence flag,
+PUT/DELETE, and an awaited test send that reports honestly).
+
+*Rationale:* The fetch implementation is injectable and the test route
+sends through the same injectable, so the whole feature is tested without
+ever opening a socket — including the load-bearing zero-calls-when-unset
+assertion.
+
+*Out of scope:* retries/queues, per-event toggles, payload templating, and
+inbound webhooks (an automations API is its own issue if wanted).

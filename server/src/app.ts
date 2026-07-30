@@ -13,6 +13,7 @@ import { achievementsRouter } from "./routes/achievements.js";
 import { goalsRouter } from "./routes/goals.js";
 import { shopRouter } from "./routes/shop.js";
 import { challengeRouter } from "./routes/challenge.js";
+import { notifyRouter } from "./routes/notify.js";
 import { goalMaterialsRouter, materialsRouter } from "./routes/materials.js";
 import { aiRouter } from "./routes/ai.js";
 import { backupRouter } from "./routes/backup.js";
@@ -93,6 +94,7 @@ export function createApp(options: AppOptions = {}) {
   app.use("/api/achievements", achievementsRouter);
   app.use("/api/shop", shopRouter);
   app.use("/api/challenge", challengeRouter);
+  app.use("/api/notify", notifyRouter);
   app.use("/api/goals", goalsRouter);
   app.use("/api/goals/:id/materials", goalMaterialsRouter);
   app.use("/api/materials", materialsRouter);

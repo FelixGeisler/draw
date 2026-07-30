@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { notifyUnlocks } from "../services/notifyService.js";
 import {
   claimAchievement,
   customizeAchievement,
@@ -56,6 +57,7 @@ achievementsRouter.post("/:key/claim", (req, res) => {
   const result = claimAchievement(req.params.key);
   switch (result.status) {
     case "ok":
+      notifyUnlocks(result.newAchievements); // post-commit (#235)
       return res.json({
         xpAwarded: result.xpAwarded,
         levelUp: result.levelUp,

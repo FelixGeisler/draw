@@ -8,6 +8,7 @@ import {
   WARMUP_LAST_DEALT_SETTING,
 } from "../db.js";
 import { REST_WEEKDAYS_SETTING } from "../services/gamificationService.js";
+import { NOTIFY_URL_SETTING } from "../services/notifyService.js";
 
 export const settingsRouter = Router();
 
@@ -18,12 +19,15 @@ export const settingsRouter = Router();
 // not user settings.
 function publicSettings(): Record<string, string> {
   const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?)")
+    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?)")
     .all(
       API_KEY_SETTING,
       CURRENT_DRAW_SETTING,
       WARMUP_DRAW_SETTING,
       WARMUP_LAST_DEALT_SETTING,
+      // The notify URL embeds the ntfy topic — knowing it means posting to
+      // the user's phone. Managed write-only via /api/notify (#235).
+      NOTIFY_URL_SETTING,
     ) as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
