@@ -22,6 +22,7 @@ import { useShop } from "../hooks/useShop";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
 import { useDeckScope } from "../DeckScopeContext";
 import { AiBreakdownPanel } from "../components/AiSuggestionPanel";
+import { ChallengeChip } from "../components/ChallengeChip";
 import { EmptyPoolReason } from "../components/EmptyPoolReason";
 import { FocusOverlay } from "../components/FocusOverlay";
 import { SnoozeMenu } from "../components/SnoozeMenu";
@@ -400,6 +401,7 @@ export function DrawPage() {
         Stop choosing. Draw one small task and just start.
       </p>
 
+      <ChallengeChip />
       <div className="draw-filters">
         <span
           className={`chip ${categoryId === undefined ? "active" : ""}`}

@@ -43,6 +43,10 @@ export function useStopTimer() {
       qc.invalidateQueries({ queryKey: ["timer"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["activity"] });
+      // A stop can land the track challenge's payout (#231) — refresh the
+      // chip and the XP header together.
+      qc.invalidateQueries({ queryKey: ["challenge"] });
+      qc.invalidateQueries({ queryKey: ["gamification"] });
       // The TimerBar is global: stopping while the Goals page is mounted must
       // refresh the feasibility chip's trackedMinutes14d pace (#60).
       qc.invalidateQueries({ queryKey: ["goals"] });

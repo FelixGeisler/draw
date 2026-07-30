@@ -63,6 +63,7 @@ function useInvalidateTasks() {
   return () => {
     qc.invalidateQueries({ queryKey: ["tasks"] });
     qc.invalidateQueries({ queryKey: ["gamification"] });
+    qc.invalidateQueries({ queryKey: ["challenge"] });
     qc.invalidateQueries({ queryKey: ["stats"] });
     // Completions/reopens/deletes change the History calendar's day cards (Stats page).
     qc.invalidateQueries({ queryKey: ["activity"] });
