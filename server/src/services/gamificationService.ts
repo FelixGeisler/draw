@@ -2,7 +2,7 @@ import { db, getSetting, getSettingString } from "../db.js";
 import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys.js";
 import { claimXpForKey } from "../../../shared/achievementTiers.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
-import { localDate, localDayBounds } from "./localDay.js";
+import { addDays, localDate, localDayBounds } from "./localDay.js";
 import { nextOccurrence } from "./recurrence.js";
 import {
   computeStreak,
@@ -213,7 +213,10 @@ export function completeTask(
   }
 
   const levelAfter = levelFromXp(totalXp()).level;
-  const newAchievements = checkAchievements({ completedTask: task });
+  const newAchievements = checkAchievements({
+    completedTask: task,
+    completion: { wasDrawn, wasWarmup: warmup != null, momentum, now },
+  });
 
   return { xpAwarded: xp, bonus, newAchievements, recurring, levelUp: levelAfter > levelBefore };
 }
@@ -357,10 +360,23 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { key: "hours_10", title: "Ten hours in", emoji: "⏱️", description: "Track 10 hours of focused work." },
   { key: "hours_100", title: "Hundred hours deep", emoji: "⏳", description: "Track 100 hours of focused work." },
   { key: "hours_1000", title: "Thousand-hour master", emoji: "🕰️", description: "Track 1,000 hours of focused work." },
+  // Drawn-completions chain (#223) — genuinely drawn cards finished.
+  { key: "drawn_10", title: "Trusting the deck", emoji: "🤝", description: "Complete 10 drawn cards." },
+  { key: "drawn_100", title: "Deck disciple", emoji: "🎩", description: "Complete 100 drawn cards." },
+  { key: "drawn_1000", title: "The deck provides", emoji: "👑", description: "Complete 1,000 drawn cards." },
+  // Steps chain (#223) — completed subtasks of broken-down work.
+  { key: "steps_10", title: "Step by step", emoji: "🪜", description: "Complete 10 steps of broken-down tasks." },
+  { key: "steps_100", title: "Master decomposer", emoji: "🧩", description: "Complete 100 steps of broken-down tasks." },
+  { key: "steps_500", title: "Nothing too big", emoji: "🗻", description: "Complete 500 steps of broken-down tasks." },
   // One-offs — no running total, so no progress bar.
   { key: "monster_slayer", title: "Monster slayer", emoji: "🐉", description: "Finish every subtask of a big task." },
   { key: "deck_clearer", title: "Deck clearer", emoji: "🏜", description: "Empty the drawable deck by completing it." },
   { key: "early_bird", title: "Early bird", emoji: "🐦", description: "Finish a 5★ task before its due date." },
+  { key: "holo_hunter", title: "Holo hunter", emoji: "✨", description: "Complete a drawn 5★ task." },
+  { key: "momentum", title: "Momentum", emoji: "🚀", description: "Ride a warm-up into a real completion within 30 minutes." },
+  { key: "well_rounded", title: "Well rounded", emoji: "🎨", description: "Complete tasks in three different categories." },
+  { key: "night_shift", title: "Night shift", emoji: "🌙", description: "Finish a task between midnight and 5 am." },
+  { key: "comeback", title: "Comeback", emoji: "🧗", description: "Complete a task the day after a streak freeze saved you." },
 ];
 
 // ---------------------------------------------------------------------------
@@ -370,7 +386,15 @@ export const ACHIEVEMENTS: AchievementDef[] = [
 // disagree — a bar that reads full is a card that unlocks. One-offs are absent
 // here: they have no meaningful running total, and gamificationState reports
 // their progress as null.
-type ChainMetric = "draws" | "completions" | "streak" | "level" | "goals" | "hours";
+type ChainMetric =
+  | "draws"
+  | "completions"
+  | "streak"
+  | "level"
+  | "goals"
+  | "hours"
+  | "drawn"
+  | "steps";
 
 interface ChainSpec {
   metric: ChainMetric;
@@ -405,6 +429,12 @@ export const CHAIN_SPECS: Partial<Record<AchievementKey, ChainSpec>> = {
   hours_10: { metric: "hours", target: 10 },
   hours_100: { metric: "hours", target: 100 },
   hours_1000: { metric: "hours", target: 1000 },
+  drawn_10: { metric: "drawn", target: 10 },
+  drawn_100: { metric: "drawn", target: 100 },
+  drawn_1000: { metric: "drawn", target: 1000 },
+  steps_10: { metric: "steps", target: 10 },
+  steps_100: { metric: "steps", target: 100 },
+  steps_500: { metric: "steps", target: 500 },
 };
 
 function unlockedKeys(): Set<string> {
@@ -438,6 +468,8 @@ interface Metrics {
   level: number;
   goals: number;
   hours: number;
+  drawn: number;
+  steps: number;
 }
 
 function nonWarmupDrawCount(): number {
@@ -476,6 +508,23 @@ function computeMetrics(): Metrics {
     level: levelFromXp(totalXp()).level,
     goals: achievedGoalCount(),
     hours: trackedHours(),
+    // Drawn completions in the ADR-30 sense: gambled, not dealt — the same
+    // was_drawn AND NOT was_warmup the trophy rarity and the ×1.5 use (#223).
+    drawn: (
+      db
+        .prepare("SELECT COUNT(*) AS n FROM completions WHERE was_drawn = 1 AND was_warmup = 0")
+        .get() as { n: number }
+    ).n,
+    // Completed SUBTASKS. The join is live (deleting a task cascades its
+    // completions away, ADR-21), so undo and delete lower it — the accepted
+    // completions-chain semantics (#223).
+    steps: (
+      db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM completions c JOIN tasks t ON t.id = c.task_id WHERE t.parent_id IS NOT NULL",
+        )
+        .get() as { n: number }
+    ).n,
   };
 }
 
@@ -491,7 +540,27 @@ function chainProgress(
   return { current: Math.min(metrics[spec.metric], spec.target), target: spec.target };
 }
 
-export function checkAchievements(event: { completedTask?: TaskRow }): string[] {
+export interface CompletionFacts {
+  /** was_drawn AND NOT was_warmup facts of THIS completion, as inserted. */
+  wasDrawn: boolean;
+  wasWarmup: boolean;
+  /** The ×1.25 momentum condition completeTask already computed (#223). */
+  momentum: boolean;
+  /** The completion instant — the same `now` the row was stamped with. */
+  now: Date;
+}
+
+export function checkAchievements(event: {
+  completedTask?: TaskRow;
+  /**
+   * Facts about the completion that fired this check (#223): holo_hunter,
+   * momentum and night_shift are properties of the completion EVENT, not of
+   * any table state, so completeTask hands them over rather than this
+   * function re-deriving them from a re-read. Absent on the draw/goal/claim
+   * call sites, where those conditions are simply false.
+   */
+  completion?: CompletionFacts;
+}): string[] {
   const unlocked = unlockedKeys();
   const fresh: string[] = [];
   const metrics = computeMetrics();
@@ -526,6 +595,40 @@ export function checkAchievements(event: { completedTask?: TaskRow }): string[] 
       event.completedTask.impact === 5 &&
       event.completedTask.due_date &&
       localDate(new Date()) <= event.completedTask.due_date,
+  );
+  // Holo hunter (#223): the trophyRarity holo condition — a GAMBLED (not
+  // dealt) 5★ completion — judged from the same facts the completions row was
+  // just written with, so display and unlock can never disagree.
+  conditions.holo_hunter = Boolean(
+    event.completion &&
+      event.completedTask &&
+      event.completion.wasDrawn &&
+      !event.completion.wasWarmup &&
+      event.completedTask.impact === 5,
+  );
+  // Momentum (#223): the exact condition that armed the ×1.25 — completeTask
+  // computed it once, this reuses it rather than re-deriving (R8: one door).
+  conditions.momentum = Boolean(event.completion?.momentum);
+  // Well rounded (#223): completions across three distinct categories. The
+  // tasks join is live (ADR-21 cascade), matching the steps metric.
+  conditions.well_rounded =
+    Boolean(event.completedTask) &&
+    (
+      db
+        .prepare(
+          "SELECT COUNT(DISTINCT t.category_id) AS n FROM completions c JOIN tasks t ON t.id = c.task_id",
+        )
+        .get() as { n: number }
+    ).n >= 3;
+  // Night shift (#223): finished between 00:00 and 05:00 on the USER'S clock.
+  // getHours() reads the process zone — the same local-day convention as the
+  // streak and the recurrence schedule (#219: never mix in UTC here).
+  conditions.night_shift = Boolean(event.completion) && event.completion!.now.getHours() < 5;
+  // Comeback (#223): completing the day right after a freeze-covered day —
+  // the streak fold already derives which days a banked token silently saved.
+  conditions.comeback = Boolean(
+    event.completion &&
+      streakState().frozenDays.includes(addDays(localDate(event.completion.now), -1)),
   );
 
   const insert = db.prepare("INSERT INTO achievements (key, unlocked_at) VALUES (?, ?)");

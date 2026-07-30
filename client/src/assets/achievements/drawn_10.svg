@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="dh10-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#141b2b"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="dh10-glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#4f8cff" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="dh10-halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#4f8cff" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="dh10-card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4f8ff"/>
+      <stop offset=".6" stop-color="#dbe7fb"/>
+      <stop offset="1" stop-color="#bcd2f4"/>
+    </linearGradient>
+    <linearGradient id="dh10-beam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9c4ff" stop-opacity=".38"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity=".03"/>
+    </linearGradient>
+    <linearGradient id="dh10-skin" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eab98b"/>
+      <stop offset="1" stop-color="#9c6a44"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#dh10-bg)"/>
+  <ellipse cx="150" cy="184" rx="150" ry="160" fill="url(#dh10-glow)"/>
+
+  <ellipse cx="150" cy="140" rx="90" ry="104" fill="url(#dh10-halo)"/>
+
+  <path d="M119 204 L198 195 L214 260 L88 266 Z" fill="url(#dh10-beam)"/>
+  <path d="M138 202 L180 197 L196 256 L112 260 Z" fill="#cfe0ff" opacity=".12"/>
+
+  <circle cx="150" cy="214" r="1.8" fill="#f4f8ff" opacity=".8"/>
+  <circle cx="128" cy="226" r="2" fill="#cfe0ff" opacity=".7"/>
+  <circle cx="176" cy="238" r="2.5" fill="#a9c4ff" opacity=".6"/>
+
+  <path d="M116 296 C 128 290 172 290 184 296 L 190 352 L 110 352 Z" fill="#8a5c3b"/>
+  <rect x="103" y="232" width="21" height="54" rx="10.5" fill="#c98f63" transform="rotate(-12 113.5 259)"/>
+  <rect x="127" y="222" width="22" height="62" rx="11" fill="#d29a6c" transform="rotate(-4 138 253)"/>
+  <rect x="152" y="222" width="22" height="62" rx="11" fill="#d29a6c" transform="rotate(4 163 253)"/>
+  <rect x="177" y="232" width="21" height="54" rx="10.5" fill="#c98f63" transform="rotate(12 187.5 259)"/>
+  <ellipse cx="108" cy="234" rx="8" ry="6" fill="#f0c9a2"/>
+  <ellipse cx="136" cy="223" rx="8.5" ry="6" fill="#f0c9a2"/>
+  <ellipse cx="165" cy="223" rx="8.5" ry="6" fill="#f0c9a2"/>
+  <ellipse cx="193" cy="234" rx="8" ry="6" fill="#f0c9a2"/>
+  <ellipse cx="108" cy="231" rx="5" ry="3.5" fill="#cfe0ff" opacity=".45"/>
+  <ellipse cx="136" cy="220" rx="5" ry="3.5" fill="#cfe0ff" opacity=".45"/>
+  <ellipse cx="165" cy="220" rx="5" ry="3.5" fill="#cfe0ff" opacity=".45"/>
+  <ellipse cx="193" cy="231" rx="5" ry="3.5" fill="#cfe0ff" opacity=".45"/>
+  <path d="M94 260 C 114 250 186 250 206 260 C 210 284 186 299 150 299 C 114 299 90 284 94 260 Z" fill="url(#dh10-skin)"/>
+  <path d="M94 260 C 114 250 186 250 206 260" fill="none" stroke="#cfe0ff" stroke-width="3.5" stroke-linecap="round" opacity=".8"/>
+  <path d="M112 272 C 132 282 168 282 188 272" fill="none" stroke="#8a5c3b" stroke-width="5" stroke-linecap="round" opacity=".55"/>
+  <path d="M122 286 C 140 292 160 292 178 286" fill="none" stroke="#8a5c3b" stroke-width="4" stroke-linecap="round" opacity=".4"/>
+  <ellipse cx="150" cy="272" rx="44" ry="16" fill="#4f8cff" opacity=".18"/>
+  <ellipse cx="150" cy="268" rx="30" ry="10" fill="#cfe0ff" opacity=".25"/>
+  <path d="M104 284 C 92 268 96 246 114 236" fill="none" stroke="#d29a6c" stroke-width="17" stroke-linecap="round"/>
+  <ellipse cx="114" cy="236" rx="8.5" ry="7" fill="#f0c9a2"/>
+  <ellipse cx="114" cy="232" rx="5" ry="3.5" fill="#cfe0ff" opacity=".45"/>
+
+  <g transform="rotate(-8 150 140)">
+    <rect x="110" y="85" width="88" height="122" rx="10" fill="#0d1017" opacity=".45"/>
+    <rect x="106" y="79" width="88" height="122" rx="10" fill="url(#dh10-card)"/>
+    <rect x="110" y="192" width="80" height="6" rx="3" fill="#cfe0ff" opacity=".9"/>
+    <rect x="114" y="87" width="72" height="106" rx="6" fill="none" stroke="#4f8cff" stroke-width="2.5" opacity=".75"/>
+    <circle cx="120" cy="93" r="1.8" fill="#ffb64f" opacity=".9"/>
+    <circle cx="180" cy="93" r="1.8" fill="#ffb64f" opacity=".9"/>
+    <circle cx="120" cy="187" r="1.8" fill="#ffb64f" opacity=".9"/>
+    <circle cx="180" cy="187" r="1.8" fill="#ffb64f" opacity=".9"/>
+    <path d="M150 106 L157.5 132.5 L184 140 L157.5 147.5 L150 174 L142.5 147.5 L116 140 L142.5 132.5 Z" fill="#4f8cff"/>
+    <path d="M150 124 L161 140 L150 156 L139 140 Z" fill="#ffb64f"/>
+    <circle cx="150" cy="140" r="4" fill="#f4f8ff"/>
+  </g>
+
+  <path d="M96 82 L99 89 L106 92 L99 95 L96 102 L93 95 L86 92 L93 89 Z" fill="#ffb64f"/>
+  <path d="M214 71 L216.5 75.5 L221 78 L216.5 80.5 L214 85 L211.5 80.5 L207 78 L211.5 75.5 Z" fill="#f4f8ff" opacity=".9"/>
+  <circle cx="78" cy="160" r="2.5" fill="#4f8cff" opacity=".8"/>
+  <circle cx="226" cy="150" r="2" fill="#f4f8ff" opacity=".8"/>
+</svg>

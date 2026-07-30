@@ -3005,3 +3005,41 @@ behind reduced motion. The pip states are spoken as one text alternative
 *Out of scope:* per-tier claim buttons on the collapsed card (the current
 tier remains the only claim surface), and any server change — the payload
 already shipped every tier.
+
+== ADR-60: The catalog grows to 37 keys — two chains for the app's own mechanics, five event one-offs, all derived from existing logs
+
+*Context:* 26 keys plateau fast: after the first week a normal user has the
+level-1 tier of most chains and all three one-offs, and the grid goes quiet
+(#223). The gap was thematic too — nothing rewarded the two behaviours the
+product is actually about: trusting the deck, and finishing the steps that
+breaking-down produces.
+
+*Decision:* Eleven new keys, no new stored state (ADR-2). Two chains: *drawn*
+(completions with `was_drawn AND NOT was_warmup` — the ADR-30 gambled sense
+the ×1.5 and the trophy rarity already use) at 10/100/1000, and *steps*
+(completions joined to `parent_id IS NOT NULL`) at 10/100/500. Five one-offs:
+`holo_hunter` (a gambled 5★ completion — exactly the trophyRarity holo
+condition), `momentum` (the ×1.25 condition completeTask already computes),
+`well_rounded` (completions across three categories), `night_shift` (a
+completion between 00:00 and 05:00 local), and `comeback` (completing the day
+after a freeze-covered day, read from the streak fold's own `frozenDays`).
+
+*Rationale:* Event-shaped conditions are judged from the completion's own
+facts, not re-derived: `completeTask` hands `checkAchievements` a
+`completion` payload (wasDrawn, wasWarmup, momentum, the stamped instant), so
+display, XP and unlock can never disagree about what a completion was — and
+R8's one-door rule holds, since the facts travel through the same call the
+completion already makes. The steps and well-rounded conditions ride live
+task joins, so undo and delete lower them — the accepted completions-chain
+semantics, unchanged. `night_shift` reads the local clock and `comeback` the
+local day (#219's rules: never UTC here). Art ships with every key — the
+emoji fallback is a degraded state, not a plan — generated to the #124 house
+conventions (300×420, dark tinted ground, radial glow, one bold motif above
+the caption band, per-key gradient prefixes) and committed as static files
+like every predecessor.
+
+*Out of scope:* AI- or backup-gated achievements (paid-feature gating; new
+`checkAchievements` call sites), rebalancing existing tiers or claim XP, and
+retroactive unlocks — the new chains count from the logs as they stand, so a
+long-time user may unlock several tiers on their next completion, which is a
+feature.

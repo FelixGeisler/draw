@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="s500-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#15202c"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="s500-glow" cx="50%" cy="43%" r="54%">
+      <stop offset="0" stop-color="#6f9fd8" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#6f9fd8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="s500-sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#ffcf7a" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#ffb64f" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="s500-face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7695ba"/>
+      <stop offset=".55" stop-color="#4a6789"/>
+      <stop offset="1" stop-color="#33506e"/>
+    </linearGradient>
+    <linearGradient id="s500-shade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b5473"/>
+      <stop offset="1" stop-color="#1b2940"/>
+    </linearGradient>
+    <linearGradient id="s500-flag" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffd98a"/>
+      <stop offset="1" stop-color="#e09b35"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#s500-bg)"/>
+  <ellipse cx="150" cy="182" rx="150" ry="160" fill="url(#s500-glow)"/>
+
+  <g fill="#f4f8ff">
+    <circle cx="40" cy="70" r="2" opacity=".7"/>
+    <circle cx="72" cy="42" r="1.4" opacity=".5"/>
+    <circle cx="108" cy="60" r="1.2" opacity=".4"/>
+    <circle cx="234" cy="46" r="1.8" opacity=".65"/>
+    <circle cx="262" cy="92" r="1.3" opacity=".45"/>
+    <circle cx="212" cy="112" r="1.2" opacity=".4"/>
+    <circle cx="30" cy="132" r="1.5" opacity=".5"/>
+  </g>
+
+  <path d="M-12 306 L70 150 L152 306 Z" fill="#1e2f44" opacity=".9"/>
+  <path d="M70 150 L58 176 L82 176 Z" fill="#f4f8ff" opacity=".25"/>
+  <path d="M168 306 L240 170 L312 306 Z" fill="#1a2939" opacity=".9"/>
+  <path d="M240 170 L228 194 L252 194 Z" fill="#f4f8ff" opacity=".2"/>
+
+  <circle cx="150" cy="56" r="52" fill="url(#s500-sun)"/>
+
+  <path d="M150 52 L22 306 L186 306 Z" fill="url(#s500-face)"/>
+  <path d="M150 52 L186 306 L278 306 Z" fill="url(#s500-shade)"/>
+  <path d="M150 52 L186 306" fill="none" stroke="#46658a" stroke-width="2.5" opacity=".55"/>
+
+  <path d="M138 128 L84 262 L116 264 Z" fill="#2c4560" opacity=".35"/>
+  <path d="M112 190 L58 288 L88 292 Z" fill="#2c4560" opacity=".25"/>
+  <path d="M196 170 L232 288 L206 292 Z" fill="#46658a" opacity=".3"/>
+
+  <path d="M150 52 L179 110 L166 103 L156 118 L146 106 L134 118 L126 106 L118 116 Z" fill="#f4f8ff"/>
+  <path d="M150 52 L179 110 L166 103 L157 116 Z" fill="#c2d3e8"/>
+  <path d="M150 52 L118 116" fill="none" stroke="#ffb64f" stroke-width="3" stroke-linecap="round" opacity=".75"/>
+
+  <g fill="none" stroke-linejoin="round">
+    <path d="M48 306 L215 262 L78 228 L200 194 L104 160 L178 130 L132 102 L150 74"
+          stroke="#142438" stroke-width="19" stroke-linecap="round" opacity=".8" transform="translate(2.5 3.5)"/>
+    <path d="M48 306 L215 262 L78 228 L200 194 L104 160 L178 130 L132 102 L150 74"
+          stroke="#90b0d3" stroke-width="14" stroke-linecap="round"/>
+    <path d="M48 306 L215 262 L78 228 L200 194 L104 160 L178 130 L132 102 L150 74"
+          stroke="#2f4a68" stroke-width="14" stroke-dasharray="3 8"/>
+  </g>
+  <g fill="#b6cbe3">
+    <circle cx="215" cy="262" r="8"/>
+    <circle cx="78" cy="228" r="8"/>
+    <circle cx="200" cy="194" r="8"/>
+    <circle cx="104" cy="160" r="8"/>
+    <circle cx="178" cy="130" r="7"/>
+    <circle cx="132" cy="102" r="6.5"/>
+  </g>
+
+  <path d="M0 300 C 52 292 96 300 150 297 C 204 294 252 290 300 298 L300 420 L0 420 Z" fill="#0d1017" opacity=".9"/>
+
+  <ellipse cx="150" cy="74" rx="10" ry="3.5" fill="#ffb64f" opacity=".45"/>
+  <rect x="148.4" y="38" width="3.2" height="35" rx="1.6" fill="#0d1017"/>
+  <path d="M152 40 C 168 41 181 44 190 48 C 180 52 167 55 152 57 Z" fill="url(#s500-flag)"/>
+  <path d="M152 40 C 166 41.5 177 44 186 47.5 L152 46 Z" fill="#f4f8ff" opacity=".28"/>
+  <circle cx="150" cy="37" r="3.4" fill="#ffb64f"/>
+</svg>

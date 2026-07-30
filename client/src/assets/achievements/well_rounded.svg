@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 420" width="300" height="420">
+  <defs>
+    <linearGradient id="wr-bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#171a2b"/>
+      <stop offset="1" stop-color="#101219"/>
+    </linearGradient>
+    <radialGradient id="wr-glow" cx="50%" cy="44%" r="54%">
+      <stop offset="0" stop-color="#6d8bff" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#6d8bff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="wr-b">
+      <stop offset="0" stop-color="#4f8cff" stop-opacity=".1"/>
+      <stop offset=".7" stop-color="#4f8cff" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#4f8cff" stop-opacity=".48"/>
+    </radialGradient>
+    <radialGradient id="wr-g">
+      <stop offset="0" stop-color="#3fbf7f" stop-opacity=".1"/>
+      <stop offset=".7" stop-color="#3fbf7f" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#3fbf7f" stop-opacity=".48"/>
+    </radialGradient>
+    <radialGradient id="wr-v">
+      <stop offset="0" stop-color="#8a63ff" stop-opacity=".1"/>
+      <stop offset=".7" stop-color="#8a63ff" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#8a63ff" stop-opacity=".48"/>
+    </radialGradient>
+    <radialGradient id="wr-core">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".95"/>
+      <stop offset=".55" stop-color="#dfe9ff" stop-opacity=".78"/>
+      <stop offset="1" stop-color="#aac2ff" stop-opacity=".5"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="300" height="420" fill="url(#wr-bg)"/>
+  <ellipse cx="150" cy="184" rx="150" ry="160" fill="url(#wr-glow)"/>
+
+  <!-- The emblem sits inside y 40..300; the caption band covers the foot of the emblem. -->
+
+  <!-- gold orbit ring with markers at the three gaps between the orbs -->
+  <circle cx="150" cy="172" r="104" fill="none" stroke="#ffb64f" stroke-width="1.8" opacity=".4"/>
+  <g fill="#ffb64f" opacity=".9">
+    <path d="M150 269 L155.2 276 L150 283 L144.8 276 Z"/>
+    <path d="M59.9 113 L65.1 120 L59.9 127 L54.7 120 Z"/>
+    <path d="M240.1 113 L245.3 120 L240.1 127 L234.9 120 Z"/>
+  </g>
+
+  <!-- soft auras behind each orb -->
+  <circle cx="150" cy="128" r="70" fill="none" stroke="#4f8cff" stroke-width="8" opacity=".1"/>
+  <circle cx="113.63" cy="191" r="70" fill="none" stroke="#3fbf7f" stroke-width="8" opacity=".1"/>
+  <circle cx="186.37" cy="191" r="70" fill="none" stroke="#8a63ff" stroke-width="8" opacity=".1"/>
+
+  <!-- the three translucent orbs: blue above, green lower-left, violet lower-right -->
+  <circle cx="150" cy="128" r="66" fill="url(#wr-b)"/>
+  <circle cx="113.63" cy="191" r="66" fill="url(#wr-g)"/>
+  <circle cx="186.37" cy="191" r="66" fill="url(#wr-v)"/>
+
+  <!-- pairwise lenses, each brighter than the orbs that make it -->
+  <path d="M84.13 131.96 A66 66 0 0 0 179.51 187.04 A66 66 0 0 0 84.13 131.96 Z"
+        fill="#7fe8d8" opacity=".3"/>
+  <path d="M215.87 131.96 A66 66 0 0 1 120.49 187.04 A66 66 0 0 1 215.87 131.96 Z"
+        fill="#a3a8ff" opacity=".3"/>
+  <path d="M150 246.07 A66 66 0 0 0 150 135.93 A66 66 0 0 0 150 246.07 Z"
+        fill="#9db8e8" opacity=".28"/>
+
+  <!-- triple overlap: the luminous heart -->
+  <path d="M150 135.93 A66 66 0 0 1 179.51 187.04 A66 66 0 0 1 120.49 187.04 A66 66 0 0 1 150 135.93 Z"
+        fill="url(#wr-core)"/>
+
+  <!-- crisp rims over the glow -->
+  <circle cx="150" cy="128" r="66" fill="none" stroke="#4f8cff" stroke-width="2.25" opacity=".9"/>
+  <circle cx="113.63" cy="191" r="66" fill="none" stroke="#3fbf7f" stroke-width="2.25" opacity=".9"/>
+  <circle cx="186.37" cy="191" r="66" fill="none" stroke="#8a63ff" stroke-width="2.25" opacity=".9"/>
+
+  <!-- rim highlights on each orb's outer shoulder -->
+  <path d="M90.8 106.4 A63 63 0 0 1 209.2 106.4" fill="none" stroke="#f4f8ff"
+        stroke-width="2" stroke-linecap="round" opacity=".45"/>
+  <path d="M124.6 253 A63 63 0 0 1 65.4 150.5" fill="none" stroke="#f4f8ff"
+        stroke-width="2" stroke-linecap="round" opacity=".45"/>
+  <path d="M234.7 150.5 A63 63 0 0 1 175.4 253" fill="none" stroke="#f4f8ff"
+        stroke-width="2" stroke-linecap="round" opacity=".45"/>
+
+  <!-- a node at each orb's center -->
+  <circle cx="150" cy="128" r="3.5" fill="#cfe0ff" opacity=".9"/>
+  <circle cx="113.63" cy="191" r="3.5" fill="#bff0d6" opacity=".9"/>
+  <circle cx="186.37" cy="191" r="3.5" fill="#ddd0ff" opacity=".9"/>
+
+  <!-- the spark at the triple overlap: gold cross behind, white star in front -->
+  <g transform="rotate(45 150 169)">
+    <path d="M150 157 Q152.5 166.5 162 169 Q152.5 171.5 150 181 Q147.5 171.5 138 169 Q147.5 166.5 150 157 Z"
+          fill="#ffb64f" opacity=".9"/>
+  </g>
+  <path d="M150 148 Q153.5 165.5 167 169 Q153.5 172.5 150 190 Q146.5 172.5 133 169 Q146.5 165.5 150 148 Z"
+        fill="#ffffff"/>
+</svg>

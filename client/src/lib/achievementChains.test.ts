@@ -170,7 +170,7 @@ describe("chain map coverage", () => {
   it("leaves exactly the three one-offs un-chained", () => {
     const oneoffs = ACHIEVEMENT_KEYS.filter((k) => !(k in ACHIEVEMENT_CHAINS));
     expect([...oneoffs].sort()).toEqual(
-      ["deck_clearer", "early_bird", "monster_slayer"].sort(),
+      ["comeback", "deck_clearer", "early_bird", "holo_hunter", "momentum", "monster_slayer", "night_shift", "well_rounded"].sort(),
     );
   });
 

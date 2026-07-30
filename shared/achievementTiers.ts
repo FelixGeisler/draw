@@ -82,10 +82,23 @@ export const ACHIEVEMENT_TIERS = {
   hours_10: "rare",
   hours_100: "super-rare",
   hours_1000: "ultra-rare",
+  // Drawn completions — the deck's own ladder (#223).
+  drawn_10: "rare",
+  drawn_100: "super-rare",
+  drawn_1000: "ultra-rare",
+  // Steps — finishing what breaking-down produces (#223).
+  steps_10: "rare",
+  steps_100: "super-rare",
+  steps_500: "ultra-rare",
   // One-offs — a single deliberate act.
   monster_slayer: "rare",
   deck_clearer: "ultra-rare",
   early_bird: "rare",
+  holo_hunter: "super-rare",
+  momentum: "rare",
+  well_rounded: "rare",
+  night_shift: "rare",
+  comeback: "super-rare",
   // Exhaustive over AchievementKey, not Record<string, …>: a key added to the
   // shared list without a tier here is a compile error, not a silent common.
 } satisfies Record<AchievementKey, AchievementTier>;
