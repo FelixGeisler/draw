@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { payChallengeIfDue } from "../services/challengeService.js";
 import { db } from "../db.js";
 
 export const timerRouter = Router();
@@ -49,5 +50,10 @@ timerRouter.post("/stop", (_req, res) => {
     new Date().toISOString(),
     entry.id,
   );
-  res.json(db.prepare(`${ENTRY_SELECT} WHERE id = ?`).get(entry.id));
+  // The track challenge's satisfying event is a STOP, not a completion —
+  // this is the second (and last) caller of payChallengeIfDue (#231); the
+  // exactly-once ledger constraint makes the double coverage harmless.
+  const challengeCompleted = payChallengeIfDue();
+  const stopped = db.prepare(`${ENTRY_SELECT} WHERE id = ?`).get(entry.id) as Record<string, unknown>;
+  res.json(challengeCompleted ? { ...stopped, challengeCompleted } : stopped);
 });
