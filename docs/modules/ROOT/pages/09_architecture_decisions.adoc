@@ -3043,3 +3043,34 @@ like every predecessor.
 retroactive unlocks — the new chains count from the logs as they stand, so a
 long-time user may unlock several tiers on their next completion, which is a
 feature.
+
+== ADR-61: Boss battles — a goal's remaining work as an HP bar, derived twice over and never a judgement
+
+*Context:* A goal with 400 minutes of open work was a number in a chip, and
+the count-based progress bar (done/taskCount) treats a 5-minute errand and a
+90-minute session as equal progress. The app's language is cards and rarity;
+a goal deserves to be an opponent (#229).
+
+*Decision:* Goals with estimated leaves render a *boss HP bar* on the Goals
+page. Max HP is a new derived field on `GET /api/goals`
+(`totalEffortMinutes`: the `remainingOpenEffortMinutes` leaf rule over open
+AND done leaves), current HP is the remaining sum, damage is the difference.
+The pure client combine lives in `lib/bossBar.ts`. *Enrage* is the
+feasibility chip's own `infeasible` verdict wearing war paint — one verdict,
+two costumes, never a second classifier. Goals without any estimated leaf
+keep the count bar: no minutes, no HP to mean anything.
+
+*Rationale:* Remaining ≤ total holds by construction (same leaves, same NULL
+skips, archived leaves out of both — a split-in-place original was replaced,
+not defeated), so the fraction cannot overflow; the lib still clamps for
+mid-refetch payload skew. HP falls live through the existing `['goals']`
+invalidation on task mutations — zero new plumbing. Effort-weighted progress
+is honest in exactly the way the count bar was not, and it stays arithmetic
+about WORK: no grading of choices (ADR-48), no judgement about which tasks
+fell. The pulse animates only under no-preference; the enraged end-state
+colors apply either way (#62 pattern). The downed state (all estimated leaves
+done) dims the bar and hands off — the kill screen is the existing
+goal-achieved overlay, not a second celebration.
+
+*Out of scope:* boss art/avatars, damage numbers floating off completions,
+and any change to the feasibility classifier itself.
