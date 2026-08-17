@@ -96,12 +96,10 @@ async function dragWithoutRelease(page: Page, from: Locator, to: Locator) {
   await page.mouse.down();
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
+  // No corrective re-measure hop here (#250): the reason strip is an absolute
+  // overlay now, so mid-drag mounts shift nothing — the honest one-step drag
+  // onto the PRE-drag box IS the regression test that rows stay put.
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
-  // Corrective hop (#244, mirrors dnd-reorganize): mid-drag reason strips
-  // shift the rows, so re-target the LIVE box; the drop commits from the
-  // last pointermove's overKey, so the stationary pointer stays right.
-  const live = (await to.boundingBox())!;
-  await page.mouse.move(live.x + live.width / 2, live.y + live.height / 2, { steps: 1 });
 }
 
 /**
@@ -158,12 +156,25 @@ test("drags a childless subtask straight under a different root (#167)", async (
 test("dropping a subtask on its OWN parent is blocked-with-reason, no move", async ({ page }) => {
   await page.goto("/tasks");
 
+  // #250 setup: scroll exactly as the drag helper will (so its own calls are
+  // no-ops and y stays scroll-stable), then pre-measure a row BELOW the
+  // origin. The reason strip mounting mid-drag must not displace it — the
+  // drop target the user aimed at stays put.
+  await row(page, ORIGIN).scrollIntoViewIfNeeded();
+  await handle(page, STEP_ONE).scrollIntoViewIfNeeded();
+  const belowBefore = (await row(page, STEP_TWO).boundingBox())!;
+
   await dragWithoutRelease(page, handle(page, STEP_ONE), row(page, ORIGIN));
   // The own-parent row names the shared rule instead of accepting the drop.
   await expect(row(page, ORIGIN)).toHaveClass(/dnd-blocked/);
   await expect(row(page, ORIGIN)).not.toHaveClass(/dnd-eligible/);
   const reason = page.locator(".dnd-reason");
   await expect(reason).toContainText("already a subtask of this target");
+
+  // #250 acceptance: the strip is visible right above, yet the below-row's
+  // bounding-box y has not moved a pixel.
+  const belowAfter = (await row(page, STEP_TWO).boundingBox())!;
+  expect(belowAfter.y).toBeCloseTo(belowBefore.y, 0);
 
   // Drifting onto the reason strip itself must not flicker it away: it carries
   // the row's data-dnd-row, so the pointer resting on it keeps ORIGIN hovered.

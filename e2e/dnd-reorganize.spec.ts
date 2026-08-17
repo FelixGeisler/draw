@@ -69,16 +69,10 @@ async function dragWithoutRelease(page: Page, from: Locator, to: Locator) {
   await page.mouse.down();
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
+  // No corrective re-measure hop here (#250): the reason strip is an absolute
+  // overlay now, so mid-drag mounts shift nothing — the honest one-step drag
+  // onto the PRE-drag box IS the regression test that rows stay put.
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
-  // The shorter #244 rows surfaced a latent staleness here: hovering the
-  // SOURCE row right after the press mounts its .dnd-reason strip ("cannot
-  // be its own parent"), shifting every row below it — so the PRE-drag
-  // measurement of `to` can now land the pointer a couple of pixels off.
-  // One corrective hop onto the LIVE box fixes it, and it is safe: the drop
-  // commits from the last pointermove's overKey, not a fresh hit-test, so a
-  // stationary pointer stays authoritative even if rows shift back under it.
-  const live = (await to.boundingBox())!;
-  await page.mouse.move(live.x + live.width / 2, live.y + live.height / 2, { steps: 1 });
 }
 
 test("drag a childless root onto another root to nest it as a subtask", async ({ page }) => {

@@ -485,8 +485,10 @@ export function TaskRow({
       {dropBlockReason && (
         /* data-dnd-row makes the strip part of this row's hit target: it
            mounts right under the pointer, so drifting onto it must keep
-           overKey on this row — without it the strip unmounts, the rows
-           shift back up, and the feedback flickers under the cursor. */
+           overKey on this row — without it the strip would unmount the
+           moment the pointer touches it, flickering the feedback. The strip
+           itself is an absolute overlay (TaskDnd.css, #250): appearing
+           mid-drag must not shift the rows below the pointer. */
         <div className="dnd-reason" data-dnd-row={task.id} role="status">
           Cannot drop here — {dropBlockReason}
         </div>
