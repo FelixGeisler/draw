@@ -1,10 +1,16 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { useCategories, useSettings } from "../hooks/useTasks";
 import { useAiStatus, useRemoveApiKey, useSetApiKey } from "../hooks/useAi";
 import { useGamification } from "../hooks/useGamification";
 import { useImportBackup, type ImportSummary } from "../hooks/useBackup";
+import {
+  UPDATE_NOTICE_KEY,
+  parseUpdateNotice,
+  serializeUpdateNotice,
+  shouldReloadAfterApply,
+} from "../lib/updateNotice";
 import type { Category } from "../api/types";
 
 function SettingInput({
@@ -433,6 +439,322 @@ function BackupSection() {
   );
 }
 
+// GET /api/update payload — mirrors the server's UpdateStatus (Settings-only
+// concern, so the type lives here like NotifySection's inline shapes).
+interface UpdateStatus {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
+  checkedAt: string | null;
+  checkEnabled: boolean;
+  applyConfigured: boolean;
+}
+
+/**
+ * Updates over the air (#247, ADR-70): the running version, the default-on
+ * daily release check, and a write-only apply trigger — one POST to a
+ * user-configured Watchtower-style endpoint; Draw never touches Docker
+ * itself. The trigger URL/token are managed exactly like the ntfy URL
+ * (#235): saved write-only, presence flag on read. After "Update now" the
+ * section polls GET /api/update every 3s (up to 5 minutes) and reloads once
+ * the server reports a new version; a sessionStorage flag pays one
+ * "Updated to X" line after that reload and is consumed.
+ */
+function UpdateSection() {
+  const qc = useQueryClient();
+  const status = useQuery({
+    queryKey: ["update"],
+    queryFn: () => api.get<UpdateStatus>("/api/update"),
+    staleTime: 60_000,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const [checkResult, setCheckResult] = useState<string | null>(null);
+  const [applyPhase, setApplyPhase] = useState<"idle" | "waiting" | "timeout">("idle");
+  const [updatedTo, setUpdatedTo] = useState<string | null>(null);
+  const [urlDraft, setUrlDraft] = useState("");
+  const [tokenDraft, setTokenDraft] = useState("");
+  const pollTimer = useRef<number | null>(null);
+
+  // Consume the post-reload notice: one "Updated to X" line, then the flag
+  // is gone — a second reload shows nothing (no loops, no repeat toasts).
+  // try/catch like every storage touch: a lost notice must never break the
+  // app (the deckScope rule). An effect, not a state initializer: StrictMode
+  // double-invokes initializers, and the second run would read the already-
+  // removed key.
+  useEffect(() => {
+    try {
+      const notice = parseUpdateNotice(sessionStorage.getItem(UPDATE_NOTICE_KEY));
+      if (notice !== null) {
+        sessionStorage.removeItem(UPDATE_NOTICE_KEY);
+        setUpdatedTo(notice);
+      }
+    } catch {
+      // storage disabled — nothing to announce
+    }
+  }, []);
+
+  // The apply poll must not outlive the section.
+  useEffect(
+    () => () => {
+      if (pollTimer.current !== null) clearInterval(pollTimer.current);
+    },
+    [],
+  );
+
+  const toggle = useMutation({
+    mutationFn: (enabled: boolean) =>
+      api.patch("/api/settings", { update_check_enabled: enabled ? "1" : "0" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["update"] });
+      qc.invalidateQueries({ queryKey: ["settings"] });
+    },
+  });
+
+  const checkNow = useMutation({
+    mutationFn: () => api.post<UpdateStatus>("/api/update/check", {}),
+    onSuccess: (s) => {
+      qc.setQueryData(["update"], s);
+      setCheckResult(
+        !s.checkEnabled
+          ? "Automatic checks are off — turn the toggle on to check."
+          : s.latest === null
+            ? "Could not reach the release feed right now — it will quietly retry on the next scheduled check."
+            : s.updateAvailable
+              ? `A newer release is out: ${s.latest}.`
+              : `You are on the latest release (${s.current}).`,
+      );
+    },
+    // The server answers 200 even for a failed check; an error here is the
+    // request itself failing — keep the same calm line, no error spam.
+    onError: () =>
+      setCheckResult(
+        "Could not reach the release feed right now — it will quietly retry on the next scheduled check.",
+      ),
+  });
+
+  const saveTrigger = useMutation({
+    mutationFn: () =>
+      api.put<{ configured: boolean }>("/api/update/trigger", {
+        url: urlDraft.trim(),
+        ...(tokenDraft.trim() ? { token: tokenDraft.trim() } : {}),
+      }),
+    onSuccess: () => {
+      // Sent once, never read back — both fields clear on success (#235 shape).
+      setUrlDraft("");
+      setTokenDraft("");
+      qc.invalidateQueries({ queryKey: ["update"] });
+    },
+  });
+  const removeTrigger = useMutation({
+    mutationFn: () => api.delete<{ configured: boolean }>("/api/update/trigger"),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["update"] }),
+  });
+
+  function startPoll(startedCurrent: string) {
+    const POLL_MS = 3_000;
+    const BUDGET_MS = 5 * 60 * 1000;
+    const startedAt = Date.now();
+    if (pollTimer.current !== null) clearInterval(pollTimer.current);
+    pollTimer.current = window.setInterval(async () => {
+      let polled: string | null = null;
+      try {
+        polled = (await api.get<UpdateStatus>("/api/update")).current;
+      } catch {
+        polled = null; // container mid-restart — keep calm and keep polling
+      }
+      if (polled !== null && shouldReloadAfterApply(startedCurrent, polled)) {
+        if (pollTimer.current !== null) clearInterval(pollTimer.current);
+        pollTimer.current = null;
+        try {
+          sessionStorage.setItem(UPDATE_NOTICE_KEY, serializeUpdateNotice(polled));
+        } catch {
+          // the toast is lost, the update is not
+        }
+        // The #193 service worker serves the new bundle on this reload.
+        location.reload();
+        return;
+      }
+      if (Date.now() - startedAt >= BUDGET_MS) {
+        if (pollTimer.current !== null) clearInterval(pollTimer.current);
+        pollTimer.current = null;
+        setApplyPhase("timeout");
+      }
+    }, POLL_MS);
+  }
+
+  const apply = useMutation({
+    mutationFn: () => api.post<{ ok: boolean }>("/api/update/apply", {}),
+    onSuccess: () => {
+      setApplyPhase("waiting");
+      // status.data is present whenever the button rendered (it gates on it).
+      startPoll(status.data?.current ?? "");
+    },
+  });
+
+  const s = status.data;
+  const configured = s?.applyConfigured ?? false;
+  return (
+    <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
+      <h3 style={{ margin: 0 }}>Updates</h3>
+      <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 280 }}>Running version</span>
+        <span data-testid="update-current-version" style={{ fontWeight: 700 }}>
+          {s ? `Draw ${s.current}` : "…"}
+        </span>
+      </div>
+      {updatedTo && (
+        <p style={{ margin: 0, color: "var(--ok)" }} data-testid="update-updated-notice">
+          ✓ Updated to {updatedTo}.
+        </p>
+      )}
+      <label className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 280 }}>Check for updates daily</span>
+        <input
+          type="checkbox"
+          data-testid="update-check-toggle"
+          checked={s?.checkEnabled ?? true}
+          disabled={!s || toggle.isPending}
+          onChange={(e) => toggle.mutate(e.target.checked)}
+        />
+        <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
+          one request per day to the GitHub release feed — off means no requests at all
+        </span>
+      </label>
+      <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button
+          data-testid="update-check-now"
+          disabled={checkNow.isPending}
+          onClick={() => checkNow.mutate()}
+        >
+          Check now
+        </button>
+        {checkResult && (
+          <span data-testid="update-check-result" style={{ fontSize: 13 }}>
+            {checkResult}
+          </span>
+        )}
+      </div>
+      {s?.updateAvailable && (
+        <div
+          data-testid="update-banner"
+          style={{
+            border: "1px solid var(--accent)",
+            borderRadius: "var(--radius-md)",
+            padding: 12,
+            display: "grid",
+            gap: 8,
+          }}
+        >
+          <strong>Update available: {s.latest}</strong>
+          {s.releaseUrl && (
+            <a
+              href={s.releaseUrl}
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--accent)" }}
+            >
+              Release notes
+            </a>
+          )}
+        </div>
+      )}
+      {configured ? (
+        <p style={{ margin: 0, color: "var(--ok)" }} data-testid="update-trigger-status">
+          ✓ Update trigger configured — “Update now” posts to it and your container platform
+          swaps the image.
+        </p>
+      ) : (
+        <p style={{ margin: 0, color: "var(--text-dim)" }} data-testid="update-trigger-status">
+          No update trigger configured — updating stays a manual pull-and-restart. Point this
+          at a Watchtower <code>http-api-update</code> endpoint (see the deployment guide,
+          section 7.5) to update from right here.
+        </p>
+      )}
+      {configured && (
+        <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            data-testid="update-apply"
+            disabled={apply.isPending || applyPhase === "waiting"}
+            onClick={() => apply.mutate()}
+          >
+            Update now
+          </button>
+          {applyPhase === "waiting" && (
+            <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
+              Update requested — waiting for the new version…
+            </span>
+          )}
+          {applyPhase === "timeout" && (
+            <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
+              Still waiting — the update may take a while longer.{" "}
+              {s?.releaseUrl && (
+                <a
+                  href={s.releaseUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--accent)" }}
+                >
+                  Release notes
+                </a>
+              )}
+            </span>
+          )}
+        </div>
+      )}
+      <div className="setting-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          type="url"
+          aria-label="Update trigger URL"
+          data-testid="update-trigger-url-input"
+          placeholder={
+            configured ? "Replace trigger URL (http://…)" : "http://watchtower:8080/v1/update"
+          }
+          value={urlDraft}
+          onChange={(e) => setUrlDraft(e.target.value)}
+          style={{ flex: 1, maxWidth: 380 }}
+        />
+        <input
+          type="password"
+          aria-label="Update trigger token"
+          data-testid="update-trigger-token-input"
+          placeholder="Bearer token (optional)"
+          value={tokenDraft}
+          onChange={(e) => setTokenDraft(e.target.value)}
+          style={{ width: 180 }}
+        />
+        <button
+          data-testid="update-trigger-save"
+          disabled={!urlDraft.trim() || saveTrigger.isPending}
+          onClick={() => saveTrigger.mutate()}
+        >
+          Save trigger
+        </button>
+        {configured && (
+          <button
+            data-testid="update-trigger-remove"
+            title="Remove the stored trigger URL and token — updating goes back to manual"
+            disabled={removeTrigger.isPending}
+            onClick={() => removeTrigger.mutate()}
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
+        Trigger URL and token are stored privately and never shown again after saving. Draw
+        itself never touches Docker — updating is one POST to your trigger.
+      </p>
+      {(saveTrigger.error || removeTrigger.error || apply.error || toggle.error) && (
+        <div style={{ color: "var(--danger)", fontSize: 13 }}>
+          {(saveTrigger.error ?? removeTrigger.error ?? apply.error ?? toggle.error)?.message}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function CategoryRow({ category }: { category: Category }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -618,6 +940,8 @@ export function SettingsPage() {
       </section>
 
       <BackupSection />
+
+      <UpdateSection />
     </div>
   );
 }

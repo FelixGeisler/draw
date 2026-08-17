@@ -3,10 +3,6 @@ import { request as apiRequest, expect, test } from "@playwright/test";
 /**
  * OTA update (#247): the Settings About/Update surface.
  *
- * SPEC-FIRST: written before the implementation — both tests are
- * `test.fixme(...)` so the suite stays green until #247 lands. WHEN
- * IMPLEMENTING: flip each `test.fixme(` back to `test(`.
- *
  * Determinism: playwright.config.ts pins UPDATE_CHECK_URL to a closed
  * loopback port (the notify-settings.spec.ts trick), so "Check now" fails
  * fast without any network and the update-available banner can never light
@@ -30,7 +26,7 @@ test.afterAll(async ({}, testInfo) => {
   await ctx.dispose();
 });
 
-test.fixme("Settings shows the running version and the check controls", async ({ page }) => {
+test("Settings shows the running version and the check controls", async ({ page }) => {
   await page.goto("/settings");
 
   // The version on screen is the one the server reports — not a hardcoded
@@ -48,7 +44,7 @@ test.fixme("Settings shows the running version and the check controls", async ({
   await expect(page.getByTestId("update-banner")).toHaveCount(0);
 });
 
-test.fixme("the unconfigured apply state guides instead of offering a button", async ({ page }) => {
+test("the unconfigured apply state guides instead of offering a button", async ({ page }) => {
   await page.goto("/settings");
 
   // No trigger configured: no "Update now" anywhere, guidance instead.

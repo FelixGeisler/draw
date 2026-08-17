@@ -1,6 +1,5 @@
 /**
- * Post-update notice (#247) — SPEC-FIRST SKELETON, behavior pinned in
- * lib/updateNotice.test.ts (it.fails until implemented — flip to it).
+ * Post-update notice (#247), behavior pinned in lib/updateNotice.test.ts.
  *
  * The apply flow POSTs /api/update/apply, then polls GET /api/update every
  * 3s (up to 5 minutes). When `current` changes, the client stamps
@@ -21,14 +20,14 @@
 
 export const UPDATE_NOTICE_KEY = "draw.updateNotice";
 
-function todo(): never {
-  throw new Error("TODO(#247): not implemented yet — spec'd in lib/updateNotice.test.ts");
-}
+// What a stored notice must look like to be announced: a bare or v-prefixed
+// semver triple, optionally with a prerelease suffix. Anything else in the
+// slot — an unrelated writer, a stale format — is not ours to toast.
+const VERSION_RE = /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 
 /** What to stamp before reloading: the version the toast will announce. */
 export function serializeUpdateNotice(version: string): string {
-  void version;
-  todo();
+  return version.trim();
 }
 
 /**
@@ -37,8 +36,10 @@ export function serializeUpdateNotice(version: string): string {
  * non-null read; that consumption is what prevents repeat toasts.
  */
 export function parseUpdateNotice(raw: string | null): string | null {
-  void raw;
-  todo();
+  if (raw === null) return null;
+  const value = raw.trim();
+  if (!VERSION_RE.test(value)) return null;
+  return value;
 }
 
 /**
@@ -50,7 +51,6 @@ export function shouldReloadAfterApply(
   startedCurrent: string,
   polledCurrent: string | null,
 ): boolean {
-  void startedCurrent;
-  void polledCurrent;
-  todo();
+  if (!polledCurrent) return false;
+  return polledCurrent !== startedCurrent;
 }
