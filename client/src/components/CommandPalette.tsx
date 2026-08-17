@@ -99,7 +99,9 @@ export function CommandPalette() {
         navigate("/tasks", { state: { focusTaskId: cmd.taskId, showDone: cmd.showDone } });
         return true;
       case "open-goal":
-        navigate("/goals");
+        // GoalsPage consumes this router state (#246, the open-task pattern):
+        // scrolls the goal card into view and flashes it once.
+        navigate("/goals", { state: { focusGoalId: cmd.goalId } });
         return true;
     }
   }

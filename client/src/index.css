@@ -445,11 +445,13 @@ textarea:focus {
   opacity: 0;
 }
 
-/* Palette landing flash (#243): the row the palette opened pulses once so the
-   eye finds it after the jump. Motion is opt-in (the #62/#123 idiom) — under
-   reduced motion the scroll alone does the pointing. */
+/* Palette landing flash (#243; goal cards #246): the row or goal card the
+   palette opened pulses once so the eye finds it after the jump. Motion is
+   opt-in (the #62/#123 idiom) — under reduced motion the scroll alone does
+   the pointing. */
 @media (prefers-reduced-motion: no-preference) {
-  .task-row.palette-flash {
+  .task-row.palette-flash,
+  [data-goal-id].palette-flash {
     animation: palette-flash var(--palette-flash-dur) ease-out;
   }
 
