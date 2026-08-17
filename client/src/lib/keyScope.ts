@@ -2,8 +2,7 @@
 // single-key shortcuts (n / d / space / ?). Pure data-in/data-out: the client
 // unit suite has no DOM, so callers summarize the keyboard event's target
 // instead of passing the element itself. The colocated spec (keyScope.test.ts)
-// is the contract; these bodies are TEST-FIRST SKELETONS that land with the
-// implementation. Wire-up (reading event.target / isComposing / overlay state
+// is the contract. Wire-up (reading event.target / isComposing / overlay state
 // and calling these) lives in the useGlobalShortcuts hook.
 
 /** Plain summary of a keydown's target — what the predicate needs, no DOM. */
@@ -27,8 +26,10 @@ export interface GlobalKeyContext {
  * select, or contenteditable. Single-letter shortcuts must never fire there.
  */
 export function isEditableTarget(target: KeyTargetInfo | null | undefined): boolean {
-  void target;
-  throw new Error("TODO #243: implement isEditableTarget");
+  if (!target) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName?.toUpperCase();
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
 }
 
 /**
@@ -36,6 +37,5 @@ export function isEditableTarget(target: KeyTargetInfo | null | undefined): bool
  * IME composition in progress, or any modal/overlay open.
  */
 export function globalKeyInert(ctx: GlobalKeyContext): boolean {
-  void ctx;
-  throw new Error("TODO #243: implement globalKeyInert");
+  return Boolean(ctx.isComposing) || Boolean(ctx.overlayOpen) || isEditableTarget(ctx.target);
 }
