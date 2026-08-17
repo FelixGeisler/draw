@@ -3350,3 +3350,53 @@ row at opacity 0.
 *Out of scope:* the visual direction itself (palette, felt/gilt), colour
 tokens beyond the existing set, de-emojifying TaskBadges, and any spacing or
 type normalization that would change computed output.
+
+== ADR-70: Updates over the air — a default-on check, the version behind the gate, a trigger instead of the socket
+
+*Context:* A self-hosted container on a Pi (#191, ADR-51) has no app store
+and no update nag: releases land on GHCR (#192, ADR-53) and nothing tells
+the owner. #247 wants Draw to notice a new release, say so, and offer a
+one-tap apply — on an app whose deployment story is "a container that only
+mounts `/data`" and whose only pre-auth endpoint is `/api/health` (ADR-50).
+
+*Decision:* Three calls worth pinning:
+
+* *The check is default-ON, and off means zero calls.* One GET per
+`UPDATE_CHECK_INTERVAL_HOURS` (default 24) to the GitHub latest-release
+endpoint, first ~60s after boot with jitter, never in the boot path. A
+self-hosted app that never phones home about updates rots silently; the
+counterweight is scope and a real off-switch — the request carries nothing
+but the `Accept` header (no token, no telemetry), and both the
+`update_check_enabled` setting and `UPDATE_CHECK_INTERVAL_HOURS=0` mean
+zero outbound calls and zero timers, the #235 rule, gating even the user's
+own "Check now". Unlike `BACKUP_INTERVAL_HOURS`, garbage in the env knob
+falls back to the default rather than to disabled: a typo silently turning
+a default-on feature off would be a setting that lies (the
+`warmup_every_hours` lesson). Comparison is a pure semver module — numeric
+fields, prereleases offered only to prerelease runners, unparseable tags
+fail closed — and the running version is `server/package.json`, read once
+(the root package.json and the MCP banner literal are not sources of
+truth; a test pins the choice). First sighting of a new version pays ONE
+notification through the #235 door, deduped in a settings row so restarts
+never re-send.
+* *The version sits behind the password gate.* `/api/health` stays exactly
+`{ok, time}`: version and update state ride the authed `GET /api/update`.
+Liveness is public infrastructure; "which exact build is this" is
+reconnaissance, and the post-restart readiness probe needs only health.
+* *Applying is a trigger, not the socket.* Draw never mounts `docker.sock`
+— a compromise of the app must not be root on the host. "Update now" is
+one POST to a user-configured trigger URL (Watchtower `http-api-update`,
+label-scoped, polling off — deployment view 7.5), `Bearer` token attached
+only there and never on the check request, managed write-only like
+`notify_url` (presence flag on read, excluded from `GET /api/settings`).
+No trigger configured -> `409` plus guidance, not a broken button. No
+auto-apply: the check may run daily, but a human taps the button. After
+apply the client polls `GET /api/update` (3s, 5-minute budget) and reloads
+once the version changes; a sessionStorage flag pays one "Updated to X"
+line and is consumed — a failed poll tick during the container swap is
+never a reason to reload.
+
+*Out of scope:* auto-apply on a schedule, update channels beyond
+stable-vs-prerelease, rollback automation (pin the previous tag + restore a
+backup, 7.5), and bare-npm self-restart — there the check and banner work,
+the button stays hidden.

@@ -260,6 +260,69 @@ express --> vol
 @enduml
 ....
 
+== 7.5 Updates over the air — check, tell, apply (#247)
+
+Draw checks for its own updates but never applies them itself (#247,
+xref:09_architecture_decisions.adoc[ADR-70]). Three separable parts:
+
+*Check.* Once per `UPDATE_CHECK_INTERVAL_HOURS` (default 24; `0` disables the
+timer) the server GETs the GitHub latest-release endpoint
+(`UPDATE_CHECK_URL` overrides it), compares the tag against its own
+`server/package.json` version — numeric semver fields, prereleases offered
+only to prerelease runners — and caches the result in memory. The
+`update_check_enabled` setting (Settings -> Updates, default on) gates every
+call including the scheduled tick: off means zero outbound calls, the #235
+rule. The first check runs ~60s after boot with jitter, never in the boot
+path.
+
+*Tell.* Settings -> Updates shows the running version, a "Check now" button
+and — when a newer release is out — a banner with the release-notes link.
+The first sighting of a new version additionally sends one notification
+through the existing `notify_url` door (#235), deduped in the
+`update_last_notified_version` settings row so re-checks and restarts never
+re-send. `GET /api/update` sits behind the password gate: the running
+version is authed data, `/api/health` stays exactly `{ok, time}` (ADR-50).
+
+*Apply.* One outbound POST to a user-configured trigger URL — Draw never
+mounts `docker.sock` and never executes an update itself. The blessed target
+is a Watchtower sidecar in HTTP-API mode, label-scoped to the draw container
+with periodic polling off (the trigger is the only actor):
+
+[source,yaml]
+----
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      WATCHTOWER_HTTP_API_UPDATE: "true"          # update only when POSTed
+      WATCHTOWER_HTTP_API_TOKEN: "<long random token>"
+      WATCHTOWER_LABEL_ENABLE: "true"             # only labeled containers
+    # draw service additionally gets:
+    #   labels: [com.centurylinklabs.watchtower.enable=true]
+    #   image: ghcr.io/felixgeisler/draw:latest   (image, not build:)
+----
+
+In Settings -> Updates, save `http://watchtower:8080/v1/update` plus the
+token as the update trigger (write-only, presence flag on read, excluded
+from `GET /api/settings` like `notify_url`). "Update now" then POSTs the
+trigger with `Authorization: Bearer <token>` — the bearer never rides the
+check request — answers `202`, and the client polls `GET /api/update` every
+3s (up to 5 minutes) until the reported version changes, then reloads
+through the #193 service-worker path and pays one "Updated to X" line. No
+trigger configured: the apply endpoint answers `409` and Settings shows this
+section instead of a button.
+
+*Rollback:* pin the previous image tag in the compose file
+(`image: ghcr.io/felixgeisler/draw:v1.2.3`), `docker compose up -d`, and —
+if a migration ran in between — restore a backup from before the update
+(xref:09_architecture_decisions.adoc[ADR-26]; the backup importer refuses
+newer-versioned archives, so restoring an older backup into an older image
+is the supported direction). *Bare-npm path:* `git pull`, `npm ci`,
+`npm run build`, restart `npm start` — the check and the banner work the
+same; only the trigger button is container-specific.
+
 [cols="1,3",options="header"]
 |===
 |Aspect |Detail
@@ -294,7 +357,10 @@ together with a loopback-only published port). `PORT` is deliberately
 not used — dev tooling injects it. `BACKUP_INTERVAL_HOURS` (production mode
 only — unset/0 disables; hours between automatic backups into
 `DATA_DIR/backups/`) and `BACKUP_RETENTION` (default 7 — how many archives to
-keep, #194/ADR-52)
+keep, #194/ADR-52). `UPDATE_CHECK_INTERVAL_HOURS` (production mode only —
+default 24, `0` disables the release-check timer; unlike the backup knob this
+one is default-ON, #247/ADR-70) and `UPDATE_CHECK_URL` (override for the
+release endpoint — tests and proxied networks)
 
 |Data
 |Everything under `DATA_DIR` (dev/production default `server/data/`, gitignored;
@@ -311,8 +377,13 @@ workflow on pushes to `main`
 |===
 
 *Outbound network:* `api.anthropic.com`, only when an AI feature is
-explicitly invoked with a configured key — and the user-configured
+explicitly invoked with a configured key — the user-configured
 `notify_url` webhook (#235/ADR-67), only when set in Settings ->
 Notifications: a fire-and-forget plain-text POST (ntfy-compatible) on
-achievement unlocks, achieved goals, and completed daily challenges. Unset
-(the default) means zero outbound calls from the notification path.
+achievement unlocks, achieved goals, and completed daily challenges (unset,
+the default, means zero outbound calls from the notification path) —
+`api.github.com`, one GET per `UPDATE_CHECK_INTERVAL_HOURS` (default daily)
+for the release check (#247/ADR-70; the Settings toggle or
+`UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls, `UPDATE_CHECK_URL`
+redirects it) — and the user-configured update trigger URL, one POST per
+explicit "Update now" click, never automatically.
