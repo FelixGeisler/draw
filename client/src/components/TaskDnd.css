@@ -96,11 +96,24 @@
   box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 60%, transparent);
 }
 
-/* The hovered blocked target names its rule right under the row. */
+/* The hovered blocked target names its rule right under the row. Absolutely
+   positioned at its static spot (all offsets auto), so — like the gaps'
+   zero-net-height trick — mounting mid-drag occupies no flow space and never
+   shifts the rows below: the drop target the user aimed at stays put (#250).
+   It overlays the top of the next row, hence the opaque panel background and
+   the danger border echoing the blocked-row language. z-index above the gaps
+   (31), below the ghost (40); it keeps pointer events on purpose — its
+   data-dnd-row keeps the blocked row hovered while the pointer rests on it. */
 .dnd-reason {
+  position: absolute;
+  z-index: 32;
   padding: 4px 10px;
   color: var(--danger);
   font-size: 13px;
+  background: var(--bg-panel);
+  border: 1px dashed var(--danger);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
 .dnd-ghost {

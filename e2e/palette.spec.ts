@@ -218,3 +218,25 @@ test("Ctrl+K yields to a running focus session — no invisible palette undernea
   await page.request.post("/api/timer/stop");
   await resolveCurrentDraw(page);
 });
+
+test("Enter on a goal result lands on its card on /goals", async ({ page }) => {
+  // Goal landing (#246): parity with the task landing above — Enter must not
+  // dump the user on an unscrolled goal list. Uniquely-named so the palette
+  // query matches exactly one result (the ArrowDown determinism invariant).
+  const GOAL_TITLE = "Palette landing lighthouse";
+  await page.request.post("/api/goals", { data: { title: GOAL_TITLE } });
+
+  await page.goto("/stats");
+  await page.keyboard.press("Control+k");
+  await page.getByTestId("palette-input").pressSequentially("landing lighthouse");
+  await expect(page.getByTestId("palette-result").filter({ hasText: GOAL_TITLE })).toBeVisible();
+
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
+
+  await expect(page.getByTestId("command-palette")).toBeHidden();
+  await expect(page).toHaveURL(/\/goals$/);
+  // Scrolled into view with a transient highlight; the goal's own card being
+  // visible is the stable, animation-agnostic half of that promise.
+  await expect(page.locator("[data-goal-id]").filter({ hasText: GOAL_TITLE })).toBeVisible();
+});
