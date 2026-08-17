@@ -27,6 +27,18 @@
 }
 
 .ach-card {
+  /* File-local design constants (#244): timings/radii that are this card's
+     signature, not the shared scale's — the slow unprompted holo drift and
+     its 2x-faster hover sweep, the reveal/tint/bar-fill beats, the
+     half-of-14px-height progress pill, and the editor's deliberate half-step
+     under the 6px control radius inside a 150px card. */
+  --sheen-drift-period: 7s;
+  --sheen-sweep-period: 3.5s;
+  --reveal-dur: 0.18s;
+  --tint-dur: 0.15s;
+  --bar-fill-dur: 0.4s;
+  --bar-pill: 7px;
+  --editor-radius: 5px;
   aspect-ratio: 5 / 7;
 }
 
@@ -51,12 +63,12 @@
   justify-content: flex-end; /* the caption sits at the foot of the art */
   width: 100%;
   height: 100%;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   background: linear-gradient(160deg, #232735, #1b1e27);
   padding: 12px;
   overflow: hidden; /* clips art and sheen to the rounded corners */
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--elev-1);
 }
 
 .ach-art {
@@ -208,16 +220,16 @@
   position: relative;
   height: 14px;
   margin-top: 5px;
-  border-radius: 7px;
+  border-radius: var(--bar-pill);
   background: rgba(18, 20, 26, 0.55);
   overflow: hidden;
 }
 
 .ach-progress-fill {
   height: 100%;
-  border-radius: 7px;
+  border-radius: var(--bar-pill);
   background: linear-gradient(90deg, var(--accent), #a06bff);
-  transition: width 0.4s;
+  transition: width var(--bar-fill-dur);
 }
 
 .ach-progress-label {
@@ -238,13 +250,13 @@
   margin-top: 6px;
   padding: 4px 8px;
   border: 1px solid var(--accent);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(79, 140, 255, 0.18);
   color: var(--text);
   font-size: 11.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background var(--tint-dur);
 }
 
 .ach-claim:hover:not(:disabled) {
@@ -306,7 +318,7 @@
   height: 26px;
   padding: 0;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(18, 20, 26, 0.75);
   color: var(--text);
   font-size: 13px;
@@ -369,7 +381,7 @@
   box-sizing: border-box;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--editor-radius);
   background: var(--bg);
   color: var(--text);
   font: inherit;
@@ -399,7 +411,7 @@
   flex: 1;
   padding: 4px 6px;
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: var(--editor-radius);
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   font-size: 11px;
@@ -432,12 +444,12 @@
    pattern above. */
 @media (prefers-reduced-motion: no-preference) {
   .ach-desc {
-    transition: opacity 0.18s ease;
+    transition: opacity var(--reveal-dur) ease;
   }
   .ach-edit {
     transition:
-      opacity 0.18s ease,
-      background 0.15s;
+      opacity var(--reveal-dur) ease,
+      background var(--tint-dur);
   }
 }
 
@@ -526,13 +538,13 @@
 
   .ach-card.unlocked.rarity-secret-rare .ach-card-inner::after,
   .ach-card.unlocked.rarity-ultra-rare .ach-card-inner::after {
-    animation: ach-sheen-drift 7s ease-in-out infinite alternate;
+    animation: ach-sheen-drift var(--sheen-drift-period) ease-in-out infinite alternate;
   }
 
   .ach-card.unlocked.rarity-super-rare:hover .ach-card-inner::after,
   .ach-card.unlocked.rarity-super-rare:focus-within .ach-card-inner::after,
   .ach-card.unlocked.rarity-rare:hover .ach-card-inner::after,
   .ach-card.unlocked.rarity-rare:focus-within .ach-card-inner::after {
-    animation: ach-sheen-drift 3.5s ease-in-out infinite alternate;
+    animation: ach-sheen-drift var(--sheen-sweep-period) ease-in-out infinite alternate;
   }
 }

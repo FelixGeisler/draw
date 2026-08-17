@@ -1,4 +1,16 @@
 .draw-scene {
+  /* File-local design constants (#244): the drawn card's signature motion —
+     the springy flip, the shuffle jitter, the art fade, the slow holo drift
+     (shared 7s beat with the achievement sheens, declared per file), the
+     regen spinner — and its 16px face frame with the 10px hint backing.
+     Bespoke by design, not rungs on the shared scale. */
+  --flip-dur: 0.65s;
+  --shuffle-dur: 0.45s;
+  --art-fade-dur: 0.8s;
+  --holo-drift-period: 7s;
+  --regen-spin-dur: 1s;
+  --card-radius: 16px;
+  --hint-radius: 10px;
   position: relative; /* anchors the ↻ overlay to the card bounds (#113) */
   perspective: 1200px;
   width: 300px;
@@ -11,7 +23,7 @@
   width: 100%;
   height: 100%;
   transform-style: preserve-3d;
-  transition: transform 0.65s cubic-bezier(0.34, 1.3, 0.5, 1);
+  transition: transform var(--flip-dur) cubic-bezier(0.34, 1.3, 0.5, 1);
 }
 
 .draw-card.flipped {
@@ -19,7 +31,7 @@
 }
 
 .draw-card.shuffling {
-  animation: shuffle 0.45s ease-in-out;
+  animation: shuffle var(--shuffle-dur) ease-in-out;
 }
 
 @keyframes shuffle {
@@ -42,7 +54,9 @@
   position: absolute;
   inset: 0;
   backface-visibility: hidden;
-  border-radius: 16px;
+  /* The art/scrim/holo layers clip via border-radius: inherit — token only
+     THIS declaration, never theirs, so they stay coupled to the face. */
+  border-radius: var(--card-radius);
   border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -170,7 +184,7 @@
   object-fit: cover;
   border-radius: inherit;
   pointer-events: none;
-  animation: art-fade 0.8s ease both;
+  animation: art-fade var(--art-fade-dur) ease both;
 }
 
 /* Legibility scrim between the art and the text. The content block huddles
@@ -220,7 +234,7 @@
 .draw-face.back .draw-hint,
 .draw-face.back .warmup-window-hint {
   padding: 3px 10px;
-  border-radius: 10px;
+  border-radius: var(--hint-radius);
 }
 
 .draw-face.back h2,
@@ -268,7 +282,7 @@
   }
 
   .draw-holo {
-    animation: holo-drift 7s ease-in-out infinite alternate;
+    animation: holo-drift var(--holo-drift-period) ease-in-out infinite alternate;
   }
 }
 
@@ -308,7 +322,7 @@
 }
 
 .draw-art-regen.pending {
-  animation: regen-spin 1s linear infinite;
+  animation: regen-spin var(--regen-spin-dur) linear infinite;
   cursor: wait;
 }
 

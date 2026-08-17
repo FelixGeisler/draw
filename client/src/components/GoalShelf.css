@@ -10,6 +10,14 @@
    the intensify/fade/lift only animate when motion is welcome — the hover
    end-states themselves still apply instantly under reduced motion. */
 .goal-shelf {
+  /* File-local design constants (#244): the cabinet's own frame radius, the
+     ghost buttons' deliberate 7px half-pill, the missed rows' softer corner,
+     and the quick hover tint — bespoke to the Hall of Fame's language, not
+     rungs on the shared scale. */
+  --cabinet-radius: 16px;
+  --ghost-radius: 7px;
+  --missed-row-radius: 10px;
+  --ghost-tint-dur: 0.15s;
   margin-top: 16px;
 }
 
@@ -22,7 +30,7 @@
 .goal-cabinet {
   position: relative;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: var(--cabinet-radius);
   border: 1px solid rgba(255, 220, 140, 0.14);
   background: linear-gradient(180deg, #1a1622 0%, #141019 58%, #0f0b14 100%);
   box-shadow:
@@ -223,7 +231,7 @@
   color: #d9c68f;
   background: transparent;
   border: 1px solid rgba(216, 196, 143, 0.38);
-  border-radius: 7px;
+  border-radius: var(--ghost-radius);
   padding: 4px 12px;
 }
 
@@ -339,7 +347,7 @@
   min-height: 44px;
   padding: 9px 16px;
   border: 1px solid rgba(255, 255, 255, 0.045);
-  border-radius: 10px;
+  border-radius: var(--missed-row-radius);
   background: rgba(255, 255, 255, 0.012);
 }
 
@@ -388,29 +396,29 @@
    end-states still take effect, just instantly, and nothing moves. */
 @media (prefers-reduced-motion: no-preference) {
   .goal-cup-beam {
-    transition: background 0.2s ease;
+    transition: background var(--dur-mid) ease;
   }
 
   .goal-cup-pool {
-    transition: background 0.2s ease, width 0.2s ease;
+    transition: background var(--dur-mid) ease, width var(--dur-mid) ease;
   }
 
   .goal-cup-art {
-    transition: filter 0.2s ease, transform 0.2s ease;
+    transition: filter var(--dur-mid) ease, transform var(--dur-mid) ease;
   }
 
   .goal-cup-name {
-    transition: color 0.2s ease, text-shadow 0.2s ease;
+    transition: color var(--dur-mid) ease, text-shadow var(--dur-mid) ease;
   }
 
   .goal-cup-reveal,
   .goal-missed-reveal {
-    transition: opacity 0.2s ease;
+    transition: opacity var(--dur-mid) ease;
   }
 
   .goal-cup-actions button,
   .goal-missed-actions button {
-    transition: background 0.15s ease, border-color 0.15s ease;
+    transition: background var(--ghost-tint-dur) ease, border-color var(--ghost-tint-dur) ease;
   }
 
   /* The only positional motion: the cup lifts a hair on hover/focus. */

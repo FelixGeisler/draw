@@ -15,7 +15,8 @@ test.describe("production serve mode", () => {
     expect(health.ok()).toBeTruthy();
 
     await page.goto(`${PROD}/`);
-    await expect(page.locator(".sidenav .brand")).toHaveText("🃏 Draw");
+    // The brand is an SVG mark + "Draw" since #244 (no emoji chrome in the nav).
+    await expect(page.locator(".sidenav .brand")).toHaveText("Draw");
   });
 
   test("a deep link survives a full page load", async ({ page }) => {

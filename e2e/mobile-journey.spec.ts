@@ -191,6 +191,22 @@ test("the controls the phone rules target are ≥44px touch targets", async ({ p
   const handleBox = (await handle.boundingBox())!;
   expect(Math.round(handleBox.width), "drag handle width").toBeGreaterThanOrEqual(44);
   expect(Math.round(handleBox.height), "drag handle height").toBeGreaterThanOrEqual(44);
+
+  // The row's icon buttons (#244): 28px hover-economy targets on desktop,
+  // but on the phone they join the 44px rule in BOTH axes — the kebab
+  // included. hover:none makes the cluster permanently visible here, so a
+  // finger can actually reach what it can hit.
+  const rowEl = taskTree(page).locator(`[data-dnd-row="${seeded.id}"]`);
+  const actions = rowEl.locator(".row-actions button");
+  const actionCount = await actions.count();
+  expect(actionCount, "the row must expose icon action buttons").toBeGreaterThanOrEqual(2);
+  for (let i = 0; i < actionCount; i++) {
+    const btn = actions.nth(i);
+    const label = await btn.getAttribute("aria-label");
+    const box = (await btn.boundingBox())!;
+    expect(Math.round(box.width), `row action "${label}" width`).toBeGreaterThanOrEqual(44);
+    expect(Math.round(box.height), `row action "${label}" height`).toBeGreaterThanOrEqual(44);
+  }
 });
 
 test("core loop on a phone: capture, draw, reveal, complete", async ({ page }) => {
@@ -259,6 +275,12 @@ test("touch drag-and-drop: a childless root nests under another root", async ({ 
   // back).
   const targetRow = taskTree(page).locator(`[data-dnd-row="${parent.id}"]`);
   await targetRow.scrollIntoViewIfNeeded();
+  // "Into view" is minimal: it stops as soon as the TARGET row clears the
+  // viewport edge, and depending on how long the shared tree is by now (it
+  // varies with which specs ran before this file) the source handle can be
+  // left sitting just below the fold. Bring it in too — the pair is two
+  // adjacent ~44px rows, so both stay visible — and only then measure.
+  await handle.scrollIntoViewIfNeeded();
 
   const from = await centre(handle);
   const targetBox = (await targetRow.boundingBox())!;

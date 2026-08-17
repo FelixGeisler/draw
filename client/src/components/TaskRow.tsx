@@ -1,4 +1,12 @@
-import { Fragment, useContext, useState } from "react";
+import {
+  Fragment,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import type { Category, Goal, NewTask, Task } from "../api/types";
 import { useCreateSubtasks, useDeleteTask, useSplitTask, useUpdateTask } from "../hooks/useTasks";
 import { useAiStatus } from "../hooks/useAi";
@@ -14,6 +22,19 @@ import { SnoozeMenu } from "./SnoozeMenu";
 import { TaskForm } from "./TaskForm";
 import { SubtaskEditor } from "./SubtaskEditor";
 import { AiBreakdownPanel } from "./AiSuggestionPanel";
+import {
+  ArrowRightIcon,
+  ArrowUpIcon,
+  BranchIcon,
+  KebabIcon,
+  MoonIcon,
+  MoveUnderIcon,
+  PencilIcon,
+  ScissorsIcon,
+  SunIcon,
+  SwapIcon,
+  TrashIcon,
+} from "./icons";
 
 interface Props {
   task: Task;
@@ -68,6 +89,12 @@ export function TaskRow({
   const [movingUnder, setMovingUnder] = useState(false);
   const [moveTargetId, setMoveTargetId] = useState("");
   const [reparentError, setReparentError] = useState<string | null>(null);
+  // Row-resolve fade (#244): a confirmed delete fades the row out while the
+  // DELETE round-trips — the refetch removes it for real (no optimistic
+  // update, ADR-43 spirit). Scoped to delete only: a completed row STAYS
+  // in the list under "show done", so a leave-fade there would strand a
+  // visible row at opacity 0.
+  const [leaving, setLeaving] = useState(false);
 
   const category = categories.find((c) => c.id === task.categoryId);
   const hasSubtasks = (task.subtasks?.length ?? 0) > 0;
@@ -197,14 +224,17 @@ export function TaskRow({
         // task-row lets the phone breakpoint wrap the action buttons onto
         // their own line (index.css, #193) — desktop keeps one line. The gap
         // lives in that stylesheet too: inline, it would beat the phone
-        // block's tighter row-gap.
-        className={["task-row", dndClass].filter(Boolean).join(" ")}
+        // block's tighter row-gap. The done-dim opacity moved to the .done
+        // class (#244) so the .row-leave fade can win the cascade — an
+        // inline opacity would beat both.
+        className={["task-row", done ? "done" : "", leaving ? "row-leave" : "", dndClass]
+          .filter(Boolean)
+          .join(" ")}
         style={{
           display: "flex",
           alignItems: "center",
           padding: "8px 10px",
           borderBottom: "1px solid var(--border)",
-          opacity: done ? 0.5 : 1,
         }}
       >
         {/* Pointer-only by design (aria-hidden, not focusable): the drag is
@@ -213,7 +243,10 @@ export function TaskRow({
         {dnd && !done && (
           <span
             className="dnd-handle"
-            title="Drag to reorganize (keyboard: the Move under… and ⤴ buttons)"
+            // Wording constraint: getByTitle matches SUBSTRINGS case-insensitively,
+            // so this tooltip must not contain another control's title verbatim —
+            // "Promote to top-level" here made the spec anchors resolve 2 elements.
+            title="Drag to reorganize (keyboard: reparent via the row menu, promote via the row actions)"
             aria-hidden="true"
             onPointerDown={(e) => dnd.startDrag(task, e)}
             // Touch drags (#193): a long-press on the handle must start the
@@ -243,9 +276,23 @@ export function TaskRow({
             but flex-shrink let a badge-heavy row crush it to min-content —
             one word per line. The floor flips who yields: past it the badges
             wrap onto a second line inside their own span instead. ~11em, not
-            px, so it tracks the row's type size. */}
+            px, so it tracks the row's type size.
+            One line, always (#244): the title owns the row — it ellipsises
+            instead of ever wrapping, at any width down to the phone. It must
+            stay a DIRECT child of .task-row: ~20 specs resolve the row as
+            getByText(title).locator(".."). The title attribute keeps an
+            elided title readable in place (native tooltip) — the one-line
+            rule removed the wrapping that used to do that job. */}
         <span
-          style={{ textDecoration: done ? "line-through" : "none", flex: 1, minWidth: "11em" }}
+          title={task.title}
+          style={{
+            textDecoration: done ? "line-through" : "none",
+            flex: 1,
+            minWidth: "11em",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
         >
           {category && depth === 0 && (
             <span className="dot" style={{ background: category.color, marginRight: 8 }} />
@@ -256,154 +303,183 @@ export function TaskRow({
             goal chip on every step would be noise, so only root rows get it. */}
         <TaskBadges task={task} goals={task.parentId == null ? goals : undefined} />
         {estimateInput && !done && <EstimateInput task={task} categoryName={category?.name} />}
-        {snoozed ? (
-          // Wake = deferredUntil now, not null (ADR-17): the retained value
-          // becomes the wake timestamp, so staleness counts from here.
-          <button
-            onClick={() => snooze({ deferredUntil: new Date().toISOString(), blocked: false })}
-            title="Put this task back in the deck"
-          >
-            Wake
-          </button>
-        ) : (
-          !done && (
-            <button onClick={() => setSnoozing((s) => !s)} title="Take this task out of the deck">
-              💤
+        {/* Action cluster (#244): every secondary control is an SVG icon
+            button in .row-actions — on pointer devices hidden at rest and
+            revealed by .task-row:hover / :focus-within, on touch devices
+            always visible. The reveal is OPACITY ONLY (index.css): the
+            buttons stay tabbable, measurable and clickable while visually
+            hidden, which is what keeps keyboard users and Playwright's
+            hover-first clicks working. Accessible names stay the old
+            labels; where a spec selects by the title attribute (Edit,
+            Promote) the title survives verbatim. */}
+        <span className="row-actions">
+          {snoozed ? (
+            // Wake = deferredUntil now, not null (ADR-17): the retained value
+            // becomes the wake timestamp, so staleness counts from here.
+            <button
+              className="icon-btn"
+              onClick={() => snooze({ deferredUntil: new Date().toISOString(), blocked: false })}
+              aria-label="Wake"
+              title="Put this task back in the deck"
+            >
+              <SunIcon />
             </button>
-          )
-        )}
-        {/* Sequential subtask mode (#23): flip "do in order" after the fact.
-            Held-back siblings wear the ⏳ queued chip via TaskBadges. A
-            recurring subtask locks the switch to sequential (#66, ADR-23);
-            the server 400 is still surfaced below as a backstop (e.g. an
-            archived recurring subtask is not in this list but blocks too). */}
-        {!done && hasSubtasks && (
-          <button
-            disabled={sequentialLocked}
-            onClick={async () => {
-              setOrderModeError(null);
-              try {
-                await updateTask.mutateAsync({
-                  id: task.id,
-                  subtaskOrderMode:
-                    task.subtaskOrderMode === "sequential" ? "parallel" : "sequential",
-                });
-              } catch (e) {
-                setOrderModeError((e as Error).message);
+          ) : (
+            !done && (
+              <button
+                className="icon-btn"
+                onClick={() => setSnoozing((s) => !s)}
+                aria-label="Snooze"
+                title="Take this task out of the deck"
+              >
+                <MoonIcon />
+              </button>
+            )
+          )}
+          {/* Sequential subtask mode (#23): flip "do in order" after the fact.
+              Held-back siblings wear the ⏳ queued chip via TaskBadges. A
+              recurring subtask locks the switch to sequential (#66, ADR-23);
+              the server 400 is still surfaced below as a backstop (e.g. an
+              archived recurring subtask is not in this list but blocks too).
+              The arrows moved into the aria-label when the label became an
+              icon — sequential-subtasks.spec selects by exactly these names. */}
+          {!done && hasSubtasks && (
+            <button
+              className="icon-btn"
+              disabled={sequentialLocked}
+              onClick={async () => {
+                setOrderModeError(null);
+                try {
+                  await updateTask.mutateAsync({
+                    id: task.id,
+                    subtaskOrderMode:
+                      task.subtaskOrderMode === "sequential" ? "parallel" : "sequential",
+                  });
+                } catch (e) {
+                  setOrderModeError((e as Error).message);
+                }
+              }}
+              aria-label={task.subtaskOrderMode === "sequential" ? "→ in order" : "⇄ any order"}
+              title={
+                sequentialLocked
+                  ? "Cannot draw in order: a recurring subtask never closes and would gate the steps behind it forever — remove its ↻ recurrence first"
+                  : task.subtaskOrderMode === "sequential"
+                    ? "Subtasks are drawn in order — click to allow any order"
+                    : "Subtasks are drawn in any order — click to draw them in the listed order"
               }
-            }}
-            title={
-              sequentialLocked
-                ? "Cannot draw in order: a recurring subtask never closes and would gate the steps behind it forever — remove its ↻ recurrence first"
-                : task.subtaskOrderMode === "sequential"
-                  ? "Subtasks are drawn in order — click to allow any order"
-                  : "Subtasks are drawn in any order — click to draw them in the listed order"
-            }
-          >
-            {task.subtaskOrderMode === "sequential" ? "→ in order" : "⇄ any order"}
-          </button>
-        )}
-        {/* Break down (#122): ONE control, one word, now also on done parents.
-            Rule 3 of the parent lifecycle (#111, ADR-32) — a new open subtask
-            reopens a done parent — was API/MCP-only, because this affordance
-            hid on every done row: the finished breakdown that turns out to
-            need one more step had no UI path at all. It keeps its label
-            rather than growing a done-only twin ("+ Step" is already the
-            editor's add-a-row button, and on an OPEN parent with subtasks
-            this same button already means "add more steps" — the #67
-            re-breakdown); only the title changes, to name the reopen before
-            the click rather than surprise the user with it. Scoped to actual
-            PARENTS: on a done leaf the checkbox already IS the reopen, and a
-            breakdown offered as a second way to reopen would duplicate it
-            with a stranger gesture. The row is dimmed to 0.5 throughout, so
-            the button is subtle by construction. */}
-        {/* Archived roots reach this row through the show-done list
-            (status=all), and `done` only tests for "done" — so before #209
-            they offered a Break down whose accept 400s with
-            ARCHIVED_PARENT_ERROR. */}
-        {task.parentId == null && task.status !== "archived" && (!done || hasSubtasks) && (
-          <button
-            onClick={() => setBreakingDown((b) => !b)}
-            title={
-              done
-                ? "Add another step — this reopens the task and undoes its completion"
-                : "Split into small steps"
-            }
-          >
-            Break down
-          </button>
-        )}
-        {splittable && (
-          <button
-            onClick={() => {
-              setSnoozing(false);
-              setMovingUnder(false);
-              setSplitting((s) => !s);
-            }}
-            title={
-              splitBecauseTooBig
-                ? "Too big to draw — replace this step with smaller parts at the same level"
-                : "Replace this step with smaller parts at the same level"
-            }
-          >
-            Split
-          </button>
-        )}
-        {/* Reparent (#100): this menu is THE reparent control — drag-and-drop
-            arrives as an alternative input in #101, reusing lib/reparent.ts.
-            Plain buttons and a native select keep both actions keyboard-
-            operable by construction. */}
-        {moveTargets.length > 0 && (
-          <button
-            onClick={() => {
-              setBreakingDown(false);
-              setSnoozing(false);
-              setReparentError(null);
-              setMovingUnder((m) => !m);
-            }}
-            title="Move under another task (it becomes a subtask)"
-          >
-            Move under…
-          </button>
-        )}
-        {!done && task.parentId != null && (
-          <button
-            onClick={() => reparent(null)}
-            aria-label="Promote to top-level"
-            title="Promote to top-level"
-          >
-            ⤴
-          </button>
-        )}
-        {/* Done rows are not editable — reopen first (matches the checkbox
-            flow). Break down above is the deliberate exception: adding a step
-            IS the reopen (#111 rule 3, ADR-32), not an edit that needs one
-            first. */}
-        {!done && (
-          <button
-            onClick={() => {
-              setBreakingDown(false);
-              setSplitting(false);
-              setAiPanel(false);
-              setSnoozing(false);
-              setMovingUnder(false);
-              setEditing(true);
-            }}
-            title="Edit"
-          >
-            ✎
-          </button>
-        )}
-        <button
-          onClick={() => {
-            if (confirm(`Delete "${task.title}"${hasSubtasks ? " and its subtasks" : ""}?`)) {
-              deleteTask.mutate(task.id);
-            }
-          }}
-          title="Delete"
-        >
-          🗑
-        </button>
+            >
+              {task.subtaskOrderMode === "sequential" ? <ArrowRightIcon /> : <SwapIcon />}
+            </button>
+          )}
+          {/* Break down (#122): ONE control, now also on done parents. Rule 3
+              of the parent lifecycle (#111, ADR-32) — a new open subtask
+              reopens a done parent — was API/MCP-only, because this
+              affordance hid on every done row. Scoped to actual PARENTS: on
+              a done leaf the checkbox already IS the reopen. Only the title
+              changes on a done row, to name the reopen before the click. */}
+          {/* Archived roots reach this row through the show-done list
+              (status=all), and `done` only tests for "done" — so before #209
+              they offered a Break down whose accept 400s with
+              ARCHIVED_PARENT_ERROR. */}
+          {task.parentId == null && task.status !== "archived" && (!done || hasSubtasks) && (
+            <button
+              className="icon-btn"
+              onClick={() => setBreakingDown((b) => !b)}
+              aria-label="Break down"
+              title={
+                done
+                  ? "Add another step — this reopens the task and undoes its completion"
+                  : "Split into small steps"
+              }
+            >
+              <BranchIcon />
+            </button>
+          )}
+          {splittable && (
+            <button
+              className="icon-btn"
+              onClick={() => {
+                setSnoozing(false);
+                setMovingUnder(false);
+                setSplitting((s) => !s);
+              }}
+              aria-label="Split"
+              title={
+                splitBecauseTooBig
+                  ? "Too big to draw — replace this step with smaller parts at the same level"
+                  : "Replace this step with smaller parts at the same level"
+              }
+            >
+              <ScissorsIcon />
+            </button>
+          )}
+          {!done && task.parentId != null && (
+            <button
+              className="icon-btn"
+              onClick={() => reparent(null)}
+              aria-label="Promote to top-level"
+              title="Promote to top-level"
+            >
+              <ArrowUpIcon />
+            </button>
+          )}
+          {/* Done rows are not editable — reopen first (matches the checkbox
+              flow). Break down above is the deliberate exception: adding a
+              step IS the reopen (#111 rule 3, ADR-32), not an edit that
+              needs one first. */}
+          {!done && (
+            <button
+              className="icon-btn"
+              onClick={() => {
+                setBreakingDown(false);
+                setSplitting(false);
+                setAiPanel(false);
+                setSnoozing(false);
+                setMovingUnder(false);
+                setEditing(true);
+              }}
+              aria-label="Edit"
+              title="Edit"
+            >
+              <PencilIcon />
+            </button>
+          )}
+          {/* The overflow kebab (#244): the two rarest actions live one
+              deliberate click away instead of repeating down the page.
+              "Move under…" keeps being THE keyboard reparent control (#100)
+              — the popover items are plain buttons, so both stay keyboard-
+              operable by construction. */}
+          <RowMenu
+            items={[
+              ...(moveTargets.length > 0
+                ? [
+                    {
+                      label: "Move under…",
+                      icon: <MoveUnderIcon />,
+                      title: "Move under another task (it becomes a subtask)",
+                      onPick: () => {
+                        setBreakingDown(false);
+                        setSnoozing(false);
+                        setReparentError(null);
+                        setMovingUnder((m) => !m);
+                      },
+                    },
+                  ]
+                : []),
+              {
+                label: "Delete",
+                icon: <TrashIcon />,
+                danger: true,
+                onPick: () => {
+                  if (confirm(`Delete "${task.title}"${hasSubtasks ? " and its subtasks" : ""}?`)) {
+                    setLeaving(true);
+                    deleteTask.mutate(task.id, { onError: () => setLeaving(false) });
+                  }
+                },
+              },
+            ]}
+          />
+        </span>
       </div>
       )}
       {dropBlockReason && (
@@ -609,6 +685,105 @@ export function TaskRow({
         />
       )}
     </div>
+  );
+}
+
+/**
+ * The row overflow menu (#244): a minimal popover, not a modal — no root
+ * inert, no focus trap. Opens on click/Enter on the "More actions" kebab;
+ * closes on Escape (focus returns to the trigger), outside pointerdown,
+ * focus leaving the wrap (a keyboard user Tabbing away must not leave an
+ * invisible open popover with a stale aria-expanded — and it keeps the
+ * helpers.ts invariant that only one .row-menu is ever open, for keyboard
+ * users too), or picking an item. Items are plain buttons reachable with Tab AND walkable
+ * with ArrowUp/ArrowDown; the design-foundation spec drives the whole
+ * keyboard round-trip.
+ */
+function RowMenu({
+  items,
+}: {
+  items: { label: string; icon: ReactNode; title?: string; danger?: boolean; onPick: () => void }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLSpanElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [open]);
+
+  function onKeyDown(e: KeyboardEvent) {
+    if (!open) return;
+    if (e.key === "Escape") {
+      // Contain it: Escape here closes THIS popover, never a surrounding
+      // overlay's handler too.
+      e.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const buttons = Array.from(
+        wrapRef.current?.querySelectorAll<HTMLButtonElement>(".row-menu button") ?? [],
+      );
+      if (buttons.length === 0) return;
+      const idx = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      const next =
+        e.key === "ArrowDown"
+          ? (idx + 1) % buttons.length
+          : idx <= 0
+            ? buttons.length - 1
+            : idx - 1;
+      buttons[next].focus();
+    }
+  }
+
+  return (
+    <span
+      ref={wrapRef}
+      className="row-menu-wrap"
+      onKeyDown={onKeyDown}
+      // React's onBlur is the bubbling focusout: relatedTarget is where focus
+      // went, null when it left the document — contains(null) is false, so
+      // that closes too.
+      onBlur={(e) => {
+        if (open && !wrapRef.current?.contains(e.relatedTarget as Node)) setOpen(false);
+      }}
+    >
+      <button
+        ref={triggerRef}
+        className="icon-btn"
+        aria-label="More actions"
+        title="More actions"
+        aria-haspopup="true"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <KebabIcon />
+      </button>
+      {open && (
+        <div className="row-menu">
+          {items.map((it) => (
+            <button
+              key={it.label}
+              className={it.danger ? "danger" : undefined}
+              title={it.title}
+              onClick={() => {
+                setOpen(false);
+                it.onPick();
+              }}
+            >
+              {it.icon}
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
   );
 }
 

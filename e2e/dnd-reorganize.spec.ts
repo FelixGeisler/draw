@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
-import { taskTree } from "./helpers.js";
+import { openRowMenu, taskTree } from "./helpers.js";
 
 // Issue #101: pointer drag-and-drop on the Tasks page as an alternative input
 // for the #100 reparent controls — same PATCH, same eligibility rules. Every
@@ -70,6 +70,15 @@ async function dragWithoutRelease(page: Page, from: Locator, to: Locator) {
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+  // The shorter #244 rows surfaced a latent staleness here: hovering the
+  // SOURCE row right after the press mounts its .dnd-reason strip ("cannot
+  // be its own parent"), shifting every row below it — so the PRE-drag
+  // measurement of `to` can now land the pointer a couple of pixels off.
+  // One corrective hop onto the LIVE box fixes it, and it is safe: the drop
+  // commits from the last pointermove's overKey, not a fresh hit-test, so a
+  // stationary pointer stays authoritative even if rows shift back under it.
+  const live = (await to.boundingBox())!;
+  await page.mouse.move(live.x + live.width / 2, live.y + live.height / 2, { steps: 1 });
 }
 
 test("drag a childless root onto another root to nest it as a subtask", async ({ page }) => {
@@ -84,12 +93,14 @@ test("drag a childless root onto another root to nest it as a subtask", async ({
 
   // The list updates without a reload: the row re-renders as a subtask, so it
   // gains the promote (⤴) affordance — and since #167 a childless subtask also
-  // keeps its "Move under…" menu (it can move under a different parent too), so
-  // both reorganize controls are present.
+  // keeps its "Move under…" action (it can move under a different parent too;
+  // in the row's kebab menu since #244), so both reorganize controls are
+  // present.
   await expect(row(page, NEST_MOVER).getByTitle("Promote to top-level")).toBeVisible();
-  await expect(
-    row(page, NEST_MOVER).getByTitle("Move under another task (it becomes a subtask)"),
-  ).toBeVisible();
+  const subtaskMenu = await openRowMenu(row(page, NEST_MOVER));
+  await expect(subtaskMenu.getByRole("button", { name: "Move under…" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(subtaskMenu).toHaveCount(0);
 
   const tasks = await tasksByTitle(page);
   expect(tasks.some((t) => t.title === NEST_MOVER)).toBe(false); // no longer a root
@@ -145,10 +156,10 @@ test("drag a subtask to the root drop zone to promote it — under reduced motio
   await expect(zone).toHaveClass(/dnd-over/);
   await page.mouse.up();
 
-  // A root row again: the move menu returns.
-  await expect(
-    row(page, CHILD).getByTitle("Move under another task (it becomes a subtask)"),
-  ).toBeVisible();
+  // A root row again: the kebab offers the move action once more.
+  const rootMenu = await openRowMenu(row(page, CHILD));
+  await expect(rootMenu.getByRole("button", { name: "Move under…" })).toBeVisible();
+  await page.keyboard.press("Escape");
   const tasks = await tasksByTitle(page);
   expect(tasks.find((t) => t.title === CHILD)?.parentId).toBeNull();
   expect(tasks.find((t) => t.title === PARENT_WITH_CHILD)?.subtasks).toEqual([]);

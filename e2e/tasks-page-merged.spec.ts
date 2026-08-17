@@ -124,6 +124,10 @@ test("the category tree below the strip keeps drag-and-drop; strip rows have non
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+  // Corrective hop (#244, mirrors dnd-reorganize): mid-drag reason strips
+  // shift the rows, so re-target the LIVE box before asserting the highlight.
+  const live = (await target.boundingBox())!;
+  await page.mouse.move(live.x + live.width / 2, live.y + live.height / 2, { steps: 1 });
   await expect(target).toHaveClass(/dnd-over/);
   await page.mouse.up();
 
