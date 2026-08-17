@@ -243,7 +243,10 @@ export function TaskRow({
         {dnd && !done && (
           <span
             className="dnd-handle"
-            title="Drag to reorganize (keyboard: Move under… in the row menu, and the Promote to top-level button)"
+            // Wording constraint: getByTitle matches SUBSTRINGS case-insensitively,
+            // so this tooltip must not contain another control's title verbatim —
+            // "Promote to top-level" here made the spec anchors resolve 2 elements.
+            title="Drag to reorganize (keyboard: reparent via the row menu, promote via the row actions)"
             aria-hidden="true"
             onPointerDown={(e) => dnd.startDrag(task, e)}
             // Touch drags (#193): a long-press on the handle must start the
