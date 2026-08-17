@@ -34,6 +34,9 @@ const GOAL_TITLE =
   "DF244 Ship the complete design foundation with tokens, icons and motion across every surface";
 // A second open root so the seeded row offers "Move under…" in its kebab.
 const ANCHOR_TITLE = "DF244 Move-target anchor";
+// A parent WITH subtasks: only such a row renders the order-mode flip, whose
+// accessible name the pictograph gate must cover (#249).
+const STEPPED_TITLE = "DF244 Stepped parent";
 
 test.beforeAll(async ({ request }) => {
   const goalRes = await request.post("/api/goals", { data: { title: GOAL_TITLE } });
@@ -50,9 +53,22 @@ test.beforeAll(async ({ request }) => {
       impact: 5,
     },
     { title: ANCHOR_TITLE, categoryId: categories[0].id, effortMinutes: 15 },
+    { title: STEPPED_TITLE, categoryId: categories[0].id },
   ]) {
     const res = await request.post("/api/tasks", { data });
     expect(res.ok(), `POST /api/tasks → ${res.status()}`).toBeTruthy();
+    const task = await res.json();
+    if (data.title === STEPPED_TITLE) {
+      const subRes = await request.post(`/api/tasks/${task.id}/subtasks`, {
+        data: {
+          subtasks: [
+            { title: "DF244 Step one", effortMinutes: 5 },
+            { title: "DF244 Step two", effortMinutes: 5 },
+          ],
+        },
+      });
+      expect(subRes.ok(), `POST subtasks → ${subRes.status()}`).toBeTruthy();
+    }
   }
 });
 
@@ -79,6 +95,15 @@ function row(page: Page): Locator {
 
 const opacityOf = (cluster: Locator) =>
   cluster.evaluate((el) => getComputedStyle(el).opacity);
+
+// Accessible names of every button in an action cluster: aria-label when set
+// (all icon buttons), text content otherwise — the #249 pictograph gate's input.
+const clusterNames = (cluster: Locator) =>
+  cluster
+    .locator("button")
+    .evaluateAll((els) =>
+      els.map((el) => (el.getAttribute("aria-label") ?? el.textContent ?? "").trim()),
+    );
 
 // Anything pictographic is emoji chrome. Covers 🎴📋🎯📊⚙️✨🃏 as well as the
 // dingbat range (✎ ✕ ⚙ live outside Extended_Pictographic's BMP heart).
@@ -196,6 +221,11 @@ test.describe("desktop, 1080px", () => {
       expect(await btn.locator("svg").count(), `"${name}" renders an svg icon`).toBe(1);
     }
     expect(await cluster.innerText()).not.toMatch(EMOJI);
+    // …and the gate covers ACCESSIBLE NAMES, not just rendered text (#249):
+    // an aria-label smuggling a glyph past the innerText check fails here.
+    for (const name of await clusterNames(cluster)) {
+      expect(name, `cluster accessible name "${name}"`).not.toMatch(EMOJI);
+    }
 
     // Tab actually walks the cluster — reachability, not just programmatic
     // focus. Start on the first action and collect what Tab lands on until
@@ -259,6 +289,24 @@ test.describe("desktop, 1080px", () => {
     await page.keyboard.press("Tab"); // → out of the wrap
     await expect(menu).toHaveCount(0);
     await expect(kebab).toHaveAttribute("aria-expanded", "false");
+  });
+
+  test("a parent's order-mode flip carries a glyph-free accessible name", async ({ page }) => {
+    // #249: the arrows live in the SVG icon only. This row HAS subtasks, so
+    // its cluster holds the one button the main row's gate never sees — the
+    // order-mode flip, whose old names ("→ in order" / "⇄ any order") were
+    // exactly the compat exception this test forbids reintroducing.
+    await page.goto("/tasks");
+    const parent = taskTree(page).locator(".task-row").filter({ hasText: STEPPED_TITLE });
+    await expect(parent).toBeVisible();
+    const cluster = parent.locator(".row-actions");
+    await expect(cluster).toHaveCount(1, { timeout: 2000 });
+    const flip = parent.getByRole("button", { name: "Any order", exact: true });
+    await expect(flip).toHaveCount(1);
+    expect(await flip.locator("svg").count(), "flip renders an svg icon").toBe(1);
+    for (const name of await clusterNames(cluster)) {
+      expect(name, `cluster accessible name "${name}"`).not.toMatch(EMOJI);
+    }
   });
 
   test("the nav renders svg icons and zero emoji chrome", async ({ page }) => {
