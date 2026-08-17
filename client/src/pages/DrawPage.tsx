@@ -640,7 +640,7 @@ export function DrawPage() {
               style={{ borderColor: "var(--accent)" }}
               onClick={() => setBreakdownAi(true)}
             >
-              ✨ Suggest with AI
+              <span aria-hidden="true">✨ </span>Suggest with AI
             </button>
           )}
           {breakdownAi && (

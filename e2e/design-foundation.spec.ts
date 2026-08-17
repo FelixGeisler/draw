@@ -304,8 +304,14 @@ test.describe("desktop, 1080px", () => {
     const flip = parent.getByRole("button", { name: "Any order", exact: true });
     await expect(flip).toHaveCount(1);
     expect(await flip.locator("svg").count(), "flip renders an svg icon").toBe(1);
-    for (const name of await clusterNames(cluster)) {
-      expect(name, `cluster accessible name "${name}"`).not.toMatch(EMOJI);
+    // The gate walks EVERY button in the row, not just the cluster: the
+    // expand/collapse caret sits before the title, outside .row-actions, and
+    // without its aria-label its accessible name IS the triangle glyph.
+    await expect(
+      parent.getByRole("button", { name: "Collapse subtasks", exact: true }),
+    ).toHaveCount(1);
+    for (const name of await clusterNames(parent)) {
+      expect(name, `row accessible name "${name}"`).not.toMatch(EMOJI);
     }
   });
 

@@ -268,6 +268,11 @@ export function TaskRow({
           <button
             onClick={() => setExpanded((e) => !e)}
             style={{ padding: "0 6px", border: "none", background: "none" }}
+            // Glyph-free accessible names (#249): without a label the caret's
+            // name IS the triangle glyph — announced as "black down-pointing
+            // small triangle".
+            aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
+            aria-expanded={expanded}
           >
             {expanded ? "▾" : "▸"}
           </button>
@@ -567,7 +572,7 @@ export function TaskRow({
               style={{ margin: "8px 0 0", borderColor: "var(--accent)" }}
               onClick={() => setAiPanel(true)}
             >
-              ✨ Suggest with AI
+              <span aria-hidden="true">✨ </span>Suggest with AI
             </button>
           )}
           {aiPanel && (
@@ -621,7 +626,7 @@ export function TaskRow({
               style={{ margin: "8px 0 0", borderColor: "var(--accent)" }}
               onClick={() => setAiPanel(true)}
             >
-              ✨ Suggest with AI
+              <span aria-hidden="true">✨ </span>Suggest with AI
             </button>
           )}
           {aiPanel && (
