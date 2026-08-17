@@ -10,9 +10,11 @@ import {
   resolveHost,
   resolvePassword,
   resolveTrustProxy,
+  resolveUpdateCheckIntervalHours,
 } from "./config.js";
 import { startServer } from "./server.js";
 import { startBackupScheduler } from "./backupScheduler.js";
+import { startUpdateScheduler } from "./updateScheduler.js";
 
 // Production entry (#189, ADR-49): the same API as dev plus the built client,
 // one port, run via tsx (`npm start`). A separate entry rather than NODE_ENV
@@ -76,4 +78,20 @@ if (backupIntervalHours > 0) {
       `(DATA_DIR/backups; restore via POST /api/backup/import)`,
   );
   startBackupScheduler(backupIntervalHours, backupRetention);
+}
+
+// OTA update check (#247): default ON, one GET per interval against the
+// GitHub latest-release endpoint (UPDATE_CHECK_URL overrides), first check
+// ~60s after boot. A prod-entry concern like the backup timer — createApp()
+// must never own an interval. UPDATE_CHECK_INTERVAL_HOURS=0 disables the
+// timer; the update_check_enabled setting additionally gates every tick at
+// call time, so toggling OFF in Settings means zero outbound calls without
+// a restart.
+const updateIntervalHours = resolveUpdateCheckIntervalHours();
+if (updateIntervalHours > 0) {
+  console.log(
+    `[server] update check every ${updateIntervalHours}h ` +
+      `(UPDATE_CHECK_INTERVAL_HOURS=0 or the Settings toggle disables)`,
+  );
+  startUpdateScheduler(updateIntervalHours);
 }

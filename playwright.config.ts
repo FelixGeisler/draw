@@ -49,6 +49,11 @@ export default defineConfig({
         API_PORT,
         // No HOST pin needed: the dev entry ignores HOST by design (#189).
         ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
+        // OTA check (#247): point the release check at a closed loopback
+        // port so "Check now" fails fast and deterministically — E2E must
+        // never reach GitHub, and a failed check must never light the
+        // update banner mid-suite.
+        UPDATE_CHECK_URL: "http://127.0.0.1:9/draw-e2e-release",
       },
     },
     {
@@ -82,6 +87,10 @@ export default defineConfig({
         // lan-password.spec.ts boots its own protected server instead.
         DRAW_PASSWORD: "",
         ANTHROPIC_API_KEY: "", // E2E always runs AI-degraded
+        // OTA check (#247): the prod entry is the one that starts the boot
+        // check timer (~60s in) — pin its check URL off the network too, or
+        // a long E2E run would fire a real GET at GitHub.
+        UPDATE_CHECK_URL: "http://127.0.0.1:9/draw-e2e-release",
       },
     },
   ],

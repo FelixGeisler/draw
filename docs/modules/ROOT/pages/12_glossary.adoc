@@ -142,6 +142,9 @@
 |*Outbound notification*
 |A fire-and-forget plain-text POST to the private `notify_url` setting (#235, ADR-67), sent by routes strictly post-commit through the single `notify()` door on achievement unlocks (batched), achieved goals, and completed daily challenges; unset means zero network calls, and a dead endpoint changes nothing but a log line
 
+|*Over-the-air update*
+|The check/tell/apply flow (#247, xref:09_architecture_decisions.adoc[ADR-70]): a default-on daily GET to the GitHub latest-release endpoint (semver-compared against `server/package.json`; the toggle or `UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls), the result surfaced in Settings plus one deduped #235 notification per new version, and "Update now" as a single bearer-authed POST to a user-configured Watchtower-style trigger URL — Draw never touches `docker.sock`; the client then polls `GET /api/update` and reloads once when the version changes
+
 |*Material*
 |A file (PDF/txt/md) or note attached to a goal; selectable context for AI calls
 

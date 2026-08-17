@@ -9,6 +9,12 @@ import {
 } from "../db.js";
 import { REST_WEEKDAYS_SETTING } from "../services/gamificationService.js";
 import { NOTIFY_URL_SETTING } from "../services/notifyService.js";
+import {
+  UPDATE_CHECK_ENABLED_SETTING,
+  UPDATE_LAST_NOTIFIED_SETTING,
+  UPDATE_TRIGGER_TOKEN_SETTING,
+  UPDATE_TRIGGER_URL_SETTING,
+} from "../services/updateService.js";
 
 export const settingsRouter = Router();
 
@@ -18,8 +24,10 @@ export const settingsRouter = Router();
 // internal session state (GET /api/draw/current, GET /api/draw/warmup),
 // not user settings.
 function publicSettings(): Record<string, string> {
+  // The placeholder count is hand-maintained — a new excluded key needs BOTH
+  // another `?` and another bound argument below.
   const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?)")
+    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?, ?, ?, ?)")
     .all(
       API_KEY_SETTING,
       CURRENT_DRAW_SETTING,
@@ -28,6 +36,12 @@ function publicSettings(): Record<string, string> {
       // The notify URL embeds the ntfy topic — knowing it means posting to
       // the user's phone. Managed write-only via /api/notify (#235).
       NOTIFY_URL_SETTING,
+      // The update trigger URL/token authorize restarting the app — managed
+      // write-only via /api/update/trigger (#247); the last-notified marker
+      // is internal dedupe state, not a user setting.
+      UPDATE_TRIGGER_URL_SETTING,
+      UPDATE_TRIGGER_TOKEN_SETTING,
+      UPDATE_LAST_NOTIFIED_SETTING,
     ) as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }
@@ -88,11 +102,22 @@ settingsRouter.patch("/", (req, res) => {
     const error = warmupEveryHoursError(body.warmup_every_hours);
     if (error) return res.status(400).json({ error });
   }
+  if (UPDATE_CHECK_ENABLED_SETTING in body) {
+    // Strictly "0"/"1": checkEnabled reads `!== "0"`, so a permissive write
+    // like "false" would store a row that reads as ON — a setting that lies.
+    const v = String(body[UPDATE_CHECK_ENABLED_SETTING]);
+    if (v !== "0" && v !== "1") {
+      return res.status(400).json({ error: `${UPDATE_CHECK_ENABLED_SETTING} must be "0" or "1"` });
+    }
+  }
   const allowed = [
     "max_draw_effort",
     "draw_cooldown_minutes",
     "daily_goal_completions",
     "warmup_every_hours",
+    // The check toggle is not a secret — it rides the generic settings
+    // endpoints; the trigger URL/token do NOT (see /api/update/trigger).
+    UPDATE_CHECK_ENABLED_SETTING,
   ];
   for (const key of allowed) {
     if (key in body) setSetting(key, String(body[key]));

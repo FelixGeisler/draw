@@ -6,11 +6,13 @@ import {
   isLoopbackHost,
   lanExposureWarning,
   resolveApiPort,
+  DEFAULT_UPDATE_CHECK_INTERVAL_HOURS,
   resolveBackupIntervalHours,
   resolveBackupRetention,
   resolveHost,
   resolvePassword,
   resolveTrustProxy,
+  resolveUpdateCheckIntervalHours,
 } from "../../src/config.js";
 
 // Explicit env objects throughout — the resolvers must not fall back to the
@@ -182,6 +184,47 @@ describe("resolveBackupIntervalHours", () => {
       expect(err).toHaveBeenCalledTimes(2);
       expect(err.mock.calls[0][0]).toContain("clamping");
     });
+  });
+});
+
+describe("resolveUpdateCheckIntervalHours (#247)", () => {
+  // Unlike BACKUP_INTERVAL_HOURS, this knob is default-ON.
+
+  it("defaults to 24h when unset or blank — the check is on by default", () => {
+    expect(resolveUpdateCheckIntervalHours({})).toBe(DEFAULT_UPDATE_CHECK_INTERVAL_HOURS);
+    expect(DEFAULT_UPDATE_CHECK_INTERVAL_HOURS).toBe(24);
+    expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "" })).toBe(24);
+    expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "  " })).toBe(24);
+  });
+
+  it("an explicit 0 (or a negative) disables — zero timers, zero calls", () => {
+    expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "0" })).toBe(0);
+    expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "-6" })).toBe(0);
+  });
+
+  it("honors a positive interval, fractional included", () => {
+    expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "12" })).toBe(12);
+    expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "0.5" })).toBe(0.5);
+  });
+
+  it("garbage falls back to the DEFAULT, never to disabled", () => {
+    // A default-on feature must not be silently switched off by a typo —
+    // that would be a setting that lies (the warmup_every_hours lesson).
+    expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "daily" })).toBe(24);
+    expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "NaN" })).toBe(24);
+  });
+
+  it("clamps over-large intervals to the int32 setInterval cap", () => {
+    // Same overflow class as BACKUP_INTERVAL_HOURS: > ~596h wraps to 1ms.
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(resolveUpdateCheckIntervalHours({ UPDATE_CHECK_INTERVAL_HOURS: "9999" })).toBe(
+        MAX_BACKUP_INTERVAL_HOURS,
+      );
+      expect(err).toHaveBeenCalled();
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 });
 

@@ -76,6 +76,32 @@ export function resolveBackupRetention(env: NodeJS.ProcessEnv = process.env): nu
   return Number.isInteger(n) && n >= 1 ? n : DEFAULT_BACKUP_RETENTION;
 }
 
+// UPDATE_CHECK_INTERVAL_HOURS (#247): the period between release checks.
+// Unlike BACKUP_INTERVAL_HOURS this knob is default-ON: unset/blank resolves
+// to 24 (the daily release check), because the check is the product default
+// and only an explicit 0 (or a negative) turns it off — 0 means zero timers
+// and zero outbound calls, the #235 rule. Garbage falls back to the DEFAULT,
+// not to disabled: an unparseable value silently switching a default-on
+// feature off would be a setting that lies. Same int32 setInterval clamp as
+// backups (MAX_BACKUP_INTERVAL_HOURS, logged to stderr). Prod-entry-only,
+// like every knob of this class — createApp()/dev never start the timer.
+export const DEFAULT_UPDATE_CHECK_INTERVAL_HOURS = 24;
+export function resolveUpdateCheckIntervalHours(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.UPDATE_CHECK_INTERVAL_HOURS?.trim();
+  if (!raw) return DEFAULT_UPDATE_CHECK_INTERVAL_HOURS;
+  const hours = Number(raw);
+  if (!Number.isFinite(hours)) return DEFAULT_UPDATE_CHECK_INTERVAL_HOURS;
+  if (hours <= 0) return 0; // an explicit off-switch, unlike garbage above
+  if (hours > MAX_BACKUP_INTERVAL_HOURS) {
+    console.error(
+      `[server] UPDATE_CHECK_INTERVAL_HOURS=${hours} exceeds the ${MAX_BACKUP_INTERVAL_HOURS}h maximum ` +
+        `(setInterval overflows past that) — clamping to ${MAX_BACKUP_INTERVAL_HOURS}h`,
+    );
+    return MAX_BACKUP_INTERVAL_HOURS;
+  }
+  return hours;
+}
+
 // TRUST_PROXY (#190, ADR-50): what Express's `trust proxy` setting should be,
 // which is what makes `req.ip` the DE-PROXIED client address behind a reverse
 // proxy — the address the login rate limiter keys on. Off by default (direct
