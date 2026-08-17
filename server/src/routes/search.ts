@@ -27,7 +27,7 @@ export const searchRouter = Router();
 function fold(s: string): string {
   return s
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "") // the Combining Diacritical Marks block
     .toLowerCase();
 }
 

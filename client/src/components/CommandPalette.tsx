@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useModalFocus } from "../hooks/useModalFocus";
-import { useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
+import { IS_MAC, useGlobalShortcuts } from "../hooks/useGlobalShortcuts";
 import { useSearch } from "../hooks/useSearch";
 import type { SearchGoal, SearchTask } from "../hooks/useSearch";
 import { useCurrentTimer, useStartTimer, useStopTimer } from "../hooks/useTimer";
@@ -111,6 +111,18 @@ export function CommandPalette() {
 
   useGlobalShortcuts({
     togglePalette: () => {
+      // #root wearing `inert` while BOTH our dialogs are closed means a
+      // FOREIGN overlay (focus session, victory) owns modality. Opening would
+      // mount the palette invisibly UNDER it (z 85 < 90, CommandPalette.css)
+      // with a focus-stealing input, and closing it again would strip the
+      // other dialog's inert. The chord still closes/swaps our own dialogs.
+      if (
+        !open &&
+        !sheetOpen &&
+        (document.getElementById("root")?.hasAttribute("inert") ?? false)
+      ) {
+        return;
+      }
       setSheetOpen(false);
       setOpen((o) => !o);
     },
@@ -212,6 +224,11 @@ function PaletteDialog({
   }, [index]);
 
   function onKeyDown(e: React.KeyboardEvent) {
+    // During IME composition the arrows pick a conversion candidate, Enter
+    // commits it and Escape cancels it — all belong to the IME, none to the
+    // palette. keyCode 229 covers engines that fire the post-composition
+    // keydown before isComposing clears.
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Escape") {
       e.preventDefault();
       onClose();
@@ -309,7 +326,9 @@ function PaletteDialog({
 
 /** Every global key, in one place — what "?" promises (#243). */
 const SHORTCUTS: [string, string][] = [
-  ["Ctrl+K", "Open or close the command palette"],
+  // The chord is platform-split (keyScope.isPaletteChord): Cmd+K on a Mac,
+  // where Ctrl+K is the native kill-to-end-of-line editing command.
+  [IS_MAC ? "⌘K" : "Ctrl+K", "Open or close the command palette"],
   ["n", "Capture a task — jumps to Tasks and focuses quick capture"],
   ["d", "Go to the Draw page — never deals a card"],
   ["Space", "Stop the running timer, or start one on the current card"],

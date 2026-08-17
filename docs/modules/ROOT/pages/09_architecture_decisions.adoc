@@ -3281,10 +3281,21 @@ announce over everything. Documented in the index.css ladder comment.
 typing (input/textarea/select/contenteditable), during IME composition, and
 while any modal is open. "Any modal" is detected as the `inert` attribute
 useModalFocus already puts on `#root` — every current and future dialog
-opts in by construction, no overlay registry to maintain. The decisions are
-pure functions (`lib/keyScope`, `lib/paletteNav`) so the DOM-less client
-suite pins them; Ctrl+K is a chord and exempt, so the palette opens even
-from inside the capture field.
+opts in by construction, no overlay registry to maintain — and the
+attribute is held by count, so stacked dialogs cannot strip each other's
+inert. Space additionally yields to a focused button/link/`role=button`:
+it is their native activation key, and stealing it would also cancel the
+click via preventDefault. The chord is platform-split — Cmd+K on macOS,
+where Ctrl+K is the native kill-to-end-of-line editing command, Ctrl+K
+elsewhere; Shift and Alt disqualify (Firefox devtools, AltGr layouts). It
+is exempt from the typing rule only, so the palette opens even from inside
+the capture field, but it refuses to open under a foreign overlay (focus
+session, victory — z 90 over the palette's 85): an invisible dialog must
+never steal focus. Inside the open palette, keys pressed during IME
+composition (Arrow/Enter/Escape picking, committing or cancelling a
+candidate) belong to the IME, not the dialog. The decisions are pure
+functions (`lib/keyScope`, `lib/paletteNav`) so the DOM-less client suite
+pins them.
 
 *Out of scope:* fuzzy ranking, search over descriptions/materials/notes,
 custom keybindings, and scrolling to a goal on the Goals page.

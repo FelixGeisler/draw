@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { captureForm, resolveCurrentDraw, taskTree } from "./helpers.js";
+import { captureForm, drawFromGoal, resolveCurrentDraw, taskTree } from "./helpers.js";
 
 // #243 command palette + global shortcuts, written TEST-FIRST. One serial
 // journey keeps the E2E budget flat: capture proves key-inertness while
@@ -91,6 +91,25 @@ test("Ctrl+Enter on a task result starts its timer and closes the palette", asyn
   expect(timer.entry.endedAt).toBeNull();
 });
 
+test("space on a focused link belongs to the element — the timer keeps running", async ({
+  page,
+}) => {
+  await page.goto("/stats");
+  await expect(page.locator(".timer-bar")).toBeVisible();
+
+  // Space is the native activation key of focused controls: on a focused
+  // button/link the global timer toggle must yield (keyScope's
+  // isSpaceActivationTarget), or a keyboard user pressing Space to click
+  // would silently stop their timer AND lose the click to preventDefault.
+  await page.locator("nav.sidenav a").first().focus();
+  await page.keyboard.press("Space");
+
+  await expect(page.locator(".timer-bar")).toBeVisible();
+  const timer = await (await page.request.get("/api/timer/current")).json();
+  expect(timer.task.title).toBe(TASK_TITLE);
+  expect(timer.entry.endedAt).toBeNull();
+});
+
 test("space outside any input stops the running timer", async ({ page }) => {
   await page.goto("/stats");
   await expect(page.locator(".timer-bar")).toBeVisible();
@@ -153,4 +172,49 @@ test("d goes to the Draw page and never deals a card", async ({ page }) => {
   await expect(page.locator(".draw-card")).not.toHaveClass(/flipped/);
   const current = await (await page.request.get("/api/draw/current")).json();
   expect(current?.task ?? null).toBeNull();
+});
+
+test("Ctrl+K yields to a running focus session — no invisible palette underneath", async ({
+  page,
+}) => {
+  // Seed one drawable task under its own goal so the draw is deterministic,
+  // then enter focus mode for real (the z-90 overlay that owns #root's inert).
+  const goal = await (
+    await page.request.post("/api/goals", { data: { title: "Palette focus-gate goal" } })
+  ).json();
+  const categories: { id: number }[] = await (await page.request.get("/api/categories")).json();
+  await page.request.post("/api/tasks", {
+    data: {
+      title: "Palette focus-gate task",
+      categoryId: categories[0].id,
+      goalId: goal.id,
+      effortMinutes: 5,
+    },
+  });
+  await drawFromGoal(page, "Palette focus-gate goal");
+  await page.locator(".draw-actions").getByRole("button", { name: "▶ Start now" }).click();
+  const overlay = page.locator(".focus-overlay");
+  await expect(overlay).toBeVisible();
+
+  // The chord must NOT open the palette under the session (z 85 < 90): an
+  // invisible dialog would steal every keystroke, and closing it again would
+  // strip the session's inert, reviving shortcuts under the covered page.
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("command-palette")).toBeHidden();
+  await expect(overlay).toBeVisible();
+  const timerDuring = await (await page.request.get("/api/timer/current")).json();
+  expect(timerDuring.task.title).toBe("Palette focus-gate task");
+
+  // Escape leaves the VIEW only (timer keeps running) — now the chord works.
+  await page.keyboard.press("Escape");
+  await expect(overlay).toBeHidden();
+  await page.keyboard.press("Control+k");
+  await expect(page.getByTestId("command-palette")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("command-palette")).toBeHidden();
+
+  // Leave the shared serial DB the way this spec found it: timer stopped,
+  // no persisted draw.
+  await page.request.post("/api/timer/stop");
+  await resolveCurrentDraw(page);
 });
