@@ -22,12 +22,6 @@ import { setFetchForTests as setNotifyFetchForTests } from "../../src/services/n
 /**
  * OTA update: check, tell, apply (#247).
  *
- * SPEC-FIRST: written before the implementation. Everything not green today
- * is `it.fails`; WHEN IMPLEMENTING #247 flip every `it.fails` to `it` (an
- * implementation that satisfies the assertions makes `it.fails` itself
- * fail — that is the reminder). The two plain `it` tests are regression
- * pins that must stay green before AND after.
- *
  * Every outbound call runs against injected fetches — no socket is ever
  * opened. TWO separate slots on purpose: updateService owns its own
  * fetchImpl (checks + trigger POSTs), notifyService owns the ntfy door —
@@ -136,7 +130,7 @@ describe("the tell surface", () => {
     expect((res.body as { ok: boolean }).ok).toBe(true);
   });
 
-  it.fails("GET /api/update reports the running version and the full status shape", async () => {
+  it("GET /api/update reports the running version and the full status shape", async () => {
     const res = await request(app).get("/api/update");
     expect(res.status).toBe(200);
     const status = res.body as UpdateStatus;
@@ -158,7 +152,7 @@ describe("the tell surface", () => {
     expect(calls).toEqual([]);
   });
 
-  it.fails("requires auth when DRAW_PASSWORD is set — the health/version split", async () => {
+  it("requires auth when DRAW_PASSWORD is set — the health/version split", async () => {
     const { createApp } = await import("../../src/app.js");
     const gated = createApp({ password: "update-spec-secret" });
     expect((await request(gated).get("/api/update")).status).toBe(401);
@@ -172,7 +166,7 @@ describe("the tell surface", () => {
 });
 
 describe("the check", () => {
-  it.fails("disabled means ZERO outbound calls — even the forced check (#235 rule)", async () => {
+  it("disabled means ZERO outbound calls — even the forced check (#235 rule)", async () => {
     setSetting(UPDATE_CHECK_ENABLED_SETTING, "0");
     // The same door every scheduler tick goes through:
     await checkForUpdate();
@@ -185,7 +179,7 @@ describe("the check", () => {
     expect(notifySent).toEqual([]);
   });
 
-  it.fails("the toggle rides PATCH /api/settings — it is not a secret", async () => {
+  it("the toggle rides PATCH /api/settings — it is not a secret", async () => {
     const patched = await request(app)
       .patch("/api/settings")
       .send({ [UPDATE_CHECK_ENABLED_SETTING]: "0" });
@@ -194,7 +188,7 @@ describe("the check", () => {
     expect((await getStatus()).checkEnabled).toBe(false);
   });
 
-  it.fails("an enabled check GETs the release endpoint once, parsing tag_name/html_url", async () => {
+  it("an enabled check GETs the release endpoint once, parsing tag_name/html_url", async () => {
     releaseTag = "v99.0.0";
     await checkForUpdate();
     expect(calls.length).toBe(1);
@@ -207,7 +201,7 @@ describe("the check", () => {
     expect(status.checkedAt).toBeTruthy();
   });
 
-  it.fails("POST /api/update/check forces a re-check and returns the fresh status", async () => {
+  it("POST /api/update/check forces a re-check and returns the fresh status", async () => {
     releaseTag = "v99.0.0";
     const res = await request(app).post("/api/update/check");
     expect(res.status).toBe(200);
@@ -215,7 +209,7 @@ describe("the check", () => {
     expect(calls.length).toBe(1);
   });
 
-  it.fails("a failed check degrades: resolves without throwing, offers no update", async () => {
+  it("a failed check degrades: resolves without throwing, offers no update", async () => {
     checkFails = true;
     await expect(checkForUpdate()).resolves.toBeDefined();
     const status = await getStatus();
@@ -225,7 +219,7 @@ describe("the check", () => {
     expect(notifySent).toEqual([]); // a failure is never a "new version"
   });
 
-  it.fails("honors the UPDATE_CHECK_URL env override — tests and proxied networks", async () => {
+  it("honors the UPDATE_CHECK_URL env override — tests and proxied networks", async () => {
     process.env.UPDATE_CHECK_URL = "https://releases.example.test/latest";
     try {
       await checkForUpdate();
@@ -238,7 +232,7 @@ describe("the check", () => {
 });
 
 describe("one notification per new version", () => {
-  it.fails("first sighting notifies once — deduped across re-checks AND restarts", async () => {
+  it("first sighting notifies once — deduped across re-checks AND restarts", async () => {
     await request(app).put("/api/notify/url").send({ url: "https://ntfy.sh/update-topic" });
     releaseTag = "v99.0.0";
     await checkForUpdate();
@@ -266,7 +260,7 @@ describe("one notification per new version", () => {
     expect(notifySent[1].body).toContain("100.0.0");
   });
 
-  it.fails("no notify_url configured: the check still works, zero sends", async () => {
+  it("no notify_url configured: the check still works, zero sends", async () => {
     releaseTag = "v99.0.0";
     await checkForUpdate();
     expect((await getStatus()).updateAvailable).toBe(true);
@@ -279,14 +273,14 @@ describe("apply — the trigger", () => {
   const TRIGGER_URL = "http://watchtower:8080/v1/update";
   const TOKEN = "wt-spec-bearer-secret";
 
-  it.fails("unconfigured apply is a 409 pointing at the deployment guide", async () => {
+  it("unconfigured apply is a 409 pointing at the deployment guide", async () => {
     const res = await request(app).post("/api/update/apply");
     expect(res.status).toBe(409);
     expect(String((res.body as { error?: string }).error)).toMatch(/deploy/i);
     expect(calls).toEqual([]); // refusing must not fire anything
   });
 
-  it.fails("PUT /api/update/trigger validates http(s) and answers presence-only", async () => {
+  it("PUT /api/update/trigger validates http(s) and answers presence-only", async () => {
     expect((await request(app).put("/api/update/trigger").send({ url: "not a url" })).status).toBe(
       400,
     );
@@ -304,7 +298,7 @@ describe("apply — the trigger", () => {
     expect((await getStatus()).applyConfigured).toBe(false);
   });
 
-  it.fails("trigger URL and token never read back — excluded from GET /api/settings", async () => {
+  it("trigger URL and token never read back — excluded from GET /api/settings", async () => {
     const saved = await request(app)
       .put("/api/update/trigger")
       .send({ url: TRIGGER_URL, token: TOKEN });
@@ -320,7 +314,7 @@ describe("apply — the trigger", () => {
     expect(JSON.stringify(status)).not.toContain(TOKEN);
   });
 
-  it.fails("configured apply: 202, exactly ONE POST, bearer attached", async () => {
+  it("configured apply: 202, exactly ONE POST, bearer attached", async () => {
     await request(app).put("/api/update/trigger").send({ url: TRIGGER_URL, token: TOKEN });
     calls = [];
     const res = await request(app).post("/api/update/apply");
@@ -332,7 +326,7 @@ describe("apply — the trigger", () => {
     expect(calls[0].headers.Authorization).toBe(`Bearer ${TOKEN}`);
   });
 
-  it.fails("no token stored: the trigger POST carries no Authorization header", async () => {
+  it("no token stored: the trigger POST carries no Authorization header", async () => {
     await request(app).put("/api/update/trigger").send({ url: TRIGGER_URL });
     calls = [];
     const res = await request(app).post("/api/update/apply");
@@ -343,7 +337,7 @@ describe("apply — the trigger", () => {
     expect(calls[0].headers.Authorization).toBeUndefined();
   });
 
-  it.fails("the bearer token NEVER rides the check request", async () => {
+  it("the bearer token NEVER rides the check request", async () => {
     // The token authorizes restarting the app; leaking it to the (default
     // GitHub, possibly proxied) check URL would hand that power away.
     await request(app).put("/api/update/trigger").send({ url: TRIGGER_URL, token: TOKEN });

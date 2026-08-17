@@ -5,9 +5,6 @@ import { startUpdateScheduler } from "../../src/updateScheduler.js";
 // an injected runCheck so nothing touches the network and NO real timer
 // leaks (a leaked interval hangs the vitest run / the Windows E2E teardown).
 // Every handle is stopped in the test that created it.
-//
-// SPEC-FIRST: src/updateScheduler.ts is a TODO-throwing skeleton, so these
-// run as `it.fails`. WHEN IMPLEMENTING #247: flip every `it.fails` to `it`.
 
 const HOUR_MS = 60 * 60 * 1000;
 const MINUTE_MS = 60 * 1000;
@@ -17,7 +14,7 @@ describe("startUpdateScheduler", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it.fails("is disabled when the interval is <= 0 — returns null, creates no timer", () => {
+  it("is disabled when the interval is <= 0 — returns null, creates no timer", () => {
     // UPDATE_CHECK_INTERVAL_HOURS=0 must mean zero timers AND zero calls
     // (the #235 rule), provable because no scheduler object even exists.
     const runCheck = vi.fn(ok);
@@ -27,7 +24,7 @@ describe("startUpdateScheduler", () => {
     expect(runCheck).not.toHaveBeenCalled();
   });
 
-  it.fails("runs the boot check after the initial delay, not immediately", () => {
+  it("runs the boot check after the initial delay, not immediately", () => {
     // ~60s after boot (injectable here; production adds jitter) — a check in
     // the boot path itself would put GitHub latency into every restart.
     const runCheck = vi.fn(ok);
@@ -41,7 +38,7 @@ describe("startUpdateScheduler", () => {
     }
   });
 
-  it.fails("then checks once per interval — at most one call per period", () => {
+  it("then checks once per interval — at most one call per period", () => {
     const runCheck = vi.fn(ok);
     const handle = startUpdateScheduler(24, { runCheck, initialDelayMs: MINUTE_MS })!;
     try {
@@ -58,7 +55,7 @@ describe("startUpdateScheduler", () => {
     }
   });
 
-  it.fails("stop() halts the boot check and all further ticks", () => {
+  it("stop() halts the boot check and all further ticks", () => {
     const runCheck = vi.fn(ok);
     const handle = startUpdateScheduler(24, { runCheck, initialDelayMs: MINUTE_MS })!;
     handle.stop();
@@ -66,7 +63,7 @@ describe("startUpdateScheduler", () => {
     expect(runCheck).not.toHaveBeenCalled();
   });
 
-  it.fails("a rejecting check is logged and swallowed — the schedule continues", async () => {
+  it("a rejecting check is logged and swallowed — the schedule continues", async () => {
     // GitHub down or the Pi offline must cost one log line, nothing else.
     const errors: string[] = [];
     const runCheck = vi.fn(() => Promise.reject(new Error("getaddrinfo ENOTFOUND api.github.com")));

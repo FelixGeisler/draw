@@ -15,6 +15,7 @@ import { searchRouter } from "./routes/search.js";
 import { shopRouter } from "./routes/shop.js";
 import { challengeRouter } from "./routes/challenge.js";
 import { notifyRouter } from "./routes/notify.js";
+import { updateRouter } from "./routes/update.js";
 import { goalMaterialsRouter, materialsRouter } from "./routes/materials.js";
 import { aiRouter } from "./routes/ai.js";
 import { backupRouter } from "./routes/backup.js";
@@ -96,6 +97,9 @@ export function createApp(options: AppOptions = {}) {
   app.use("/api/shop", shopRouter);
   app.use("/api/challenge", challengeRouter);
   app.use("/api/notify", notifyRouter);
+  // OTA update surface (#247) — deliberately BELOW the gate: the running
+  // version is authed data (ADR-50), and the apply endpoint restarts the app.
+  app.use("/api/update", updateRouter);
   app.use("/api/goals", goalsRouter);
   // Palette search (#243, ADR-68): title search over tasks AND goals in one
   // round-trip — its own namespace, not a /api/tasks?q=: the payload is a
