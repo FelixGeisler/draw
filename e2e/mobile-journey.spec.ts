@@ -275,6 +275,12 @@ test("touch drag-and-drop: a childless root nests under another root", async ({ 
   // back).
   const targetRow = taskTree(page).locator(`[data-dnd-row="${parent.id}"]`);
   await targetRow.scrollIntoViewIfNeeded();
+  // "Into view" is minimal: it stops as soon as the TARGET row clears the
+  // viewport edge, and depending on how long the shared tree is by now (it
+  // varies with which specs ran before this file) the source handle can be
+  // left sitting just below the fold. Bring it in too — the pair is two
+  // adjacent ~44px rows, so both stay visible — and only then measure.
+  await handle.scrollIntoViewIfNeeded();
 
   const from = await centre(handle);
   const targetBox = (await targetRow.boundingBox())!;
