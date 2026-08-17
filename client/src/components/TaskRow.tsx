@@ -268,6 +268,11 @@ export function TaskRow({
           <button
             onClick={() => setExpanded((e) => !e)}
             style={{ padding: "0 6px", border: "none", background: "none" }}
+            // Glyph-free accessible names (#249): without a label the caret's
+            // name IS the triangle glyph — announced as "black down-pointing
+            // small triangle".
+            aria-label={expanded ? "Collapse subtasks" : "Expand subtasks"}
+            aria-expanded={expanded}
           >
             {expanded ? "▾" : "▸"}
           </button>
@@ -341,8 +346,10 @@ export function TaskRow({
               recurring subtask locks the switch to sequential (#66, ADR-23);
               the server 400 is still surfaced below as a backstop (e.g. an
               archived recurring subtask is not in this list but blocks too).
-              The arrows moved into the aria-label when the label became an
-              icon — sequential-subtasks.spec selects by exactly these names. */}
+              Glyph-free accessible names (#249): the icon carries the arrow,
+              the name never does — sequential-subtasks.spec selects by exactly
+              these names, and design-foundation.spec gates pictographs out of
+              every accessible name in the action cluster. */}
           {!done && hasSubtasks && (
             <button
               className="icon-btn"
@@ -359,13 +366,13 @@ export function TaskRow({
                   setOrderModeError((e as Error).message);
                 }
               }}
-              aria-label={task.subtaskOrderMode === "sequential" ? "→ in order" : "⇄ any order"}
+              aria-label={task.subtaskOrderMode === "sequential" ? "Enforce step order" : "Any order"}
               title={
                 sequentialLocked
-                  ? "Cannot draw in order: a recurring subtask never closes and would gate the steps behind it forever — remove its ↻ recurrence first"
+                  ? "Cannot draw in order: a recurring subtask never closes and would gate the steps behind it forever — remove its recurrence first"
                   : task.subtaskOrderMode === "sequential"
-                    ? "Subtasks are drawn in order — click to allow any order"
-                    : "Subtasks are drawn in any order — click to draw them in the listed order"
+                    ? "Subtasks are drawn in the listed order — click to allow them in any sequence"
+                    : "Subtasks are drawn in any sequence — click to enforce the listed order"
               }
             >
               {task.subtaskOrderMode === "sequential" ? <ArrowRightIcon /> : <SwapIcon />}
@@ -567,7 +574,7 @@ export function TaskRow({
               style={{ margin: "8px 0 0", borderColor: "var(--accent)" }}
               onClick={() => setAiPanel(true)}
             >
-              ✨ Suggest with AI
+              <span aria-hidden="true">✨ </span>Suggest with AI
             </button>
           )}
           {aiPanel && (
@@ -621,7 +628,7 @@ export function TaskRow({
               style={{ margin: "8px 0 0", borderColor: "var(--accent)" }}
               onClick={() => setAiPanel(true)}
             >
-              ✨ Suggest with AI
+              <span aria-hidden="true">✨ </span>Suggest with AI
             </button>
           )}
           {aiPanel && (

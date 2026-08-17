@@ -61,7 +61,7 @@ test("sequential breakdown: only the first step is drawable, the second queues u
   ).not.toBeVisible();
   // The parent row announces the mode and offers the flip.
   await expect(
-    taskRow(page, PARENT_TITLE).getByRole("button", { name: "→ in order" }),
+    taskRow(page, PARENT_TITLE).getByRole("button", { name: "Enforce step order" }),
   ).toBeVisible();
 
   // The goal-scoped deck holds exactly the first step.
@@ -101,9 +101,9 @@ test("flipping the parent back to any order clears the queue", async ({ page }) 
     taskRow(page, "Mount the clothes rail").locator(".chip", { hasText: "⏳ queued" }),
   ).toBeVisible();
 
-  await taskRow(page, PARENT_TITLE).getByRole("button", { name: "→ in order" }).click();
+  await taskRow(page, PARENT_TITLE).getByRole("button", { name: "Enforce step order" }).click();
   await expect(
-    taskRow(page, PARENT_TITLE).getByRole("button", { name: "⇄ any order" }),
+    taskRow(page, PARENT_TITLE).getByRole("button", { name: "Any order" }),
   ).toBeVisible();
   await expect(
     taskRow(page, "Mount the clothes rail").locator(".chip", { hasText: "⏳ queued" }),
@@ -113,7 +113,7 @@ test("flipping the parent back to any order clears the queue", async ({ page }) 
 test("a step completed out of order never wears the queued chip", async ({ page }) => {
   // Back to in-order: the still-open, older step two holds the rail back again.
   await page.goto("/tasks");
-  await taskRow(page, PARENT_TITLE).getByRole("button", { name: "⇄ any order" }).click();
+  await taskRow(page, PARENT_TITLE).getByRole("button", { name: "Any order" }).click();
   // Keep done rows on screen — the completed step must stay visible to assert on.
   await page.getByLabel("show done").check();
   const rail = taskRow(page, "Mount the clothes rail");
@@ -158,7 +158,7 @@ test("recurring steps cannot join an in-order breakdown (#66)", async ({ page })
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(taskRow(page, RECUR_STEP_TITLE).locator(".chip", { hasText: "↻ 3d" })).toBeVisible();
 
-  const flip = taskRow(page, RECUR_PARENT_TITLE).getByRole("button", { name: "⇄ any order" });
+  const flip = taskRow(page, RECUR_PARENT_TITLE).getByRole("button", { name: "Any order" });
   await expect(flip).toBeDisabled();
   await expect(flip).toHaveAttribute("title", /recurring/);
 
