@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
-import { taskTree } from "./helpers.js";
+import { openRowMenu, taskTree } from "./helpers.js";
 
 // Issue #167: a CHILDLESS subtask can be dragged (or menu-moved) straight under
 // a DIFFERENT open root — no promote-then-nest two-step. The server always
@@ -97,6 +97,11 @@ async function dragWithoutRelease(page: Page, from: Locator, to: Locator) {
   await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2, { steps: 3 });
   await expect(page.locator(".dnd-ghost")).toBeVisible();
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+  // Corrective hop (#244, mirrors dnd-reorganize): mid-drag reason strips
+  // shift the rows, so re-target the LIVE box; the drop commits from the
+  // last pointermove's overKey, so the stationary pointer stays right.
+  const live = (await to.boundingBox())!;
+  await page.mouse.move(live.x + live.width / 2, live.y + live.height / 2, { steps: 1 });
 }
 
 /**
@@ -205,15 +210,15 @@ test("the cross-parent nest works identically under reduced motion", async ({ pa
 });
 
 test("the menu offers cross-parent Move under… for a childless subtask", async ({ page }) => {
-  // Keyboard/menu parity with the drag (#167): the "Move under…" button now
-  // appears on a childless subtask row and lists other open roots. Origin now
-  // holds only STEP_TWO; move it under the destination via the menu.
+  // Keyboard/menu parity with the drag (#167): the "Move under…" action now
+  // appears on a childless subtask row (in the kebab menu since #244) and
+  // lists other open roots. Origin now holds only STEP_TWO; move it under
+  // the destination via the menu.
   await page.goto("/tasks");
 
   const subtaskRow = row(page, STEP_TWO);
-  await subtaskRow
-    .getByTitle("Move under another task (it becomes a subtask)")
-    .click();
+  const menu = await openRowMenu(subtaskRow);
+  await menu.getByRole("button", { name: "Move under…" }).click();
   await page.getByLabel(/Move under/).selectOption({ label: DEST });
   await page.getByRole("button", { name: "Move", exact: true }).click();
 

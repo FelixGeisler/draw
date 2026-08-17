@@ -4,10 +4,9 @@ import { subtaskEditor, taskTree } from "./helpers.js";
 /**
  * Design foundation (#244) — the behavioural floor the restructure must land on.
  *
- * These specs were written BEFORE the implementation (test-first). Every test
- * carries `test.fail()` so the suite stays green until the implementation
- * exists; the implementer REMOVES the `test.fail()` lines as each behaviour
- * lands (an "unexpected pass" is the reminder). The DOM contract they pin:
+ * These specs were written BEFORE the implementation (test-first); their
+ * `test.fail()` markers came off as each behaviour landed. The DOM contract
+ * they pin:
  *
  *   - `.task-row` keeps its class and stays the container hover/focus-within
  *     key on (the #243 palette flash and the DnD hit-testing already require
@@ -89,7 +88,6 @@ test.describe("desktop, 1080px", () => {
   test.use({ viewport: { width: 1080, height: 800 } });
 
   test("a 5-star goal-linked row keeps its long title to exactly one line", async ({ page }) => {
-    test.fail(true, "#244 not implemented yet — remove when the row restructure lands");
     await page.goto("/tasks");
     const r = row(page);
     await expect(r).toBeVisible();
@@ -104,11 +102,32 @@ test.describe("desktop, 1080px", () => {
     // of its text contents via a Range instead, and back it with the height
     // bound the contract names (≤ 1.6em: one line even at a generous
     // line-height; a second line puts it past 2em).
+    //
+    // AMENDED during implementation (#244): Chromium fragments an ellipsised
+    // nowrap text node into MULTIPLE horizontal rects on the same visual
+    // line (observed: [942px, 262px] fragments for one 21px-tall line), and
+    // the inline-block category dot adds its own rect too — a raw rect count
+    // can never be 1 here. A "line" is therefore a group of vertically
+    // OVERLAPPING rects: fragments and the dot merge into their line box,
+    // while a genuine second line starts below the first one's bottom.
     const title = r.getByText(TASK_TITLE, { exact: true });
     const m = await title.evaluate((el) => {
       const range = document.createRange();
       range.selectNodeContents(el);
-      const lines = Array.from(range.getClientRects()).filter((rect) => rect.width > 0).length;
+      const rects = Array.from(range.getClientRects())
+        .filter((rect) => rect.width > 0)
+        .sort((a, b) => a.top - b.top);
+      let lines = 0;
+      let bottom = -Infinity;
+      for (const rect of rects) {
+        // 2px tolerance for subpixel rounding between fragments.
+        if (rect.top >= bottom - 2) {
+          lines++;
+          bottom = rect.bottom;
+        } else {
+          bottom = Math.max(bottom, rect.bottom);
+        }
+      }
       const s = getComputedStyle(el);
       return {
         lines,
@@ -127,7 +146,6 @@ test.describe("desktop, 1080px", () => {
   test("actions reveal on hover and focus-within, and every action is keyboard-reachable", async ({
     page,
   }) => {
-    test.fail(true, "#244 not implemented yet — remove when the row restructure lands");
     await page.goto("/tasks");
     const r = row(page);
     await expect(r).toBeVisible();
@@ -227,7 +245,6 @@ test.describe("desktop, 1080px", () => {
   });
 
   test("the nav renders svg icons and zero emoji chrome", async ({ page }) => {
-    test.fail(true, "#244 not implemented yet — remove when the icon set lands");
     await page.goto("/");
     const nav = page.locator(".sidenav");
     await expect(nav).toBeVisible();
@@ -260,7 +277,6 @@ test.describe("touch (hover: none)", () => {
   test.use({ isMobile: true, hasTouch: true, viewport: { width: 900, height: 800 } });
 
   test("row actions are always visible without hover", async ({ page }) => {
-    test.fail(true, "#244 not implemented yet — remove when the row restructure lands");
     await page.goto("/tasks");
     // Guard: the emulation really is a hover-incapable device, or the test
     // proves nothing.

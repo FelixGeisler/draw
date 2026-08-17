@@ -22,6 +22,20 @@ export function subtaskEditor(page: Page): Locator {
 }
 
 /**
+ * Open a task row's overflow menu (#244): the kebab ("More actions") holds
+ * the relocated "Move under…" and "Delete" actions. Playwright's click
+ * hovers first, which is what reveals the opacity-hidden .row-actions
+ * cluster — no explicit hover needed. Returns the popover, scoped to the
+ * page (it is the only .row-menu that can be open at a time).
+ */
+export async function openRowMenu(row: Locator): Promise<Locator> {
+  await row.getByRole("button", { name: "More actions", exact: true }).click();
+  const menu = row.page().locator(".row-menu");
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+/**
  * Resolve a current draw persisted by an earlier serial spec (issue #25).
  * Since #88 the draw is a commitment — there is no "Draw again", and a
  * restored card blocks the idle front face. Resolution mirrors the product's

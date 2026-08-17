@@ -1,12 +1,13 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
-import { taskTree } from "./helpers.js";
+import { openRowMenu, taskTree } from "./helpers.js";
 
 // Issue #100 (+ #167): the Tasks page offers menu-based reparenting — "Move
 // under…" on any CHILDLESS row (a root or, since #167, a subtask that can move
 // to a different parent), "Promote to top-level" on subtask rows. Both are
 // plain buttons/selects (keyboard-operable by construction; the promote test
-// drives the keyboard path). Runs against the shared E2E database after the
+// drives the keyboard path). Since #244 "Move under…" lives in the row's
+// kebab menu — openRowMenu is the shared way in. Runs against the shared E2E database after the
 // other specs; all seeded titles are unique to this spec.
 test.describe.configure({ mode: "serial" });
 
@@ -42,19 +43,19 @@ test("move a root task under another via the Move under… menu", async ({ page 
   await seed(page.request);
   await page.goto("/tasks");
 
-  await row(page, LOOSE_TITLE)
-    .getByTitle("Move under another task (it becomes a subtask)")
-    .click();
+  const moveMenu = await openRowMenu(row(page, LOOSE_TITLE));
+  await moveMenu.getByRole("button", { name: "Move under…" }).click();
   await page.getByLabel("Move under").selectOption({ label: UMBRELLA_TITLE });
   await page.getByRole("button", { name: "Move", exact: true }).click();
 
   // The row re-renders as a subtask: it gains the promote (⤴) affordance, and
-  // since #167 a childless subtask keeps its "Move under…" menu too (it can
+  // since #167 a childless subtask keeps its "Move under…" action too (it can
   // move under a different parent), so both reorganize controls are present.
   await expect(row(page, LOOSE_TITLE).getByTitle("Promote to top-level")).toBeVisible();
-  await expect(
-    row(page, LOOSE_TITLE).getByTitle("Move under another task (it becomes a subtask)"),
-  ).toBeVisible();
+  const subtaskMenu = await openRowMenu(row(page, LOOSE_TITLE));
+  await expect(subtaskMenu.getByRole("button", { name: "Move under…" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(subtaskMenu).toHaveCount(0);
 
   // The server persisted the adoption — the task nests under the umbrella.
   const tasks = await tasksByTitle(page);
@@ -75,11 +76,12 @@ test("promote the subtask back to top-level — via the keyboard", async ({ page
   await promote.focus();
   await page.keyboard.press("Enter");
 
-  // A root row again: the move menu returns, the promote button leaves.
-  await expect(
-    row(page, LOOSE_TITLE).getByTitle("Move under another task (it becomes a subtask)"),
-  ).toBeVisible();
+  // A root row again: the promote button leaves, the kebab still offers the
+  // move action.
   await expect(row(page, LOOSE_TITLE).getByTitle("Promote to top-level")).not.toBeVisible();
+  const rootMenu = await openRowMenu(row(page, LOOSE_TITLE));
+  await expect(rootMenu.getByRole("button", { name: "Move under…" })).toBeVisible();
+  await page.keyboard.press("Escape");
 
   const tasks = await tasksByTitle(page);
   const loose = tasks.find((t) => t.title === LOOSE_TITLE);

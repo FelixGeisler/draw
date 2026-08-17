@@ -87,7 +87,8 @@ async function logIn(page: Page) {
   await page.goto(`${BASE}/`);
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Unlock" }).click();
-  await expect(page.locator(".sidenav .brand")).toHaveText("🃏 Draw");
+  // The brand is an SVG mark + "Draw" since #244 (no emoji chrome in the nav).
+  await expect(page.locator(".sidenav .brand")).toHaveText("Draw");
 }
 
 test.describe("LAN password gate", () => {
