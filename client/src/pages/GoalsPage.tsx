@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import type { Goal } from "../api/types";
 import { useCreateGoal, useDeleteGoal, useUpdateGoal, useGoals } from "../hooks/useGoals";
 import { useCategories, useCreateTask } from "../hooks/useTasks";
@@ -100,7 +101,7 @@ function GoalCard({
   }
 
   return (
-    <div className="panel" style={{ marginTop: 16 }}>
+    <div className="panel" data-goal-id={goal.id} style={{ marginTop: 16 }}>
       {editing ? (
         <form
           style={{ display: "grid", gap: 8 }}
@@ -343,6 +344,34 @@ export function GoalsPage() {
   // response, so the overlay shows the stamped resolvedAt, not a client guess.
   const [victory, setVictory] = useState<Goal | null>(null);
   const [missedNotice, setMissedNotice] = useState<string | null>(null);
+
+  // Palette landing (#246, the TasksPage #243 pattern): the palette navigates
+  // here with { focusGoalId } in router state. Consume it ONCE — the replace
+  // strips the state so back/reload cannot re-scroll.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
+  useEffect(() => {
+    const state = location.state as { focusGoalId?: number } | null;
+    if (state?.focusGoalId == null) return;
+    setPendingFocusId(state.focusGoalId);
+    navigate(location.pathname, { replace: true });
+  }, [location, navigate]);
+
+  // Scroll-and-flash once the card exists — same classList idiom as the
+  // TasksPage flash (a one-shot pulse is not worth threading a prop for).
+  // A resolved goal renders in the shelf, not as a card: the querySelector
+  // finds nothing and the landing quietly degrades to bare /goals.
+  useEffect(() => {
+    if (pendingFocusId == null || goals.data == null) return;
+    const el = document.querySelector<HTMLElement>(`[data-goal-id="${pendingFocusId}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "center" });
+      el.classList.add("palette-flash");
+      window.setTimeout(() => el.classList.remove("palette-flash"), 1500);
+    }
+    setPendingFocusId(null);
+  }, [pendingFocusId, goals.data]);
 
   return (
     <div className="content">

@@ -3298,7 +3298,8 @@ functions (`lib/keyScope`, `lib/paletteNav`) so the DOM-less client suite
 pins them.
 
 *Out of scope:* fuzzy ranking, search over descriptions/materials/notes,
-custom keybindings, and scrolling to a goal on the Goals page.
+custom keybindings, and scrolling to a goal on the Goals page (closed by
+#246: goals now land with the same router-state scroll-and-flash as tasks).
 
 == ADR-69: Design foundation — a token layer that renames instead of retunes, opacity-only row reveals, one SVG icon set
 
