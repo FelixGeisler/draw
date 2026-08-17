@@ -243,7 +243,7 @@ export function TaskRow({
         {dnd && !done && (
           <span
             className="dnd-handle"
-            title="Drag to reorganize (keyboard: the Move under… and ⤴ buttons)"
+            title="Drag to reorganize (keyboard: Move under… in the row menu, and the Promote to top-level button)"
             aria-hidden="true"
             onPointerDown={(e) => dnd.startDrag(task, e)}
             // Touch drags (#193): a long-press on the handle must start the
@@ -277,8 +277,11 @@ export function TaskRow({
             One line, always (#244): the title owns the row — it ellipsises
             instead of ever wrapping, at any width down to the phone. It must
             stay a DIRECT child of .task-row: ~20 specs resolve the row as
-            getByText(title).locator(".."). */}
+            getByText(title).locator(".."). The title attribute keeps an
+            elided title readable in place (native tooltip) — the one-line
+            rule removed the wrapping that used to do that job. */}
         <span
+          title={task.title}
           style={{
             textDecoration: done ? "line-through" : "none",
             flex: 1,
@@ -685,8 +688,11 @@ export function TaskRow({
 /**
  * The row overflow menu (#244): a minimal popover, not a modal — no root
  * inert, no focus trap. Opens on click/Enter on the "More actions" kebab;
- * closes on Escape (focus returns to the trigger), outside pointerdown, or
- * picking an item. Items are plain buttons reachable with Tab AND walkable
+ * closes on Escape (focus returns to the trigger), outside pointerdown,
+ * focus leaving the wrap (a keyboard user Tabbing away must not leave an
+ * invisible open popover with a stale aria-expanded — and it keeps the
+ * helpers.ts invariant that only one .row-menu is ever open, for keyboard
+ * users too), or picking an item. Items are plain buttons reachable with Tab AND walkable
  * with ArrowUp/ArrowDown; the design-foundation spec drives the whole
  * keyboard round-trip.
  */
@@ -734,7 +740,17 @@ function RowMenu({
   }
 
   return (
-    <span ref={wrapRef} className="row-menu-wrap" onKeyDown={onKeyDown}>
+    <span
+      ref={wrapRef}
+      className="row-menu-wrap"
+      onKeyDown={onKeyDown}
+      // React's onBlur is the bubbling focusout: relatedTarget is where focus
+      // went, null when it left the document — contains(null) is false, so
+      // that closes too.
+      onBlur={(e) => {
+        if (open && !wrapRef.current?.contains(e.relatedTarget as Node)) setOpen(false);
+      }}
+    >
       <button
         ref={triggerRef}
         className="icon-btn"

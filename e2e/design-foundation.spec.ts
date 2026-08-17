@@ -141,6 +141,9 @@ test.describe("desktop, 1080px", () => {
     // This title genuinely does not fit — one line must mean ellipsis, not a
     // vacuous pass on a row that happened to be wide enough.
     expect(m.elided).toBe(true);
+    // …and an elided title stays readable IN PLACE: the native tooltip
+    // (title attribute) replaced the wrapping the one-line rule removed.
+    await expect(title).toHaveAttribute("title", TASK_TITLE);
   });
 
   test("actions reveal on hover and focus-within, and every action is keyboard-reachable", async ({
@@ -242,6 +245,20 @@ test.describe("desktop, 1080px", () => {
     await page.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);
     await expect(kebab).toBeFocused();
+
+    // Tabbing AWAY from the open popover closes it too: without a focusout
+    // close, a keyboard user leaves an invisible open menu behind with a
+    // stale aria-expanded (and could open a second row's menu alongside it).
+    await page.keyboard.press("Enter");
+    await expect(menu).toBeVisible();
+    await expect(kebab).toHaveAttribute("aria-expanded", "true");
+    await page.keyboard.press("Tab"); // → Move under…
+    await expect(moveItem).toBeFocused();
+    await page.keyboard.press("Tab"); // → Delete
+    await expect(deleteItem).toBeFocused();
+    await page.keyboard.press("Tab"); // → out of the wrap
+    await expect(menu).toHaveCount(0);
+    await expect(kebab).toHaveAttribute("aria-expanded", "false");
   });
 
   test("the nav renders svg icons and zero emoji chrome", async ({ page }) => {
