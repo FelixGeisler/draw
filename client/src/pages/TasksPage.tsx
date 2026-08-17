@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   useCategories,
@@ -135,6 +135,33 @@ export function TasksPage() {
       setScope(undefined);
     }
   }, [pendingFocusId, tasks.data, scope, setScope, taskById]);
+
+  // List-entry motion (#244): a task captured while the page is open fades
+  // and slides in. Same classList idiom as the palette flash above — a
+  // transient one-shot class instead of plumbing a prop through the strip,
+  // the tree and the subtask recursion. The FIRST payload of a query (page
+  // load, or the "show done" flip changing the query key) animates nothing:
+  // rows that were merely revealed did not "arrive".
+  const seenIdsRef = useRef<{ key: boolean; ids: Set<number> } | null>(null);
+  useEffect(() => {
+    if (tasks.data == null) return;
+    const ids = new Set<number>();
+    for (const t of tasks.data) {
+      ids.add(t.id);
+      for (const s of t.subtasks ?? []) ids.add(s.id);
+    }
+    const prev = seenIdsRef.current;
+    seenIdsRef.current = { key: showDone, ids };
+    if (prev == null || prev.key !== showDone) return;
+    for (const id of ids) {
+      if (prev.ids.has(id)) continue;
+      // A row can render twice (triage strip + tree) — animate every copy.
+      for (const el of document.querySelectorAll<HTMLElement>(`[data-task-id="${id}"]`)) {
+        el.classList.add("row-enter");
+        window.setTimeout(() => el.classList.remove("row-enter"), 400);
+      }
+    }
+  }, [tasks.data, showDone]);
 
   const triageRow = (t: Task, key: DrawGroup) => (
     <TaskRow

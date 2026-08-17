@@ -39,6 +39,59 @@
     transparent 70%
   );
 
+  /* ---- Design tokens (#244, ADR-69) --------------------------------------
+     Same rationale as the sheens above: one value, many surfaces. The values
+     are the app's own de-facto conventions given names — this layer renames,
+     it does not retune, so adopting a token never changes computed output.
+     Genuinely bespoke values (the card face's 16px frame, the sheen drift
+     period, the calendar's tile-coupled 3px) stay NAMED file-local custom
+     properties at the top of their own stylesheet instead of fake rungs
+     here. */
+
+  /* Spacing: 4px base. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  /* Type scale with paired line-heights. sm sits at the app's real 13px —
+     the single most repeated size in the client — not a rounded ideal. */
+  --text-xs: 12px;
+  --lh-xs: 1.35;
+  --text-sm: 13px;
+  --lh-sm: 1.4;
+  --text-md: 15px;
+  --lh-md: 1.4;
+  --text-lg: 17px;
+  --lh-lg: 1.35;
+  --text-xl: 22px;
+  --lh-xl: 1.3;
+
+  /* Radii: 8 and 12 are today's de-facto control/panel values. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  /* Elevation: the two shadow strengths the dark theme already paints
+     (card resting shade, floating overlay lift). */
+  --elev-1: 0 3px 12px rgba(0, 0, 0, 0.4);
+  --elev-2: 0 6px 24px rgba(0, 0, 0, 0.35);
+
+  /* Motion: fast = reveals, mid = arrivals, slow = deliberate emphasis. */
+  --dur-fast: 140ms;
+  --dur-mid: 200ms;
+  --dur-slow: 320ms;
+  --ease-standard: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  /* File-local timing of THIS stylesheet: the #243 landing flash — a slow
+     attention pulse, deliberately not on the shared scale. */
+  --palette-flash-dur: 1.4s;
+
   font-family: "Segoe UI", system-ui, sans-serif;
   color-scheme: dark;
 }
@@ -62,7 +115,7 @@ button {
   font: inherit;
   cursor: pointer;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg-panel);
   color: var(--text);
   padding: 8px 14px;
@@ -90,7 +143,7 @@ textarea {
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px 10px;
 }
 
@@ -123,10 +176,18 @@ textarea:focus {
 }
 
 .sidenav .brand {
-  font-size: 22px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xl);
   font-weight: 700;
   padding: 8px 12px 20px;
   letter-spacing: 0.5px;
+}
+
+.sidenav .brand svg {
+  width: 0.95em;
+  height: 0.95em;
 }
 
 .sidenav a {
@@ -134,18 +195,26 @@ textarea:focus {
   align-items: center;
   gap: 10px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   color: var(--text-dim);
 }
 
-/* Fixed-width icon slot so glyphs of different natural widths (🎴 vs ⚙️) keep
-   the labels on one vertical line. */
+/* Fixed-width icon slot (kept from the emoji era so the labels stay on one
+   vertical line); the SVG icon set (#244) sizes off the slot's font-size —
+   the phone block below only has to bump that one number. */
 .sidenav .nav-ico {
   width: 1.3em;
   flex-shrink: 0;
   text-align: center;
   font-size: 15px;
   line-height: 1;
+}
+
+.sidenav .nav-ico svg {
+  width: 1.2em;
+  height: 1.2em;
+  display: block;
+  margin: 0 auto;
 }
 
 .sidenav a.active {
@@ -210,7 +279,7 @@ textarea:focus {
 .panel {
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 16px;
 }
 
@@ -219,7 +288,7 @@ textarea:focus {
   align-items: center;
   gap: 6px;
   padding: 4px 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   font-size: 13px;
   color: var(--text-dim);
@@ -255,17 +324,171 @@ textarea:focus {
   gap: 10px;
 }
 
+/* The done-dim used to be an inline style; a class since #244 so the
+   .row-leave fade below can win the cascade. */
+.task-row.done {
+  opacity: 0.5;
+}
+
+/* ---- Row actions (#244, ADR-69) -----------------------------------------
+   The secondary controls are icon buttons in a .row-actions cluster. On
+   hover-capable devices the cluster rests at opacity 0 and reveals on
+   .task-row:hover / :focus-within; on touch devices it is simply always
+   visible. The hidden state is OPACITY ONLY — never display, visibility or
+   pointer-events — so the buttons keep their tab stops, their geometry and
+   their clickability (Playwright's click hovers first; keyboard users get
+   the reveal from :focus-within). */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+@media (hover: hover) {
+  .task-row .row-actions {
+    opacity: 0;
+  }
+
+  .task-row:hover .row-actions,
+  .task-row:focus-within .row-actions {
+    opacity: 1;
+  }
+}
+
+/* ~28px hit targets on desktop; the phone block below grows them to the
+   44px floor like every other button. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+}
+
+.icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.icon-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: none;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+/* The kebab popover (#244): a minimal menu, not a modal. z 60 slots between
+   the dnd overlays (40) and the phone nav (80) — see the ladder comment in
+   the phone block. */
+.row-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.row-menu {
+  position: absolute;
+  top: calc(100% + var(--space-1));
+  right: 0;
+  z-index: 60;
+  min-width: 11em;
+  padding: var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  box-shadow: var(--elev-2);
+}
+
+.row-menu button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.row-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.row-menu button svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--text-dim);
+}
+
+.row-menu .danger {
+  color: var(--danger);
+}
+
+/* Row-resolve fade (#244): TaskRow puts .row-leave on a row whose DELETE is
+   in flight — it fades while the refetch removes it for real. After .done
+   on purpose: deleting a done row must still fade to 0. */
+.task-row.row-leave {
+  opacity: 0;
+}
+
 /* Palette landing flash (#243): the row the palette opened pulses once so the
    eye finds it after the jump. Motion is opt-in (the #62/#123 idiom) — under
    reduced motion the scroll alone does the pointing. */
 @media (prefers-reduced-motion: no-preference) {
   .task-row.palette-flash {
-    animation: palette-flash 1.4s ease-out;
+    animation: palette-flash var(--palette-flash-dur) ease-out;
+  }
+
+  .row-actions {
+    transition: opacity var(--dur-fast) var(--ease-standard);
+  }
+
+  .task-row.row-leave {
+    transition: opacity var(--dur-fast) var(--ease-standard);
+  }
+
+  /* List entry (#244): TasksPage marks rows that ARRIVED (a fresh capture),
+     never rows merely revealed by a filter flip. */
+  .task-row.row-enter {
+    animation: row-enter var(--dur-mid) var(--ease-standard);
+  }
+
+  /* Route change (#244): the keyed wrapper in App.tsx remounts per pathname
+     and re-runs this — short and opacity-led so post-navigation assertions
+     (and the README screenshot script's fixed settles) never race it. */
+  .route-view {
+    animation: route-in var(--dur-fast) var(--ease-standard);
   }
 }
 @keyframes palette-flash {
   from {
     background: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+}
+@keyframes row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@keyframes route-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
   }
 }
 
@@ -390,6 +613,14 @@ textarea:focus {
     row-gap: 4px;
   }
 
+  /* The row's icon buttons (#244) join the 44px touch-target rule in both
+     axes — the min-height rule above already stretches them, this squares
+     them off (the desktop 28px width is a hover-device economy). */
+  .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+
   /* Settings rows (SettingsPage.tsx): a 280px label plus its control plus the
      hint text do not fit a phone, so they stack THERE — on desktop each row
      stays the single line it has always been. */
@@ -469,7 +700,7 @@ textarea:focus {
      gives (PR #125 review). Never shrink — the pill is one text line. */
   flex-shrink: 0;
   padding: 3px 14px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.4px;

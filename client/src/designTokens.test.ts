@@ -10,9 +10,8 @@ import { describe, expect, it } from "vitest";
  * hatch this gate honours: a `--foo: 3.5s` DECLARATION is fine, a
  * `animation: sheen 3.5s` USE is not.
  *
- * Test-first (#244): these are `it.fails` until the migration lands — the
- * implementer flips each to plain `it` as its file goes clean (an
- * "unexpected pass" under vitest is the reminder).
+ * Test-first (#244): these started as `it.fails` and flipped to plain `it`
+ * as each file's migration landed.
  *
  * Scans, per declaration:
  *   - `transition*` / `animation*` values for non-zero `<n>s` / `<n>ms`
@@ -61,7 +60,7 @@ export function bareLiteralViolations(css: string): string[] {
 
 describe("#244 token gate — no bare duration/radius literals in migrated stylesheets", () => {
   for (const [name, rel] of Object.entries(FILES)) {
-    it.fails(`${name} uses tokens or named file-local properties`, () => {
+    it(`${name} uses tokens or named file-local properties`, () => {
       const css = readFileSync(new URL(rel, import.meta.url), "utf8");
       expect(bareLiteralViolations(css)).toEqual([]);
     });

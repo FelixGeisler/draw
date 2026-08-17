@@ -6,6 +6,15 @@
    with the rest of Stats; motion sits behind prefers-reduced-motion. */
 
 .cal-section {
+  /* File-local design constants (#244): the 3px tile radius is coupled to
+     the 13/15px --cal-cell tile (a 4px scale rung would visibly retexture
+     ~180 tiles), the detail keeps its softer 10px corner, and the tile
+     hover/detail fade are deliberately FASTER than the shared scale so a
+     13px tile never lags the pointer. */
+  --cal-tile-radius: 3px;
+  --cal-detail-radius: 10px;
+  --cal-hover-dur: 0.1s;
+  --cal-detail-in-dur: 0.12s;
   /* Containing block for the floating day-detail overlay (#182): the detail is
      mounted here (OUTSIDE the overflow-x scroll box, so it can't clip) and
      positioned absolute against this box. */
@@ -43,7 +52,7 @@
   overflow-x: auto;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--bg-panel);
 }
 
@@ -89,7 +98,7 @@
   position: relative;
   width: var(--cal-cell);
   height: var(--cal-cell);
-  border-radius: 3px;
+  border-radius: var(--cal-tile-radius);
 }
 
 /* Five-step intensity ramp, shared by the tiles and the legend swatches. */
@@ -177,7 +186,7 @@
 .cal-swatch {
   width: 13px;
   height: 13px;
-  border-radius: 3px;
+  border-radius: var(--cal-tile-radius);
 }
 
 /* A static footer hint — one line, constant height, so nothing below reflows as
@@ -207,9 +216,9 @@
   max-width: 380px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--cal-detail-radius);
   background: var(--bg);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--elev-2);
   font-size: 13px;
   pointer-events: none;
   /* Cap the height so an unusually busy day (many cards) can never grow taller
@@ -293,11 +302,11 @@
 @media (prefers-reduced-motion: no-preference) {
   .cal-cell {
     transition:
-      transform 0.1s ease,
-      outline-color 0.1s ease;
+      transform var(--cal-hover-dur) ease,
+      outline-color var(--cal-hover-dur) ease;
   }
   /* The floating detail fades in; reduced motion drops the animation entirely. */
   .cal-detail {
-    animation: cal-detail-in 0.12s ease;
+    animation: cal-detail-in var(--cal-detail-in-dur) ease;
   }
 }
