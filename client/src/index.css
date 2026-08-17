@@ -255,6 +255,20 @@ textarea:focus {
   gap: 10px;
 }
 
+/* Palette landing flash (#243): the row the palette opened pulses once so the
+   eye finds it after the jump. Motion is opt-in (the #62/#123 idiom) — under
+   reduced motion the scroll alone does the pointing. */
+@media (prefers-reduced-motion: no-preference) {
+  .task-row.palette-flash {
+    animation: palette-flash 1.4s ease-out;
+  }
+}
+@keyframes palette-flash {
+  from {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+}
+
 /* ---- Phone layout (#193) ------------------------------------------------
    ONE width breakpoint for the whole client: 640px — its first and only width
    query (before #193 every @media in the client was prefers-reduced-motion, and
@@ -285,9 +299,10 @@ textarea:focus {
 
   /* The sidenav becomes a fixed bottom tab bar: icon over label, one flex
      share per entry (5 entries, 6 with the Assistant). z-index sits above
-     page chrome (dnd overlays top out at 40) but below the fullscreen
-     focus/victory overlays (90) and the achievement toast (100) — focus mode
-     intentionally covers the nav. */
+     page chrome (dnd overlays top out at 40) but below the command palette
+     and shortcut sheet (85, CommandPalette.css — a modal must cover the nav),
+     the fullscreen focus/victory overlays (90) and the achievement toast
+     (100) — focus mode intentionally covers the nav. */
   .sidenav {
     position: fixed;
     bottom: 0;

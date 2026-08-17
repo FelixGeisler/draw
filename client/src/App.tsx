@@ -8,6 +8,7 @@ import { AssistantPage } from "./pages/AssistantPage";
 import { TimerBar } from "./components/TimerBar";
 import { GamificationHeader } from "./components/GamificationHeader";
 import { AchievementToast } from "./components/AchievementToast";
+import { CommandPalette } from "./components/CommandPalette";
 import { DeckScopeBar } from "./components/DeckScopeBar";
 import { DeckScopeProvider } from "./DeckScopeContext";
 import { useAiStatus } from "./hooks/useAi";
@@ -60,6 +61,10 @@ export default function App() {
         <DeckScopeBar />
         <TimerBar />
         <AchievementToast />
+        {/* Command palette + global shortcuts (#243, ADR-68): mounted once in
+            the shell so Ctrl+K works from every page; renders null until
+            opened, like the toast above. */}
+        <CommandPalette />
         <Routes>
           <Route path="/" element={<DrawPage />} />
           {/* Capture merged into Tasks (#151, ADR-40) — the route survives as

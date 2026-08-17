@@ -190,6 +190,10 @@ export function TaskRow({
         // Rows outside a DnD context (the triage strip, #151) are not drop
         // targets — without the attribute the hit-test skips them entirely.
         data-dnd-row={dnd ? task.id : undefined}
+        // Palette landing hook (#243): TasksPage scrolls-and-flashes the row
+        // the palette opened by this id — subtask rows carry it too via the
+        // recursion below.
+        data-task-id={task.id}
         // task-row lets the phone breakpoint wrap the action buttons onto
         // their own line (index.css, #193) — desktop keeps one line. The gap
         // lives in that stylesheet too: inline, it would beat the phone
