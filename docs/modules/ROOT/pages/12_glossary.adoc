@@ -37,6 +37,9 @@
 |*Deck scope (work mode)*
 |One category the whole app is narrowed to (#214, xref:09_architecture_decisions.adoc[ADR-57]): the Draw page's chips, made sticky. Stored PER DEVICE in `localStorage`, never in `settings` — a phone and a desktop against one instance can sit in different modes. Narrows the deck and the Tasks page; never Stats, streaks or XP, and never retracts a face-up card. An id whose category was deleted resolves back to the whole deck
 
+|*Command palette*
+|The Ctrl+K overlay (#243, xref:09_architecture_decisions.adoc[ADR-68]): one input searching task and goal titles server-side (`GET /api/search`, case- and diacritic-insensitive; done tasks marked, subtasks findable, archived never) plus the fixed actions — draw, capture, timer, navigation — which make it the shortcut discovery surface. Ignores work mode: it finds what the deck hides. Ships the global single keys n (capture), d (go to the deck — never deals), space (stop the running timer or start the current draw's), ? (shortcut sheet), all inert while typing, composing via IME, or under any modal (space also yields to a focused button or link; the chord is Cmd+K on macOS)
+
 |*Draw*
 |Weighted random selection of one drawable task, presented as a card — deliberately the ONLY way tasks surface on the Draw page: there is no multi-card day preview (the daily hand of ADR-34 was removed by ADR-39)
 

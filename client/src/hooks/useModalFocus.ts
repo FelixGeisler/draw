@@ -14,17 +14,26 @@ import { useEffect, useRef, type RefObject } from "react";
  * Escape handling stays with each caller: the two dialogs mean different
  * things by it ("leave the view, timer keeps running" vs "close the
  * celebration").
+ *
+ * `inert` is held by COUNT, not set/remove (#243 review): dialogs can
+ * overlap for a commit (the shortcut sheet swapping into the palette), and
+ * a naive removeAttribute from the first closer would hand the covered page
+ * back to keyboard and pointer while the second dialog is still open.
  */
+let inertHolders = 0;
+
 export function useModalFocus(): RefObject<HTMLDivElement | null> {
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const trigger = document.activeElement;
     const root = document.getElementById("root");
+    inertHolders += 1;
     root?.setAttribute("inert", "");
     dialogRef.current?.focus();
     return () => {
+      inertHolders -= 1;
       // Un-inert BEFORE restoring — an inert element refuses focus.
-      root?.removeAttribute("inert");
+      if (inertHolders === 0) root?.removeAttribute("inert");
       // The trigger may be gone by exit time (the action that opened the
       // dialog may have unmounted its own row); restoring is best-effort,
       // never a crash.

@@ -11,6 +11,7 @@ import { activityRouter } from "./routes/activity.js";
 import { gamificationRouter } from "./routes/gamification.js";
 import { achievementsRouter } from "./routes/achievements.js";
 import { goalsRouter } from "./routes/goals.js";
+import { searchRouter } from "./routes/search.js";
 import { shopRouter } from "./routes/shop.js";
 import { challengeRouter } from "./routes/challenge.js";
 import { notifyRouter } from "./routes/notify.js";
@@ -96,6 +97,10 @@ export function createApp(options: AppOptions = {}) {
   app.use("/api/challenge", challengeRouter);
   app.use("/api/notify", notifyRouter);
   app.use("/api/goals", goalsRouter);
+  // Palette search (#243, ADR-68): title search over tasks AND goals in one
+  // round-trip — its own namespace, not a /api/tasks?q=: the payload is a
+  // flat result-row shape, not the task projection.
+  app.use("/api/search", searchRouter);
   app.use("/api/goals/:id/materials", goalMaterialsRouter);
   app.use("/api/materials", materialsRouter);
   app.use("/api/ai", aiRouter);

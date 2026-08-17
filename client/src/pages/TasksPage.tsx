@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   useCategories,
   useCreateTask,
@@ -54,7 +55,7 @@ export function TasksPage() {
   // even for subtasks: a subtask always shares its parent's category (the
   // #44 cascade keeps them in step), so a scoped tree never hides a step
   // whose parent is visible.
-  const { scope } = useDeckScope();
+  const { scope, setScope } = useDeckScope();
   const allRoots = tasks.data ?? [];
   const roots = scope == null ? allRoots : allRoots.filter((t) => t.categoryId === scope);
 
@@ -98,6 +99,42 @@ export function TasksPage() {
     reparent: (id, parentId) => updateTask.mutateAsync({ id, parentId }),
     reorder: (id, beforeId) => reorderSubtask.mutateAsync({ id, beforeId }),
   });
+
+  // Palette landing (#243, ADR-68): the palette navigates here with
+  // { focusTaskId, showDone } in router state. Consume it ONCE — the replace
+  // strips the state so back/reload cannot re-scroll — and flip "show done"
+  // first when the target is done: the row cannot render under the default
+  // open-only query.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
+  useEffect(() => {
+    const state = location.state as { focusTaskId?: number; showDone?: boolean } | null;
+    if (state?.focusTaskId == null) return;
+    if (state.showDone) setShowDone(true);
+    setPendingFocusId(state.focusTaskId);
+    navigate(location.pathname, { replace: true });
+  }, [location, navigate]);
+
+  // Scroll-and-flash once the row exists. classList, not a prop: the flash is
+  // a one-shot animation, and threading a transient id through the strip, the
+  // tree and the subtask recursion would be pure plumbing (a refetch may
+  // reconcile the class away early — harmless for a 1.5 s pulse). A work-mode
+  // scope can hide the row entirely; the palette exists to find what pages
+  // hide (ADR-68), so the scope yields to the search instead of landing the
+  // user on an empty page.
+  useEffect(() => {
+    if (pendingFocusId == null || tasks.data == null) return;
+    const el = document.querySelector<HTMLElement>(`[data-task-id="${pendingFocusId}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "center" });
+      el.classList.add("palette-flash");
+      window.setTimeout(() => el.classList.remove("palette-flash"), 1500);
+      setPendingFocusId(null);
+    } else if (scope != null && taskById.has(pendingFocusId)) {
+      setScope(undefined);
+    }
+  }, [pendingFocusId, tasks.data, scope, setScope, taskById]);
 
   const triageRow = (t: Task, key: DrawGroup) => (
     <TaskRow

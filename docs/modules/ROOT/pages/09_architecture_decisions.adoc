@@ -3244,3 +3244,58 @@ assertion.
 
 *Out of scope:* retries/queues, per-event toggles, payload templating, and
 inbound webhooks (an automations API is its own issue if wanted).
+
+== ADR-68: Command palette — server-side search that ignores work mode, a z-slot at 85, and 'd' that navigates instead of dealing
+
+*Context:* Capture was fast, retrieval was not (#243): one search box in the
+whole client (scoped to goal-less tasks inside the goal editor) and zero
+global keyboard entry points.
+
+*Decision:* One Ctrl+K palette mounted in the app shell, backed by a new
+`GET /api/search` over task and goal titles, plus four global single keys
+(n capture, d draw page, space timer toggle, ? shortcut sheet). Four calls
+worth pinning:
+
+* *Search runs server-side and ignores deck scope.* Work mode (ADR-57) is a
+per-device display preference; the palette exists to find what the deck and
+pages deliberately hide — done tasks, subtasks behind their roots, goals of
+any status, other categories. Only `archived` stays invisible: it is the
+soft-delete state, not work. Matching folds case AND diacritics by NFD
+normalization in JS — SQLite's `LIKE` folds ASCII only and the repo
+registers no `db.function` — so the route selects broadly and filters in
+process (single-user DB), which also makes user-typed `%` and `_` literal
+for free. No index, no FTS table, no schema change (ADR-2's derived-over-
+stored spirit). Landing on a hidden row clears the scope: the scope yields
+to the search, never the other way round.
+* *`d` navigates to the deck; it never deals.* The issue text said "d draw",
+but a draw is a commitment (#88) — a stray keypress must not gamble for the
+user. `d` lands on the idle face-down deck, focused (programmatic focus
+only, `tabIndex -1`); dealing stays one deliberate click. The same rule
+shapes space: with no running timer and no current draw it is a no-op,
+never a start of something random.
+* *z-index 85.* Above the phone bottom nav (80) — a modal must cover the
+page — and below the focus/victory overlays (90) and the achievement toast
+(100): Ctrl+K must not paint over a running focus session, and unlocks
+announce over everything. Documented in the index.css ladder comment.
+* *One inertness rule, read off `inert`.* The single keys are dead while
+typing (input/textarea/select/contenteditable), during IME composition, and
+while any modal is open. "Any modal" is detected as the `inert` attribute
+useModalFocus already puts on `#root` — every current and future dialog
+opts in by construction, no overlay registry to maintain — and the
+attribute is held by count, so stacked dialogs cannot strip each other's
+inert. Space additionally yields to a focused button/link/`role=button`:
+it is their native activation key, and stealing it would also cancel the
+click via preventDefault. The chord is platform-split — Cmd+K on macOS,
+where Ctrl+K is the native kill-to-end-of-line editing command, Ctrl+K
+elsewhere; Shift and Alt disqualify (Firefox devtools, AltGr layouts). It
+is exempt from the typing rule only, so the palette opens even from inside
+the capture field, but it refuses to open under a foreign overlay (focus
+session, victory — z 90 over the palette's 85): an invisible dialog must
+never steal focus. Inside the open palette, keys pressed during IME
+composition (Arrow/Enter/Escape picking, committing or cancelling a
+candidate) belong to the IME, not the dialog. The decisions are pure
+functions (`lib/keyScope`, `lib/paletteNav`) so the DOM-less client suite
+pins them.
+
+*Out of scope:* fuzzy ranking, search over descriptions/materials/notes,
+custom keybindings, and scrolling to a goal on the Goals page.

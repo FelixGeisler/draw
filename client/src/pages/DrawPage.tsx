@@ -447,6 +447,12 @@ export function DrawPage() {
             // shipped weave is the CSS default and unknown keys degrade to it.
             data-back={shop.data && shop.data.equipped !== "classic" ? shop.data.equipped : undefined}
             onClick={phase === "idle" ? doDraw : undefined}
+            // Palette/shortcut target (#243, ADR-68): 'd' and "Draw a card"
+            // land HERE, focused but face-down — never dealt (a draw is a
+            // commitment, #88). tabIndex -1 on purpose: programmatic focus
+            // only, no tab stop and no key activation, so drawing stays one
+            // deliberate click.
+            tabIndex={-1}
           >
             🃏
             <div style={{ fontSize: 15, marginTop: 12, color: "var(--text-dim)" }}>
