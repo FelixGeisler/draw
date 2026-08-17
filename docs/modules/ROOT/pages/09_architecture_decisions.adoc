@@ -3299,3 +3299,54 @@ pins them.
 
 *Out of scope:* fuzzy ranking, search over descriptions/materials/notes,
 custom keybindings, and scrolling to a goal on the Goals page.
+
+== ADR-69: Design foundation — a token layer that renames instead of retunes, opacity-only row reveals, one SVG icon set
+
+*Context:* The client had colour tokens and nothing else (#244): no spacing,
+type, radius, elevation or motion scale — every stylesheet picked its own
+literals. Task rows buried their own title under five always-visible labelled
+buttons, and emoji served as the icon set, rendered with per-platform shapes
+and widths. This is the floor for any later visual direction; it must change
+structure without changing identity.
+
+*Decision:* Four calls worth pinning:
+
+* *Tokens rename, they do not retune.* The `:root` layer (`--space-*`,
+`--text-*`+`--lh-*`, `--radius-*`, `--elev-*`, `--dur-*`, `--ease-standard`)
+names the values the UI already uses — `--text-sm` is the app's real 13px,
+not a rounded ideal — so adopting a token never changes computed output.
+Genuinely bespoke values (the card face's 16px frame, the 7s holo drift, the
+half-height progress pills, the calendar's tile-coupled 3px) become NAMED
+file-local custom properties at the top of their own stylesheet instead of
+fake scale rungs. A node-side vitest (`designTokens.test.ts`) keeps the five
+migrated stylesheets free of bare duration/radius literals permanently, with
+the custom-property declaration as the escape hatch. Tokens replace VALUES
+only: motion stays inside its `prefers-reduced-motion: no-preference` blocks
+(the #62/#123 idiom) — hoisting a declaration and zeroing a token under
+`reduce` would flip the computed `0s` several specs assert.
+* *Row actions reveal by opacity ONLY.* The secondary controls collapsed
+into a `.row-actions` icon cluster: hidden at rest on hover-capable devices,
+revealed by `.task-row:hover`/`:focus-within`, always visible under
+`(hover: none)`. Never `display`/`visibility`/`pointer-events` hiding — the
+buttons must keep their tab stops, geometry and clickability for keyboard
+users and for Playwright, whose click hovers first. The two rarest actions
+(Move under…, Delete) moved into a kebab popover (`.row-menu`) — a popover,
+not a modal: no root inert, plain buttons, Esc returns focus to the trigger.
+Titles that specs select by (`Edit`, `Promote to top-level`) survive
+verbatim; accessible names stay the old labels.
+* *One inline-SVG icon set* (`components/icons.tsx`): single 2px stroke,
+`currentColor`, 24-box, sized by consumer CSS, every icon `aria-hidden` so
+names never leak into links/buttons. Emoji stays only where it is content
+(category emoji, achievement art, the TaskBadges chip vocabulary) — chrome
+emoji is gone, brand included.
+* *Daily-surface motion on the new tokens*, all behind `no-preference`:
+route enter (one keyed wrapper in App.tsx around `<Routes>`, not seven
+per-page `.content` roots), list entry for freshly captured rows (the
+palette-flash classList idiom, never a prop through the tree), and a
+delete-only row fade. Complete deliberately gets NO leave-fade: under
+"show done" the row STAYS in the list, and a fade would strand a visible
+row at opacity 0.
+
+*Out of scope:* the visual direction itself (palette, felt/gilt), colour
+tokens beyond the existing set, de-emojifying TaskBadges, and any spacing or
+type normalization that would change computed output.
