@@ -3,11 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import request from "supertest";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { freshApp } from "../helpers.js";
 import { deleteSetting, setSetting } from "../../src/db.js";
 import {
   DEFAULT_UPDATE_CHECK_URL,
+  FORCED_CHECK_MIN_INTERVAL_MS,
   UPDATE_CHECK_ENABLED_SETTING,
   UPDATE_LAST_NOTIFIED_SETTING,
   UPDATE_TRIGGER_TOKEN_SETTING,
@@ -34,8 +35,16 @@ import { setFetchForTests as setNotifyFetchForTests } from "../../src/services/n
  *   call, the user's own button included — "off means off").
  * - Exactly one ntfy notification per new version, surviving restarts
  *   (dedupe lives in the update_last_notified_version settings row).
+ * - Forced checks are throttled server-side: within
+ *   FORCED_CHECK_MIN_INTERVAL_MS the cache is served, no outbound GET —
+ *   a hammered button cannot burn GitHub's unauthenticated rate budget.
+ * - A failed (or junk-answering) re-check RETAINS the last successful
+ *   sighting — one blip must not un-light the banner until tomorrow.
  * - Apply: 409 unconfigured; configured -> exactly ONE POST, bearer only
  *   when a token is set, and the bearer NEVER rides the check request.
+ *   A trigger that ANSWERS non-2xx is remembered as lastApplyError (cleared
+ *   on the next attempt); rejections stay warn-only — an aborted socket is
+ *   what a successful swap of this very container looks like.
  * - Trigger URL/token are write-only: presence flag on read, excluded from
  *   GET /api/settings (remember: routes/settings.ts's NOT IN (?,...) list
  *   is hand-counted — add BOTH placeholders and bound args).
@@ -140,6 +149,7 @@ describe("the tell surface", () => {
       "checkEnabled",
       "checkedAt",
       "current",
+      "lastApplyError",
       "latest",
       "releaseUrl",
       "updateAvailable",
@@ -217,6 +227,52 @@ describe("the check", () => {
     expect(status.latest).toBeNull();
     await drain();
     expect(notifySent).toEqual([]); // a failure is never a "new version"
+  });
+
+  it("throttles the forced check: within the min interval the cache is served", async () => {
+    releaseTag = "v99.0.0";
+    expect((await request(app).post("/api/update/check")).status).toBe(200);
+    expect(calls.length).toBe(1);
+    // Hammering the button (or a curl loop) must not reach GitHub again —
+    // the unauthenticated budget is 60 req/hr for the whole host.
+    const second = await request(app).post("/api/update/check");
+    expect(second.status).toBe(200);
+    expect((second.body as UpdateStatus).updateAvailable).toBe(true); // the cache, not a refusal
+    expect(calls.length).toBe(1);
+    // Past the window the forced check goes outbound again. Only Date is
+    // faked — supertest and the abort timer keep their real timers.
+    vi.useFakeTimers({ now: Date.now() + FORCED_CHECK_MIN_INTERVAL_MS + 1_000, toFake: ["Date"] });
+    try {
+      expect((await request(app).post("/api/update/check")).status).toBe(200);
+      expect(calls.length).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a failed re-check keeps the last successful sighting — one blip must not un-light the banner", async () => {
+    releaseTag = "v99.0.0";
+    await checkForUpdate();
+    expect((await getStatus()).updateAvailable).toBe(true);
+    checkFails = true;
+    await expect(checkForUpdate()).resolves.toBeDefined();
+    const status = await getStatus();
+    expect(status.updateAvailable).toBe(true); // yesterday's sighting still stands
+    expect(status.latest).toContain("99.0.0");
+    expect(status.releaseUrl).toContain("v99.0.0");
+    expect(status.checkedAt).toBeTruthy(); // the attempt itself IS recorded
+  });
+
+  it("a reachable feed answering junk counts as a failed check — sighting retained", async () => {
+    releaseTag = "v99.0.0";
+    await checkForUpdate();
+    setFetchForTests(() =>
+      Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ garbage: true }) }),
+    );
+    await expect(checkForUpdate()).resolves.toBeDefined();
+    const status = await getStatus();
+    expect(status.latest).toContain("99.0.0"); // junk is a failure, not "no update"
+    expect(status.updateAvailable).toBe(true);
   });
 
   it("honors the UPDATE_CHECK_URL env override — tests and proxied networks", async () => {
@@ -337,6 +393,40 @@ describe("apply — the trigger", () => {
     expect(calls[0].headers.Authorization).toBeUndefined();
   });
 
+  it("a trigger that answers non-2xx becomes lastApplyError — cleared on the next attempt", async () => {
+    await request(app).put("/api/update/trigger").send({ url: TRIGGER_URL, token: TOKEN });
+    setFetchForTests(() => Promise.resolve({ ok: false, status: 401 }));
+    // The fire-and-forget contract holds: still a 202, never a throw.
+    expect((await request(app).post("/api/update/apply")).status).toBe(202);
+    await drain();
+    expect(String((await getStatus()).lastApplyError)).toContain("401");
+    // A NEW attempt starts with a clean verdict — the polling client keys
+    // on lastApplyError to stop waiting, so a stale one would kill a
+    // perfectly good retry.
+    setFetchForTests(() => Promise.resolve({ ok: true, status: 200 }));
+    expect((await request(app).post("/api/update/apply")).status).toBe(202);
+    await drain();
+    expect((await getStatus()).lastApplyError).toBeNull();
+  });
+
+  it("a rejecting trigger POST stays warn-only — a dropped socket is what a successful swap looks like", async () => {
+    await request(app).put("/api/update/trigger").send({ url: TRIGGER_URL });
+    setFetchForTests(() => Promise.reject(new Error("socket hang up")));
+    expect((await request(app).post("/api/update/apply")).status).toBe(202);
+    await drain();
+    expect((await getStatus()).lastApplyError).toBeNull();
+  });
+
+  it("a synchronously-throwing fetch cannot escape the fire-and-forget", async () => {
+    await request(app).put("/api/update/trigger").send({ url: TRIGGER_URL });
+    setFetchForTests(() => {
+      throw new Error("sync boom");
+    });
+    expect((await request(app).post("/api/update/apply")).status).toBe(202);
+    await drain();
+    expect((await getStatus()).lastApplyError).toBeNull();
+  });
+
   it("the bearer token NEVER rides the check request", async () => {
     // The token authorizes restarting the app; leaking it to the (default
     // GitHub, possibly proxied) check URL would hand that power away.
@@ -360,5 +450,6 @@ const _shape: UpdateStatus = {
   checkedAt: "2026-08-17T00:00:00.000Z",
   checkEnabled: true,
   applyConfigured: false,
+  lastApplyError: null,
 };
 void _shape;

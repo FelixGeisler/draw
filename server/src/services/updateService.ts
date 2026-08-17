@@ -11,10 +11,13 @@
  * - Check target: UPDATE_CHECK_URL env override (read at call time so tests
  *   and proxied networks can point it), default the GitHub latest-release
  *   endpoint. GET with `Accept: application/vnd.github+json`, 3s
- *   AbortController cap, parse `tag_name` + `html_url`. Failure = one
- *   console.warn, a degraded status (latest null, updateAvailable false),
- *   never a throw. The trigger bearer token NEVER rides this request — it
- *   authorizes restarting the app, and the check URL is not the trigger.
+ *   AbortController cap, parse `tag_name` + `html_url`. Failure (network,
+ *   non-2xx, or a reachable feed answering without a tag_name) = one
+ *   console.warn, never a throw — and the sighting from the last SUCCESSFUL
+ *   check is retained: a transient blip must not un-light a banner for a
+ *   whole day. Only a fresh boot (or a successful check saying otherwise)
+ *   answers latest null. The trigger bearer token NEVER rides this request —
+ *   it authorizes restarting the app, and the check URL is not the trigger.
  * - Running version: the server's own package.json (resolveJsonModule is
  *   off, hence readFileSync), read once and memoized. The root package.json
  *   and mcpServer's literal are NOT sources of truth — pinned by the
@@ -56,6 +59,15 @@ export const UPDATE_LAST_NOTIFIED_SETTING = "update_last_notified_version";
 export const DEFAULT_UPDATE_CHECK_URL =
   "https://api.github.com/repos/FelixGeisler/draw/releases/latest";
 
+/**
+ * Server-side floor between FORCED checks (POST /api/update/check): within
+ * the window the route serves the cache instead of another outbound GET, so
+ * a hammered button (or a curl loop) cannot burn GitHub's unauthenticated
+ * 60-req/hr budget. The daily scheduler calls checkForUpdate() directly and
+ * is not affected.
+ */
+export const FORCED_CHECK_MIN_INTERVAL_MS = 30_000;
+
 /** The GET /api/update payload — also what checkForUpdate resolves to. */
 export interface UpdateStatus {
   current: string;
@@ -66,6 +78,15 @@ export interface UpdateStatus {
   checkedAt: string | null;
   checkEnabled: boolean;
   applyConfigured: boolean;
+  /**
+   * The verdict of the most recent apply attempt: a trigger that ANSWERED
+   * non-2xx (token typo'd, wrong URL) is remembered here so the polling
+   * client can stop waiting instead of burning its five-minute budget.
+   * Cleared on every new apply POST. Rejections (abort, network) stay null —
+   * a Watchtower holding the connection while it swaps this very container
+   * looks exactly like that, and must not be reported as failure.
+   */
+  lastApplyError: string | null;
 }
 
 // In-memory cache of the last check — deliberately NOT persisted: a stale
@@ -75,6 +96,12 @@ let cachedVersion: string | null = null;
 let latestSeen: string | null = null;
 let latestReleaseUrl: string | null = null;
 let lastCheckedAt: string | null = null;
+let lastApplyError: string | null = null;
+
+/** Written by routes/update.ts around the fire-and-forget trigger POST. */
+export function setLastApplyError(message: string | null): void {
+  lastApplyError = message;
+}
 
 /** The server's own package.json version, read once and memoized. */
 export function appVersion(): string {
@@ -108,6 +135,7 @@ export function updateStatus(): UpdateStatus {
     checkedAt: lastCheckedAt,
     checkEnabled: updateCheckEnabled(),
     applyConfigured: applyConfigured(),
+    lastApplyError,
   };
 }
 
@@ -150,16 +178,21 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
       throw new Error(`release endpoint answered HTTP ${response?.status ?? "?"}`);
     }
     const release = (await response.json()) as { tag_name?: unknown; html_url?: unknown };
-    latestSeen = typeof release.tag_name === "string" ? release.tag_name : null;
+    if (typeof release.tag_name !== "string") {
+      // A reachable feed answering junk is a failed check, not "no update" —
+      // the distinct message keeps it tellable from a network failure in logs.
+      throw new Error("release endpoint answered without a tag_name");
+    }
+    latestSeen = release.tag_name;
     latestReleaseUrl = typeof release.html_url === "string" ? release.html_url : null;
     notifyNewVersionOnce();
   } catch (err) {
     // Degrade, never throw: GitHub down or the Pi offline is a normal state.
+    // The last SUCCESSFUL sighting is deliberately retained — a lit banner
+    // must not go dark for up to a day because one re-check blipped.
     console.warn(
       `[update] check failed: ${err instanceof Error ? err.message : String(err)}`,
     );
-    latestSeen = null;
-    latestReleaseUrl = null;
   } finally {
     clearTimeout(timer);
     lastCheckedAt = new Date().toISOString();
@@ -177,4 +210,5 @@ export function resetUpdateStateForTests(): void {
   latestSeen = null;
   latestReleaseUrl = null;
   lastCheckedAt = null;
+  lastApplyError = null;
 }

@@ -3,6 +3,8 @@ import { deleteSetting, getSettingString, setSetting } from "../db.js";
 import {
   checkForUpdate,
   currentFetch,
+  FORCED_CHECK_MIN_INTERVAL_MS,
+  setLastApplyError,
   updateStatus,
   UPDATE_TRIGGER_TOKEN_SETTING,
   UPDATE_TRIGGER_URL_SETTING,
@@ -44,11 +46,21 @@ updateRouter.get("/", (_req, res) => {
   res.json(updateStatus());
 });
 
-// Force a re-check now. checkForUpdate() itself honors update_check_enabled
-// ("off means off" — the user's own button included) and never rejects on
-// network failure, so this always answers 200 with the (possibly degraded)
-// status.
+// Force a re-check now — throttled: within FORCED_CHECK_MIN_INTERVAL_MS of
+// the last completed attempt the cache is served instead of another outbound
+// GET, so a hammered button (or a curl loop) cannot burn GitHub's
+// unauthenticated 60-req/hr budget. checkForUpdate() itself honors
+// update_check_enabled ("off means off" — the user's own button included)
+// and never rejects on network failure, so this always answers 200 with the
+// (possibly degraded) status.
 updateRouter.post("/check", async (_req, res) => {
+  const cached = updateStatus();
+  if (
+    cached.checkedAt !== null &&
+    Date.now() - Date.parse(cached.checkedAt) < FORCED_CHECK_MIN_INTERVAL_MS
+  ) {
+    return res.json(cached);
+  }
   res.json(await checkForUpdate());
 });
 
@@ -94,13 +106,26 @@ updateRouter.post("/apply", (_req, res) => {
   // Longer cap than the 3s check: the trigger may pull an image before
   // answering. Nothing awaits this — the 202 below returns immediately.
   const timer = setTimeout(() => controller.abort(), 60_000);
-  void Promise.resolve(
-    currentFetch()(url, {
+  setLastApplyError(null); // every attempt starts with a clean verdict
+  // Async IIFE so even a synchronously-throwing fetchImpl lands in .catch
+  // (the scheduler guards its tick the same way).
+  void (async () => {
+    const response = (await currentFetch()(url, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal: controller.signal,
-    }),
-  )
+    })) as { ok?: boolean; status?: number };
+    if (!response?.ok) {
+      // The trigger ANSWERED and refused (401 = token typo'd/missing) — that
+      // is a hard verdict, remembered so the polling client can stop waiting
+      // out its five-minute budget. Rejections below stay warn-only: an
+      // abort or dropped socket is what a Watchtower swapping this very
+      // container looks like, and must not be reported as failure.
+      const message = `update trigger answered HTTP ${response?.status ?? "?"}`;
+      setLastApplyError(message);
+      console.warn(`[update] ${message}`);
+    }
+  })()
     .catch((err: unknown) => {
       console.warn(
         `[update] trigger POST failed: ${err instanceof Error ? err.message : String(err)}`,

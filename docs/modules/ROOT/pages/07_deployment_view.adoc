@@ -273,10 +273,15 @@ only to prerelease runners — and caches the result in memory. The
 `update_check_enabled` setting (Settings -> Updates, default on) gates every
 call including the scheduled tick: off means zero outbound calls, the #235
 rule. The first check runs ~60s after boot with jitter, never in the boot
-path.
+path. A failed re-check (network, non-2xx, or a reachable feed answering
+without a `tag_name`) retains the last successful sighting — one blip must
+not un-light the banner until the next daily tick.
 
 *Tell.* Settings -> Updates shows the running version, a "Check now" button
 and — when a newer release is out — a banner with the release-notes link.
+Forced checks are throttled server-side (one outbound GET per 30s; within
+the window the cached status is served), so a hammered button cannot burn
+GitHub's unauthenticated 60-req/hr budget.
 The first sighting of a new version additionally sends one notification
 through the existing `notify_url` door (#235), deduped in the
 `update_last_notified_version` settings row so re-checks and restarts never
@@ -310,9 +315,13 @@ from `GET /api/settings` like `notify_url`). "Update now" then POSTs the
 trigger with `Authorization: Bearer <token>` — the bearer never rides the
 check request — answers `202`, and the client polls `GET /api/update` every
 3s (up to 5 minutes) until the reported version changes, then reloads
-through the #193 service-worker path and pays one "Updated to X" line. No
-trigger configured: the apply endpoint answers `409` and Settings shows this
-section instead of a button.
+through the #193 service-worker path and pays one "Updated to X" line. A
+trigger that answers non-2xx (token typo'd, wrong URL) is remembered as
+`lastApplyError` in the status and stops the poll with an error line instead
+of a five-minute wait; a dropped or aborted socket is deliberately NOT a
+failure — that is what a successful swap of the very container looks like.
+No trigger configured: the apply endpoint answers `409` and Settings shows
+this section instead of a button.
 
 *Rollback:* pin the previous image tag in the compose file
 (`image: ghcr.io/felixgeisler/draw:v1.2.3`), `docker compose up -d`, and —
@@ -322,6 +331,8 @@ newer-versioned archives, so restoring an older backup into an older image
 is the supported direction). *Bare-npm path:* `git pull`, `npm ci`,
 `npm run build`, restart `npm start` — the check and the banner work the
 same; only the trigger button is container-specific.
+
+== 7.6 Summary — install, run, configure
 
 [cols="1,3",options="header"]
 |===

@@ -449,6 +449,7 @@ interface UpdateStatus {
   checkedAt: string | null;
   checkEnabled: boolean;
   applyConfigured: boolean;
+  lastApplyError: string | null;
 }
 
 /**
@@ -471,7 +472,8 @@ function UpdateSection() {
     refetchOnWindowFocus: false,
   });
   const [checkResult, setCheckResult] = useState<string | null>(null);
-  const [applyPhase, setApplyPhase] = useState<"idle" | "waiting" | "timeout">("idle");
+  const [applyPhase, setApplyPhase] = useState<"idle" | "waiting" | "timeout" | "failed">("idle");
+  const [applyError, setApplyError] = useState<string | null>(null);
   const [updatedTo, setUpdatedTo] = useState<string | null>(null);
   const [urlDraft, setUrlDraft] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
@@ -557,29 +559,49 @@ function UpdateSection() {
     const BUDGET_MS = 5 * 60 * 1000;
     const startedAt = Date.now();
     if (pollTimer.current !== null) clearInterval(pollTimer.current);
+    // A GET outliving the 3s cadence (container mid-swap) must not stack
+    // ticks — two overlapping ticks could both decide to reload.
+    let inFlight = false;
+    const stopPoll = () => {
+      if (pollTimer.current !== null) clearInterval(pollTimer.current);
+      pollTimer.current = null;
+    };
     pollTimer.current = window.setInterval(async () => {
-      let polled: string | null = null;
+      if (inFlight) return;
+      inFlight = true;
       try {
-        polled = (await api.get<UpdateStatus>("/api/update")).current;
-      } catch {
-        polled = null; // container mid-restart — keep calm and keep polling
-      }
-      if (polled !== null && shouldReloadAfterApply(startedCurrent, polled)) {
-        if (pollTimer.current !== null) clearInterval(pollTimer.current);
-        pollTimer.current = null;
+        let polledStatus: UpdateStatus | null = null;
         try {
-          sessionStorage.setItem(UPDATE_NOTICE_KEY, serializeUpdateNotice(polled));
+          polledStatus = await api.get<UpdateStatus>("/api/update");
         } catch {
-          // the toast is lost, the update is not
+          polledStatus = null; // container mid-restart — keep calm and keep polling
         }
-        // The #193 service worker serves the new bundle on this reload.
-        location.reload();
-        return;
-      }
-      if (Date.now() - startedAt >= BUDGET_MS) {
-        if (pollTimer.current !== null) clearInterval(pollTimer.current);
-        pollTimer.current = null;
-        setApplyPhase("timeout");
+        if (polledStatus?.lastApplyError) {
+          // The trigger answered and refused (bad token/URL) — waiting out
+          // the five-minute budget would tell the user nothing more.
+          stopPoll();
+          setApplyError(polledStatus.lastApplyError);
+          setApplyPhase("failed");
+          return;
+        }
+        const polled = polledStatus?.current ?? null;
+        if (polled !== null && shouldReloadAfterApply(startedCurrent, polled)) {
+          stopPoll();
+          try {
+            sessionStorage.setItem(UPDATE_NOTICE_KEY, serializeUpdateNotice(polled));
+          } catch {
+            // the toast is lost, the update is not
+          }
+          // The #193 service worker serves the new bundle on this reload.
+          location.reload();
+          return;
+        }
+        if (Date.now() - startedAt >= BUDGET_MS) {
+          stopPoll();
+          setApplyPhase("timeout");
+        }
+      } finally {
+        inFlight = false;
       }
     }, POLL_MS);
   }
@@ -587,9 +609,14 @@ function UpdateSection() {
   const apply = useMutation({
     mutationFn: () => api.post<{ ok: boolean }>("/api/update/apply", {}),
     onSuccess: () => {
+      // The button only renders once status.data is loaded (applyConfigured
+      // gates it) — the early return localizes that invariant instead of
+      // polling against a "" baseline that would reload on the first tick.
+      const startedCurrent = status.data?.current;
+      if (!startedCurrent) return;
+      setApplyError(null);
       setApplyPhase("waiting");
-      // status.data is present whenever the button rendered (it gates on it).
-      startPoll(status.data?.current ?? "");
+      startPoll(startedCurrent);
     },
   });
 
@@ -684,6 +711,12 @@ function UpdateSection() {
           {applyPhase === "waiting" && (
             <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
               Update requested — waiting for the new version…
+            </span>
+          )}
+          {applyPhase === "failed" && (
+            <span data-testid="update-apply-error" style={{ color: "var(--danger)", fontSize: 13 }}>
+              The update trigger refused the request ({applyError}) — check the trigger URL and
+              token, then try again.
             </span>
           )}
           {applyPhase === "timeout" && (
