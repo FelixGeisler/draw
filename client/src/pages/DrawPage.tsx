@@ -63,6 +63,12 @@ export function DrawPage() {
   const { scope: categoryId, setScope: setCategoryId } = useDeckScope();
   const [goalId, setGoalId] = useState<number | undefined>();
   const [shuffling, setShuffling] = useState(false);
+  // A FRESH deal of this session (#255): gates the arrival motion — the deal
+  // arc and the one-shot gilt sweep (DrawPage.css). Deliberately NOT derived
+  // from the persisted draw: a restored card is not an arrival, so a reload
+  // re-seats the card without replaying the fanfare (and without stalling
+  // the screenshot script or the residue spec's timings).
+  const [dealt, setDealt] = useState(false);
   // The latest draw response of THIS session: the odds line and the
   // empty-deck reason render from it, and its task doubles as the session
   // snapshot for resolveDrawnCard's two exceptions. The standing card itself
@@ -172,6 +178,7 @@ export function DrawPage() {
    */
   async function reveal(mutate: () => Promise<DrawResponse>) {
     setShuffling(true);
+    setDealt(false);
     setResult(null);
     setEditing(false);
     setEdited(false);
@@ -191,6 +198,9 @@ export function DrawPage() {
       // ending the shuffle flips straight to the drawn card — no refetch
       // race in the animation.
       setResult(response);
+      // Same commit as the result: .dealt and .flipped land together, so the
+      // arc animation sees its full class set on the arrival render.
+      setDealt(true);
     } finally {
       // #118: a rejected draw (server down, 409 from the warm-up route) used
       // to leave "shuffling…" spinning forever — a dead deck that not even a
@@ -274,6 +284,7 @@ export function DrawPage() {
     setCurrentDraw(null);
     setResult(null);
     setHeldSince(null);
+    setDealt(false);
   }
 
   /**
@@ -439,7 +450,7 @@ export function DrawPage() {
         <div
           className={`draw-card ${phase === "revealed" ? "flipped" : ""} ${
             phase === "shuffling" ? "shuffling" : ""
-          }`}
+          } ${dealt && result?.task != null && task?.id === result.task.id ? "dealt" : ""}`}
         >
           <div
             className="draw-face front"

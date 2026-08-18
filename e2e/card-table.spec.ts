@@ -11,10 +11,9 @@ import { drawFromGoal } from "./helpers.js";
  *     reduced-motion deal (flipped card, pure flip matrix, zero animated
  *     card chrome, zero canvas), and the action row's stable geometry under
  *     card hover. These are the guardrails the retune must not break.
- *   - `test.fixme(...)` — the NEW look: serif on the card-face title only,
- *     the one-shot gilt sheen sweep on arrival, and the hover tilt living
- *     BELOW `.draw-card`. WHEN IMPLEMENTING: flip each `test.fixme(` back to
- *     `test(` (the #244/#247 idiom).
+ *   - The NEW look (started as `test.fixme`, flipped as #255 landed): serif
+ *     on the card-face title only, the one-shot gilt sheen sweep on arrival,
+ *     and the hover tilt living BELOW `.draw-card`.
  *
  * Anchors this file PINS for the implementation (chosen here, honored there):
  *   - The deal sheen is a pseudo-element of `.draw-face.back` (`::after`,
@@ -228,10 +227,10 @@ test("the action row's buttons hold their exact boxes while the card is hovered"
 });
 
 // ---------------------------------------------------------------------------
-// The new look — flip `test.fixme(` → `test(` as #255 lands.
+// The new look (#255).
 // ---------------------------------------------------------------------------
 
-test.fixme("serif lives on the card-face title ONLY", async ({ page }) => {
+test("serif lives on the card-face title ONLY", async ({ page }) => {
   // The ONLY serif in the app: the drawn card's title (Georgia stack).
   // Everything around it stays the sans stack — the Draw page's own H1, the
   // stage action row, the card's description, and the Tasks page H1.
@@ -262,7 +261,7 @@ test.fixme("serif lives on the card-face title ONLY", async ({ page }) => {
   expect(await fontFamilyOf(tasksH1), "Tasks page H1 stays sans").not.toMatch(SERIF);
 });
 
-test.fixme("the deal ends with ONE gilt sheen sweep — it never loops", async ({ page }) => {
+test("the deal ends with ONE gilt sheen sweep — it never loops", async ({ page }) => {
   // The casino line is the operative constraint: a glint you notice when
   // you look, not a casino. The sweep is the #124 pattern (::after with an
   // oversized background-position animation) on `.draw-face.back`, runs
@@ -287,7 +286,7 @@ test.fixme("the deal ends with ONE gilt sheen sweep — it never loops", async (
   await expect(page.locator(".draw-holo")).toHaveCount(0);
 });
 
-test.fixme("hover tilt engages below .draw-card — the settled flip matrix survives a hovered card", async ({
+test("hover tilt engages below .draw-card — the settled flip matrix survives a hovered card", async ({
   page,
 }) => {
   // fullbleed-holo pins `.draw-card`'s settled transform to the exact flip
@@ -299,9 +298,15 @@ test.fixme("hover tilt engages below .draw-card — the settled flip matrix surv
   const face = page.locator(".draw-face.back");
   await expect(card).toHaveCSS("transform", PURE_FLIP_MATRIX);
 
-  // Park the pointer away from the card and capture the face's REST
-  // transform (it is a matrix already: the back face carries rotateY(180)).
+  // Park the pointer away from the card and let the tilt RELEASE settle
+  // before sampling the face's REST transform: the pointer arrives at (0,0)
+  // FROM the card (drawFromGoal's click parks it there, engaging the tilt),
+  // so an instant sample would capture a mid-release frame as "rest".
+  // The back face's rest is its own pure rotateY(180deg) — the same matrix
+  // the card pins — and toHaveCSS retries until the transition lands there.
+  // [#255 implementation amendment: was an unsettled instant sample.]
   await page.mouse.move(0, 0);
+  await expect(face).toHaveCSS("transform", PURE_FLIP_MATRIX);
   const rest = await face.evaluate((el) => getComputedStyle(el).transform);
 
   // Hover OFF-CENTER: a perspective tilt is ~zero at dead center.
