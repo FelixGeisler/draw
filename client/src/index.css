@@ -368,9 +368,12 @@ textarea:focus {
 
 /* Task row (TaskRow.tsx keeps the rest of its box inline). The gap lives here
    because it has to be overridable: an inline `gap` shorthand would beat the
-   phone block's `row-gap`, leaving wrapped rows 10px apart instead of 4 (#193). */
+   phone block's `row-gap`, leaving wrapped rows 10px apart instead of 4 (#193).
+   The brass left edge is the rows' ONE card-table identity mark (#255) —
+   low-alpha, riding the accent so it retunes with the palette. */
 .task-row {
   gap: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 /* The done-dim used to be an inline style; a class since #244 so the

@@ -13,25 +13,25 @@ const PAGE = `<!doctype html>
   * { box-sizing: border-box; margin: 0; }
   body {
     min-height: 100vh; display: flex; align-items: center; justify-content: center;
-    background: #12141a; color: #e8eaf0;
+    background: #0f1a16; color: #eceae2;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   main {
     width: min(320px, 90vw); padding: 2rem 1.75rem; border-radius: 12px;
-    background: #1b1e27; border: 1px solid #2c3040; text-align: center;
+    background: #17211d; border: 1px solid #2a3a33; text-align: center;
   }
   h1 { font-size: 1.4rem; margin-bottom: 0.35rem; }
-  p.hint { color: #9aa0b0; font-size: 0.85rem; margin-bottom: 1.25rem; }
-  label { display: block; text-align: left; font-size: 0.85rem; color: #9aa0b0; margin-bottom: 0.35rem; }
+  p.hint { color: #9aa396; font-size: 0.85rem; margin-bottom: 1.25rem; }
+  label { display: block; text-align: left; font-size: 0.85rem; color: #9aa396; margin-bottom: 0.35rem; }
   /* min-height 44px: comfortable touch targets on the phone (#193). */
   input {
     width: 100%; min-height: 44px; padding: 0.55rem 0.7rem; border-radius: 8px;
-    background: #12141a; color: #e8eaf0; border: 1px solid #2c3040; font-size: 1rem;
+    background: #0f1a16; color: #eceae2; border: 1px solid #2a3a33; font-size: 1rem;
   }
-  input:focus { outline: 2px solid #4f8cff; outline-offset: -1px; }
+  input:focus { outline: 2px solid #c8a25b; outline-offset: -1px; }
   button {
     width: 100%; min-height: 44px; margin-top: 0.85rem; padding: 0.55rem; border-radius: 8px;
-    background: #4f8cff; color: #fff; border: 1px solid #4f8cff;
+    background: #c8a25b; color: #24190a; border: 1px solid #c8a25b;
     font-size: 1rem; cursor: pointer;
   }
   button:hover { filter: brightness(1.1); }

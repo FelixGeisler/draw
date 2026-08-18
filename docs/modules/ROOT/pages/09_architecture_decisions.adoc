@@ -3407,3 +3407,55 @@ swap of the very container looks like.
 stable-vs-prerelease, rollback automation (pin the previous tag + restore a
 backup, 7.5), and bare-npm self-restart — there the check and banner work,
 the button stays hidden.
+
+== ADR-71: Card-table identity — felt ground, brass accent, serif on the card face only
+
+*Context:* The app's chrome was neutral charcoal-and-blue while its reward
+layer already spoke another language: a lit dark-gold trophy cabinet, brass
+plaques, rarity sheens, booster packs (#181, #156, #230). #255 commits the
+whole app to that language — direction B of the pitched mockups: the deck
+becomes a card table, so the reward layer stops looking bolted on. Built on
+the #244 token layer, so most of the reskin is one `:root` retune.
+
+*Decision:* Five calls worth pinning:
+
+* *The casino line is the operative constraint.* The sheen comment in
+index.css — "a glint you notice when you look, not a casino" — governs the
+whole identity: the deal's gilt sweep runs ONCE per fresh deal (a restored
+card is not an arrival and stays quiet), the hover tilt is ≤5° and releases
+fully at rest, nothing loops on any interactive element, and every new
+motion sits inside its `prefers-reduced-motion: no-preference` block
+(ADR-69's gating idiom, unchanged). The tilt transforms `.draw-face.back`,
+composed onto its own `rotateY(180deg)` — never `.draw-card`, whose settled
+pure-flip matrix the holo specs byte-pin.
+* *Tokens retuned in place; the NAMES and the RATIOS are the contract.* The
+#244 token names survive (`--bg`, `--accent`, …) with felt/brass values, and
+a permanent sibling gate (`tokenContrast.test.ts`) computes WCAG ratios from
+the actual `index.css` values with `lib/cardVisuals`' own contrast helpers:
+text/bg ≥ 7:1, dim/bg ≥ 4.5:1, panel variants likewise, and primary-button
+ink on `--accent` ≥ 4.5:1 — which forced the one behavioural colour change:
+`--accent-ink` is DARK on brass (white on the old blue was a standing 3.2:1
+AA failure). The classic card-back weave, previously three private copies
+(deck, locked achievement, unlock toast; the shop swatch reuses the deck's),
+is one `--card-back-classic` property — the #124 sheen-hoist pattern.
+* *Serif lives on the card face title ONLY.* Georgia stack on
+`.draw-face.back h2`, nowhere else — not the card's own description, not the
+page H1s, not the uppercase letterspaced stage action row (also this-row-
+only). One serif is a signature; two is a font mess. E2E pins both halves.
+* *Category colour is data, never chrome.* Pills keep the raw category fill
+and the computed `pillInk` verdict on every surface and every palette (the
+mockup's uniform brass pills were a sketch); `DARK_INK` stays `#12141a`
+byte-for-byte, never re-derived from a retuned `--bg`. Likewise the seeded
+and default category colours (`#4f8cff` et al.) are user data and survive
+the retune untouched.
+* *The reward layer was the reference, not the target.* The trophy
+cabinet's gold, the rarity sheen ladder and the trophy pile keep their
+values byte-identical except what flows in through shared tokens — repainting
+the shipped identities (#181, ADR-42) in brass would erase the very layer the
+table was tuned to match. The Wrapped share card keeps its inlined charcoal
+palette by its own #234 decision (deliberately frozen against theme drift).
+
+*Out of scope:* a light theme, per-surface accent theming, the command
+palette adopting the accent (its selection stays `--bg-hover` on purpose —
+a utility surface, not a stage), and any card geometry change (300x420 and
+the 5/7 achievement ratio stand).
