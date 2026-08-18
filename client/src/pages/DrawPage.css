@@ -66,9 +66,9 @@
 }
 
 .draw-face.front {
-  background:
-    radial-gradient(circle at 30% 30%, rgba(79, 140, 255, 0.25), transparent 60%),
-    repeating-linear-gradient(45deg, #1b1e27 0 14px, #20242f 14px 28px);
+  /* The shared classic weave (#255, index.css): identical on the deck, a
+     locked achievement, the toast's card back and the shop swatch. */
+  background: var(--card-back-classic);
   font-size: 64px;
   cursor: pointer;
   user-select: none;
@@ -366,7 +366,7 @@
 .draw-filters .chip.active {
   border-color: var(--accent);
   color: var(--text);
-  background: rgba(79, 140, 255, 0.15);
+  background: var(--accent-wash-mid);
 }
 
 /* Warm-up draw (#57): secondary escape hatch below the idle deck. */

@@ -22,11 +22,9 @@ import { contrastRatio, parseHexColor } from "./lib/cardVisuals";
  * code that picks the category pill ink — so the gate and the product can
  * never disagree about what "contrast" means.
  *
- * SPEC-FIRST (#255): the primary-button check is `it.fails` — today's ink is
- * white on #4f8cff, which is 3.22:1 and is exactly the debt the brass retune
- * pays (dark ink on brass computes ≥ 7:1). WHEN IMPLEMENTING: flip that
- * `it.fails` to `it`. The four token gates pass on the current palette and
- * must keep passing on the felt.
+ * Spec-first history (#255): the primary-button check started as `it.fails`
+ * against the blue chrome — white on #4f8cff was 3.22:1, exactly the debt
+ * the brass retune paid (dark --accent-ink on brass computes ≥ 7:1).
  */
 
 const css = readFileSync(new URL("./index.css", import.meta.url), "utf8");
@@ -130,11 +128,9 @@ describe("#255 contrast gate — the palette may retune, legibility may not", ()
     gate(color(tokens, "--text-dim"), color(tokens, "--bg-panel"), 4.5, "--text-dim/--bg-panel");
   });
 
-  // SPEC-FIRST (#255): flip `it.fails` → `it` when the brass accent lands.
-  // Today: white on #4f8cff = 3.22:1 — the blue chrome's standing AA failure.
-  // The contract for the retune: primary-button ink goes DARK on brass
-  // (never white on brass), which computes ≥ 7:1 for the pinned values.
-  it.fails("primary-button ink on --accent ≥ 4.5:1 (AA)", () => {
+  // The blue chrome's standing AA failure (white on #4f8cff = 3.22:1), paid
+  // by #255: primary-button ink is DARK on brass — never white on brass.
+  it("primary-button ink on --accent ≥ 4.5:1 (AA)", () => {
     const ink = primaryButtonInk(css);
     expect(ink, "button.primary declares a color (its ink)").not.toBeNull();
     const inkHex = resolveTokenColor(tokens, ink!);

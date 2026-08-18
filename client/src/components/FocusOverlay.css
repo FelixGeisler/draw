@@ -16,7 +16,7 @@
   padding: 32px;
   text-align: center;
   background:
-    radial-gradient(circle at 50% 32%, rgba(79, 140, 255, 0.14), transparent 62%),
+    radial-gradient(circle at 50% 32%, var(--accent-wash-soft), transparent 62%),
     var(--bg);
 }
 
