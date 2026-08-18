@@ -26,7 +26,9 @@
  * activate handler drops the previous version's cache. Bump CACHE when the
  * precached shell list changes shape or what may become the shell changes.
  */
-const CACHE = "draw-shell-v2";
+// v3 (#255): the icon rasters and the manifest's felt theme/background were
+// retuned to the card-table identity — refresh the precached copies.
+const CACHE = "draw-shell-v3";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 self.addEventListener("install", (event) => {

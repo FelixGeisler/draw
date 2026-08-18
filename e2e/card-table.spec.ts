@@ -329,3 +329,32 @@ test("hover tilt engages below .draw-card — the settled flip matrix survives a
     })
     .toBe(rest);
 });
+
+test.describe("hover-capability gate", () => {
+  // The tilt's third gate: `@media (hover: hover)`. Chromium's touch
+  // emulation (hasTouch) flips the media feature to `hover: none` while a
+  // real mouse move still ENGAGES the `:hover` pseudo-class — verified
+  // empirically — so if the `(hover: hover)` half of the media query were
+  // dropped, the tilt rule would apply here and the transform would move.
+  test.use({ hasTouch: true });
+
+  test("a touch device gets NO tilt — the hovered face keeps the pure flip matrix", async ({
+    page,
+  }) => {
+    await drawFromGoal(page, GOAL_TITLE);
+    const face = page.locator(".draw-face.back");
+    await expect(face).toHaveCSS("transform", PURE_FLIP_MATRIX);
+
+    // Same off-center hover the tilt test uses to PRODUCE a tilt…
+    const fb = (await face.boundingBox())!;
+    await page.mouse.move(fb.x + fb.width * 0.8, fb.y + fb.height * 0.25);
+    // …then outwait the tilt transition (--tilt-dur is 0.26s): a broken gate
+    // would have visibly tilted long before 600ms. A negative needs a fixed
+    // wait — there is no state change to poll for.
+    await page.waitForTimeout(600);
+    expect(
+      await face.evaluate((el) => getComputedStyle(el).transform),
+      "an emulated touch device must never tilt",
+    ).toBe(PURE_FLIP_MATRIX);
+  });
+});

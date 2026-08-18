@@ -419,6 +419,9 @@
 
 .ach-editor-save {
   border-color: var(--accent) !important;
+  /* #255: adopting --accent-wash-mid deliberately snapped this wash from its
+     old private alpha 0.22 to the standing 0.18 step — the one wash whose
+     strength moved in the normalization, not a pure rename. */
   background: var(--accent-wash-mid) !important;
 }
 

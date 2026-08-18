@@ -46,8 +46,10 @@ describe("card art system prompt (#27, #113)", () => {
   });
 
   it("anchors the dark deck palette, with the harmony built around the category color (#113)", () => {
-    expect(CARD_ART_SYSTEM_PROMPT).toContain("#1b1e27");
-    expect(CARD_ART_SYSTEM_PROMPT).toContain("#232735");
+    // #255 card-table follow-up: the anchors are the slate card-stock tones
+    // (DrawPage.css .draw-face.back), not the retired charcoal app background.
+    expect(CARD_ART_SYSTEM_PROMPT).toContain("#171d24");
+    expect(CARD_ART_SYSTEM_PROMPT).toContain("#232a33");
     expect(CARD_ART_SYSTEM_PROMPT).toMatch(/palette harmony built around the task's category color/);
     // the one-recipe accent rule is gone — it made every card converge
     expect(CARD_ART_SYSTEM_PROMPT).not.toMatch(/single accent/);

@@ -15,7 +15,7 @@
   --ok: #3fbf7f;
 
   /* Identity companions (#255). The accent's ink is DARK — never white on
-     brass (white computes 3.2:1; this pair is gated ≥ 4.5:1). The washes are
+     brass (white computes 2.4:1; this pair is gated ≥ 4.5:1). The washes are
      the accent's three standing alpha steps, replacing the eight raw
      rgba(79,140,255,…) literals the blue era scattered outside :root. */
   --accent-ink: #24190a;

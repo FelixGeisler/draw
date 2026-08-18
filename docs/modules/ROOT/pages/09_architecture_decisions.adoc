@@ -3432,8 +3432,10 @@ pure-flip matrix the holo specs byte-pin.
 #244 token names survive (`--bg`, `--accent`, …) with felt/brass values, and
 a permanent sibling gate (`tokenContrast.test.ts`) computes WCAG ratios from
 the actual `index.css` values with `lib/cardVisuals`' own contrast helpers:
-text/bg ≥ 7:1, dim/bg ≥ 4.5:1, panel variants likewise, and primary-button
-ink on `--accent` ≥ 4.5:1 — which forced the one behavioural colour change:
+text/bg ≥ 7:1, dim/bg ≥ 4.5:1, panel variants likewise, primary-button
+ink on `--accent` ≥ 4.5:1, and — the brass being TEXT itself on the active
+nav mark and the odds fine print — `--accent` as a foreground on both
+grounds ≥ 4.5:1. The ink rule forced the one behavioural colour change:
 `--accent-ink` is DARK on brass (white on the old blue was a standing 3.2:1
 AA failure). The classic card-back weave, previously three private copies
 (deck, locked achievement, unlock toast; the shop swatch reuses the deck's),
@@ -3454,6 +3456,8 @@ values byte-identical except what flows in through shared tokens — repainting
 the shipped identities (#181, ADR-42) in brass would erase the very layer the
 table was tuned to match. The Wrapped share card keeps its inlined charcoal
 palette by its own #234 decision (deliberately frozen against theme drift).
+The favicon, by contrast, IS chrome — the browser-tab card mark followed the
+retune (brass frame and glow, felt weave) rather than staying blue-era.
 
 *Out of scope:* a light theme, per-surface accent theming, the command
 palette adopting the accent (its selection stays `--bg-hover` on purpose —

@@ -100,7 +100,7 @@ Hard rules for every artwork:
 - Output one single self-contained <svg> element with viewBox="0 0 300 420" (the card's 5:7 ratio), filling the whole area.
 - Strictly NO text of any kind: no <text> or <tspan> elements, and no letters, digits or words drawn as paths.
 - No <script>, no <foreignObject>, no <image>, no <style>, no event-handler attributes, and no external references of any kind (no http(s):, data: or file URLs) — reference only your own <defs> via url(#id) or href="#id". A server-side sanitizer strips everything else.
-- Dark, calm base anchored on the app background: base tones between #1b1e27 and #232735, with the requested palette harmony built around the task's category color so every card still reads as part of one deck. Keep contrast subtle — the artwork sits BEHIND light card text that must stay legible.
+- Dark, calm base anchored on the card face it covers: base tones between #171d24 and #232a33 (the app's slate card stock, #255), with the requested palette harmony built around the task's category color so every card still reads as part of one deck. Keep contrast subtle — the artwork sits BEHIND light card text that must stay legible.
 - Compose for a portrait art window: the focal interest lives in the upper-center region of the canvas (a card frame may crop the lower part), while the full area stays covered.
 - Make it abstract and quietly evocative of the task's theme within the requested archetype. Never literal illustrations, icons, mascots or clip-art.
 - Keep it compact: at most ~80 elements — express repetition through <defs> with <use> or <pattern> instead of duplicated markup. Filters are welcome (turbulence, blur, displacement, soft light) but no heavier than the archetype needs.`;

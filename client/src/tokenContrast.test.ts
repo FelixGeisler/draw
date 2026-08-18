@@ -17,6 +17,8 @@ import { contrastRatio, parseHexColor } from "./lib/cardVisuals";
  *   --text-dim on --bg        ≥ 4.5:1 (AA)
  *   --text-dim on --bg-panel  ≥ 4.5:1
  *   primary-button ink on --accent ≥ 4.5:1 (AA)
+ *   --accent   on --bg        ≥ 4.5:1 (AA — the brass is TEXT on .draw-chance)
+ *   --accent   on --bg-panel  ≥ 4.5:1 (AA — and on .sidenav a.active)
  *
  * The math is lib/cardVisuals' own WCAG helpers — the same luminance/contrast
  * code that picks the category pill ink — so the gate and the product can
@@ -136,5 +138,17 @@ describe("#255 contrast gate — the palette may retune, legibility may not", ()
     const inkHex = resolveTokenColor(tokens, ink!);
     expect(inkHex, `button.primary ink "${ink}" resolves to a hex color`).not.toBeNull();
     gate(inkHex!, color(tokens, "--accent"), 4.5, "primary ink/--accent");
+  });
+
+  // #255 made the accent a FOREGROUND too: brass text marks the active nav
+  // (.sidenav a.active on --bg-panel) and the odds fine print (.draw-chance
+  // on --bg). Gate both grounds so a future retune cannot dim the brass
+  // below AA while every background-role check stays green.
+  it("--accent as text on --bg ≥ 4.5:1 (AA)", () => {
+    gate(color(tokens, "--accent"), color(tokens, "--bg"), 4.5, "--accent/--bg");
+  });
+
+  it("--accent as text on --bg-panel ≥ 4.5:1 (AA)", () => {
+    gate(color(tokens, "--accent"), color(tokens, "--bg-panel"), 4.5, "--accent/--bg-panel");
   });
 });
