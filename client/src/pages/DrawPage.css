@@ -3,8 +3,17 @@
      the springy flip, the shuffle jitter, the art fade, the slow holo drift
      (shared 7s beat with the achievement sheens, declared per file), the
      regen spinner — and its 16px face frame with the 10px hint backing.
-     Bespoke by design, not rungs on the shared scale. */
-  --flip-dur: 0.65s;
+     Bespoke by design, not rungs on the shared scale.
+
+     The deal (#255): --flip-dur deliberately EQUALS --deal-dur — the arc
+     animation masks the underlying flip transition, and matched durations
+     mean the hand-off at animation end lands exactly on the transition's
+     settled frame (no jump). The sweep starts when the card has arrived
+     (animation-delay: --deal-dur) and runs once. */
+  --flip-dur: 0.56s;
+  --deal-dur: 0.56s;
+  --sheen-sweep-dur: 0.9s;
+  --tilt-dur: 0.26s;
   --shuffle-dur: 0.45s;
   --art-fade-dur: 0.8s;
   --holo-drift-period: 7s;
@@ -50,6 +59,47 @@
   }
 }
 
+/* The deal (#255): a FRESH deal (.dealt — DrawPage.tsx sets it with the
+   reveal; a restored card never gets it, a reload is not an arrival) arcs in
+   with rotateZ/translateY overshoot. The overshoot lives in the bezier, not
+   the keyframes: the y>1 control point carries rotateY past 180° and swings
+   rotateZ/translateY past rest before settling. Durations matched to the
+   flip transition underneath (see .draw-scene), so the animation's last
+   frame IS the transition's settled frame — .flipped still lands the exact
+   pure-flip matrix the holo specs pin. Motion-gated per ADR-69: under
+   reduced motion the ungated transition still flips the card. */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes deal-arc {
+    from {
+      transform: rotateY(0deg) rotateZ(-3deg) translateY(10px);
+    }
+    to {
+      transform: rotateY(180deg) rotateZ(0deg) translateY(0);
+    }
+  }
+
+  .draw-card.flipped.dealt {
+    animation: deal-arc var(--deal-dur) cubic-bezier(0.34, 1.36, 0.5, 1);
+  }
+}
+
+/* Hover tilt (#255): a gentle perspective tilt + lift on the revealed card
+   face — composed onto the face's own rotateY(180deg), NEVER on .draw-card,
+   whose settled transform is byte-pinned by the holo specs (and Playwright
+   parks the mouse on the card after clicking it). Gated on hover-capable
+   devices only (a phone tap must not leave a lingering transform) AND on
+   no-preference; the transition releases it fully at rest. The action row
+   below the scene never moves — transforms don't reflow. */
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .draw-face.back {
+    transition: transform var(--tilt-dur) var(--ease-standard);
+  }
+
+  .draw-card.flipped:hover .draw-face.back {
+    transform: rotateY(180deg) rotateX(4deg) rotateZ(-0.8deg) translateZ(8px);
+  }
+}
+
 .draw-face {
   position: absolute;
   inset: 0;
@@ -66,9 +116,9 @@
 }
 
 .draw-face.front {
-  background:
-    radial-gradient(circle at 30% 30%, rgba(79, 140, 255, 0.25), transparent 60%),
-    repeating-linear-gradient(45deg, #1b1e27 0 14px, #20242f 14px 28px);
+  /* The shared classic weave (#255, index.css): identical on the deck, a
+     locked achievement, the toast's card back and the shop swatch. */
+  background: var(--card-back-classic);
   font-size: 64px;
   cursor: pointer;
   user-select: none;
@@ -129,7 +179,21 @@
 }
 
 .draw-face.back {
-  background: linear-gradient(160deg, #232735, #1b1e27);
+  /* Gilt-edged card stock (#255): a slate stock gradient under a top-left
+     light, a brass radial glow and faint diagonal pinstripes. The glow and
+     pinstripes ARE the degraded no-art fill — when the art layers don't
+     render (no API key), this face stands alone as a finished card, never a
+     blank (card-art-degraded.spec pins that no art-layer node exists). */
+  background:
+    radial-gradient(circle at 50% 28%, rgba(200, 162, 91, 0.14), transparent 60%),
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.03) 0 2px, transparent 2px 11px),
+    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.05), transparent 55%),
+    linear-gradient(160deg, #232a33, #171d24);
+  border-color: var(--gilt-border);
+  /* Inset top highlight + a deep drop shadow: the card sits ON the felt. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 40px -14px rgba(0, 0, 0, 0.6);
   transform: rotateY(180deg);
   text-align: center;
   /* Nothing ever paints outside the fixed 300x420 card bounds — long
@@ -167,6 +231,10 @@
 
 .draw-face.back h2 {
   margin: 0;
+  /* THE ONLY serif in the app (#255): the drawn card's title — a printed
+     card name on gilt stock. Everything else, the card's own description
+     included, stays the sans stack (card-table.spec pins both halves). */
+  font-family: Georgia, "Iowan Old Style", "Times New Roman", serif;
   font-size: 22px;
   line-height: 1.3;
 }
@@ -286,6 +354,47 @@
   }
 }
 
+/* The gilt sheen sweep (#255): ONE pass of the warm band over the freshly
+   dealt face — the #124 oversized background-position pattern, as a pseudo
+   of the face itself (never a canvas, never a sibling above .draw-holo).
+   Scoped to .dealt like the arc: an arrival glint, so a restored card stays
+   quiet. The base pseudo is static and invisible (opacity 0); only the
+   motion block below ever shows it, so reduced motion computes
+   animation-name: none with nothing painted. */
+.draw-card.dealt .draw-face.back::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: var(--sheen-gilt);
+  background-size: 250% 250%;
+  background-position: 50% 50%;
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes gilt-sweep {
+    0% {
+      background-position: 118% 118%;
+      opacity: 0;
+    }
+    18% {
+      opacity: 1;
+    }
+    100% {
+      background-position: 0% 0%;
+      opacity: 0;
+    }
+  }
+
+  /* Once, after the card lands (delay = the deal's own duration) — a glint
+     you notice when you look, not a casino. */
+  .draw-card.dealt .draw-face.back::after {
+    animation: gilt-sweep var(--sheen-sweep-dur) ease-out var(--deal-dur);
+  }
+}
+
 /* Reduced motion: the art still appears, just without the fade (the holo
    drift above is motion-gated and simply never runs — the static sheen
    stays painted). */
@@ -308,7 +417,7 @@
   padding: 0;
   border-radius: 50%;
   border: 1px solid var(--border);
-  background: rgba(27, 30, 39, 0.7);
+  background: rgba(23, 33, 29, 0.7); /* --bg-panel felt, with alpha (#255) */
   color: var(--text-dim);
   font-size: 15px;
   line-height: 1;
@@ -333,8 +442,12 @@
 }
 
 .draw-chance {
-  color: var(--text-dim);
+  /* Brass small caps (#255): the odds read as the card's fine print. The
+     DOM text is untouched — specs match "in the deck" on content. */
+  color: var(--accent);
   font-size: 12px;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
 }
 
 .draw-hint {
@@ -352,6 +465,15 @@
   margin-top: 8px;
 }
 
+/* The stage's table talk (#255): uppercase, letterspaced, THIS row only —
+   buttons elsewhere in the app keep normal case. CSS-only, so accessible
+   names and every text matcher still see the authored casing. */
+.draw-actions button {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 12.5px;
+}
+
 .draw-filters {
   display: flex;
   gap: 8px;
@@ -366,7 +488,7 @@
 .draw-filters .chip.active {
   border-color: var(--accent);
   color: var(--text);
-  background: rgba(79, 140, 255, 0.15);
+  background: var(--accent-wash-mid);
 }
 
 /* Warm-up draw (#57): secondary escape hatch below the idle deck. */

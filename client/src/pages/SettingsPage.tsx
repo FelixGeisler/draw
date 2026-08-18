@@ -120,7 +120,9 @@ function StreakSection() {
                 style={{
                   padding: "4px 10px",
                   background: active ? "var(--accent)" : undefined,
-                  color: active ? "#fff" : undefined,
+                  // Dark ink on brass, like button.primary (#255) — never
+                  // white on the accent.
+                  color: active ? "var(--accent-ink)" : undefined,
                 }}
               >
                 {label}

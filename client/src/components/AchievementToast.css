@@ -71,9 +71,7 @@
    collection card. */
 .ach-toast-face.back {
   border: 1px solid var(--border);
-  background:
-    radial-gradient(circle at 30% 30%, rgba(79, 140, 255, 0.25), transparent 60%),
-    repeating-linear-gradient(45deg, #1b1e27 0 14px, #20242f 14px 28px);
+  background: var(--card-back-classic);
 }
 
 .ach-toast-face.front {

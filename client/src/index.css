@@ -1,14 +1,29 @@
 :root {
-  --bg: #12141a;
-  --bg-panel: #1b1e27;
-  --bg-hover: #232735;
-  --border: #2c3040;
-  --text: #e8eaf0;
-  --text-dim: #9aa0b0;
-  --accent: #4f8cff;
+  /* Card-table identity (#255, direction B): the ground is felt, the accent
+     is brass. Values retuned in place — the #244 token NAMES are the stable
+     contract (tokenContrast.test.ts gates the ratios, not the colors).
+     --danger/--warn/--ok stay semantic and untouched. */
+  --bg: #0f1a16;
+  --bg-panel: #17211d;
+  --bg-hover: #1e2a24;
+  --border: #2a3a33;
+  --text: #eceae2;
+  --text-dim: #9aa396;
+  --accent: #c8a25b;
   --danger: #ff5f6b;
   --warn: #ffb64f;
   --ok: #3fbf7f;
+
+  /* Identity companions (#255). The accent's ink is DARK — never white on
+     brass (white computes 2.4:1; this pair is gated ≥ 4.5:1). The washes are
+     the accent's three standing alpha steps, replacing the eight raw
+     rgba(79,140,255,…) literals the blue era scattered outside :root. */
+  --accent-ink: #24190a;
+  --accent-grad: linear-gradient(90deg, var(--accent), #e2c185);
+  --gilt-border: rgba(200, 162, 91, 0.32);
+  --accent-wash-strong: rgba(200, 162, 91, 0.32);
+  --accent-wash-mid: rgba(200, 162, 91, 0.18);
+  --accent-wash-soft: rgba(200, 162, 91, 0.12);
 
   /* The two shipped rarity sheens (#62/#107, redesigned in #123), hoisted here
      in #124 so every card surface paints the SAME gradient instead of a
@@ -38,6 +53,28 @@
     rgba(214, 224, 240, 0.09) 58%,
     transparent 70%
   );
+
+  /* The gilt sweep (#255): the deal's one-shot arrival glint on the drawn
+     card's face — same 115deg band geometry as the two sheens above, warm
+     and low-alpha. Runs ONCE per deal (DrawPage.css), never drifts: the
+     casino line above is the operative constraint. */
+  --sheen-gilt: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(232, 207, 154, 0.1) 42%,
+    rgba(255, 235, 190, 0.18) 50%,
+    rgba(232, 207, 154, 0.1) 58%,
+    transparent 70%
+  );
+
+  /* The classic card-back weave (#255, the #124 hoist pattern): ONE paint for
+     every surface that shows a face-down card — the deck (.draw-face.front),
+     a locked achievement (.ach-card.locked), the unlock toast's back and the
+     shop's classic swatch. Three private copies used to drift; now they
+     cannot. Geometry (45deg, 14/28px) unchanged from the charcoal era. */
+  --card-back-classic:
+    radial-gradient(circle at 30% 30%, rgba(200, 162, 91, 0.22), transparent 60%),
+    repeating-linear-gradient(45deg, #1a241e 0 14px, #202b24 14px 28px);
 
   /* ---- Design tokens (#244, ADR-69) --------------------------------------
      Same rationale as the sheens above: one value, many surfaces. The values
@@ -100,9 +137,17 @@
   box-sizing: border-box;
 }
 
+/* The table itself (#255): a static top light and a faint diagonal weave on
+   the felt — one paint, zero animation. fixed attachment so the vignette is
+   the room's light, not a texture that scrolls with the page; panels lay
+   their own opaque felt on top. */
 body {
   margin: 0;
-  background: var(--bg);
+  background:
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.015) 0 2px, transparent 2px 8px),
+    radial-gradient(ellipse 130% 70% at 50% -10%, rgba(236, 234, 226, 0.05), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
 }
 
@@ -128,7 +173,9 @@ button:hover {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  /* Dark ink on brass, never white on brass (#255): the pair is contrast-
+     gated ≥ 4.5:1 in tokenContrast.test.ts. */
+  color: var(--accent-ink);
   font-weight: 600;
 }
 
@@ -219,7 +266,9 @@ textarea:focus {
 
 .sidenav a.active {
   background: var(--bg-panel);
-  color: var(--text);
+  /* Brass is the active-nav mark (#255) — the one place in the nav the
+     accent shows. */
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -263,7 +312,7 @@ textarea:focus {
   align-items: center;
   gap: 14px;
   padding: 10px 24px;
-  background: rgba(79, 140, 255, 0.12);
+  background: var(--accent-wash-soft);
   border-bottom: 1px solid var(--accent);
 }
 
@@ -319,9 +368,12 @@ textarea:focus {
 
 /* Task row (TaskRow.tsx keeps the rest of its box inline). The gap lives here
    because it has to be overridable: an inline `gap` shorthand would beat the
-   phone block's `row-gap`, leaving wrapped rows 10px apart instead of 4 (#193). */
+   phone block's `row-gap`, leaving wrapped rows 10px apart instead of 4 (#193).
+   The brass left edge is the rows' ONE card-table identity mark (#255) —
+   low-alpha, riding the accent so it retunes with the palette. */
 .task-row {
   gap: 10px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
 /* The done-dim used to be an inline style; a class since #244 so the

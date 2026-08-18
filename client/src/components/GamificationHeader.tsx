@@ -40,7 +40,7 @@ export function GamificationHeader() {
             width: `${pct}%`,
             height: "100%",
             borderRadius: 6,
-            background: "linear-gradient(90deg, var(--accent), #a06bff)",
+            background: "var(--accent-grad)",
             transition: "width 0.5s",
           }}
         />

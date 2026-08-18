@@ -137,7 +137,7 @@ test("art is the FULL-BLEED background of the whole card face, under a legibilit
   const back = page.locator(".draw-face.back");
   await expect(back.locator("h2")).toHaveText(HOLO_TITLE); // restored (#25)
   // Let the restore's flip transition SETTLE before measuring geometry —
-  // toHaveCSS retries until the 0.65s rotateY lands on its final matrix.
+  // toHaveCSS retries until the --flip-dur rotateY lands on its final matrix.
   await expect(page.locator(".draw-card")).toHaveCSS(
     "transform",
     "matrix3d(-1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1)",

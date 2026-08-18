@@ -166,6 +166,18 @@ async function main() {
         console.log(`attempt ${attempt}: drew a non-holo card — dealing a fresh board`);
         continue;
       }
+      // The deal (#255) is a ~560ms arc plus a delayed one-shot 900ms gilt
+      // sweep — longer than the flat settle below, so wait for every FINITE
+      // animation on the scene to finish (the holo drift loops forever and
+      // must be excluded, it is the shot's whole point).
+      await page.locator(".draw-scene").evaluate((el) =>
+        Promise.all(
+          el
+            .getAnimations({ subtree: true })
+            .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+            .map((a) => a.finished.catch(() => {})),
+        ),
+      );
       // The first draw unlocks an achievement, and its toast sits over the
       // action row — a shot taken under it loses the last button. The toast
       // self-dismisses after 4s (AchievementToast.tsx), so wait it out rather
@@ -175,6 +187,10 @@ async function main() {
         .last()
         .waitFor({ state: "detached", timeout: 15_000 })
         .catch(() => {});
+      // The click left the pointer ON the card, which engages the #255 hover
+      // tilt — park it away and let the ~260ms release settle so the hero
+      // shows the card seated on the felt, not mid-hover.
+      await page.mouse.move(0, 0);
       await wait(600);
       await page.screenshot({ path: path.join(outDir, "draw.png") });
 
