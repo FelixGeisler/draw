@@ -131,6 +131,73 @@ describe("update_task input schema", () => {
     expect(description).toContain("ADR-23");
     expect(description).toContain("inherits");
   });
+
+  it("accepts pause fields only as nullable-string and boolean inputs", () => {
+    for (const args of [
+      { id: 1, deferredUntil: "2099-07-20T10:00:00+02:00" },
+      { id: 1, deferredUntil: null },
+      { id: 1, blocked: true },
+      { id: 1, blocked: false },
+      { id: 1, deferredUntil: "2099-07-20T10:00:00Z", blocked: false },
+    ]) {
+      expect(schema.safeParse(args).success).toBe(true);
+    }
+    for (const args of [
+      { id: 1, deferredUntil: 123 },
+      { id: 1, blocked: "true" },
+      { id: 1, blocked: null },
+      { id: 1, blocked: 1 },
+    ]) {
+      expect(schema.safeParse(args).success).toBe(false);
+    }
+  });
+
+  it("documents all pause and resume recipes at the schema boundary", () => {
+    const definition = tool("update_task");
+    expect(definition.description).toContain(
+      "{ id, deferredUntil: <future ISO datetime>, blocked: false }",
+    );
+    expect(definition.description).toContain("{ id, blocked: true }");
+    expect(definition.description).toContain(
+      "{ id, deferredUntil: <current ISO datetime>, blocked: false }",
+    );
+    expect(definition.description).toContain("wake automatically");
+    expect(definition.description).toContain("blocked: true wins");
+
+    const deferred = (definition.inputSchema.deferredUntil as z.ZodType).description ?? "";
+    expect(deferred).toContain("future instant");
+    expect(deferred).toContain("null only clears the retained timestamp");
+    expect(deferred).toContain("current ISO datetime plus blocked: false");
+    const blocked = (definition.inputSchema.blocked as z.ZodType).description ?? "";
+    expect(blocked).toContain("pauses indefinitely");
+    expect(blocked).toContain("wins over a timed pause");
+  });
+});
+
+describe("update_task pause passthrough", () => {
+  it("sends both pause fields unchanged in exactly one PATCH", async () => {
+    const supplied = "2099-07-20T10:00:00+02:00";
+    const { api, calls } = stubApi((method, path) =>
+      method === "PATCH" && path === "/api/tasks/7"
+        ? { status: 200, body: { task: { id: 7 } } }
+        : undefined,
+    );
+
+    const outcome = await executeTool("update_task", api, {
+      id: 7,
+      deferredUntil: supplied,
+      blocked: false,
+    });
+
+    expect(outcome.isError).toBeUndefined();
+    expect(calls).toEqual([
+      {
+        method: "PATCH",
+        path: "/api/tasks/7",
+        body: { deferredUntil: supplied, blocked: false },
+      },
+    ]);
+  });
 });
 
 describe("create_subtasks input schema", () => {
