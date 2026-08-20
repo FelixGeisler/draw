@@ -36,6 +36,7 @@ function tool(name: string) {
 
 const EXPECTED_TOOLS = [
   "complete_task",
+  "create_goal",
   "create_subtasks",
   "create_task",
   "draw_card",
@@ -200,6 +201,59 @@ describe("ADR-4 wording in tool descriptions (issue #76)", () => {
     expect(tool("create_task").description).toContain("Non-neutral impact (≠3)");
     expect(tool("update_task").description).toContain("non-neutral impact (≠3)");
     expect(tool("update_task").description).toContain("omit impact when unlinking");
+  });
+});
+
+describe("create_goal", () => {
+  const schema = z.object(tool("create_goal").inputSchema);
+
+  it("requires a title and accepts outcome + targetDate", () => {
+    expect(schema.safeParse({}).success).toBe(false);
+    expect(schema.safeParse({ title: "Pass the exam" }).success).toBe(true);
+    expect(
+      schema.safeParse({
+        title: "Pass the exam",
+        outcome: "Grade 2.0 or better",
+        targetDate: "2026-09-30",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects a non-ISO targetDate at the schema, like create_task's dueDate", () => {
+    expect(schema.safeParse({ title: "Pass the exam", targetDate: "Sept 30" }).success).toBe(false);
+  });
+
+  it("POSTs /api/goals with the args verbatim and returns the created goal", async () => {
+    const { api, calls } = stubApi((method, path) =>
+      method === "POST" && path === "/api/goals"
+        ? { status: 201, body: { id: 3, title: "Pass the exam", status: "active" } }
+        : undefined,
+    );
+    const outcome = await executeTool("create_goal", api, {
+      title: "Pass the exam",
+      outcome: "Grade 2.0 or better",
+      targetDate: "2026-09-30",
+    });
+    expect(outcome.isError).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].body).toMatchObject({
+      title: "Pass the exam",
+      outcome: "Grade 2.0 or better",
+      targetDate: "2026-09-30",
+    });
+    expect(outcome.text).toContain("Pass the exam");
+  });
+
+  it("surfaces the API's title rejection verbatim (whitespace passes zod, the route trims)", async () => {
+    const { api, calls } = stubApi((method, path) =>
+      method === "POST" && path === "/api/goals"
+        ? { status: 400, body: { error: "title is required" } }
+        : undefined,
+    );
+    const outcome = await executeTool("create_goal", api, { title: " " });
+    expect(outcome.isError).toBe(true);
+    expect(outcome.text).toContain("title is required");
+    expect(calls).toHaveLength(1);
   });
 });
 

@@ -87,6 +87,7 @@ describe("MCP tool surface (tools/list)", () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       "complete_task",
+      "create_goal",
       "create_subtasks",
       "create_task",
       "draw_card",
@@ -139,6 +140,34 @@ describe("read tools", () => {
     const settings = res.json<Record<string, string>>();
     expect(settings.max_draw_effort).toBe("30");
     expect(JSON.stringify(settings)).not.toContain("anthropic");
+  });
+});
+
+describe("create_goal", () => {
+  it("creates a goal that list_goals then returns, active with its outcome", async () => {
+    const res = await callTool("create_goal", {
+      title: "Ship the thesis",
+      outcome: "Submitted and accepted",
+      targetDate: "2026-12-01",
+    });
+    expect(res.isError).toBe(false);
+    const goal = res.json<{ id: number; status: string; targetDate: string }>();
+    expect(goal.id).toBeGreaterThan(0);
+    expect(goal.status).toBe("active");
+    expect(goal.targetDate).toBe("2026-12-01");
+
+    const goals = (await callTool("list_goals")).json<
+      Array<{ id: number; outcome: string | null }>
+    >();
+    const created = goals.find((g) => g.id === goal.id);
+    expect(created).toBeDefined();
+    expect(created!.outcome).toBe("Submitted and accepted");
+  });
+
+  it("surfaces the route's title rejection as a tool error", async () => {
+    const res = await callTool("create_goal", { title: "   " });
+    expect(res.isError).toBe(true);
+    expect(res.text).toContain("title is required");
   });
 });
 
