@@ -555,6 +555,33 @@ const listGoals = defineTool({
   },
 });
 
+const createGoal = defineTool({
+  name: "create_goal",
+  description:
+    "Create a goal: a title plus how success is measured (outcome). Tasks link to it via " +
+    "goalId and their 1–5 impact rates leverage toward it — what the draw weights by (ADR-4). " +
+    "A targetDate (YYYY-MM-DD) lets the goal show the daily pace the remaining work requires. " +
+    "New goals start active; resolving one (achieved/missed/dropped) stays in the app.",
+  inputSchema: {
+    title: z.string().min(1),
+    outcome: z
+      .string()
+      .optional()
+      .describe("How success is measured — the goal's definition of done"),
+    targetDate: dateSchema.optional(),
+  },
+  annotations: {
+    title: "Create goal",
+    readOnlyHint: false,
+    destructiveHint: false,
+    openWorldHint: false,
+  },
+  execute: async (api, args) => {
+    const res = await call(api, "create_goal", "POST", "/api/goals", args);
+    return res.ok ? ok(res.body) : res.outcome;
+  },
+});
+
 const listMaterials = defineTool({
   name: "list_materials",
   description:
@@ -626,6 +653,7 @@ export const TOOLS: ToolDef[] = [
   stopTimer,
   getStats,
   listGoals,
+  createGoal,
   listMaterials,
   listCategories,
   getSettings,
