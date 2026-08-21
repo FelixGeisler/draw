@@ -51,6 +51,48 @@ async function importArchive(archive: Buffer) {
   return request(app).post("/api/backup/import").attach("file", archive, "backup.zip");
 }
 
+function rebuildContractTable(
+  database: Database.Database,
+  table: "gold_ledger" | "pack_openings",
+  columns: string,
+  rewrite: (sql: string) => string,
+) {
+  const createSql = (
+    database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as {
+      sql: string;
+    }
+  ).sql;
+  const triggers = database
+    .prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?")
+    .all(table) as { name: string; sql: string }[];
+  const old = `${table}_weakened_source`;
+  database.transaction(() => {
+    for (const trigger of triggers) database.exec(`DROP TRIGGER ${trigger.name}`);
+    database.exec(`ALTER TABLE ${table} RENAME TO ${old}`);
+    database.exec(rewrite(createSql));
+    database.exec(`INSERT INTO ${table} (${columns}) SELECT ${columns} FROM ${old}`);
+    database.exec(`DROP TABLE ${old}`);
+    for (const trigger of triggers) database.exec(trigger.sql);
+  })();
+}
+
+async function tamperedV18Archive(mutate: (database: Database.Database) => void): Promise<Buffer> {
+  const { body } = await exportArchive();
+  const zip = new AdmZip(body);
+  const probePath = path.join(dataDir(), `tampered-v18-${Date.now()}-${Math.random()}.db`);
+  fs.writeFileSync(probePath, zip.getEntry("app.db")!.getData());
+  const probe = new Database(probePath);
+  try {
+    mutate(probe);
+  } finally {
+    probe.close();
+  }
+  zip.deleteFile("app.db");
+  zip.addFile("app.db", fs.readFileSync(probePath));
+  fs.rmSync(probePath, { force: true });
+  return zip.toBuffer();
+}
+
 /** Full API snapshot used to prove "identical" and "untouched". */
 async function apiSnapshot() {
   const [tasks, goals, settings, gamification] = await Promise.all([
@@ -129,6 +171,16 @@ beforeAll(async () => {
     localDate(new Date()),
     new Date().toISOString(),
   );
+  // Non-empty v18 append-only facts must survive with their constraints and
+  // AUTOINCREMENT replay order, not merely with table names.
+  db.prepare(
+    "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (-3, 'buy:pack', 'backup-gold', ?)",
+  ).run("2026-08-20T10:00:00.000Z");
+  db.prepare(
+    `INSERT INTO pack_openings
+     (opening_order, ref, payment, back_key, rarity, duplicate, secret_chance_bp, effective_bonus, opened_at)
+     VALUES (5, 'backup-opening', 'gold', 'classic', 'common', 0, 500, 'none', ?)`,
+  ).run("2026-08-20T10:01:00.000Z");
 });
 
 describe("GET /api/backup/export", () => {
@@ -243,6 +295,23 @@ describe("POST /api/backup/import — round trip", () => {
     expect(after.gamification.freezesBanked).toBe(1);
     const restored = await testDb();
     expect(restored.prepare("SELECT COUNT(*) AS n FROM streak_freezes").get()).toEqual({ n: 1 });
+    expect(restored.prepare("SELECT amount, reason, ref FROM gold_ledger").all()).toEqual([
+      { amount: -3, reason: "buy:pack", ref: "backup-gold" },
+    ]);
+    expect(
+      restored.prepare("SELECT opening_order AS openingOrder, ref FROM pack_openings").all(),
+    ).toEqual([{ openingOrder: 5, ref: "backup-opening" }]);
+    expect(
+      restored.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'pack_openings'").get(),
+    ).toEqual({ seq: 5 });
+    const later = restored
+      .prepare(
+        `INSERT INTO pack_openings
+         (ref, payment, back_key, rarity, duplicate, secret_chance_bp, effective_bonus, opened_at)
+         VALUES ('backup-opening-later', 'ticket', 'classic', 'rare', 1, 550, 'ticket', ?)`,
+      )
+      .run("2026-08-20T10:02:00.000Z");
+    expect(Number(later.lastInsertRowid)).toBeGreaterThan(5);
 
     const download = await request(app)
       .get(`/api/materials/${materialId}/download`)
@@ -371,6 +440,81 @@ describe("POST /api/backup/import — rejections (live data untouched)", () => {
     await expectRejected(zip.toBuffer(), /newer version/);
   });
 
+  it("rejects a v18-stamped backup missing an owner column or required index", async () => {
+    const missingOwner = await tamperedV18Archive((staged) => {
+      staged.exec("ALTER TABLE completions DROP COLUMN gold_awarded");
+    });
+    await expectRejected(missingOwner, /schema v18 contract/);
+
+    const missingIndex = await tamperedV18Archive((staged) => {
+      staged.exec("DROP INDEX idx_xp_ledger_reason");
+    });
+    await expectRejected(missingIndex, /schema v18 contract/);
+  });
+
+  it("rejects weakened owner CHECKs hidden behind decoy comments", async () => {
+    const weakCompletionCheck = await tamperedV18Archive((staged) => {
+      staged.exec(`
+        ALTER TABLE completions DROP COLUMN gold_awarded;
+        ALTER TABLE completions ADD COLUMN gold_awarded INTEGER NOT NULL DEFAULT 0
+          /* CHECK (gold_awarded >= 0) */;
+      `);
+    });
+    await expectRejected(weakCompletionCheck, /schema v18 contract/);
+
+    const weakAchievementCheck = await tamperedV18Archive((staged) => {
+      staged.exec(`
+        ALTER TABLE achievements DROP COLUMN claim_gold;
+        ALTER TABLE achievements ADD COLUMN claim_gold INTEGER
+          /* CHECK (claim_gold IS NULL OR claim_gold >= 0) */;
+      `);
+    });
+    await expectRejected(weakAchievementCheck, /schema v18 contract/);
+  });
+
+  it("rejects a case-mutated enum literal that validation does not probe", async () => {
+    const openingColumns =
+      "opening_order, ref, payment, back_key, rarity, duplicate, secret_chance_bp, effective_bonus, opened_at";
+    const archive = await tamperedV18Archive((staged) => {
+      rebuildContractTable(staged, "pack_openings", openingColumns, (sql) =>
+        sql.replace("'secret-rare'", "'Secret-rare'"),
+      );
+    });
+    await expectRejected(archive, /schema v18 contract/);
+  });
+
+  it("rejects a v18-stamped backup missing an immutable trigger", async () => {
+    const archive = await tamperedV18Archive((staged) => {
+      staged.exec("DROP TRIGGER pack_openings_no_delete");
+    });
+    await expectRejected(archive, /schema v18 contract/);
+  });
+
+  it("rejects missing AUTOINCREMENT and weakened CHECK/unique contracts", async () => {
+    const openingColumns =
+      "opening_order, ref, payment, back_key, rarity, duplicate, secret_chance_bp, effective_bonus, opened_at";
+    const noAutoIncrement = await tamperedV18Archive((staged) => {
+      rebuildContractTable(staged, "pack_openings", openingColumns, (sql) =>
+        sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "INTEGER PRIMARY KEY"),
+      );
+    });
+    await expectRejected(noAutoIncrement, /schema v18 contract/);
+
+    const weakCheck = await tamperedV18Archive((staged) => {
+      rebuildContractTable(staged, "pack_openings", openingColumns, (sql) =>
+        sql.replace("secret_chance_bp BETWEEN 500 AND 1500", "secret_chance_bp BETWEEN 0 AND 9999"),
+      );
+    });
+    await expectRejected(weakCheck, /schema v18 contract/);
+
+    const weakUnique = await tamperedV18Archive((staged) => {
+      rebuildContractTable(staged, "gold_ledger", "id, amount, reason, ref, created_at", (sql) =>
+        sql.replace(/,\s*UNIQUE \(reason, ref\)/, ""),
+      );
+    });
+    await expectRejected(weakUnique, /schema v18 contract/);
+  });
+
   it("rejects an archive with a zip-slip file entry before anything is swapped", async () => {
     // adm-zip normalizes ".." when WRITING entries, so a hostile archive is
     // forged by binary-patching the entry name (same length keeps all zip
@@ -408,6 +552,8 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
     const current = fs.readFileSync(schemaPath, "utf-8");
     const v2Schema = current
+      .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
+      .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
       // v15 (#157): strip the sort_order column + stamp trigger FIRST, so
       // window_end regains its trailing newline before the window strip below
       // (the forward-migration on import re-adds both).
@@ -513,6 +659,79 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     } finally {
       bak.close();
     }
+  });
+});
+
+describe("POST /api/backup/import — v17 compatibility cutover", () => {
+  it("migrates and validates a seeded v17 database in staging before swap", async () => {
+    const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
+    const current = fs.readFileSync(schemaPath, "utf-8");
+    const v17 = current
+      .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
+      .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
+      .replace(/CREATE INDEX idx_xp_ledger_reason ON xp_ledger\(reason\);\r?\n\r?\n/, "")
+      .replace(/-- Empty v18 Gold effect ledger[\s\S]*?(?=CREATE TABLE achievement_customizations)/, "");
+    const legacyPath = path.join(dataDir(), "v17-backup.db");
+    const legacy = new Database(legacyPath);
+    legacy.exec(v17);
+    const goal = legacy
+      .prepare("INSERT INTO goals (title, created_at) VALUES ('v17 backup goal', ?)")
+      .run("2026-08-20T00:00:00.000Z");
+    const task = legacy
+      .prepare(
+        "INSERT INTO tasks (title, category_id, goal_id, created_at) VALUES ('v17 backup task', 1, ?, ?)",
+      )
+      .run(goal.lastInsertRowid, "2026-08-20T01:00:00.000Z");
+    legacy
+      .prepare(
+        `INSERT INTO completions
+         (task_id, completed_at, was_drawn, was_warmup, xp_awarded)
+         VALUES (?, ?, 1, 0, 9)`,
+      )
+      .run(task.lastInsertRowid, "2026-08-20T02:00:00.000Z");
+    legacy
+      .prepare(
+        `INSERT INTO achievements (key, unlocked_at, claimed_at, claim_xp)
+         VALUES ('first_completion', ?, ?, 11)`,
+      )
+      .run("2026-08-20T02:00:00.000Z", "2026-08-20T03:00:00.000Z");
+    legacy
+      .prepare("INSERT INTO xp_ledger (amount, reason, ref, created_at) VALUES (-250, 'buy:pack', 'v17-pack', ?)")
+      .run("2026-08-20T04:00:00.000Z");
+    legacy
+      .prepare("INSERT INTO streak_freezes (milestone_day, created_at) VALUES ('2026-08-20', ?)")
+      .run("2026-08-20T05:00:00.000Z");
+    legacy
+      .prepare("INSERT INTO settings (key, value) VALUES ('owned_card_backs', ?)")
+      .run('["classic","ember"]');
+    legacy.pragma("user_version = 17");
+    legacy.close();
+
+    const zip = new AdmZip();
+    zip.addFile("manifest.json", Buffer.from(JSON.stringify({ app: MANIFEST_APP, userVersion: 17 })));
+    zip.addFile("app.db", fs.readFileSync(legacyPath));
+    fs.rmSync(legacyPath, { force: true });
+
+    await importArchive(zip.toBuffer()).then((response) => expect(response.status).toBe(200));
+    const migrated = await testDb();
+    expect(migrated.pragma("user_version", { simple: true })).toBe(18);
+    expect(
+      migrated.prepare("SELECT xp_awarded AS xp, gold_awarded AS gold FROM completions").get(),
+    ).toEqual({ xp: 9, gold: 0 });
+    expect(
+      migrated.prepare("SELECT claim_xp AS xp, claim_gold AS gold FROM achievements").get(),
+    ).toEqual({ xp: 11, gold: null });
+    expect(migrated.prepare("SELECT amount, reason, ref FROM xp_ledger").all()).toEqual([
+      { amount: -250, reason: "buy:pack", ref: "v17-pack" },
+    ]);
+    expect(migrated.prepare("SELECT COUNT(*) AS count FROM gold_ledger").get()).toEqual({ count: 0 });
+    expect(migrated.prepare("SELECT COUNT(*) AS count FROM pack_openings").get()).toEqual({ count: 0 });
+    expect(
+      migrated.prepare("SELECT value FROM settings WHERE key = 'owned_card_backs'").get(),
+    ).toEqual({ value: '["classic","ember"]' });
+    expect(migrated.prepare("SELECT COUNT(*) AS count FROM streak_freezes").get()).toEqual({
+      count: 1,
+    });
   });
 });
 

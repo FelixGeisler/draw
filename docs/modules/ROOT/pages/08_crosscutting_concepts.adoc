@@ -13,10 +13,11 @@ clock, which re-admits it when the window opens, ADR-20 — or, on a RECURRING
 task, its due date still ahead, that date being its next occurrence, which
 re-admits it on the user's local day it names, ADR-6 amendment/#205),
 "in progress" (running time entry
-exists), XP/level/streak (aggregates over `completions` PLUS claimed-achievement
-payouts — since #156 XP has TWO stored sources,
-`SUM(completions.xp_awarded) + SUM(achievements.claim_xp)`, both honest event
-logs so no counter drifts, ADR-42; the streak's rest
+exists), Gold/XP/level/streak (v18 derives unclamped Gold from completion and
+achievement owner columns plus `gold_ledger`; permanent XP is exactly
+`SUM(completions.xp_awarded) + SUM(achievements.claim_xp) +
+SUM(xp_ledger.amount WHERE reason='challenge')`, so retained legacy shop rows
+are inert — ADR-5/ADR-42/ADR-62; the streak's rest
 days and freeze consumption are re-derived on every read from the rest-weekday
 setting and the append-only `streak_freezes` earn log — ADR-28), and the
 displayed effort of a broken-down
@@ -225,9 +226,11 @@ AI degraded mode).
 
 `PRAGMA user_version` switch in `db.ts`: fresh databases execute `schema.sql`
 (always the current schema); existing databases run incremental `ALTER TABLE`
-steps. No migration framework. Backup import (section 8.9) reuses the same
-`migrate()` after swapping in a restored database, so backups from older app
-versions are migrated forward exactly like an old database on boot.
+steps. No migration framework. Version 18 adds the two Gold owner columns, the
+append-only `gold_ledger`, immutable `pack_openings`, and the XP-ledger reason
+index in one transaction; `user_version=18` is the last statement, so any DDL
+failure leaves a v17 database unchanged. Backup import (section 8.9) runs this
+same migration against its staged copy before any live swap.
 
 == 8.9 Backup and restore
 
@@ -243,10 +246,16 @@ partial restore. Safety nets, both inside `DATA_DIR`:
 - the previous database is kept as `app.db.bak` (overwritten on the next import),
 - the previous material files as `files.bak`.
 
-Every rejected import (foreign zip, corrupt or newer-versioned database,
-unsafe paths) is a `400` with the live data untouched: validation runs
-against staged temp copies before anything is swapped. The Settings page
-gates the restore behind an explicit warning plus typing `REPLACE`.
+Every rejected import (foreign zip, corrupt or newer-than-v18 database,
+unsafe paths) is a `400` with the live data untouched. Versions through v18
+are accepted; v17-or-older snapshots migrate in staging. The staged database
+must then match the complete runtime v18 contract: both owner columns, exact
+Gold/opening definitions and CHECK/unique/AUTOINCREMENT rules, all six
+immutable triggers (definition and rollback-only behavior), and the
+XP-ledger reason index. Only that validated file reaches the atomic swap. A
+round trip therefore preserves append-only rows, opening order and
+`sqlite_sequence`, not merely table names. The Settings page gates restore
+behind an explicit warning plus typing `REPLACE`.
 
 A restored `app.db` carries each material's `anthropic_file_id` (section 8.4),
 which is Anthropic-side state that does not travel with the archive — on another

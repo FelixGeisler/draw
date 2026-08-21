@@ -67,6 +67,12 @@ levels, and streaks are computed from it. Reopening a task deletes its latest
 completion (no XP farming).
 *Rationale:* Stored counters drift; a log can be re-aggregated and audited.
 
+*Amendment (#263, schema v18):* XP is permanent. The exact aggregate is
+completion XP + claimed-achievement XP + only `xp_ledger` rows whose reason is
+`challenge`; every retained legacy shop reason is inert. Gold follows the same
+log-over-counter rule, derived unclamped from `completions.gold_awarded`,
+`achievements.claim_gold`, and `gold_ledger.amount`. No mutable balance exists.
+
 == ADR-6: Recurring tasks stay open, due date advances
 
 *Context:* Weekly chores must reappear without recreating tasks.
@@ -873,11 +879,9 @@ database — the torn-DB hazard), *copy* `app.db` to `app.db.bak` (copy, not
 rename: the live path never disappears, so a crash cannot boot into a fresh
 empty DB), swap `files/` (previous kept as `files.bak`), and last the
 staged snapshot is renamed onto `app.db` — a single same-volume rename, the
-atomic commit point. Reopen (`db` is an exported `let`; ESM live bindings
-update every importer) runs `migrate()`, so older backups move forward
-exactly like an old database would on boot. The whole swap is one
-synchronous block: better-sqlite3 is synchronous, so no request can
-interleave with a half-swapped state.
+atomic commit point. The whole swap is one synchronous block:
+better-sqlite3 is synchronous, so no request can interleave with a
+half-swapped state.
 *Rationale:* one archive keeps backups self-contained (acceptance was
 export → wipe → import → byte-identical material files); validating on
 staged copies means every rejection is a 400 with live data untouched; and
@@ -885,6 +889,16 @@ ordering the swap around a final atomic rename means a crash at any step
 boots either the complete old state or the complete new state. `adm-zip`
 handles both zip directions synchronously, fitting the no-framework
 guardrails; `multer` (already a dependency) receives the upload.
+
+*Amendment (#263, schema v18):* import accepts versions through v18 and rejects
+anything newer. A v17-or-older archive is migrated in staging _before_ swap;
+the staging handle must then prove the complete v18 runtime contract, including
+both Gold owner columns, exact table CHECK/unique/AUTOINCREMENT definitions,
+all six immutable trigger definitions and behavior, and
+`idx_xp_ledger_reason`. Missing or weakened contracts are rejected while live
+data remains untouched. Reopen after swap sees an already migrated, validated
+file. Non-empty opening rows and `sqlite_sequence` survive round trips.
+
 *Accepted limitation (#103):* `adm-zip` inflates each entry fully in memory,
 so peak RSS during export/import scales with the largest entry — the DB
 snapshot, plus one material at a time. Accepted, not fixed: this is a local
@@ -1001,6 +1015,12 @@ exact drift ADR-5 exists to prevent. Deriving consumption keeps reads pure,
 re-aggregatable, and auditable, and the append-only log plus UNIQUE
 milestone day is the entire anti-farming story — no trigger, no counter,
 no reconciliation job.
+
+*Amendment (#263):* historical shop freezes remain replay facts: only
+`xp_ledger.reason='buy:freeze'` timestamps are converted by the existing local
+calendar-day function and merged with milestone days. No other XP-ledger reason
+and no `pack_openings.effective_bonus` participates before #266; the ordered
+cap-2 fold, consumption, rest-day and expiry semantics are unchanged.
 
 == ADR-29: Focus mode is a derived view — timer plus current draw decide, nothing is persisted
 
@@ -1843,6 +1863,10 @@ can be claimed ONCE ever (idempotent by the primary key + a guarded
 This deliberately widens ADR-5's "XP is the completions log": a claim is
 still an honest, idempotent event fact, so there is still no stored `xp`
 counter to drift — the total is derived from two logs instead of one.
+Schema v18 (#263) adds nullable `claim_gold` as Gold owned by the same
+achievement row, with no backfill and no producer in this cutover; it does not
+change claim-for-XP behavior. Permanent XP subsequently narrows ledger
+participation to challenge rows (ADR-5 amendment).
 `POST /api/achievements/:key/claim` returns `200 {xpAwarded, levelUp}`,
 `400` for an unknown or not-yet-unlocked key, `409` for a repeat. `claim_xp`
 is stamped from the SERVER tier table at claim time — the client is never
@@ -3116,6 +3140,16 @@ charge — a refusal that costs XP is a bug, not a rule.
 *Out of scope:* consumable items beyond the freeze, trading/duplicates
 protection beyond the flat refund, and pack pity timers.
 
+*Amendment (#263, schema v18):* the XP purchase model is retired. Historical
+rows remain immutable history, but only `challenge` contributes to permanent
+XP; `buy:freeze` remains solely a historical freeze-replay input. The shop GET
+is transitional Gold + bank + settings-owned collection/equipment, with no XP
+or costs. Every purchase POST reaching the route returns
+`400 {"error":"shop purchases are unavailable"}` without RNG or writes. Pack
+and direct-freeze controls are removed. The existing card-back settings and
+equip/Draw behavior remain authoritative. Empty append-only `gold_ledger` and
+immutable `pack_openings` establish the next contract without a producer.
+
 == ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
 
 *Context:* The deck deals work but never sets a stake (#231). A small daily
@@ -3146,6 +3180,11 @@ budget, and the payout path is integration-tested.
 
 *Out of scope:* challenge streaks/history, rerolls, difficulty tiers, and
 pack rewards (the payout stays plain XP; what it buys is the shop's business).
+
+*Amendment (#263):* `challenge` is now the only XP-ledger reason included by
+`totalXp()`. The existing +50 XP producer is unchanged. `challenge` is reserved
+as a future Gold-ledger reason, but v18 adds no Gold producer and does not copy
+challenge payouts into Gold.
 
 == ADR-64: The estimation hint becomes tap-to-apply and reaches the triage strip — and applying dismisses it
 

@@ -1,14 +1,8 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import type express from "express";
 import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
-
-// The XP shop (#230, ADR-62). What must hold: the ledger is the only place XP
-// moves (purchases negative, refunds positive), a retry with the same ref is
-// harmless, a full freeze bank refuses BEFORE charging, and the pull odds are
-// a service-level fact pinned with an injected rng — the HTTP surface only
-// promises pack shape and balance arithmetic.
 
 let app: express.Express;
 let db: Database.Database;
@@ -25,138 +19,158 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  db.prepare("DELETE FROM xp_ledger").run();
   db.prepare("DELETE FROM completions").run();
+  db.prepare("DELETE FROM achievements").run();
+  db.prepare("DELETE FROM xp_ledger").run();
   db.prepare("DELETE FROM streak_freezes").run();
   db.prepare("DELETE FROM settings WHERE key IN ('owned_card_backs', 'equipped_card_back')").run();
 });
 
-/** Bank XP the honest way — completion rows, the first stored source. */
-function seedXp(amount: number) {
+function seedCompletion(xp: number, gold: number) {
   db.prepare(
-    "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, 0, 0, ?)",
-  ).run(taskId, new Date().toISOString(), amount);
+    `INSERT INTO completions
+     (task_id, completed_at, was_drawn, was_warmup, xp_awarded, gold_awarded)
+     VALUES (?, ?, 0, 0, ?, ?)`,
+  ).run(taskId, new Date().toISOString(), xp, gold);
 }
 
-describe("GET /api/shop", () => {
-  it("ships the catalog, balance, bank state and the always-owned classic back", async () => {
-    seedXp(300);
-    const res = await request(app).get("/api/shop").expect(200);
-    expect(res.body).toMatchObject({
-      xp: 300,
-      packCost: 250,
-      freezeCost: 500,
+function stateSnapshot() {
+  return {
+    gold: db.prepare("SELECT * FROM gold_ledger ORDER BY id").all(),
+    openings: db.prepare("SELECT * FROM pack_openings ORDER BY opening_order").all(),
+    xp: db.prepare("SELECT * FROM xp_ledger ORDER BY id").all(),
+    settings: db
+      .prepare("SELECT * FROM settings WHERE key IN ('owned_card_backs', 'equipped_card_back') ORDER BY key")
+      .all(),
+  };
+}
+
+const exactKeys = ["gold", "freezesBanked", "freezeBankCap", "backs", "equipped"].sort();
+
+describe("GET /api/shop — exact transitional shape", () => {
+  it.each([
+    { completion: 0, claim: null, ledger: 0, expected: 0 },
+    { completion: 20, claim: 5, ledger: 7, expected: 32 },
+    { completion: 1, claim: null, ledger: -9, expected: -8 },
+  ])("returns unclamped Gold $expected with no legacy fields", async (fixture) => {
+    const baseline = (
+      db.prepare("SELECT COALESCE(SUM(amount), 0) AS gold FROM gold_ledger").get() as {
+        gold: number;
+      }
+    ).gold;
+    seedCompletion(999, fixture.completion);
+    if (fixture.claim !== null) {
+      db.prepare(
+        "INSERT INTO achievements (key, unlocked_at, claimed_at, claim_xp, claim_gold) VALUES ('first_draw', ?, ?, 888, ?)",
+      ).run(new Date().toISOString(), new Date().toISOString(), fixture.claim);
+    }
+    if (fixture.ledger !== 0) {
+      db.prepare(
+        "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (?, 'challenge', ?, ?)",
+      ).run(fixture.ledger, `gold-${fixture.expected}`, new Date().toISOString());
+    }
+
+    const response = await request(app).get("/api/shop").expect(200);
+    expect(Object.keys(response.body).sort()).toEqual(exactKeys);
+    expect(response.body).toMatchObject({
+      gold: baseline + fixture.expected,
       freezesBanked: 0,
       freezeBankCap: 2,
       equipped: "classic",
     });
-    const classic = res.body.backs.find((b: { key: string }) => b.key === "classic");
-    expect(classic.owned).toBe(true);
-    expect(res.body.backs.length).toBeGreaterThan(4);
+    expect(response.body).not.toHaveProperty("xp");
+    expect(response.body).not.toHaveProperty("packCost");
+    expect(response.body).not.toHaveProperty("freezeCost");
+    expect(response.body).not.toHaveProperty("tickets");
+    expect(response.body.backs.find((back: { key: string }) => back.key === "classic")).toMatchObject({
+      owned: true,
+    });
+  });
+
+  it("preserves settings-owned collection/equipment and unknown fallback without rewriting", async () => {
+    const owned = '["classic","ember","unknown-future-key"]';
+    db.prepare("INSERT INTO settings (key, value) VALUES ('owned_card_backs', ?)").run(owned);
+    db.prepare("INSERT INTO settings (key, value) VALUES ('equipped_card_back', 'ember')").run();
+    let response = await request(app).get("/api/shop").expect(200);
+    expect(response.body.equipped).toBe("ember");
+    expect(response.body.backs.find((back: { key: string }) => back.key === "ember").owned).toBe(true);
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'owned_card_backs'").get()).toEqual({
+      value: owned,
+    });
+
+    db.prepare("UPDATE settings SET value = 'unknown' WHERE key = 'equipped_card_back'").run();
+    response = await request(app).get("/api/shop").expect(200);
+    expect(response.body.equipped).toBe("classic");
+    expect(db.prepare("SELECT value FROM settings WHERE key = 'equipped_card_back'").get()).toEqual({
+      value: "unknown",
+    });
   });
 });
 
-describe("POST /api/shop/buy — pack", () => {
-  it("refuses without enough XP, before writing anything", async () => {
-    seedXp(200);
-    const res = await request(app).post("/api/shop/buy").send({ item: "pack", ref: "p1" });
-    expect(res.status).toBe(400);
-    expect((await request(app).get("/api/shop")).body.xp).toBe(200);
-    expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
+describe("POST /api/shop/buy — disabled exact response and no writes", () => {
+  it.each([
+    { label: "legacy pack", send: (r: request.Test) => r.send({ item: "pack", ref: "p1" }) },
+    { label: "legacy freeze", send: (r: request.Test) => r.send({ item: "freeze", ref: "f1" }) },
+    { label: "malformed domain", send: (r: request.Test) => r.send({ item: 42, ref: [] }) },
+    { label: "unknown parsed body", send: (r: request.Test) => r.send({ future: true }) },
+    { label: "absent content type", send: (r: request.Test) => r },
+    {
+      label: "non-json content type",
+      send: (r: request.Test) => r.set("Content-Type", "text/plain").send("legacy"),
+    },
+  ])("rejects $label", async ({ send }) => {
+    seedCompletion(500, 0);
+    const before = stateSnapshot();
+    const random = vi.spyOn(Math, "random");
+    try {
+      const response = await send(request(app).post("/api/shop/buy")).expect(400);
+      expect(response.headers["content-type"]).toContain("application/json");
+      expect(response.body).toEqual({ error: "shop purchases are unavailable" });
+      expect(random).not.toHaveBeenCalled();
+      expect(stateSnapshot()).toEqual(before);
+    } finally {
+      random.mockRestore();
+    }
   });
 
-  it("charges once, deals two pulls, and a replayed ref 409s without re-charging", async () => {
-    seedXp(600);
-    const res = await request(app).post("/api/shop/buy").send({ item: "pack", ref: "p2" });
-    expect(res.status).toBe(200);
-    expect(res.body.pulls).toHaveLength(2);
-    const refunds = res.body.pulls.reduce(
-      (sum: number, p: { refund: number }) => sum + p.refund,
-      0,
-    );
-    expect(res.body.xp).toBe(600 - 250 + refunds);
+  it("retains malformed-JSON and body-limit middleware precedence", async () => {
+    const malformed = await request(app)
+      .post("/api/shop/buy")
+      .set("Content-Type", "application/json")
+      .send('{"item":')
+      .expect(400);
+    expect(malformed.body).not.toEqual({ error: "shop purchases are unavailable" });
 
-    const retry = await request(app).post("/api/shop/buy").send({ item: "pack", ref: "p2" });
-    expect(retry.status).toBe(409);
-    expect((await request(app).get("/api/shop")).body.xp).toBe(600 - 250 + refunds);
+    const overLimit = await request(app)
+      .post("/api/shop/buy")
+      .set("Content-Type", "application/json")
+      .send(JSON.stringify({ padding: "x".repeat(110_000) }))
+      .expect(413);
+    expect(overLimit.body).not.toEqual({ error: "shop purchases are unavailable" });
   });
 
-  it("requires a ref — a purchase with no idempotency handle is refused", async () => {
-    seedXp(600);
-    const res = await request(app).post("/api/shop/buy").send({ item: "pack" });
-    expect(res.status).toBe(400);
-  });
-});
-
-describe("POST /api/shop/buy — freeze", () => {
-  it("banks a token derived from the purchase ledger row itself", async () => {
-    seedXp(500);
-    const res = await request(app).post("/api/shop/buy").send({ item: "freeze", ref: "f1" });
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ xp: 0, freezesBanked: 1 });
-    // No streak_freezes row: the buy:freeze ledger row IS the token — writing
-    // the milestone table would swallow a same-day organic earn (ADR-62).
-    expect(db.prepare("SELECT COUNT(*) AS n FROM streak_freezes").get()).toEqual({ n: 0 });
-  });
-
-  it("a full bank refuses BEFORE the charge", async () => {
-    seedXp(1500);
-    await request(app).post("/api/shop/buy").send({ item: "freeze", ref: "f2" }).expect(200);
-    await request(app).post("/api/shop/buy").send({ item: "freeze", ref: "f3" }).expect(200);
-    const third = await request(app).post("/api/shop/buy").send({ item: "freeze", ref: "f4" });
-    expect(third.status).toBe(400);
-    expect(third.body.error).toContain("full");
-    expect((await request(app).get("/api/shop")).body.xp).toBe(500); // charged exactly twice
-  });
-
-  it("a bought token does not block a same-day ORGANIC milestone earn", async () => {
-    // The regression ADR-62 exists to prevent: shouldEarnFreeze reads only
-    // the milestone table, so a shop purchase today must leave an organic
-    // earn's INSERT path untouched.
-    seedXp(500);
-    await request(app).post("/api/shop/buy").send({ item: "freeze", ref: "f5" }).expect(200);
-    const organic = db
-      .prepare("INSERT OR IGNORE INTO streak_freezes (milestone_day, created_at) VALUES (?, ?)")
-      .run(new Date().toISOString().slice(0, 10), new Date().toISOString());
-    expect(organic.changes).toBe(1);
+  it("retains authentication precedence for valid parsed requests", async () => {
+    const { createApp } = await import("../../src/app.js");
+    const protectedApp = createApp({ password: "shop-secret" });
+    const response = await request(protectedApp)
+      .post("/api/shop/buy")
+      .send({ item: "pack", ref: "p1" })
+      .expect(401);
+    expect(response.body).not.toEqual({ error: "shop purchases are unavailable" });
   });
 });
 
-describe("pull mechanics (service-level, injected rng)", () => {
-  it("a duplicate pull refunds instead of re-owning; new pulls grow the owned set", async () => {
-    const { buyPack } = await import("../../src/services/shopService.js");
-    const { totalXp } = await import("../../src/services/gamificationService.js");
-    seedXp(1000);
-    // rng pinned low → both pulls land on the first (lowest-roll) pool entry:
-    // slot 0 owns it, slot 1 is the duplicate and refunds.
-    const { pulls } = db.transaction(() => buyPack(totalXp, "svc1", new Date(), () => 0))();
-    expect(pulls[0].duplicate).toBe(false);
-    expect(pulls[1].duplicate).toBe(true);
-    expect(pulls[1].refund).toBe(75);
-    expect(pulls[0].back.key).toBe(pulls[1].back.key);
+describe("POST /api/shop/equip — compatibility", () => {
+  it("equips an owned back, refuses an unowned one, and returns the exact shape", async () => {
+    db.prepare(
+      "INSERT INTO settings (key, value) VALUES ('owned_card_backs', '[\"classic\",\"ember\"]')",
+    ).run();
+    const ok = await request(app).post("/api/shop/equip").send({ back: "ember" }).expect(200);
+    expect(Object.keys(ok.body).sort()).toEqual(exactKeys);
+    expect(ok.body.equipped).toBe("ember");
 
-    const shop = (await request(app).get("/api/shop")).body;
-    const ownedKeys = shop.backs.filter((b: { owned: boolean }) => b.owned).map((b: { key: string }) => b.key);
-    expect(ownedKeys).toContain(pulls[0].back.key);
-    expect(shop.xp).toBe(1000 - 250 + 75);
-  });
-});
-
-describe("POST /api/shop/equip", () => {
-  it("equips an owned back and refuses an unowned one", async () => {
-    seedXp(1000);
-    const { buyPack } = await import("../../src/services/shopService.js");
-    const { totalXp } = await import("../../src/services/gamificationService.js");
-    const { pulls } = db.transaction(() => buyPack(totalXp, "svc2", new Date(), () => 0))();
-    const owned = pulls[0].back.key;
-
-    const ok = await request(app).post("/api/shop/equip").send({ back: owned });
-    expect(ok.status).toBe(200);
-    expect(ok.body.equipped).toBe(owned);
-
-    const bad = await request(app).post("/api/shop/equip").send({ back: "prism" });
-    expect(bad.status).toBe(400);
-    // Still equipped as before — a refused equip changes nothing.
-    expect((await request(app).get("/api/shop")).body.equipped).toBe(owned);
+    const bad = await request(app).post("/api/shop/equip").send({ back: "prism" }).expect(400);
+    expect(bad.body).toEqual({ error: "you do not own that card back" });
+    expect((await request(app).get("/api/shop")).body.equipped).toBe("ember");
   });
 });

@@ -50,6 +50,8 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const schema = fs
     .readFileSync(schemaPath, "utf-8")
+    .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
+    .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
     // …nor the v15 sort_order column and its stamp trigger (#157) — the
     // v6 → v15 boot adds them, so leaving them in the seed would make the ALTER
     // (and the CREATE TRIGGER) fail.

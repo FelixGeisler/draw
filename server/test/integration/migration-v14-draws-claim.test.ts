@@ -23,6 +23,8 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v13Schema = current
+    .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
+    .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
     // v15 (#157): strip the sort_order column and its stamp trigger so this
     // pre-v15 fixture does not already carry what the v15 migration adds.
     .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
@@ -61,9 +63,9 @@ beforeAll(async () => {
 });
 
 describe("migration v13 → v14 (#156, ADR-42)", () => {
-  it("runs the chain to the current version (17: v14 draws/claim, v15 sort_order, v16 customizations, v17 xp_ledger)", async () => {
+  it("runs the chain through the current v18 schema", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(17);
+    expect(db.pragma("user_version", { simple: true })).toBe(18);
   });
 
   it("creates the draws log with the append-only shape", async () => {

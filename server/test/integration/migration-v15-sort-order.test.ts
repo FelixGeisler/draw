@@ -29,6 +29,10 @@ const currentSchema = fs.readFileSync(schemaPath, "utf-8");
 // The v14 schema: today's schema.sql minus only the v15 sort_order column and
 // its stamp trigger (both ADDED by the v15 migration).
 const v14Schema = currentSchema
+  // v18 (#263): owner columns are ALTERed by the forward chain; the remaining
+  // v18 objects sit inside the customization strip below.
+  .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
+  .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
   .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
   .replace(/-- Stamp sort_order[\s\S]*?END;\r?\n/, "")
   // v16 (#177): strip achievement_customizations too — this pre-v15 fixture is
@@ -52,6 +56,8 @@ beforeAll(async () => {
   expect(v14Schema).not.toContain("sort_order");
   expect(v14Schema).not.toContain("tasks_stamp_sort_order");
   expect(v14Schema).not.toContain("achievement_customizations");
+  expect(v14Schema).not.toContain("gold_awarded");
+  expect(v14Schema).not.toContain("claim_gold");
 
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
   legacy.exec(v14Schema);
@@ -102,9 +108,9 @@ beforeAll(async () => {
 });
 
 describe("migration v14 → v15 adds tasks.sort_order (#157, ADR-43)", () => {
-  it("bumps user_version to 17 (v15 sort_order, then v16 customizations ride the same chain)", async () => {
+  it("runs the forward chain through schema v18", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(17);
+    expect(db.pragma("user_version", { simple: true })).toBe(18);
   });
 
   it("adds sort_order as REAL NOT NULL DEFAULT 0", async () => {
