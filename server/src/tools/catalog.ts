@@ -282,7 +282,12 @@ const updateTask = defineTool({
     "archived task cannot take subtasks (adopting one under it is rejected): un-archive it first. " +
     "On a task with recurEveryDays, dueDate is its NEXT OCCURRENCE: setting a future one takes " +
     "the card out of the deck until that day (setting today's, or clearing the recurrence, " +
-    "brings it back), while on a non-recurring task a due date never affects drawability.",
+    "brings it back), while on a non-recurring task a due date never affects drawability. " +
+    "Pause/wake recipes (one update_task call each): timed pause from any prior state = " +
+    "{ id, deferredUntil: <future ISO datetime>, blocked: false }; indefinite pause = " +
+    "{ id, blocked: true }; manual resume from either mode = " +
+    "{ id, deferredUntil: <current ISO datetime>, blocked: false }. Timed pauses wake " +
+    "automatically after the instant passes; blocked: true wins over a timed pause.",
   inputSchema: {
     id: idSchema,
     title: z.string().min(1).optional(),
@@ -297,6 +302,21 @@ const updateTask = defineTool({
     impact: impactSchema.optional(),
     effortMinutes: z.number().int().positive().nullable().optional(),
     dueDate: dateSchema.nullable().optional(),
+    deferredUntil: z
+      .string()
+      .nullable()
+      .optional()
+      .describe(
+        "ISO datetime passed to the task API. A future instant is a timed pause and wakes " +
+          "automatically after expiry. null only clears the retained timestamp; it is not the " +
+          "manual-resume recipe. Resume with the current ISO datetime plus blocked: false",
+      ),
+    blocked: z
+      .boolean()
+      .optional()
+      .describe(
+        "true pauses indefinitely and wins over a timed pause; false clears the indefinite block",
+      ),
     recurEveryDays: z
       .number()
       .int()
