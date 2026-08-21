@@ -239,23 +239,32 @@ export function completeTask(
 // ---------------------------------------------------------------------------
 // XP / levels — always derived from completions, never stored.
 
-// XP has TWO stored sources since #156 (ADR-42, amending ADR-5): the
-// completions log (as ever) plus claimed achievements. Both are honest event
-// facts — a claim is a one-time payout, guarded idempotent by the achievements
-// primary key — so summing them stays within the "derive from logs, never a
-// stored counter" spirit: there is still no `xp` column anywhere.
+// Permanent XP (#263) keeps every historical ledger row but treats only a
+// daily-challenge payout as XP. Legacy shop purchase/refund rows are inert;
+// completion and claim facts remain the other two exact sources.
 export function totalXp(): number {
-  // Third source since #230 (ADR-62): the xp_ledger — shop purchases
-  // (negative), duplicate refunds and challenge payouts (positive). Spending
-  // can lower the level; unlocked achievements never re-lock (append-only).
   const row = db
     .prepare(
       `SELECT COALESCE((SELECT SUM(xp_awarded) FROM completions), 0)
             + COALESCE((SELECT SUM(claim_xp) FROM achievements), 0)
-            + COALESCE((SELECT SUM(amount) FROM xp_ledger), 0) AS xp`,
+            + COALESCE((
+                SELECT SUM(amount) FROM xp_ledger WHERE reason = 'challenge'
+              ), 0) AS xp`,
     )
     .get() as { xp: number };
   return row.xp;
+}
+
+/** Gold is derived, unclamped, from its three owning event sources (#263). */
+export function totalGold(): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE((SELECT SUM(gold_awarded) FROM completions), 0)
+            + COALESCE((SELECT SUM(claim_gold) FROM achievements), 0)
+            + COALESCE((SELECT SUM(amount) FROM gold_ledger), 0) AS gold`,
+    )
+    .get() as { gold: number };
+  return row.gold;
 }
 
 /** XP needed to advance from level n to n+1: 100 * n^1.5 */

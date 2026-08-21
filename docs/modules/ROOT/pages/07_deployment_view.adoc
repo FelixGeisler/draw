@@ -328,7 +328,10 @@ this section instead of a button.
 if a migration ran in between — restore a backup from before the update
 (xref:09_architecture_decisions.adoc[ADR-26]; the backup importer refuses
 newer-versioned archives, so restoring an older backup into an older image
-is the supported direction). *Bare-npm path:* `git pull`, `npm ci`,
+is the supported direction). Current images accept backups through schema
+v18: older files migrate and undergo complete v18 schema/immutability
+validation in staging before the live database moves; a missing or weakened
+contract leaves the live deployment untouched. *Bare-npm path:* `git pull`, `npm ci`,
 `npm run build`, restart `npm start` — the check and the banner work the
 same; only the trigger button is container-specific.
 

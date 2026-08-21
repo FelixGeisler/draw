@@ -22,10 +22,13 @@ const currentSchema = fs.readFileSync(schemaPath, "utf-8");
 
 // The v15 schema: today's schema.sql minus only the v16
 // achievement_customizations table (ADDED by the v16 migration).
-const v15Schema = currentSchema.replace(
-  /-- User-customizable achievement display metadata[\s\S]*?CREATE TABLE achievement_customizations[\s\S]*?\);\r?\n\r?\n/,
-  "",
-);
+const v15Schema = currentSchema
+  .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
+  .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
+  .replace(
+    /-- User-customizable achievement display metadata[\s\S]*?CREATE TABLE achievement_customizations[\s\S]*?\);\r?\n\r?\n/,
+    "",
+  );
 
 beforeAll(async () => {
   expect(v15Schema).not.toBe(currentSchema);
@@ -44,9 +47,9 @@ beforeAll(async () => {
 });
 
 describe("migration v15 → v16 adds achievement_customizations (#177, ADR-44)", () => {
-  it("bumps user_version to 17", async () => {
+  it("bumps user_version through the current v18 chain", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(17);
+    expect(db.pragma("user_version", { simple: true })).toBe(18);
   });
 
   it("creates achievement_customizations with the display-override shape", async () => {

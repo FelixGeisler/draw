@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { V18_STATEMENTS } from "./schemaV18.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
@@ -28,38 +29,38 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 17;
+export const CURRENT_VERSION = 18;
 
-function migrate() {
-  const version = db.pragma("user_version", { simple: true }) as number;
+export function migrateDatabase(database: Database.Database = db) {
+  const version = database.pragma("user_version", { simple: true }) as number;
   if (version < 1) {
     // Fresh database — schema.sql is always the CURRENT schema.
     const schema = fs.readFileSync(path.join(here, "schema.sql"), "utf-8");
-    db.exec(schema);
+    database.exec(schema);
   } else {
     if (version < 2) {
-      db.exec("ALTER TABLE materials ADD COLUMN stored_name TEXT");
+      database.exec("ALTER TABLE materials ADD COLUMN stored_name TEXT");
     }
     if (version < 3) {
       // Snooze/block (issue #19, ADR-17).
-      db.exec("ALTER TABLE tasks ADD COLUMN deferred_until TEXT");
-      db.exec("ALTER TABLE tasks ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
+      database.exec("ALTER TABLE tasks ADD COLUMN deferred_until TEXT");
+      database.exec("ALTER TABLE tasks ADD COLUMN blocked INTEGER NOT NULL DEFAULT 0");
     }
     if (version < 4) {
       // Sequential subtask mode (issue #23, ADR-18).
-      db.exec(
+      database.exec(
         "ALTER TABLE tasks ADD COLUMN subtask_order_mode TEXT NOT NULL CHECK (subtask_order_mode IN ('parallel', 'sequential')) DEFAULT 'parallel'",
       );
     }
     if (version < 5) {
       // Availability window (issue #33, ADR-20): all three set or all NULL.
-      db.exec("ALTER TABLE tasks ADD COLUMN window_days TEXT");
-      db.exec("ALTER TABLE tasks ADD COLUMN window_start TEXT");
-      db.exec("ALTER TABLE tasks ADD COLUMN window_end TEXT");
+      database.exec("ALTER TABLE tasks ADD COLUMN window_days TEXT");
+      database.exec("ALTER TABLE tasks ADD COLUMN window_start TEXT");
+      database.exec("ALTER TABLE tasks ADD COLUMN window_end TEXT");
     }
     if (version < 6) {
       // AI card art cache (issue #27, ADR-22): sanitized SVG, once per task.
-      db.exec(`CREATE TABLE card_art (
+      database.exec(`CREATE TABLE card_art (
         task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
         svg TEXT NOT NULL,
         created_at TEXT NOT NULL
@@ -100,13 +101,13 @@ function migrate() {
       // transition guards prevent re-creating it). The guard must NOT run
       // here — it would fail the migration on the very legacy data it
       // exists to repair. Pinned by migration-v6-recurring.test.ts.
-      db.transaction(() => {
-        const findNested = db.prepare(
+      database.transaction(() => {
+        const findNested = database.prepare(
           `SELECT t.id AS id, p.parent_id AS grandparentId
            FROM tasks t JOIN tasks p ON p.id = t.parent_id
            WHERE p.parent_id IS NOT NULL`,
         );
-        const hoist = db.prepare("UPDATE tasks SET parent_id = ? WHERE id = ?");
+        const hoist = database.prepare("UPDATE tasks SET parent_id = ? WHERE id = ?");
         const reparented = new Set<number>();
         const maxPasses = (findNested.all() as unknown[]).length + 1;
         for (let pass = 0; ; pass++) {
@@ -134,7 +135,7 @@ function migrate() {
         // historical rating is grandfathered the way goal deletion
         // grandfathers one, and the ADR-4 no-op tolerance keeps such rows
         // editable. Not an oversight (ADR-24).
-        const adopt = db.prepare(
+        const adopt = database.prepare(
           `UPDATE tasks
            SET goal_id = (SELECT r.goal_id FROM tasks r WHERE r.id = tasks.parent_id),
                category_id = CASE
@@ -150,7 +151,7 @@ function migrate() {
     if (version < 8) {
       // Streak freeze tokens (issue #58, ADR-28): append-only earn log;
       // consumption stays derived at read time.
-      db.exec(`CREATE TABLE streak_freezes (
+      database.exec(`CREATE TABLE streak_freezes (
         id INTEGER PRIMARY KEY,
         milestone_day TEXT NOT NULL UNIQUE,
         created_at TEXT NOT NULL
@@ -161,8 +162,8 @@ function migrate() {
       // was completed as the dealt warm-up card (momentum derives from these
       // rows), and the rate limit becomes a user setting. INSERT OR IGNORE:
       // a restored backup may already carry the row.
-      db.exec("ALTER TABLE completions ADD COLUMN was_warmup INTEGER NOT NULL DEFAULT 0");
-      db.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('warmup_every_hours', '8')");
+      database.exec("ALTER TABLE completions ADD COLUMN was_warmup INTEGER NOT NULL DEFAULT 0");
+      database.exec("INSERT OR IGNORE INTO settings (key, value) VALUES ('warmup_every_hours', '8')");
     }
     if (version < 10) {
       // Daily hand (issue #59, ADR-34): a PURE DATA migration — the hand
@@ -173,7 +174,7 @@ function migrate() {
       // it, and the Draw page's budget input would render empty on exactly
       // the databases that predate the feature. INSERT OR IGNORE: a restored
       // backup may already carry the row.
-      db.exec(
+      database.exec(
         "INSERT OR IGNORE INTO settings (key, value) VALUES ('daily_hand_budget_minutes', '90')",
       );
     }
@@ -187,7 +188,7 @@ function migrate() {
       // is deliberately nothing to migrate — the PDFs under files/ remain the
       // source of truth, so a database that never gets an id keeps working on
       // the base64 fallback path.
-      db.exec("ALTER TABLE materials ADD COLUMN anthropic_file_id TEXT");
+      database.exec("ALTER TABLE materials ADD COLUMN anthropic_file_id TEXT");
     }
     if (version < 12) {
       // Goal resolution (#145, ADR-38): 'missed' joins the status CHECK and
@@ -208,10 +209,10 @@ function migrate() {
       // goals, so a pre-existing violation in an unrelated table cannot
       // abort the boot blaming this rebuild. No indexes/triggers/views
       // exist on goals — nothing else to recreate.
-      db.pragma("foreign_keys = OFF");
+      database.pragma("foreign_keys = OFF");
       try {
-        db.transaction(() => {
-          db.exec(`CREATE TABLE goals_new (
+        database.transaction(() => {
+          database.exec(`CREATE TABLE goals_new (
             id INTEGER PRIMARY KEY,
             title TEXT NOT NULL,
             outcome TEXT,
@@ -221,13 +222,13 @@ function migrate() {
             resolved_at TEXT
           )`);
           // id copied explicitly — it is the FK target of tasks and materials.
-          db.exec(`INSERT INTO goals_new (id, title, outcome, target_date, status, created_at)
+          database.exec(`INSERT INTO goals_new (id, title, outcome, target_date, status, created_at)
                    SELECT id, title, outcome, target_date, status, created_at FROM goals`);
-          db.exec("DROP TABLE goals");
-          db.exec("ALTER TABLE goals_new RENAME TO goals");
+          database.exec("DROP TABLE goals");
+          database.exec("ALTER TABLE goals_new RENAME TO goals");
           const violations = [
-            ...(db.pragma("foreign_key_check(tasks)") as unknown[]),
-            ...(db.pragma("foreign_key_check(materials)") as unknown[]),
+            ...(database.pragma("foreign_key_check(tasks)") as unknown[]),
+            ...(database.pragma("foreign_key_check(materials)") as unknown[]),
           ];
           if (violations.length > 0) {
             throw new Error(
@@ -236,7 +237,7 @@ function migrate() {
           }
         })();
       } finally {
-        db.pragma("foreign_keys = ON");
+        database.pragma("foreign_keys = ON");
       }
     }
     if (version < 13) {
@@ -248,7 +249,7 @@ function migrate() {
       // code can read. v10 above stays verbatim: on a pre-v10 file it still
       // seeds the row this step deletes, which is the honest replay of
       // history (the chain test pins exactly that).
-      db.exec("DELETE FROM settings WHERE key IN ('daily_hand_budget_minutes', 'daily_hand')");
+      database.exec("DELETE FROM settings WHERE key IN ('daily_hand_budget_minutes', 'daily_hand')");
     }
     if (version < 14) {
       // Achievement chains + claim-for-XP (#156, ADR-42). Two additions:
@@ -265,14 +266,14 @@ function migrate() {
       //      no backfill — every pre-#156 row reads as "unlocked, unclaimed",
       //      which is exactly the launch-payday state (the 11 existing unlocks
       //      become immediately claimable).
-      db.exec(`CREATE TABLE draws (
+      database.exec(`CREATE TABLE draws (
         id INTEGER PRIMARY KEY,
         task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
         drawn_at TEXT NOT NULL,
         was_warmup INTEGER NOT NULL DEFAULT 0
       )`);
-      db.exec("ALTER TABLE achievements ADD COLUMN claimed_at TEXT");
-      db.exec("ALTER TABLE achievements ADD COLUMN claim_xp INTEGER");
+      database.exec("ALTER TABLE achievements ADD COLUMN claimed_at TEXT");
+      database.exec("ALTER TABLE achievements ADD COLUMN claim_xp INTEGER");
     }
     if (version < 15) {
       // Stored sibling positions (#157, ADR-43): explicit, reorderable order
@@ -310,12 +311,12 @@ function migrate() {
       // set sort_order explicitly (> 0), so the `WHEN NEW.sort_order = 0` guard
       // leaves them in the archived original's slot. Root order stays creation
       // order (roots are not reorderable).
-      db.exec("ALTER TABLE tasks ADD COLUMN sort_order REAL NOT NULL DEFAULT 0");
-      db.exec(`WITH ranked AS (
+      database.exec("ALTER TABLE tasks ADD COLUMN sort_order REAL NOT NULL DEFAULT 0");
+      database.exec(`WITH ranked AS (
                  SELECT id, ROW_NUMBER() OVER (ORDER BY created_at ASC, id ASC) AS rn FROM tasks
                )
                UPDATE tasks SET sort_order = (SELECT rn FROM ranked WHERE ranked.id = tasks.id)`);
-      db.exec(`CREATE TRIGGER tasks_stamp_sort_order AFTER INSERT ON tasks
+      database.exec(`CREATE TRIGGER tasks_stamp_sort_order AFTER INSERT ON tasks
         WHEN NEW.sort_order = 0
         BEGIN
           UPDATE tasks SET sort_order =
@@ -342,7 +343,7 @@ function migrate() {
       // `resolved_at` (ADR-38) and `sort_order` (ADR-43) WITHIN ADR-2, which
       // bans stored DERIVABLES, not stored facts. Rides the backup/restore
       // round trip like any other table (reopenDatabase re-migrates, ADR-26).
-      db.exec(`CREATE TABLE achievement_customizations (
+      database.exec(`CREATE TABLE achievement_customizations (
         key TEXT PRIMARY KEY,
         title TEXT,
         description TEXT,
@@ -351,16 +352,15 @@ function migrate() {
     }
 
     if (version < 17) {
-      // XP ledger (#230, ADR-62): the third stored XP source after the
-      // completions log and achievement claims (ADR-42). Every row is an
-      // event fact — a shop purchase (negative amount), a pack-duplicate
-      // refund or a daily-challenge payout (positive) — and totalXp() sums
-      // them, so there is STILL no xp counter column anywhere (ADR-5).
+      // XP ledger (#230, ADR-62): append-only event facts for the legacy shop
+      // and daily challenge. Since v18 (#263), only challenge amounts enter
+      // permanent XP; retained purchase/refund rows remain auditable and
+      // buy:freeze timestamps continue to replay historical freeze earns.
       //
       // UNIQUE(reason, ref) is the idempotency spine: "one challenge payout
       // per local day" and "one purchase per client-supplied ref" are both
       // INSERT OR IGNORE against it, the streak_freezes milestone pattern.
-      db.exec(`CREATE TABLE xp_ledger (
+      database.exec(`CREATE TABLE xp_ledger (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         amount INTEGER NOT NULL,
         reason TEXT NOT NULL,
@@ -369,11 +369,20 @@ function migrate() {
         UNIQUE(reason, ref)
       )`);
     }
+    if (version < 18) {
+      // Gold/opening compatibility cutover (#263): one transaction means a
+      // failed DDL statement leaves a v17 database and every existing fact
+      // untouched. user_version advances only after the full contract lands.
+      database.transaction(() => {
+        for (const statement of V18_STATEMENTS) database.exec(statement);
+        database.pragma(`user_version = ${CURRENT_VERSION}`);
+      })();
+    }
   }
-  db.pragma(`user_version = ${CURRENT_VERSION}`);
+  if (version < 1) database.pragma(`user_version = ${CURRENT_VERSION}`);
 }
 
-migrate();
+migrateDatabase();
 
 /**
  * Close the current handle (if still open) and reopen the database file at
@@ -384,7 +393,7 @@ migrate();
 export function reopenDatabase() {
   if (db.open) db.close();
   db = openDatabase();
-  migrate();
+  migrateDatabase();
 }
 
 // Settings key for the Claude API key. Stored plaintext in the local

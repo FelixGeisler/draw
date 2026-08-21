@@ -101,6 +101,7 @@ CREATE TABLE completions (
   completed_at TEXT NOT NULL,
   was_drawn INTEGER NOT NULL DEFAULT 0,
   xp_awarded INTEGER NOT NULL DEFAULT 0,
+  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK (gold_awarded >= 0),
   -- Warm-up draw (#57, ADR-30): 1 when the task was completed as the dealt
   -- warm-up card. Momentum (×1.25 on the NEXT completion within 30 minutes)
   -- is derived from these rows at completion time, never stored — undoing the
@@ -149,7 +150,8 @@ CREATE TABLE achievements (
   -- claim time (the client is never the XP authority). Both NULL until claimed;
   -- idempotent by the primary key — one row per key, one claim ever.
   claimed_at TEXT,
-  claim_xp INTEGER
+  claim_xp INTEGER,
+  claim_gold INTEGER CHECK (claim_gold IS NULL OR claim_gold >= 0)
 );
 
 -- Draw log (#156, ADR-42): append-only event log of every card dealt, the
@@ -188,9 +190,10 @@ CREATE TABLE streak_freezes (
 -- all-default row). USER STATE, not derivable (ADR-2 bans stored derivables,
 -- not stored facts — it stands with resolved_at, ADR-38, and sort_order,
 -- ADR-43). Unlock/claim/XP/rarity and the shared key set stay untouched.
--- XP ledger (#230, ADR-62): purchases (negative), refunds and challenge
--- payouts (positive). Third XP source after completions and claims; summed by
--- totalXp(), never a counter. UNIQUE(reason, ref) = idempotency spine.
+-- XP ledger (#230/#263, ADR-62): retained append-only legacy shop effects and
+-- challenge payouts. Only reason='challenge' contributes to permanent XP;
+-- buy:freeze timestamps remain historical freeze earns. UNIQUE(reason, ref)
+-- is the idempotency spine.
 CREATE TABLE xp_ledger (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   amount INTEGER NOT NULL,
@@ -199,6 +202,85 @@ CREATE TABLE xp_ledger (
   created_at TEXT NOT NULL,
   UNIQUE(reason, ref)
 );
+
+CREATE INDEX idx_xp_ledger_reason ON xp_ledger(reason);
+
+-- Empty v18 Gold effect ledger (#263). Completion and achievement Gold stays
+-- on its owning fact; only future challenge/purchase/refund/bonus effects use
+-- this append-only log. The BEFORE INSERT guard makes INSERT OR REPLACE abort
+-- before SQLite can delete a conflicting row while recursive_triggers is off.
+CREATE TABLE gold_ledger (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  amount INTEGER NOT NULL,
+  reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+  ref TEXT NOT NULL CHECK (length(trim(ref)) > 0),
+  created_at TEXT NOT NULL,
+  UNIQUE (reason, ref)
+);
+
+CREATE TRIGGER gold_ledger_no_replace
+BEFORE INSERT ON gold_ledger
+WHEN EXISTS (
+  SELECT 1 FROM gold_ledger
+  WHERE id = NEW.id OR (reason = NEW.reason AND ref = NEW.ref)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'gold_ledger is append-only');
+END;
+
+CREATE TRIGGER gold_ledger_no_update
+BEFORE UPDATE ON gold_ledger
+BEGIN
+  SELECT RAISE(ABORT, 'gold_ledger is append-only');
+END;
+
+CREATE TRIGGER gold_ledger_no_delete
+BEFORE DELETE ON gold_ledger
+BEGIN
+  SELECT RAISE(ABORT, 'gold_ledger is append-only');
+END;
+
+-- Future opening replay log (#263). opening_order is replay order and ref is
+-- the future idempotency key; v18 creates no producer and leaves it empty.
+CREATE TABLE pack_openings (
+  opening_order INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref TEXT NOT NULL UNIQUE CHECK (length(trim(ref)) > 0),
+  payment TEXT NOT NULL CHECK (payment IN ('gold', 'ticket')),
+  back_key TEXT NOT NULL CHECK (length(trim(back_key)) > 0),
+  rarity TEXT NOT NULL
+    CHECK (rarity IN ('common', 'rare', 'ultra-rare', 'secret-rare')),
+  duplicate INTEGER NOT NULL CHECK (duplicate IN (0, 1)),
+  secret_chance_bp INTEGER NOT NULL
+    CHECK (
+      secret_chance_bp BETWEEN 500 AND 1500
+      AND secret_chance_bp % 50 = 0
+    ),
+  effective_bonus TEXT NOT NULL
+    CHECK (effective_bonus IN ('none', 'freeze', 'pouch', 'ticket')),
+  opened_at TEXT NOT NULL
+);
+
+CREATE TRIGGER pack_openings_no_replace
+BEFORE INSERT ON pack_openings
+WHEN EXISTS (
+  SELECT 1 FROM pack_openings
+  WHERE opening_order = NEW.opening_order OR ref = NEW.ref
+)
+BEGIN
+  SELECT RAISE(ABORT, 'pack_openings are immutable');
+END;
+
+CREATE TRIGGER pack_openings_no_update
+BEFORE UPDATE ON pack_openings
+BEGIN
+  SELECT RAISE(ABORT, 'pack_openings are immutable');
+END;
+
+CREATE TRIGGER pack_openings_no_delete
+BEFORE DELETE ON pack_openings
+BEGIN
+  SELECT RAISE(ABORT, 'pack_openings are immutable');
+END;
 
 CREATE TABLE achievement_customizations (
   key TEXT PRIMARY KEY,
