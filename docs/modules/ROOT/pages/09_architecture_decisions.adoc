@@ -2628,33 +2628,54 @@ fetched. The fixed GHCR boundary permits one fail-closed Bearer exchange for
 the exact combined `WWW-Authenticate` value exposed by Fetch (without claiming
 visibility of physical header-field cardinality), confines optional paired
 Basic credentials to the exact token endpoint and Bearer credentials to the
-registry origin, follows no redirect, retries only the authenticated named
-restart, and uses one resource-specific non-wildcard `Accept` value.
+registry origin, retries only the authenticated named restart, and uses one
+resource-specific non-wildcard `Accept` value. Named/digest indexes, manifests,
+tokens, and errors still reject every redirect. The sole exception is an
+`amd64-config` or `arm64-config` digest-pinned blob GET: it may accept one empty
+307 and manually follow one HTTPS Location on
+`pkg-containers.githubusercontent.com` whose exact
+`/ghcrblobs<positive-decimal>/blobs/<requested-digest>` path binds it to that
+config. The complete nonempty signed query remains opaque and is passed through
+without application-level query parsing, normalization, or reserialization. The
+follow carries only octet-stream and
+identity Accept headers--no Authorization, Cookie, or Referer--and rejects any
+further redirect.
 * *Transport evidence is bounded before interpretation.* Every registry,
-challenge/error, and token response requests identity encoding, rejects any
-Fetch-visible coding other than absent or exact `identity`, and streams at most
-1 MiB of bytes exposed by Fetch before strict parsing or OCI validation. Six
-physical requests complete an unchallenged graph; a challenge adds one failed
-named request and one token request, for at most eight requests. Each physical
-request has a 20-second fetch-and-stream deadline inside one non-resetting
-90-second overall deadline. Requests remain sequential, stop at the first
-failure, and SIGINT/SIGTERM abort the active operation. Exit 0 is the sole JSON
-success; structured initial-name absence is exit 3; usage/credential setup is
-exit 2; authentication, transport, timeout, strict-JSON, and graph failures are
-exit 1. Output is one bounded sanitized line where applicable and never includes
-credentials, tokens, challenge/error bodies, or ignored error details.
+challenge/error, token, redirect, and CDN response requests identity encoding,
+rejects any Fetch-visible coding other than absent or exact `identity`, and
+streams at most 1 MiB of bytes exposed by Fetch before strict parsing or OCI
+validation. The 307 body must be exactly empty; the followed 200 config still
+passes descriptor size, content type, digest, and optional Docker digest checks.
+Six physical requests complete an unchallenged direct graph and eight complete
+one with both config redirects. A challenge adds one failed named request and
+one token request, so challenged success uses eight direct requests or at most
+ten with both redirects. Registry and token allowances do not increase. Every
+307 and CDN follow has its own 20-second fetch-and-stream deadline inside the
+same non-resetting 90-second overall deadline. Requests remain sequential, stop
+at the first failure, and SIGINT/SIGTERM abort the active operation. Exit 0 is
+the sole JSON success; structured initial-name absence is exit 3;
+usage/credential setup is exit 2; authentication, transport, timeout,
+strict-JSON, and graph failures are exit 1. Output is one bounded sanitized line
+where applicable and never includes credentials, tokens, capability queries,
+complete capability URLs, challenge/error bodies, or ignored error details.
 * *The test seam does not widen production policy.* Production always constructs
 and validates canonical HTTPS `Request` objects before calling Node 22 global
 `fetch`; it has no transport selector or capture facility. Deterministic tests
 may inject a trusted Fetch-compatible adapter that maps those already-validated
-requests to local HTTP and retains only in-memory, authorization-redacted
-evidence. This adapter can technically inspect, alter, ignore, or replace a
-request and is not a security boundary. The runner remains the single policy
-path, so future publication can call the same expected-revision CLI without
-reimplementing registry or OCI rules.
+requests to local HTTP and retains only in-memory, authorization-redacted and
+capability-query-redacted evidence. This adapter can technically inspect,
+alter, ignore, or replace a request and is not a security boundary. The runner
+remains the single policy path, so future publication can call the same
+expected-revision CLI without reimplementing registry or OCI rules.
+* *The CDN exception is calibrated compatibility, not a provider contract.* Its
+GitHub-owned host and path shape reflect GHCR's observed config delivery; any
+status, origin, path-shape, or query-presence drift fails closed pending another
+reviewed compatibility change. The client deliberately does not interpret the
+provider's signed query, and the exception makes no CDN-availability promise.
 * *Consistency is not provenance authenticity.* Digest, size, media, platform,
 and revision agreement closes internal graph substitution after name
-resolution, but an authorized substitution before resolution remains
+resolution, and descriptor-size plus digest validation detects substituted CDN
+config bytes, but an authorized substitution before resolution remains
 undetectable without a signature or independently trusted digest anchor. #276
 accepts that residual risk and performs no registry mutation, publication, or
 promotion.
