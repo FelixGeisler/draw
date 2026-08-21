@@ -15,6 +15,26 @@ function caught(input: unknown): StrictJsonError {
   throw new Error("expected parseStrictJson to fail");
 }
 
+function withArrayMethodPollution<T>(
+  name: "push" | "pop",
+  replacement: (...args: any[]) => unknown,
+  call: () => T,
+): T {
+  const descriptor = Object.getOwnPropertyDescriptor(Array.prototype, name);
+  if (!descriptor) throw new Error(`Array.prototype.${name} is unavailable`);
+  const polluted = Object.create(null);
+  polluted.value = replacement;
+  polluted.enumerable = descriptor.enumerable;
+  polluted.configurable = descriptor.configurable;
+  polluted.writable = descriptor.writable;
+  Object.defineProperty(Array.prototype, name, polluted);
+  try {
+    return call();
+  } finally {
+    Object.defineProperty(Array.prototype, name, descriptor);
+  }
+}
+
 describe("parseStrictJson contract", () => {
   it("exports exactly the parser and typed error", async () => {
     // @ts-expect-error JavaScript module has no declaration file.
@@ -105,5 +125,31 @@ describe("parseStrictJson contract", () => {
     } finally {
       delete (Object.prototype as Record<string, unknown>).strictJsonSetterProbe;
     }
+  });
+
+  it("constructs parsed arrays without inherited push or pop", () => {
+    const parsed = withArrayMethodPollution(
+      "push",
+      function pollutedPush(this: unknown[], ...items: unknown[]) {
+        for (let index = 0; index < items.length; index += 1) {
+          const descriptor = Object.create(null);
+          descriptor.value = typeof items[index] === "number" ? 999 : items[index];
+          descriptor.enumerable = true;
+          descriptor.configurable = true;
+          descriptor.writable = true;
+          Reflect.defineProperty(this, String(this.length), descriptor);
+        }
+        return this.length;
+      },
+      () => parseStrictJson(bytes('{"values":[1,{"nested":[2]}]}')),
+    );
+    expect(parsed).toEqual({ values: [1, { nested: [2] }] });
+
+    const empty = withArrayMethodPollution(
+      "pop",
+      () => { throw new Error("polluted pop must not run"); },
+      () => parseStrictJson(bytes("[]")),
+    );
+    expect(empty).toEqual([]);
   });
 });

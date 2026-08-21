@@ -14,6 +14,19 @@ function syntax(message) {
   throw new StrictJsonError("JSON_SYNTAX", message);
 }
 
+function defineOwnData(target, key, value) {
+  const descriptor = Object.create(null);
+  descriptor.value = value;
+  descriptor.enumerable = true;
+  descriptor.configurable = true;
+  descriptor.writable = true;
+  if (!Reflect.defineProperty(target, key, descriptor)) syntax("JSON value could not be constructed");
+}
+
+function appendOwn(array, value) {
+  defineOwnData(array, String(array.length), value);
+}
+
 class Parser {
   constructor(text) {
     this.text = text;
@@ -34,14 +47,14 @@ class Parser {
       if (frame.type === "array") {
         if (frame.state === "value-or-end" && this.text[this.position] === "]") {
           this.position += 1;
-          stack.pop();
+          stack.length -= 1;
           continue;
         }
         if (frame.state === "comma-or-end") {
           const separator = this.text[this.position];
           if (separator === "]") {
             this.position += 1;
-            stack.pop();
+            stack.length -= 1;
             continue;
           }
           if (separator !== ",") syntax("Expected ',' or ']' in JSON array");
@@ -51,22 +64,22 @@ class Parser {
         }
 
         const item = this.parseValueToken();
-        frame.value.push(item.value);
+        appendOwn(frame.value, item.value);
         frame.state = "comma-or-end";
-        if (item.frame) stack.push(item.frame);
+        if (item.frame) appendOwn(stack, item.frame);
         continue;
       }
 
       if (frame.state === "key-or-end" && this.text[this.position] === "}") {
         this.position += 1;
-        stack.pop();
+        stack.length -= 1;
         continue;
       }
       if (frame.state === "comma-or-end") {
         const separator = this.text[this.position];
         if (separator === "}") {
           this.position += 1;
-          stack.pop();
+          stack.length -= 1;
           continue;
         }
         if (separator !== ",") syntax("Expected ',' or '}' in JSON object");
@@ -86,14 +99,9 @@ class Parser {
       this.skipWhitespace();
 
       const member = this.parseValueToken();
-      Object.defineProperty(frame.value, name, {
-        value: member.value,
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
+      defineOwnData(frame.value, name, member.value);
       frame.state = "comma-or-end";
-      if (member.frame) stack.push(member.frame);
+      if (member.frame) appendOwn(stack, member.frame);
     }
 
     this.skipWhitespace();

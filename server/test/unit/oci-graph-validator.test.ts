@@ -67,6 +67,26 @@ function withArrayIteratorPollution<T>(
   }
 }
 
+function withArrayMethodPollution<T>(
+  name: "push" | "pop" | "includes" | "every",
+  replacement: (...args: any[]) => unknown,
+  call: () => T,
+): T {
+  const descriptor = Object.getOwnPropertyDescriptor(Array.prototype, name);
+  if (!descriptor) throw new Error(`Array.prototype.${name} is unavailable`);
+  const polluted = Object.create(null);
+  polluted.value = replacement;
+  polluted.enumerable = descriptor.enumerable;
+  polluted.configurable = descriptor.configurable;
+  polluted.writable = descriptor.writable;
+  Object.defineProperty(Array.prototype, name, polluted);
+  try {
+    return call();
+  } finally {
+    Object.defineProperty(Array.prototype, name, descriptor);
+  }
+}
+
 describe("validateOciGraph staged contract", () => {
   it("exports exactly the validator and typed error", async () => {
     // @ts-expect-error JavaScript module has no declaration file.
@@ -364,6 +384,54 @@ describe("OCI index, descriptor, manifest, and config schemas", () => {
     );
 
     expect(result.fetchPlan).toEqual(expectedPlan(fixture.records[2]));
+  });
+
+  it("does not trust inherited array methods while parsing and snapshotting schema arrays", () => {
+    let validDescriptor: Record<string, any> | null = null;
+    const malformed = makeFixture({ mutateIndex: (index) => {
+      validDescriptor = structuredClone(index.manifests[0]);
+      index.manifests[0].digest = "invalid";
+    } });
+
+    const pushError = withArrayMethodPollution(
+      "push",
+      function pollutedPush(this: unknown[], ...items: unknown[]) {
+        for (let index = 0; index < items.length; index += 1) {
+          const item = items[index];
+          const replacement = item !== null && typeof item === "object" &&
+            Object.hasOwn(item, "digest") && (item as Record<string, unknown>).digest === "invalid"
+            ? validDescriptor
+            : item;
+          const descriptor = Object.create(null);
+          descriptor.value = replacement;
+          descriptor.enumerable = true;
+          descriptor.configurable = true;
+          descriptor.writable = true;
+          Reflect.defineProperty(this, String(this.length), descriptor);
+        }
+        return this.length;
+      },
+      () => {
+        try {
+          validateOciGraph(deriveCall([malformed.records[0]]));
+        } catch (error) {
+          return error;
+        }
+        return null;
+      },
+    );
+    expect(pushError).toBeInstanceOf(OciGraphValidationError);
+    expect(pushError).toMatchObject({ code: "SCHEMA_INVALID", stage: "named-index" });
+
+    const valid = makeFixture();
+    for (const name of ["pop", "includes", "every"] as const) {
+      const result = withArrayMethodPollution(
+        name,
+        () => { throw new Error(`polluted ${name} must not run`); },
+        () => validateOciGraph(expectedCall(valid.records.slice(0, 2))),
+      );
+      expect(result.fetchPlan).toEqual(expectedPlan(valid.records[2]));
+    }
   });
 
   it("rejects malformed own index and layer descriptors that a polluted iterator tries to substitute", () => {

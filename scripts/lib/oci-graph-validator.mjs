@@ -79,7 +79,11 @@ function isObject(value) {
 function hasExactOwnKeys(value, expected) {
   if (!isObject(value)) return false;
   const keys = Reflect.ownKeys(value);
-  return keys.length === expected.length && expected.every((key) => has(value, key));
+  if (keys.length !== expected.length) return false;
+  for (let index = 0; index < expected.length; index += 1) {
+    if (!has(value, expected[index])) return false;
+  }
+  return true;
 }
 
 function inspectOwnData(value) {
@@ -94,19 +98,26 @@ function inspectOwnData(value) {
       dataOnly = false;
       continue;
     }
-    Object.defineProperty(values, key, {
-      value: descriptor.value,
-      enumerable: true,
-      configurable: false,
-      writable: false,
-    });
+    if (!defineOwnData(values, key, descriptor.value, false, false)) return null;
   }
   return { keys, values, dataOnly };
 }
 
 function hasExactInspectedKeys(inspection, expected) {
-  return inspection !== null && inspection.dataOnly &&
-    inspection.keys.length === expected.length && expected.every((key) => has(inspection.values, key));
+  if (inspection === null || !inspection.dataOnly || inspection.keys.length !== expected.length) return false;
+  for (let index = 0; index < expected.length; index += 1) {
+    if (!has(inspection.values, expected[index])) return false;
+  }
+  return true;
+}
+
+function defineOwnData(target, key, value, configurable = true, writable = true) {
+  const descriptor = Object.create(null);
+  descriptor.value = value;
+  descriptor.enumerable = true;
+  descriptor.configurable = configurable;
+  descriptor.writable = writable;
+  return Reflect.defineProperty(target, key, descriptor);
 }
 
 function snapshotDenseArray(value, { strings = false } = {}) {
@@ -114,14 +125,14 @@ function snapshotDenseArray(value, { strings = false } = {}) {
   const inspection = inspectOwnData(value);
   if (inspection === null || !inspection.dataOnly) return null;
   const length = inspection.values.length;
-  if (!Number.isSafeInteger(length) || length < 0 || inspection.keys.length !== length + 1 || !inspection.keys.includes("length")) {
+  if (!Number.isSafeInteger(length) || length < 0 || inspection.keys.length !== length + 1 || !has(inspection.values, "length")) {
     return null;
   }
   const snapshot = [];
   for (let index = 0; index < length; index += 1) {
     const key = String(index);
     if (!has(inspection.values, key) || (strings && typeof inspection.values[key] !== "string")) return null;
-    snapshot.push(inspection.values[key]);
+    if (!defineOwnData(snapshot, key, inspection.values[key])) return null;
   }
   return Object.freeze(snapshot);
 }
