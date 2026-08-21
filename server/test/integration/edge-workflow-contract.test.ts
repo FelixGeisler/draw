@@ -105,7 +105,7 @@ describe("edge workflow privilege, concurrency, and action supply chain", () => 
     expect(beforeSteps).toMatch(
       /permissions:\s*\n\s+contents:\s*read\s*\n\s+packages:\s*write\s*\n/,
     );
-    expect(beforeSteps.match(/^\s+[a-z-]+:\s*(read|write)$/gm)).toEqual([
+    expect(beforeSteps.match(/^[ \t]+[a-z-]+:[ \t]*(read|write)[ \t]*$/gm)).toEqual([
       "      contents: read",
       "      packages: write",
     ]);
@@ -219,11 +219,11 @@ describe("edge workflow absent build contract", () => {
       /build-args:\s*\|\s*\n\s+DRAW_BUILD_CHANNEL=edge\s*\n\s+DRAW_BUILD_SHA=\$\{\{ steps\.target\.outputs\.sha \}\}/,
     );
     expect(build.match(/DRAW_BUILD_/g)).toHaveLength(2);
-    expect(build).toContain(
-      "labels: |\n            org.opencontainers.image.revision=${{ steps.target.outputs.sha }}",
+    expect(build).toMatch(
+      /labels: \|\r?\n\s+org\.opencontainers\.image\.revision=\$\{\{ steps\.target\.outputs\.sha \}\}/,
     );
-    expect(build).toContain(
-      "annotations: |\n            index:org.opencontainers.image.revision=${{ steps.target.outputs.sha }}",
+    expect(build).toMatch(
+      /annotations: \|\r?\n\s+index:org\.opencontainers\.image\.revision=\$\{\{ steps\.target\.outputs\.sha \}\}/,
     );
   });
 
