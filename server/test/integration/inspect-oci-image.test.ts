@@ -101,7 +101,10 @@ function runner(origin: string, options: {
   };
 }
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 async function runChild(scenario: string) {
   const child = fork(fileURLToPath(new URL("../support/inspect-oci-image-child.mjs", import.meta.url)), [scenario], {
@@ -520,28 +523,41 @@ describe("bounded GHCR inspector integration", () => {
     }
   });
 
-  it("enforces the Fetch-exposed 1 MiB streaming cap without trusting Content-Length", async () => {
-    let closedEarly = false;
-    const local = await fakeServer((request, response) => {
-      request.on("close", () => { closedEarly = true; });
-      response.writeHead(200, {
+  it.each([
+    { label: "misleading under-limit", contentLength: "1024" },
+    { label: "absent", contentLength: undefined },
+  ])("enforces the Fetch-exposed 1 MiB streaming cap with $label Content-Length", async ({ contentLength }) => {
+    let calls = 0;
+    let cancellations = 0;
+    let requestAborted = false;
+    const transport = async (request: Request) => {
+      calls += 1;
+      request.signal.addEventListener("abort", () => { requestAborted = true; }, { once: true });
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(1_048_576));
+          controller.enqueue(new Uint8Array([1]));
+        },
+        cancel() { cancellations += 1; },
+      });
+      const headers: Record<string, string> = {
         "Content-Type": INDEX_MEDIA_TYPE,
         "Docker-Content-Digest": `sha256:${"0".repeat(64)}`,
-        "Content-Length": "1048577",
-      });
-      response.write(Buffer.alloc(1_048_576, 0x20));
-      response.end(Buffer.from("x"));
+      };
+      if (contentLength !== undefined) headers["Content-Length"] = contentLength;
+      return new Response(body, { status: 200, headers });
+    };
+    let stdout = "";
+    let stderr = "";
+    const code = await runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {},
+      stdout: { write(value: string) { stdout += value; } },
+      stderr: { write(value: string) { stderr += value; } },
+      transport, signals: new EventEmitter(),
     });
-    try {
-      const test = runner(local.origin);
-      await expect(runCli(test.input)).resolves.toBe(1);
-      expect(test.observed).toHaveLength(1);
-      expect(test.output().stdout).toBe("");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(closedEarly).toBe(true);
-    } finally {
-      await local.close();
-    }
+    expect(code).toBe(1);
+    expect({ calls, cancellations, requestAborted }).toEqual({ calls: 1, cancellations: 1, requestAborted: true });
+    expect({ stdout, stderr }).toEqual({ stdout: "", stderr: "inspection failed: request or image validation failed\n" });
   });
 
   it("keeps the 1 MiB boundary bufferable before strict validation", async () => {
@@ -642,6 +658,47 @@ describe("bounded GHCR inspector integration", () => {
     await expect(promise).resolves.toBe(1);
     expect(calls).toBe(5);
     expect(stderr).toMatch(/^inspection failed:/);
+  });
+
+  it("rejects success when the monotonic overall deadline crosses during final synchronous validation", async () => {
+    const fixture = makeInspectionFixture();
+    const realNow = performance.now.bind(performance);
+    // Read 23 is the check immediately before the sixth synchronous core
+    // validation; crossing on read 24 simulates that validation consuming the
+    // remaining budget without yielding to the queued 90-second timer.
+    let deadlineReads = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => {
+      const stack = new Error().stack ?? "";
+      if (!stack.includes("scripts/inspect-oci-image.mjs")) return realNow();
+      deadlineReads += 1;
+      return deadlineReads >= 24 ? 90_001 : 0;
+    });
+    let calls = 0;
+    const transport = async (request: Request) => {
+      calls += 1;
+      const artifact = fixture.artifacts.get(new URL(request.url).pathname);
+      if (!artifact) throw new Error("unexpected path");
+      return new Response(artifact.body, {
+        status: 200,
+        headers: {
+          "Content-Type": artifact.contentType,
+          "Docker-Content-Digest": artifact.dockerDigest,
+          "Content-Encoding": "identity",
+        },
+      });
+    };
+    let stdout = "";
+    let stderr = "";
+    const code = await runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {},
+      stdout: { write(value: string) { stdout += value; } },
+      stderr: { write(value: string) { stderr += value; } },
+      transport, signals: new EventEmitter(),
+    });
+    expect(code).toBe(1);
+    expect(calls).toBe(6);
+    expect(deadlineReads).toBe(24);
+    expect({ stdout, stderr }).toEqual({ stdout: "", stderr: "inspection failed: request or image validation failed\n" });
   });
 
   it("preserves exact spawned-process success and no-network usage contracts", async () => {

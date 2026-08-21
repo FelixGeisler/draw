@@ -234,7 +234,15 @@ function combineSignals(overallSignal, requestSignal) {
   return AbortSignal.any([overallSignal, requestSignal]);
 }
 
-export async function inspectGhcrImage({ tag, expectedRevision, credentials, transport, overallSignal, startOverallDeadline }) {
+export async function inspectGhcrImage({
+  tag,
+  expectedRevision,
+  credentials,
+  transport,
+  overallSignal,
+  startOverallDeadline,
+  assertOverallDeadline,
+}) {
   const records = [];
   let bearerToken = null;
   let tokenExchanged = false;
@@ -242,8 +250,16 @@ export async function inspectGhcrImage({ tag, expectedRevision, credentials, tra
   let totalRequests = 0;
   let overallDeadlineStarted = false;
 
+  const enforceOverallDeadline = () => {
+    try {
+      assertOverallDeadline();
+    } catch {
+      fail("inspection was aborted");
+    }
+  };
+
   const dispatch = async ({ url, accept, authorization, kind }) => {
-    if (overallSignal.aborted) fail("inspection was aborted");
+    enforceOverallDeadline();
     if (totalRequests >= MAX_TOTAL_REQUESTS || (kind === "registry" && registryRequests >= MAX_REGISTRY_REQUESTS)) {
       fail("request allowance exhausted");
     }
@@ -269,6 +285,7 @@ export async function inspectGhcrImage({ tag, expectedRevision, credentials, tra
           startOverallDeadline();
           overallDeadlineStarted = true;
         }
+        enforceOverallDeadline();
         response = await transport(request);
       } catch {
         fail(request.signal.aborted ? "request timed out or was aborted" : "transport request failed");
@@ -357,12 +374,15 @@ export async function inspectGhcrImage({ tag, expectedRevision, credentials, tra
       headers: responseHeaders(response),
       body,
     });
-    if (overallSignal.aborted) fail("inspection was aborted");
+    enforceOverallDeadline();
     result = expectedRevision === undefined
       ? validateOciGraph({ mode: "derive", records })
       : validateOciGraph({ mode: "expected", expectedRevision, records });
-    if (overallSignal.aborted) fail("inspection was aborted");
-    if (result.fetchPlan.length === 0) return result;
+    enforceOverallDeadline();
+    if (result.fetchPlan.length === 0) {
+      enforceOverallDeadline();
+      return result;
+    }
     if (result.fetchPlan.length !== 1) fail("core fetch plan is invalid");
     plan = result.fetchPlan[0];
   }

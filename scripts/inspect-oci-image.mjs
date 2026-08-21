@@ -1,3 +1,4 @@
+import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import {
@@ -73,6 +74,7 @@ export async function runCli({ argv, env, stdout, stderr, transport, signals }) 
 
   const overallController = new AbortController();
   const onSignal = () => overallController.abort();
+  let overallDeadline;
   let overallTimer;
   try {
     if (typeof transport !== "function" || !signals || typeof signals.on !== "function" || typeof signals.off !== "function") {
@@ -81,7 +83,17 @@ export async function runCli({ argv, env, stdout, stderr, transport, signals }) 
     signals.on("SIGINT", onSignal);
     signals.on("SIGTERM", onSignal);
     const startOverallDeadline = () => {
-      if (overallTimer === undefined) overallTimer = setTimeout(() => overallController.abort(), OVERALL_TIMEOUT_MS);
+      if (overallDeadline === undefined) {
+        overallDeadline = performance.now() + OVERALL_TIMEOUT_MS;
+        overallTimer = setTimeout(() => overallController.abort(), OVERALL_TIMEOUT_MS);
+      }
+    };
+    const assertOverallDeadline = () => {
+      if (overallController.signal.aborted ||
+          (overallDeadline !== undefined && performance.now() >= overallDeadline)) {
+        overallController.abort();
+        throw new Error("inspection deadline exceeded");
+      }
     };
     const result = await inspectGhcrImage({
       tag: parsed.tag,
@@ -90,8 +102,11 @@ export async function runCli({ argv, env, stdout, stderr, transport, signals }) 
       transport,
       overallSignal: overallController.signal,
       startOverallDeadline,
+      assertOverallDeadline,
     });
-    stdout.write(`${JSON.stringify({ digest: result.digest, revision: result.revision })}\n`);
+    const output = `${JSON.stringify({ digest: result.digest, revision: result.revision })}\n`;
+    assertOverallDeadline();
+    stdout.write(output);
     return 0;
   } catch (error) {
     if (error instanceof GhcrImageNotFoundError) {
