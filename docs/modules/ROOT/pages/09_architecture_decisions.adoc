@@ -2594,6 +2594,14 @@ first real `v*` tag. It is only dispatchable once the file is on the default
 branch (a GitHub constraint), so the practical sequence is: merge → dispatch a
 `:dryrun` build to confirm the image builds on both arches → then tag
 `v1.0.0-rc.1` for the end-to-end acceptance check.
+* *Identity comes from the publish checkout.* Immediately after its checkout,
+the `publish` job resolves the full commit with `git rev-parse HEAD` and passes
+that value as `DRAW_BUILD_SHA`; this remains truthful when a dispatch supplies
+an optional `ref`. Tag pushes pass `DRAW_BUILD_CHANNEL=stable`, while dispatch
+dry runs pass `local`. The Dockerfile exposes both build arguments at runtime;
+an ordinary local build defaults to channel `local` and an empty SHA. This
+contract does not publish an `edge` image or claim that an identity consumer
+exists.
 
 *Rationale:*
 
@@ -3420,8 +3428,16 @@ a default-on feature off would be a setting that lies (the
 fields, prereleases offered only to prerelease runners, unparseable tags
 fail closed — and the running version is `server/package.json`, read once
 (the root package.json and the MCP banner literal are not sources of
-truth; a test pins the choice). First sighting of a new version pays ONE
-notification through the #235 door, deduped in a settings row so restarts
+truth; a test pins the choice). The authenticated status also reports flat
+build-identity fields: `buildChannel` trims `DRAW_BUILD_CHANNEL` but accepts
+only exact lower-case `stable`, `edge`, or `local` (otherwise `local`), and
+`buildSha` trims `DRAW_BUILD_SHA` but accepts only a full 40-character ASCII
+hex SHA, normalized to lower case (otherwise `null`). `buildIdentity` is
+`<channel>:<sha>` when valid and `<channel>:version-<server package version>`
+otherwise. These fields do not yet change release checking or drive a client
+consumer; client consumption and edge publication are follow-ups. First
+sighting of a new version pays ONE notification through the #235 door, deduped
+in a settings row so restarts
 never re-send. Forced checks are throttled server-side (one outbound GET
 per 30s window, cache served inside it) so a hammered button cannot burn
 GitHub's unauthenticated rate budget, and a failed re-check retains the
@@ -3446,10 +3462,10 @@ never a reason to reload. A trigger that ANSWERS non-2xx is remembered as
 aborted socket stays warn-only, because that is exactly what a successful
 swap of the very container looks like.
 
-*Out of scope:* auto-apply on a schedule, update channels beyond
-stable-vs-prerelease, rollback automation (pin the previous tag + restore a
-backup, 7.5), and bare-npm self-restart — there the check and banner work,
-the button stays hidden.
+*Out of scope:* auto-apply on a schedule, client build-identity consumption,
+edge image publication/promotion, rollback automation (pin the previous tag +
+restore a backup, 7.5), and bare-npm self-restart — there the check and banner
+work, the button stays hidden.
 
 == ADR-71: Card-table identity — felt ground, brass accent, serif on the card face only
 

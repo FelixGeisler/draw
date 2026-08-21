@@ -70,6 +70,9 @@ const SERVER_PKG_VERSION = (
     version: string;
   }
 ).version;
+const ORIGINAL_BUILD_CHANNEL = process.env.DRAW_BUILD_CHANNEL;
+const ORIGINAL_BUILD_SHA = process.env.DRAW_BUILD_SHA;
+const FULL_BUILD_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 let app: express.Express;
 let calls: OutboundCall[];
@@ -78,6 +81,8 @@ let releaseTag: string;
 let checkFails: boolean;
 
 beforeEach(async () => {
+  delete process.env.DRAW_BUILD_CHANNEL;
+  delete process.env.DRAW_BUILD_SHA;
   app = await freshApp();
   calls = [];
   notifySent = [];
@@ -123,6 +128,10 @@ beforeEach(async () => {
 afterEach(() => {
   setFetchForTests(null);
   setNotifyFetchForTests(null);
+  if (ORIGINAL_BUILD_CHANNEL === undefined) delete process.env.DRAW_BUILD_CHANNEL;
+  else process.env.DRAW_BUILD_CHANNEL = ORIGINAL_BUILD_CHANNEL;
+  if (ORIGINAL_BUILD_SHA === undefined) delete process.env.DRAW_BUILD_SHA;
+  else process.env.DRAW_BUILD_SHA = ORIGINAL_BUILD_SHA;
 });
 
 const drain = () => new Promise((resolve) => setImmediate(resolve));
@@ -146,6 +155,9 @@ describe("the tell surface", () => {
     expect(status.current).toBe(SERVER_PKG_VERSION);
     expect(Object.keys(status).sort()).toEqual([
       "applyConfigured",
+      "buildChannel",
+      "buildIdentity",
+      "buildSha",
       "checkEnabled",
       "checkedAt",
       "current",
@@ -154,12 +166,64 @@ describe("the tell surface", () => {
       "releaseUrl",
       "updateAvailable",
     ]);
+    expect(status.buildChannel).toBe("local");
+    expect(status.buildSha).toBeNull();
+    expect(status.buildIdentity).toBe(`local:version-${SERVER_PKG_VERSION}`);
     expect(status.checkEnabled).toBe(true); // default ON
     expect(status.applyConfigured).toBe(false);
     expect(status.updateAvailable).toBe(false);
     expect(status.checkedAt).toBeNull(); // cache is in-memory; fresh boot has none
     // The GET is a cache read — it must never trigger an outbound call.
     expect(calls).toEqual([]);
+  });
+
+  it("authenticated GET reports every supported channel and invalid/missing SHAs", async () => {
+    const { createApp } = await import("../../src/app.js");
+    const gated = createApp({ password: "identity-spec-secret" });
+    const cases = [
+      {
+        channel: "stable",
+        sha: FULL_BUILD_SHA,
+        expectedChannel: "stable",
+        expectedSha: FULL_BUILD_SHA,
+      },
+      {
+        channel: "edge",
+        sha: FULL_BUILD_SHA.toUpperCase(),
+        expectedChannel: "edge",
+        expectedSha: FULL_BUILD_SHA,
+      },
+      { channel: "local", sha: "not-a-sha", expectedChannel: "local", expectedSha: null },
+      {
+        channel: "preview",
+        sha: FULL_BUILD_SHA,
+        expectedChannel: "local",
+        expectedSha: FULL_BUILD_SHA,
+      },
+      { channel: " stable ", sha: " ", expectedChannel: "stable", expectedSha: null },
+      { channel: "EDGE", sha: undefined, expectedChannel: "local", expectedSha: null },
+    ] as const;
+
+    for (const entry of cases) {
+      process.env.DRAW_BUILD_CHANNEL = entry.channel;
+      if (entry.sha === undefined) delete process.env.DRAW_BUILD_SHA;
+      else process.env.DRAW_BUILD_SHA = entry.sha;
+      const response = await request(gated)
+        .get("/api/update")
+        .set("x-draw-password", "identity-spec-secret");
+      expect(response.status).toBe(200);
+      const status = response.body as UpdateStatus;
+      expect(status.buildChannel).toBe(entry.expectedChannel);
+      expect(status.buildSha).toBe(entry.expectedSha);
+      expect(status.buildIdentity).toBe(
+        entry.expectedSha
+          ? `${entry.expectedChannel}:${entry.expectedSha}`
+          : `${entry.expectedChannel}:version-${SERVER_PKG_VERSION}`,
+      );
+      expect(status.current).toBe(SERVER_PKG_VERSION);
+      expect(status.latest).toBeNull();
+      expect(status.updateAvailable).toBe(false);
+    }
   });
 
   it("requires auth when DRAW_PASSWORD is set — the health/version split", async () => {
@@ -444,6 +508,9 @@ describe("apply — the trigger", () => {
 // Type-level guard that the status shape stays what GET /api/update serves.
 const _shape: UpdateStatus = {
   current: "1.0.0",
+  buildChannel: "stable",
+  buildSha: "0123456789abcdef0123456789abcdef01234567",
+  buildIdentity: "stable:0123456789abcdef0123456789abcdef01234567",
   latest: "1.1.0",
   updateAvailable: true,
   releaseUrl: "https://github.com/FelixGeisler/draw/releases/tag/v1.1.0",

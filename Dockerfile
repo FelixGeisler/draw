@@ -54,6 +54,11 @@ RUN npm prune --omit=dev
 # prebuild and we would have to build against musl).
 FROM node:22-bookworm-slim AS runtime
 
+# Deterministic identity for the running server. Ordinary local builds retain
+# truthful defaults; release automation supplies the checked-out commit.
+ARG DRAW_BUILD_CHANNEL=local
+ARG DRAW_BUILD_SHA=
+
 # tini as PID 1: forwards SIGTERM to the server for a clean, prompt shutdown
 # and reaps any stray children. Makes the image behave well under a bare
 # `docker run` too, not only with `--init`.
@@ -68,6 +73,8 @@ ENV NODE_ENV=production \
     # (ADR-49). Pair with DRAW_PASSWORD on a real LAN (ADR-50).
     HOST=0.0.0.0 \
     API_PORT=3001 \
+    DRAW_BUILD_CHANNEL=${DRAW_BUILD_CHANNEL} \
+    DRAW_BUILD_SHA=${DRAW_BUILD_SHA} \
     # All persistent state on the mounted volume, not the writable layer.
     DATA_DIR=/data
 
