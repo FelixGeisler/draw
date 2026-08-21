@@ -267,6 +267,65 @@ describe("bounded GHCR inspector integration", () => {
     }
   });
 
+  it("accepts an opaque parseable query with encoded data, duplicate-looking parameters, and a decoded space", async () => {
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    const cdnPath = `/ghcrblobs7/blobs/${digest}`;
+    const capabilityMarker = "never-retain-opaque-capability";
+    const rawQuery = `?sig=opaque%2Fvalue%3D&part=one&part=two&label=decoded space&secret=${capabilityMarker}`;
+    const serializedQuery = rawQuery.replace("decoded space", "decoded%20space");
+    const serializationChecks: boolean[] = [];
+    let redirected = false;
+    const local = await fakeServer((request, response) => {
+      const logical = new URL(request.url ?? "/", "http://test.invalid");
+      if (logical.pathname === cdnPath) {
+        serializationChecks.push(logical.search === serializedQuery);
+        const artifact = fixture.artifacts.get(configPath);
+        if (!artifact) return send(response, 500, bytes({ error: "unexpected fixture path" }));
+        return send(response, 200, artifact.body, {
+          "Content-Type": artifact.contentType,
+          "Docker-Content-Digest": artifact.dockerDigest,
+          "Content-Encoding": "identity",
+        });
+      }
+      if (!redirected && logical.pathname === configPath) {
+        redirected = true;
+        response.writeHead(307, {
+          "Content-Type": "application/octet-stream",
+          "Content-Encoding": "identity",
+          Location: `${CONFIG_CDN_ORIGIN}${cdnPath}${rawQuery}`,
+        });
+        return response.end();
+      }
+      return successfulRoute(fixture)(request, response);
+    });
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(0);
+      expect(serializationChecks).toEqual([true]);
+      expect(test.output()).toEqual({
+        stdout: `${JSON.stringify({ digest: fixture.digest, revision: fixture.revision })}\n`,
+        stderr: "",
+      });
+      const cdnRequests = test.observed.filter((item) => new URL(item.url).origin === CONFIG_CDN_ORIGIN);
+      expect(cdnRequests).toHaveLength(1);
+      expect(cdnRequests[0]).toMatchObject({
+        url: `${CONFIG_CDN_ORIGIN}${cdnPath}`,
+        redirect: "error",
+        authorization: null,
+        queryPresent: true,
+      });
+      const retainedEvidence = JSON.stringify({ observed: test.observed, output: test.output() });
+      const capabilityLeaked = [capabilityMarker, "opaque%2Fvalue", "decoded%20space"]
+        .some((value) => retainedEvidence.includes(value));
+      expect(capabilityLeaked).toBe(false);
+    } finally {
+      await local.close();
+    }
+  });
+
   it.each([
     { label: "302 status", status: 302, location: "valid" },
     { label: "HTTP scheme", status: 307, location: "http" },
@@ -310,7 +369,7 @@ describe("bounded GHCR inspector integration", () => {
       fragment: `${good}#fragment`,
       "empty-query": good.slice(0, good.indexOf("?")) + "?",
       missing: undefined,
-      combined: `${good}, ${good}`,
+      combined: `${good.slice(0, good.indexOf("?"))}, ${good}`,
     };
     const local = await fakeServer((request, response) => {
       const path = request.url?.split("?")[0] ?? "";

@@ -216,7 +216,7 @@ function isRedirectableConfigPlan(plan) {
 }
 
 function validateConfigCdnLocation(value, requestedDigest) {
-  if (typeof value !== "string" || value.length === 0 || /[\u0000-\u0020\u007f]/.test(value)) {
+  if (typeof value !== "string" || value.length === 0) {
     fail("config redirect location is invalid");
   }
   let url;
