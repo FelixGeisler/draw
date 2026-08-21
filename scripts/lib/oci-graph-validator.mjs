@@ -66,15 +66,47 @@ function hasExactOwnKeys(value, expected) {
   return keys.length === expected.length && expected.every((key) => has(value, key));
 }
 
-function isDenseArray(value, { strings = false } = {}) {
-  if (!Array.isArray(value)) return false;
+function inspectOwnData(value) {
+  if (!isObject(value) && !Array.isArray(value)) return null;
   const keys = Reflect.ownKeys(value);
-  if (keys.length !== value.length + 1 || !keys.includes("length")) return false;
-  for (let index = 0; index < value.length; index += 1) {
-    if (!has(value, String(index))) return false;
-    if (strings && typeof value[index] !== "string") return false;
+  const values = Object.create(null);
+  let dataOnly = true;
+  for (const key of keys) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !has(descriptor, "value")) {
+      dataOnly = false;
+      continue;
+    }
+    Object.defineProperty(values, key, {
+      value: descriptor.value,
+      enumerable: true,
+      configurable: false,
+      writable: false,
+    });
   }
-  return true;
+  return { keys, values, dataOnly };
+}
+
+function hasExactInspectedKeys(inspection, expected) {
+  return inspection !== null && inspection.dataOnly &&
+    inspection.keys.length === expected.length && expected.every((key) => has(inspection.values, key));
+}
+
+function snapshotDenseArray(value, { strings = false } = {}) {
+  if (!Array.isArray(value)) return null;
+  const inspection = inspectOwnData(value);
+  if (inspection === null || !inspection.dataOnly) return null;
+  const length = inspection.values.length;
+  if (!Number.isSafeInteger(length) || length < 0 || inspection.keys.length !== length + 1 || !inspection.keys.includes("length")) {
+    return null;
+  }
+  const snapshot = [];
+  for (let index = 0; index < length; index += 1) {
+    const key = String(index);
+    if (!has(inspection.values, key) || (strings && typeof inspection.values[key] !== "string")) return null;
+    snapshot.push(inspection.values[key]);
+  }
+  return Object.freeze(snapshot);
 }
 
 function read(value, key) {
@@ -86,67 +118,71 @@ function isSafeSize(value) {
 }
 
 function validateCall(call) {
-  if (!isObject(call) || !has(call, "mode")) {
-    graphError("INPUT_INVALID", "input", "call must be an exact object with an own mode");
-  }
-  const mode = read(call, "mode");
+  const inspection = inspectOwnData(call);
+  const mode = inspection?.values.mode;
   if (mode !== "expected" && mode !== "derive") {
-    graphError("INPUT_INVALID", "input", "mode must be expected or derive");
+    graphError("INPUT_INVALID", "input", "mode must be an own data property equal to expected or derive");
   }
   const keys = mode === "expected" ? CALL_KEYS_EXPECTED : CALL_KEYS_DERIVE;
-  if (!hasExactOwnKeys(call, keys)) {
-    graphError("INPUT_INVALID", "input", "call has an invalid shape for its mode");
+  if (!hasExactInspectedKeys(inspection, keys)) {
+    graphError("INPUT_INVALID", "input", "call has an invalid shape or accessor for its mode");
   }
-  if (mode === "expected" && (typeof read(call, "expectedRevision") !== "string" || !REVISION.test(read(call, "expectedRevision")))) {
+  const expectedRevision = mode === "expected" ? inspection.values.expectedRevision : null;
+  if (mode === "expected" && (typeof expectedRevision !== "string" || !REVISION.test(expectedRevision))) {
     graphError("INPUT_INVALID", "input", "expectedRevision must be lowercase 40-hex");
   }
-  const records = read(call, "records");
-  if (!isDenseArray(records) || records.length < 1 || records.length > STAGES.length) {
-    graphError("INPUT_INVALID", "input", "records must be a dense nonempty stage prefix");
+  const records = snapshotDenseArray(inspection.values.records);
+  if (records === null || records.length < 1 || records.length > STAGES.length) {
+    graphError("INPUT_INVALID", "input", "records must be a dense nonempty stage prefix without accessors");
   }
-  return { mode, expectedRevision: mode === "expected" ? read(call, "expectedRevision") : null, records };
+  return { mode, expectedRevision, records };
 }
 
-function validateHeaderArrays(headers, stage) {
-  if (!hasExactOwnKeys(headers, HEADER_KEYS)) {
-    graphError("INPUT_INVALID", stage, "headers must have the exact required own keys");
+function snapshotRecordInput(inspection, stage, failureStage) {
+  if (!hasExactInspectedKeys(inspection, RECORD_KEYS)) {
+    graphError("INPUT_INVALID", failureStage, "record must have exact own data properties and no accessors");
   }
-  for (const key of HEADER_KEYS) {
-    if (!isDenseArray(read(headers, key), { strings: true })) {
-      graphError("INPUT_INVALID", stage, `${key} must be a dense string array`);
-    }
+  const record = inspection.values;
+  if (!ENDPOINTS.has(record.endpoint) || !PLATFORMS.has(record.platform)) {
+    graphError("INPUT_INVALID", failureStage, "record endpoint or platform is invalid");
   }
-}
-
-function validateRecordInput(record, stage) {
-  if (!hasExactOwnKeys(record, RECORD_KEYS)) {
-    graphError("INPUT_INVALID", stage, "record must have the exact required own keys");
-  }
-  if (!ENDPOINTS.has(read(record, "endpoint")) || !PLATFORMS.has(read(record, "platform"))) {
-    graphError("INPUT_INVALID", stage, "record endpoint or platform is invalid");
-  }
-  const requestedDigest = read(record, "requestedDigest");
   const digestShapeValid = stage === "named-index"
-    ? requestedDigest === null
-    : typeof requestedDigest === "string" && SHA256.test(requestedDigest);
+    ? record.requestedDigest === null
+    : typeof record.requestedDigest === "string" && SHA256.test(record.requestedDigest);
   if (!digestShapeValid) {
-    graphError("INPUT_INVALID", stage, "requestedDigest has the wrong shape for this stage");
+    graphError("INPUT_INVALID", failureStage, "requestedDigest has the wrong shape for this stage");
   }
-  if (!DESCRIPTOR_MEDIA_TYPES.has(read(record, "expectedMediaType"))) {
-    graphError("INPUT_INVALID", stage, "expectedMediaType is not an authorized descriptor media type");
+  if (!DESCRIPTOR_MEDIA_TYPES.has(record.expectedMediaType)) {
+    graphError("INPUT_INVALID", failureStage, "expectedMediaType is not an authorized descriptor media type");
   }
-  const expectedSize = read(record, "expectedSize");
-  const sizeShapeValid = stage.endsWith("-index") ? expectedSize === null : isSafeSize(expectedSize);
+  const sizeShapeValid = stage.endsWith("-index") ? record.expectedSize === null : isSafeSize(record.expectedSize);
   if (!sizeShapeValid) {
-    graphError("INPUT_INVALID", stage, "expectedSize has the wrong shape for this stage");
+    graphError("INPUT_INVALID", failureStage, "expectedSize has the wrong shape for this stage");
   }
-  if (!Number.isInteger(read(record, "status"))) {
-    graphError("INPUT_INVALID", stage, "status must be an integer");
+  if (!Number.isInteger(record.status)) {
+    graphError("INPUT_INVALID", failureStage, "status must be an integer");
   }
-  validateHeaderArrays(read(record, "headers"), stage);
-  if (!(read(record, "body") instanceof Uint8Array)) {
-    graphError("INPUT_INVALID", stage, "body must be a Uint8Array");
+
+  const headerInspection = inspectOwnData(record.headers);
+  if (!hasExactInspectedKeys(headerInspection, HEADER_KEYS)) {
+    graphError("INPUT_INVALID", failureStage, "headers must have exact own data properties and no accessors");
   }
+  const headers = Object.create(null);
+  for (const key of HEADER_KEYS) {
+    const values = snapshotDenseArray(headerInspection.values[key], { strings: true });
+    if (values === null) graphError("INPUT_INVALID", failureStage, `${key} must be a dense data-only string array`);
+    headers[key] = values;
+  }
+  Object.freeze(headers);
+
+  if (!(record.body instanceof Uint8Array)) {
+    graphError("INPUT_INVALID", failureStage, "body must be a Uint8Array");
+  }
+  const snapshot = Object.create(null);
+  for (const key of RECORD_KEYS) snapshot[key] = record[key];
+  snapshot.headers = headers;
+  snapshot.body = new Uint8Array(record.body);
+  return Object.freeze(snapshot);
 }
 
 function makePlan(stage, endpoint, platform, digest, mediaType, size) {
@@ -379,17 +415,19 @@ export function validateOciGraph(call) {
   let indexDescriptors = null;
 
   for (let index = 0; index < records.length; index += 1) {
-    const record = records[index];
+    const inspection = inspectOwnData(records[index]);
     const expectedStage = STAGES[index];
-    const suppliedStage = isObject(record) && has(record, "stage") ? read(record, "stage") : null;
+    const suppliedStage = inspection?.values.stage;
     if (!STAGE_SET.has(suppliedStage)) {
-      graphError("INPUT_INVALID", "input", "record stage is missing or invalid");
+      graphError("INPUT_INVALID", "input", "record stage is missing, invalid, or an accessor");
     }
+
+    const failureStage = suppliedStage === expectedStage ? expectedStage : "input";
+    const record = snapshotRecordInput(inspection, suppliedStage, failureStage);
     if (suppliedStage !== expectedStage) {
       graphError("STAGE_ORDER", suppliedStage, "record stage is not the next canonical stage");
     }
 
-    validateRecordInput(record, expectedStage);
     validateAuthorization(record, expectedPlan, expectedStage);
     if (read(record, "status") !== 200) graphError("HTTP_STATUS", expectedStage, "response status must be 200");
     validateHeaders(record, expectedStage);

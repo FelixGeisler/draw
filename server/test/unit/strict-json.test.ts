@@ -43,6 +43,22 @@ describe("parseStrictJson contract", () => {
     }
   });
 
+  it("parses and rejects deeply nested bounded JSON without using the JavaScript call stack", () => {
+    const depth = 10_000;
+    const validSource = "[".repeat(depth) + "0" + "]".repeat(depth);
+    expect(bytes(validSource).byteLength).toBeLessThan(1024 * 1024);
+
+    let value = parseStrictJson(bytes(validSource));
+    for (let level = 0; level < depth; level += 1) {
+      expect(Array.isArray(value)).toBe(true);
+      value = value[0];
+    }
+    expect(value).toBe(0);
+
+    const error = caught(bytes("[".repeat(depth)));
+    expect(error.code).toBe("JSON_SYNTAX");
+  });
+
   it("rejects identical, conflicting, nested, and escape-equivalent duplicate decoded names", () => {
     for (const source of [
       '{"a":1,"a":1}',

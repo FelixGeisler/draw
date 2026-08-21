@@ -154,6 +154,15 @@ describe("validateOciGraph staged contract", () => {
     }
   });
 
+  it("classifies a malformed out-of-order record as input before stage order", () => {
+    const fixture = makeFixture();
+    const malformedWrongStage = cloneFixture(fixture.records[1]) as any;
+    delete malformedWrongStage.status;
+
+    expect(caught(deriveCall([malformedWrongStage]))).toMatchObject({ code: "INPUT_INVALID", stage: "input" });
+    expect(caught(deriveCall([fixture.records[1]]))).toMatchObject({ code: "STAGE_ORDER", stage: "digest-index" });
+  });
+
   it("uses own properties only while tolerating polluted prototypes on valid call, records, and headers", () => {
     const fixture = makeFixture();
     const record = cloneFixture(fixture.records[0]);
@@ -172,6 +181,24 @@ describe("validateOciGraph staged contract", () => {
     delete inheritedEndpoint.endpoint;
     Object.setPrototypeOf(inheritedEndpoint, { endpoint: "manifests" });
     expect(caught(deriveCall([inheritedEndpoint]))).toMatchObject({ code: "INPUT_INVALID", stage: "named-index" });
+  });
+
+  it("rejects accessors before they can vary authorization and response evidence", () => {
+    const fixture = makeFixture();
+    const records = cloneFixture(fixture.records.slice(0, 3));
+    const authorizedDigest = records[2].requestedDigest;
+    let reads = 0;
+    Object.defineProperty(records[2], "requestedDigest", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        reads += 1;
+        return reads === 1 ? authorizedDigest : digest(records[2].body);
+      },
+    });
+
+    expect(caught(expectedCall(records))).toMatchObject({ code: "INPUT_INVALID", stage: "amd64-manifest" });
+    expect(reads).toBe(0);
   });
 
   it("checks every authorization field before response evidence", () => {
@@ -222,6 +249,10 @@ describe("validateOciGraph staged contract", () => {
     const badJson = cloneFixture(fixture.records[0]);
     replaceNamedBody(badJson, bytes('{"a":1,"a":2}'));
     expect(caught(deriveCall([badJson]))).toMatchObject({ code: "JSON_INVALID", stage: "named-index" });
+
+    const deeplyMalformedJson = cloneFixture(fixture.records[0]);
+    replaceNamedBody(deeplyMalformedJson, bytes("[".repeat(10_000)));
+    expect(caught(deriveCall([deeplyMalformedJson]))).toMatchObject({ code: "JSON_INVALID", stage: "named-index" });
 
     const badSchema = cloneFixture(fixture.records[0]);
     replaceNamedBody(badSchema, bytes({ schemaVersion: 1 }));

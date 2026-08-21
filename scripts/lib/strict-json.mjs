@@ -23,27 +23,107 @@ class Parser {
   parse() {
     this.skipWhitespace();
     if (this.position === this.text.length) syntax("JSON text is empty");
-    const value = this.parseValue();
+
+    const root = this.parseValueToken();
+    const stack = root.frame ? [root.frame] : [];
+
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      this.skipWhitespace();
+
+      if (frame.type === "array") {
+        if (frame.state === "value-or-end" && this.text[this.position] === "]") {
+          this.position += 1;
+          stack.pop();
+          continue;
+        }
+        if (frame.state === "comma-or-end") {
+          const separator = this.text[this.position];
+          if (separator === "]") {
+            this.position += 1;
+            stack.pop();
+            continue;
+          }
+          if (separator !== ",") syntax("Expected ',' or ']' in JSON array");
+          this.position += 1;
+          this.skipWhitespace();
+          frame.state = "value";
+        }
+
+        const item = this.parseValueToken();
+        frame.value.push(item.value);
+        frame.state = "comma-or-end";
+        if (item.frame) stack.push(item.frame);
+        continue;
+      }
+
+      if (frame.state === "key-or-end" && this.text[this.position] === "}") {
+        this.position += 1;
+        stack.pop();
+        continue;
+      }
+      if (frame.state === "comma-or-end") {
+        const separator = this.text[this.position];
+        if (separator === "}") {
+          this.position += 1;
+          stack.pop();
+          continue;
+        }
+        if (separator !== ",") syntax("Expected ',' or '}' in JSON object");
+        this.position += 1;
+        this.skipWhitespace();
+      }
+
+      if (this.text[this.position] !== '"') syntax("Expected a JSON object member name");
+      const name = this.parseString();
+      if (frame.names.has(name)) {
+        throw new StrictJsonError("DUPLICATE_KEY", `Duplicate JSON member: ${name}`);
+      }
+      frame.names.add(name);
+      this.skipWhitespace();
+      if (this.text[this.position] !== ":") syntax("Expected ':' after JSON member name");
+      this.position += 1;
+      this.skipWhitespace();
+
+      const member = this.parseValueToken();
+      Object.defineProperty(frame.value, name, {
+        value: member.value,
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+      frame.state = "comma-or-end";
+      if (member.frame) stack.push(member.frame);
+    }
+
     this.skipWhitespace();
     if (this.position !== this.text.length) {
       throw new StrictJsonError("TRAILING_CONTENT", "JSON text has trailing content");
     }
-    return value;
+    return root.value;
   }
 
   skipWhitespace() {
     while (JSON_WHITESPACE.has(this.text[this.position])) this.position += 1;
   }
 
-  parseValue() {
+  parseValueToken() {
     const char = this.text[this.position];
-    if (char === '"') return this.parseString();
-    if (char === "{") return this.parseObject();
-    if (char === "[") return this.parseArray();
-    if (char === "t") return this.parseLiteral("true", true);
-    if (char === "f") return this.parseLiteral("false", false);
-    if (char === "n") return this.parseLiteral("null", null);
-    if (char === "-" || (char >= "0" && char <= "9")) return this.parseNumber();
+    if (char === '"') return { value: this.parseString() };
+    if (char === "{") {
+      this.position += 1;
+      const value = Object.create(null);
+      return { value, frame: { type: "object", value, names: new Set(), state: "key-or-end" } };
+    }
+    if (char === "[") {
+      this.position += 1;
+      const value = [];
+      return { value, frame: { type: "array", value, state: "value-or-end" } };
+    }
+    if (char === "t") return { value: this.parseLiteral("true", true) };
+    if (char === "f") return { value: this.parseLiteral("false", false) };
+    if (char === "n") return { value: this.parseLiteral("null", null) };
+    if (char === "-" || (char >= "0" && char <= "9")) return { value: this.parseNumber() };
     syntax("Expected a JSON value");
   }
 
@@ -95,66 +175,6 @@ class Parser {
     syntax("Unterminated JSON string");
   }
 
-  parseArray() {
-    const value = [];
-    this.position += 1;
-    this.skipWhitespace();
-    if (this.text[this.position] === "]") {
-      this.position += 1;
-      return value;
-    }
-    while (true) {
-      value.push(this.parseValue());
-      this.skipWhitespace();
-      const separator = this.text[this.position];
-      if (separator === "]") {
-        this.position += 1;
-        return value;
-      }
-      if (separator !== ",") syntax("Expected ',' or ']' in JSON array");
-      this.position += 1;
-      this.skipWhitespace();
-    }
-  }
-
-  parseObject() {
-    const value = Object.create(null);
-    const names = new Set();
-    this.position += 1;
-    this.skipWhitespace();
-    if (this.text[this.position] === "}") {
-      this.position += 1;
-      return value;
-    }
-    while (true) {
-      if (this.text[this.position] !== '"') syntax("Expected a JSON object member name");
-      const name = this.parseString();
-      if (names.has(name)) {
-        throw new StrictJsonError("DUPLICATE_KEY", `Duplicate JSON member: ${name}`);
-      }
-      names.add(name);
-      this.skipWhitespace();
-      if (this.text[this.position] !== ":") syntax("Expected ':' after JSON member name");
-      this.position += 1;
-      this.skipWhitespace();
-      const member = this.parseValue();
-      Object.defineProperty(value, name, {
-        value: member,
-        enumerable: true,
-        configurable: true,
-        writable: true,
-      });
-      this.skipWhitespace();
-      const separator = this.text[this.position];
-      if (separator === "}") {
-        this.position += 1;
-        return value;
-      }
-      if (separator !== ",") syntax("Expected ',' or '}' in JSON object");
-      this.position += 1;
-      this.skipWhitespace();
-    }
-  }
 }
 
 export function parseStrictJson(bytes) {
@@ -172,5 +192,10 @@ export function parseStrictJson(bytes) {
   if (text.startsWith("\ufeff")) {
     throw new StrictJsonError("BOM_FORBIDDEN", "a leading UTF-8 BOM is forbidden");
   }
-  return new Parser(text).parse();
+  try {
+    return new Parser(text).parse();
+  } catch (error) {
+    if (error instanceof StrictJsonError) throw error;
+    throw new StrictJsonError("JSON_SYNTAX", "JSON text could not be parsed");
+  }
 }
