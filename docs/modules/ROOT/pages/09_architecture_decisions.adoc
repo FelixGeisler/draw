@@ -2538,7 +2538,7 @@ disk must not take the app down. Off-device targets (S3, rsync) and a Settings
 UI are out of scope (#194): copying `DATA_DIR/backups/` off the box is a
 deployment concern, deliberately left to the operator.
 
-== ADR-53: Tag-triggered release pipeline — full-test gate, multi-arch GHCR push, GitHub Release, all from one `v*` tag
+== ADR-53: Tag-triggered release pipeline and bounded OCI inspector foundation
 
 *Context:* ADR-51 shipped the container image (#191) but explicitly left
 "registry/release automation" out — the image was built locally and had *never
@@ -2602,6 +2602,48 @@ dry runs pass `local`. The Dockerfile exposes both build arguments at runtime;
 an ordinary local build defaults to channel `local` and an empty SHA. This
 contract does not publish an `edge` image or claim that an identity consumer
 exists.
+* *A bounded, repository-specific inspector is the reusable publication
+foundation.* The strict JSON and staged OCI graph core from #274 is integrated
+by #276 behind `node scripts/inspect-oci-image.mjs --image
+<ghcr.io/felixgeisler/draw:tag> [--expected-revision <sha>]`. The CLI either
+checks the supplied revision or derives the revision from the index, and emits a
+digest-pinned result only after the named index, digest-pinned index, amd64
+manifest/config, and arm64 manifest/config validate sequentially; the core's
+one-item plan is the sole authority for the next request and layers are never
+fetched. The fixed GHCR boundary permits one fail-closed Bearer exchange for
+the exact combined `WWW-Authenticate` value exposed by Fetch (without claiming
+visibility of physical header-field cardinality), confines optional paired
+Basic credentials to the exact token endpoint and Bearer credentials to the
+registry origin, follows no redirect, retries only the authenticated named
+restart, and uses one resource-specific non-wildcard `Accept` value.
+* *Transport evidence is bounded before interpretation.* Every registry,
+challenge/error, and token response requests identity encoding, rejects any
+Fetch-visible coding other than absent or exact `identity`, and streams at most
+1 MiB of bytes exposed by Fetch before strict parsing or OCI validation. Six
+physical requests complete an unchallenged graph; a challenge adds one failed
+named request and one token request, for at most eight requests. Each physical
+request has a 20-second fetch-and-stream deadline inside one non-resetting
+90-second overall deadline. Requests remain sequential, stop at the first
+failure, and SIGINT/SIGTERM abort the active operation. Exit 0 is the sole JSON
+success; structured initial-name absence is exit 3; usage/credential setup is
+exit 2; authentication, transport, timeout, strict-JSON, and graph failures are
+exit 1. Output is one bounded sanitized line where applicable and never includes
+credentials, tokens, challenge/error bodies, or ignored error details.
+* *The test seam does not widen production policy.* Production always constructs
+and validates canonical HTTPS `Request` objects before calling Node 22 global
+`fetch`; it has no transport selector or capture facility. Deterministic tests
+may inject a trusted Fetch-compatible adapter that maps those already-validated
+requests to local HTTP and retains only in-memory, authorization-redacted
+evidence. This adapter can technically inspect, alter, ignore, or replace a
+request and is not a security boundary. The runner remains the single policy
+path, so future publication can call the same expected-revision CLI without
+reimplementing registry or OCI rules.
+* *Consistency is not provenance authenticity.* Digest, size, media, platform,
+and revision agreement closes internal graph substitution after name
+resolution, but an authorized substitution before resolution remains
+undetectable without a signature or independently trusted digest anchor. #276
+accepts that residual risk and performs no registry mutation, publication, or
+promotion.
 
 *Rationale:*
 
