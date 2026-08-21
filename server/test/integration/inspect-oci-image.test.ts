@@ -20,6 +20,8 @@ type ObservedRequest = {
   authorization: string | null;
 };
 
+const BEARER_CHALLENGE = "Bearer realm=\"https://ghcr.io/token\",service=\"ghcr.io\",scope=\"repository:felixgeisler/draw:pull\"";
+
 async function fakeServer(route: Route) {
   const server = createServer(route);
   server.listen(0, "127.0.0.1");
@@ -261,6 +263,76 @@ describe("bounded GHCR inspector integration", () => {
     }
   });
 
+  it.each([
+    "application/json;charset=utf-8",
+    "Application/JSON \t;\t CHARSET=UTF-8",
+  ])("accepts valid case-insensitive JSON content type %j", async (contentType) => {
+    const local = await fakeServer((_request, response) => send(response, 404, distributionError("MANIFEST_UNKNOWN"), {
+      "Content-Type": contentType,
+    }));
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(3);
+      expect(test.observed).toHaveLength(1);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it.each([
+    { responseKind: "401", contentType: "application/json; charset = utf-8", requests: 1 },
+    { responseKind: "401", contentType: "application/json; charset= utf-8", requests: 1 },
+    { responseKind: "401", contentType: "application/json; charset =utf-8", requests: 1 },
+    { responseKind: "404", contentType: "application/json; charset = utf-8", requests: 1 },
+    { responseKind: "404", contentType: "application/json; charset= utf-8", requests: 1 },
+    { responseKind: "404", contentType: "application/json; charset =utf-8", requests: 1 },
+    { responseKind: "token", contentType: "application/json; charset = utf-8", requests: 2 },
+    { responseKind: "token", contentType: "application/json; charset= utf-8", requests: 2 },
+    { responseKind: "token", contentType: "application/json; charset =utf-8", requests: 2 },
+  ])("rejects whitespace around JSON parameter equals for $responseKind: $contentType", async ({ responseKind, contentType, requests }) => {
+    const local = await fakeServer((request, response) => {
+      if (responseKind === "token" && request.url?.startsWith("/token?")) {
+        return send(response, 200, bytes({ token: "token" }), { "Content-Type": contentType });
+      }
+      if (responseKind === "401" || responseKind === "token") {
+        return send(response, 401, distributionError("UNAUTHORIZED"), {
+          "Content-Type": responseKind === "401" ? contentType : "application/json",
+          "WWW-Authenticate": BEARER_CHALLENGE,
+        });
+      }
+      return send(response, 404, distributionError("MANIFEST_UNKNOWN"), { "Content-Type": contentType });
+    });
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(1);
+      expect(test.observed).toHaveLength(requests);
+      expect(test.output().stdout).toBe("");
+    } finally {
+      await local.close();
+    }
+  });
+
+  it.each([
+    "application/json; charset",
+    "application/json; charset==utf-8",
+    "application/json; charset=\"utf-8\"",
+    "application/json; charset=utf-8; charset=utf-8",
+    "application/json; charset=utf-8; profile=x",
+    "application/json, text/plain",
+    "application/json; =utf-8",
+  ])("rejects malformed or additional JSON content-type parameter form %j", async (contentType) => {
+    const local = await fakeServer((_request, response) => send(response, 404, distributionError("MANIFEST_UNKNOWN"), {
+      "Content-Type": contentType,
+    }));
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(1);
+      expect(test.observed).toHaveLength(1);
+    } finally {
+      await local.close();
+    }
+  });
+
   it("allows only a validated initial-name absence to return exit 3", async () => {
     const local = await fakeServer((_request, response) => send(response, 404, distributionError("MANIFEST_UNKNOWN", "not here", { ignored: true })));
     try {
@@ -285,6 +357,147 @@ describe("bounded GHCR inspector integration", () => {
       const test = runner(local.origin);
       await expect(runCli(test.input)).resolves.toBe(1);
       expect(test.output().stdout).toBe("");
+    } finally {
+      await local.close();
+    }
+  });
+
+  it.each(["x", "😀".repeat(512)])("accepts a Distribution message at the scalar boundary", async (message) => {
+    const body = bytes({
+      errors: [
+        { code: "MANIFEST_UNKNOWN", message, detail: { arbitrary: [true, null, 7] } },
+        { code: "MANIFEST_UNKNOWN", message: "same code" },
+      ],
+    });
+    const local = await fakeServer((_request, response) => send(response, 404, body));
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(3);
+      expect(test.output()).toEqual({ stdout: "", stderr: "image not found\n" });
+    } finally {
+      await local.close();
+    }
+  });
+
+  it.each([401, 404].flatMap((status) => [
+    { status, malformed: "empty-message" },
+    { status, malformed: "513-scalars" },
+    { status, malformed: "unpaired-surrogate" },
+    { status, malformed: "missing-key" },
+    { status, malformed: "extra-key" },
+    { status, malformed: "mixed-code" },
+    { status, malformed: "duplicate-detail-key" },
+  ]))("rejects $status Distribution error with $malformed and stops", async ({ status, malformed }) => {
+    const code = status === 401 ? "UNAUTHORIZED" : "MANIFEST_UNKNOWN";
+    const otherCode = status === 401 ? "MANIFEST_UNKNOWN" : "UNAUTHORIZED";
+    let body: Uint8Array;
+    if (malformed === "empty-message") body = distributionError(code, "");
+    else if (malformed === "513-scalars") body = distributionError(code, "x".repeat(513));
+    else if (malformed === "unpaired-surrogate") body = bytes(`{"errors":[{"code":"${code}","message":"\\ud800"}]}`);
+    else if (malformed === "missing-key") body = bytes({ errors: [{ code }] });
+    else if (malformed === "extra-key") body = bytes({ errors: [{ code, message: "secret response", extra: true }] });
+    else if (malformed === "mixed-code") body = bytes({ errors: [{ code, message: "one" }, { code: otherCode, message: "two" }] });
+    else body = bytes(`{"errors":[{"code":"${code}","message":"one","detail":{"a":1,"a":2}}]}`);
+    const local = await fakeServer((_request, response) => send(response, status, body, {
+      ...(status === 401 ? { "WWW-Authenticate": BEARER_CHALLENGE } : {}),
+    }));
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(1);
+      expect(test.observed).toHaveLength(1);
+      expect(test.output()).toEqual({ stdout: "", stderr: "inspection failed: request or image validation failed\n" });
+      expect(test.output().stderr).not.toContain("secret response");
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("returns absence for a valid post-auth named restart 404", async () => {
+    let calls = 0;
+    const local = await fakeServer((request, response) => {
+      calls += 1;
+      if (request.url?.startsWith("/token?")) return send(response, 200, bytes({ token: "token" }));
+      if (calls === 1) return send(response, 401, distributionError("UNAUTHORIZED"), { "WWW-Authenticate": BEARER_CHALLENGE });
+      return send(response, 404, distributionError("MANIFEST_UNKNOWN"));
+    });
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(3);
+      expect(test.observed).toHaveLength(3);
+      expect(test.observed.filter((item) => new URL(item.url).pathname === "/token")).toHaveLength(1);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("rejects a repeated post-auth 401 without a second token exchange", async () => {
+    let registryCalls = 0;
+    const local = await fakeServer((request, response) => {
+      if (request.url?.startsWith("/token?")) return send(response, 200, bytes({ token: "token" }));
+      registryCalls += 1;
+      return send(response, 401, distributionError("UNAUTHORIZED"), { "WWW-Authenticate": BEARER_CHALLENGE });
+    });
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(1);
+      expect(registryCalls).toBe(2);
+      expect(test.observed).toHaveLength(3);
+      expect(test.observed.filter((item) => new URL(item.url).pathname === "/token")).toHaveLength(1);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it.each([401, 404])("rejects later registry status %s after named resolution without authentication or retry", async (status) => {
+    const fixture = makeInspectionFixture();
+    let calls = 0;
+    const local = await fakeServer((request, response) => {
+      calls += 1;
+      if (calls === 1) return successfulRoute(fixture)(request, response);
+      const code = status === 401 ? "UNAUTHORIZED" : "MANIFEST_UNKNOWN";
+      return send(response, status, distributionError(code), {
+        ...(status === 401 ? { "WWW-Authenticate": BEARER_CHALLENGE } : {}),
+      });
+    });
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(1);
+      expect(test.observed).toHaveLength(2);
+      expect(test.observed.every((item) => new URL(item.url).pathname !== "/token")).toBe(true);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it.each([
+    { responseKind: "401", fault: "encoding", requests: 1 },
+    { responseKind: "404", fault: "encoding", requests: 1 },
+    { responseKind: "generic", fault: "encoding", requests: 1 },
+    { responseKind: "token", fault: "encoding", requests: 2 },
+    { responseKind: "401", fault: "oversize", requests: 1 },
+    { responseKind: "404", fault: "oversize", requests: 1 },
+    { responseKind: "generic", fault: "oversize", requests: 1 },
+    { responseKind: "token", fault: "oversize", requests: 2 },
+  ])("enforces $fault before interpreting a $responseKind response", async ({ responseKind, fault, requests }) => {
+    const oversized = new Uint8Array(1_048_577);
+    const local = await fakeServer((request, response) => {
+      if (responseKind === "token" && !request.url?.startsWith("/token?")) {
+        return send(response, 401, distributionError("UNAUTHORIZED"), { "WWW-Authenticate": BEARER_CHALLENGE });
+      }
+      const status = responseKind === "401" ? 401 : responseKind === "404" ? 404 : responseKind === "generic" ? 500 : 200;
+      const body = fault === "oversize"
+        ? oversized
+        : responseKind === "401" ? distributionError("UNAUTHORIZED")
+          : responseKind === "404" ? distributionError("MANIFEST_UNKNOWN")
+            : responseKind === "token" ? bytes({ token: "token" }) : bytes({ error: "failed" });
+      const headers: Record<string, string> = fault === "encoding" ? { "Content-Encoding": "x-test-coding" } : {};
+      send(response, status, body, headers);
+    });
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(1);
+      expect(test.observed).toHaveLength(requests);
+      expect(test.output()).toEqual({ stdout: "", stderr: "inspection failed: request or image validation failed\n" });
     } finally {
       await local.close();
     }
@@ -345,7 +558,7 @@ describe("bounded GHCR inspector integration", () => {
     }
   });
 
-  it("aborts one physical request after its 20-second streaming deadline", async () => {
+  it("aborts one physical request after its 20-second response-header deadline", async () => {
     vi.useFakeTimers();
     let calls = 0;
     const transport = (request: Request) => new Promise<Response>((_resolve, reject) => {
@@ -362,6 +575,40 @@ describe("bounded GHCR inspector integration", () => {
     await expect(promise).resolves.toBe(1);
     expect(calls).toBe(1);
     expect(stderr).toMatch(/^inspection failed:/);
+  });
+
+  it("times out and cancels a stalled response body after headers without another request", async () => {
+    vi.useFakeTimers();
+    const fixture = makeInspectionFixture();
+    const named = fixture.artifacts.values().next().value;
+    let calls = 0;
+    let cancellations = 0;
+    let requestAborted = false;
+    const transport = async (request: Request) => {
+      calls += 1;
+      request.signal.addEventListener("abort", () => { requestAborted = true; }, { once: true });
+      const body = new ReadableStream<Uint8Array>({
+        pull() { /* headers are available, but the body never yields a chunk */ },
+        cancel() { cancellations += 1; },
+      });
+      return new Response(body, {
+        status: 200,
+        headers: {
+          "Content-Type": named.contentType,
+          "Docker-Content-Digest": named.dockerDigest,
+        },
+      });
+    };
+    let stderr = "";
+    const promise = runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {},
+      stdout: { write() {} }, stderr: { write(value: string) { stderr += value; } },
+      transport, signals: new EventEmitter(),
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    await expect(promise).resolves.toBe(1);
+    expect({ calls, cancellations, requestAborted }).toEqual({ calls: 1, cancellations: 1, requestAborted: true });
+    expect(stderr).toBe("inspection failed: request or image validation failed\n");
   });
 
   it("keeps one 90-second overall deadline across physical requests", async () => {

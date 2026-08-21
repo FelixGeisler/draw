@@ -58,35 +58,42 @@ function validateIdentityEncoding(response) {
 function validateJsonContentType(response) {
   const value = response.headers.get("content-type");
   if (value === null) fail("JSON response content type is missing");
-  const parts = value.split(";");
-  if (parts.length > 2 || parts[0].trim().toLowerCase() !== JSON_MEDIA_TYPE) {
+  // HTTP permits OWS around the parameter separator, but not around the
+  // parameter's `=`. Only the accepted bare type or one exact charset
+  // parameter is valid; case is insignificant for all three tokens.
+  if (!/^[\t ]*application\/json(?:[\t ]*;[\t ]*charset=utf-8)?[\t ]*$/i.test(value)) {
     fail("JSON response content type is invalid");
-  }
-  if (parts.length === 2) {
-    const parameter = parts[1].trim().match(/^([^=]+)=([^=]+)$/);
-    if (!parameter || parameter[1].trim().toLowerCase() !== "charset" || parameter[2].trim().toLowerCase() !== "utf-8") {
-      fail("JSON response content type is invalid");
-    }
   }
 }
 
-async function readBounded(response, abortRequest) {
+async function readBounded(response, requestSignal, abortRequest) {
   const reader = response.body?.getReader();
   if (!reader) return new Uint8Array();
+  const aborted = Symbol("aborted");
+  let notifyAbort;
+  const abortPromise = new Promise((resolve) => { notifyAbort = () => resolve(aborted); });
+  const cancelReader = () => {
+    try {
+      const cancellation = reader.cancel();
+      cancellation.catch(() => {});
+    } catch { /* cancellation is best effort after the abort request */ }
+  };
+  requestSignal.addEventListener("abort", notifyAbort, { once: true });
   const chunks = [];
   let length = 0;
   try {
     while (true) {
-      const item = await reader.read();
+      const item = requestSignal.aborted ? aborted : await Promise.race([reader.read(), abortPromise]);
+      if (item === aborted) {
+        cancelReader();
+        fail("request timed out or was aborted");
+      }
       if (item.done) break;
       if (!(item.value instanceof Uint8Array)) fail("response stream is invalid");
       length += item.value.byteLength;
       if (length > MAX_RESPONSE_BYTES) {
         abortRequest();
-        try {
-          const cancellation = reader.cancel();
-          cancellation.catch(() => {});
-        } catch { /* cancellation is best effort after the abort request */ }
+        cancelReader();
         fail("response exceeds byte limit");
       }
       chunks.push(item.value);
@@ -94,6 +101,8 @@ async function readBounded(response, abortRequest) {
   } catch (error) {
     if (error instanceof GhcrInspectionError) throw error;
     fail("response stream failed");
+  } finally {
+    requestSignal.removeEventListener("abort", notifyAbort);
   }
   const body = new Uint8Array(length);
   let offset = 0;
@@ -265,7 +274,7 @@ export async function inspectGhcrImage({ tag, expectedRevision, credentials, tra
         fail(request.signal.aborted ? "request timed out or was aborted" : "transport request failed");
       }
       if (!(response instanceof Response)) fail("transport returned an invalid response");
-      const body = await readBounded(response, () => requestController.abort());
+      const body = await readBounded(response, request.signal, () => requestController.abort());
       validateIdentityEncoding(response);
       return { response, body };
     } finally {

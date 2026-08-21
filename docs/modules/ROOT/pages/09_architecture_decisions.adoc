@@ -2647,11 +2647,16 @@ promotion.
 
 *Rationale:*
 
-* *Amends ADR-51's deferral, nothing else.* ADR-51 named "#192" as the excluded
-automation; this is that piece and only that piece. Docker Hub, npm publishing,
-and changelog conventions beyond GitHub's generated notes remain out of scope.
-No production code changes — the version bump to 1.0.0 (the `package.json`
-files) is a separate concern and is *not* performed by this workflow.
+* *Completes the release-and-inspection deferral without changing the app
+runtime.* ADR-51 named "#192" as the excluded release automation; that workflow
+still makes no application production-code change, and the version bump to
+1.0.0 (the `package.json` files) remains a separate concern. #276 separately
+adds the production inspector CLI and HTTP client: their boundary ends at
+bounded, encoding-checked registry/token/Distribution responses and the strict
+#274 graph core, including fail-closed authentication and error classification.
+They do not alter the server/client runtime, publish an image, or mutate a
+registry. Docker Hub, npm publishing, and changelog conventions beyond GitHub's
+generated notes remain out of scope.
 * *Separation of pipelines.* Tag-only triggering means a normal push or PR never
 builds or publishes; `ci.yml` and `docs.yml` are byte-for-byte unchanged.
 * *Verification.* Workflows are not executable in this CI, so (as with the
