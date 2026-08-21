@@ -18,8 +18,11 @@ type ObservedRequest = {
   accept: string | null;
   acceptEncoding: string | null;
   authorization: string | null;
+  queryPresent: boolean;
+  headerNames: string[];
 };
 
+const CONFIG_CDN_ORIGIN = "https://pkg-containers.githubusercontent.com";
 const BEARER_CHALLENGE = "Bearer realm=\"https://ghcr.io/token\",service=\"ghcr.io\",scope=\"repository:felixgeisler/draw:pull\"";
 
 async function fakeServer(route: Route) {
@@ -58,6 +61,39 @@ function successfulRoute(fixture = makeInspectionFixture()): Route {
   };
 }
 
+const TEST_CAPABILITY_QUERY = "?sig=opaque%2Fvalue%3D&part=one&part=two";
+
+function redirectedConfigRoute(fixture = makeInspectionFixture(), observeCapability?: (exact: boolean) => void): Route {
+  const direct = successfulRoute(fixture);
+  const configArtifacts = [...fixture.artifacts.entries()].filter(([path]) => path.includes("/blobs/"));
+  return (request, response) => {
+    const logical = new URL(request.url ?? "/", "http://test.invalid");
+    const cdnMatch = logical.pathname.match(/^\/ghcrblobs(?:11|12)\/blobs\/(sha256:[0-9a-f]{64})$/);
+    if (cdnMatch) {
+      observeCapability?.(logical.search === TEST_CAPABILITY_QUERY);
+      const artifact = fixture.artifacts.get(`/v2/felixgeisler/draw/blobs/${cdnMatch[1]}`);
+      if (!artifact) return send(response, 500, bytes({ error: "unexpected fixture path" }));
+      return send(response, 200, artifact.body, {
+        "Content-Type": artifact.contentType,
+        "Docker-Content-Digest": artifact.dockerDigest,
+        "Content-Encoding": "identity",
+      });
+    }
+    const configIndex = configArtifacts.findIndex(([path]) => path === logical.pathname);
+    if (configIndex >= 0) {
+      const digest = logical.pathname.slice(logical.pathname.lastIndexOf("/") + 1);
+      const cdnPath = `/ghcrblobs${configIndex === 0 ? "11" : "12"}/blobs/${digest}`;
+      response.writeHead(307, {
+        "Content-Type": "application/octet-stream",
+        "Content-Encoding": "identity",
+        Location: `${configIndex === 0 ? `${CONFIG_CDN_ORIGIN}:443` : CONFIG_CDN_ORIGIN}${cdnPath}${TEST_CAPABILITY_QUERY}`,
+      });
+      return response.end();
+    }
+    return direct(request, response);
+  };
+}
+
 function runner(origin: string, options: {
   argv?: string[];
   env?: Record<string, string | undefined>;
@@ -69,16 +105,21 @@ function runner(origin: string, options: {
   const signals = new EventEmitter();
   const transport = async (request: Request) => {
     const authorization = request.headers.get("authorization");
-    options.observeRawAuthorization?.(request.url, authorization);
+    const logical = new URL(request.url);
+    const retainedUrl = logical.origin === CONFIG_CDN_ORIGIN
+      ? `${logical.origin}${logical.pathname}`
+      : request.url;
+    options.observeRawAuthorization?.(retainedUrl, authorization);
     observed.push({
-      url: request.url,
+      url: retainedUrl,
       method: request.method,
       redirect: request.redirect,
       accept: request.headers.get("accept"),
       acceptEncoding: request.headers.get("accept-encoding"),
       authorization: authorization === null ? null : "<redacted>",
+      queryPresent: logical.search.length > 1,
+      headerNames: [...request.headers.keys()].sort(),
     });
-    const logical = new URL(request.url);
     return fetch(`${origin}${logical.pathname}${logical.search}`, {
       method: request.method,
       headers: request.headers,
@@ -142,12 +183,547 @@ describe("bounded GHCR inspector integration", () => {
         MANIFEST_MEDIA_TYPE,
         "application/octet-stream",
       ]);
-      expect(test.observed.every((item) => item.method === "GET" && item.redirect === "error" && item.acceptEncoding === "identity")).toBe(true);
+      expect(test.observed.map((item) => item.redirect)).toEqual([
+        "error", "error", "error", "manual", "error", "manual",
+      ]);
+      expect(test.observed.every((item) => item.method === "GET" && item.acceptEncoding === "identity")).toBe(true);
       expect(test.observed.every((item) => !item.accept?.includes("*") && !item.url.includes("/layers/"))).toBe(true);
       expect(test.observed.every((item) => item.authorization === null)).toBe(true);
     } finally {
       await local.close();
     }
+  });
+
+  it.each([
+    { mode: "derive", challenged: false, requests: 8 },
+    { mode: "expected", challenged: true, requests: 10 },
+  ])("follows both constrained config redirects in $mode mode (challenged: $challenged)", async ({ mode, challenged, requests }) => {
+    const fixture = makeInspectionFixture();
+    let challengeSent = false;
+    const capabilityChecks: boolean[] = [];
+    const rawAuthorization: Array<[string, string | null]> = [];
+    const redirectRoute = redirectedConfigRoute(fixture, (exact) => capabilityChecks.push(exact));
+    const local = await fakeServer((request, response) => {
+      if (request.url?.startsWith("/token?")) return send(response, 200, bytes({ token: "opaque-token" }));
+      if (challenged && !challengeSent) {
+        challengeSent = true;
+        return send(response, 401, distributionError("UNAUTHORIZED"), { "WWW-Authenticate": BEARER_CHALLENGE });
+      }
+      return redirectRoute(request, response);
+    });
+    try {
+      const argv = mode === "expected"
+        ? ["--image", "ghcr.io/felixgeisler/draw:edge", "--expected-revision", REVISION]
+        : undefined;
+      const test = runner(local.origin, {
+        argv,
+        observeRawAuthorization: (url, value) => rawAuthorization.push([url, value]),
+      });
+      await expect(runCli(test.input)).resolves.toBe(0);
+      expect(test.output()).toEqual({
+        stdout: `${JSON.stringify({ digest: fixture.digest, revision: fixture.revision })}\n`,
+        stderr: "",
+      });
+      expect(test.observed).toHaveLength(requests);
+      expect(capabilityChecks).toEqual([true, true]);
+      const fixturePaths = [...fixture.artifacts.keys()];
+      const successOrder = [
+        fixturePaths[0], fixturePaths[1], fixturePaths[2], fixturePaths[3],
+        `/ghcrblobs11/blobs/${fixturePaths[3].slice(fixturePaths[3].lastIndexOf("/") + 1)}`,
+        fixturePaths[4], fixturePaths[5],
+        `/ghcrblobs12/blobs/${fixturePaths[5].slice(fixturePaths[5].lastIndexOf("/") + 1)}`,
+      ];
+      expect(test.observed.map((item) => new URL(item.url).pathname)).toEqual(challenged
+        ? [fixturePaths[0], "/token", ...successOrder]
+        : successOrder);
+
+      const cdnRequests = test.observed.filter((item) => new URL(item.url).origin === CONFIG_CDN_ORIGIN);
+      expect(cdnRequests).toHaveLength(2);
+      expect(cdnRequests).toEqual(cdnRequests.map((item) => ({
+        ...item,
+        method: "GET",
+        redirect: "error",
+        accept: "application/octet-stream",
+        acceptEncoding: "identity",
+        authorization: null,
+        queryPresent: true,
+        headerNames: ["accept", "accept-encoding"],
+      })));
+      expect(cdnRequests.every((item) => !item.url.includes("?"))).toBe(true);
+      expect(JSON.stringify(test.observed)).not.toContain("opaque%2Fvalue");
+
+      const registryConfigs = test.observed.filter((item) =>
+        new URL(item.url).origin === "https://ghcr.io" && new URL(item.url).pathname.includes("/blobs/"));
+      expect(registryConfigs).toHaveLength(2);
+      expect(registryConfigs.every((item) => item.redirect === "manual" && item.queryPresent === false)).toBe(true);
+      expect(test.observed.filter((item) => new URL(item.url).origin === "https://ghcr.io" &&
+        !new URL(item.url).pathname.includes("/blobs/"))).toHaveLength(challenged ? 6 : 4);
+      expect(rawAuthorization.filter(([url]) => new URL(url).origin === CONFIG_CDN_ORIGIN)
+        .every(([, value]) => value === null)).toBe(true);
+      expect(test.observed.filter((item) => new URL(item.url).pathname !== "/token" &&
+        new URL(item.url).origin !== CONFIG_CDN_ORIGIN)).toHaveLength(challenged ? 7 : 6);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it("accepts an opaque parseable query with encoded data, duplicate-looking parameters, and a decoded space", async () => {
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    const cdnPath = `/ghcrblobs7/blobs/${digest}`;
+    const capabilityMarker = "never-retain-opaque-capability";
+    const rawQuery = `?sig=opaque%2Fvalue%3D&part=one&part=two&label=decoded space&secret=${capabilityMarker}`;
+    const serializedQuery = rawQuery.replace("decoded space", "decoded%20space");
+    const serializationChecks: boolean[] = [];
+    let redirected = false;
+    const local = await fakeServer((request, response) => {
+      const logical = new URL(request.url ?? "/", "http://test.invalid");
+      if (logical.pathname === cdnPath) {
+        serializationChecks.push(logical.search === serializedQuery);
+        const artifact = fixture.artifacts.get(configPath);
+        if (!artifact) return send(response, 500, bytes({ error: "unexpected fixture path" }));
+        return send(response, 200, artifact.body, {
+          "Content-Type": artifact.contentType,
+          "Docker-Content-Digest": artifact.dockerDigest,
+          "Content-Encoding": "identity",
+        });
+      }
+      if (!redirected && logical.pathname === configPath) {
+        redirected = true;
+        response.writeHead(307, {
+          "Content-Type": "application/octet-stream",
+          "Content-Encoding": "identity",
+          Location: `${CONFIG_CDN_ORIGIN}${cdnPath}${rawQuery}`,
+        });
+        return response.end();
+      }
+      return successfulRoute(fixture)(request, response);
+    });
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(0);
+      expect(serializationChecks).toEqual([true]);
+      expect(test.output()).toEqual({
+        stdout: `${JSON.stringify({ digest: fixture.digest, revision: fixture.revision })}\n`,
+        stderr: "",
+      });
+      const cdnRequests = test.observed.filter((item) => new URL(item.url).origin === CONFIG_CDN_ORIGIN);
+      expect(cdnRequests).toHaveLength(1);
+      expect(cdnRequests[0]).toMatchObject({
+        url: `${CONFIG_CDN_ORIGIN}${cdnPath}`,
+        redirect: "error",
+        authorization: null,
+        queryPresent: true,
+      });
+      const retainedEvidence = JSON.stringify({ observed: test.observed, output: test.output() });
+      const capabilityLeaked = [capabilityMarker, "opaque%2Fvalue", "decoded%20space"]
+        .some((value) => retainedEvidence.includes(value));
+      expect(capabilityLeaked).toBe(false);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it.each([
+    { label: "302 status", status: 302, location: "valid" },
+    { label: "HTTP scheme", status: 307, location: "http" },
+    { label: "wrong origin", status: 307, location: "origin" },
+    { label: "non-default port", status: 307, location: "port" },
+    { label: "wrong path", status: 307, location: "path" },
+    { label: "path-normalization material", status: 307, location: "normalized-path" },
+    { label: "wrong digest", status: 307, location: "digest" },
+    { label: "zero ghcrblobs number", status: 307, location: "zero" },
+    { label: "leading-zero ghcrblobs number", status: 307, location: "leading-zero" },
+    { label: "signed ghcrblobs number", status: 307, location: "signed" },
+    { label: "decimal ghcrblobs number", status: 307, location: "decimal" },
+    { label: "missing ghcrblobs number", status: 307, location: "missing-number" },
+    { label: "extra path", status: 307, location: "extra" },
+    { label: "credentials", status: 307, location: "credentials" },
+    { label: "fragment", status: 307, location: "fragment" },
+    { label: "empty query", status: 307, location: "empty-query" },
+    { label: "missing Location", status: 307, location: "missing" },
+    { label: "combined Location values", status: 307, location: "combined" },
+  ])("rejects a config redirect with $label before CDN dispatch", async ({ status, location }) => {
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    const good = `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}?sig=test`;
+    const locations: Record<string, string | undefined> = {
+      valid: good,
+      http: good.replace("https:", "http:"),
+      origin: good.replace("pkg-containers.githubusercontent.com", "example.invalid"),
+      port: good.replace(".com/", ".com:444/"),
+      path: `${CONFIG_CDN_ORIGIN}/other/blobs/${digest}?sig=test`,
+      "normalized-path": `${CONFIG_CDN_ORIGIN}/ignored/../ghcrblobs1/blobs/${digest}?sig=test`,
+      digest: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/sha256:${"f".repeat(64)}?sig=test`,
+      zero: `${CONFIG_CDN_ORIGIN}/ghcrblobs0/blobs/${digest}?sig=test`,
+      "leading-zero": `${CONFIG_CDN_ORIGIN}/ghcrblobs01/blobs/${digest}?sig=test`,
+      signed: `${CONFIG_CDN_ORIGIN}/ghcrblobs+1/blobs/${digest}?sig=test`,
+      decimal: `${CONFIG_CDN_ORIGIN}/ghcrblobs1.0/blobs/${digest}?sig=test`,
+      "missing-number": `${CONFIG_CDN_ORIGIN}/ghcrblobs/blobs/${digest}?sig=test`,
+      extra: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}/extra?sig=test`,
+      credentials: good.replace("https://", "https://user:password@"),
+      fragment: `${good}#fragment`,
+      "empty-query": good.slice(0, good.indexOf("?")) + "?",
+      missing: undefined,
+      combined: `${good.slice(0, good.indexOf("?"))}, ${good}`,
+    };
+    const local = await fakeServer((request, response) => {
+      const path = request.url?.split("?")[0] ?? "";
+      if (path !== configPath) return successfulRoute(fixture)(request, response);
+      const headers: Record<string, string> = { "Content-Encoding": "identity" };
+      const value = locations[location];
+      if (value !== undefined) headers.Location = value;
+      return send(response, status, new Uint8Array(), headers);
+    });
+    try {
+      const test = runner(local.origin);
+      await expect(runCli(test.input)).resolves.toBe(1);
+      expect(test.observed).toHaveLength(4);
+      expect(test.observed.at(-1)?.redirect).toBe("manual");
+      expect(test.observed.some((item) => new URL(item.url).origin === CONFIG_CDN_ORIGIN)).toBe(false);
+      expect(test.output()).toEqual({ stdout: "", stderr: "inspection failed: request or image validation failed\n" });
+    } finally {
+      await local.close();
+    }
+  });
+
+  it.each(["named index", "digest index", "manifest", "token"]) (
+    "keeps redirect:error and rejects a redirect for $target",
+    async (target) => {
+      const fixture = makeInspectionFixture();
+      const paths = [...fixture.artifacts.keys()];
+      let registryCalls = 0;
+      const local = await fakeServer((request, response) => {
+        if (request.url?.startsWith("/token?")) {
+          if (target === "token") return send(response, 307, new Uint8Array(), {
+            Location: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/sha256:${"a".repeat(64)}?sig=test`,
+          });
+          return send(response, 200, bytes({ token: "token" }));
+        }
+        registryCalls += 1;
+        if (target === "token" && registryCalls === 1) {
+          return send(response, 401, distributionError("UNAUTHORIZED"), { "WWW-Authenticate": BEARER_CHALLENGE });
+        }
+        const targetPath = target === "named index" ? paths[0] : target === "digest index" ? paths[1] : paths[2];
+        if (request.url?.split("?")[0] === targetPath) {
+          return send(response, 307, new Uint8Array(), {
+            Location: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/sha256:${"a".repeat(64)}?sig=test`,
+          });
+        }
+        return successfulRoute(fixture)(request, response);
+      });
+      try {
+        const test = runner(local.origin);
+        await expect(runCli(test.input)).resolves.toBe(1);
+        expect(test.observed.at(-1)?.redirect).toBe("error");
+        expect(test.observed.some((item) => new URL(item.url).origin === CONFIG_CDN_ORIGIN)).toBe(false);
+      } finally {
+        await local.close();
+      }
+    },
+  );
+
+  it.each([
+    { encoding: undefined, contentLength: undefined },
+    { encoding: "identity", contentLength: "999" },
+  ])("accepts an exactly empty 307 body with encoding $encoding and Content-Length $contentLength", async ({ encoding, contentLength }) => {
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    const location = `${CONFIG_CDN_ORIGIN}/ghcrblobs9/blobs/${digest}${TEST_CAPABILITY_QUERY}`;
+    let redirected = false;
+    let calls = 0;
+    const transport = async (request: Request) => {
+      calls += 1;
+      const logical = new URL(request.url);
+      const artifactPath = logical.origin === CONFIG_CDN_ORIGIN
+        ? `/v2/felixgeisler/draw/blobs/${logical.pathname.slice(logical.pathname.lastIndexOf("/") + 1)}`
+        : logical.pathname;
+      const artifact = fixture.artifacts.get(artifactPath);
+      if (!artifact) throw new Error("unexpected path");
+      if (!redirected && logical.pathname === configPath) {
+        redirected = true;
+        const headers = new Headers({ Location: location });
+        if (encoding !== undefined) headers.set("Content-Encoding", encoding);
+        if (contentLength !== undefined) headers.set("Content-Length", contentLength);
+        return new Response(new Uint8Array(), { status: 307, headers });
+      }
+      return new Response(artifact.body, { status: 200, headers: {
+        "Content-Type": artifact.contentType,
+        "Docker-Content-Digest": artifact.dockerDigest,
+        "Content-Encoding": "identity",
+      } });
+    };
+    let stdout = "";
+    let stderr = "";
+    const code = await runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {},
+      stdout: { write(value: string) { stdout += value; } },
+      stderr: { write(value: string) { stderr += value; } },
+      transport, signals: new EventEmitter(),
+    });
+    expect(code).toBe(0);
+    expect(calls).toBe(7);
+    expect({ stdout, stderr }).toEqual({
+      stdout: `${JSON.stringify({ digest: fixture.digest, revision: fixture.revision })}\n`, stderr: "",
+    });
+  });
+
+  it.each([
+    { label: "first nonempty byte", size: 1, contentLength: "0" },
+    { label: "oversize stream", size: 1_048_577, contentLength: undefined },
+  ])("rejects and cancels a 307 $label before following", async ({ size, contentLength }) => {
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    let calls = 0;
+    let cancellations = 0;
+    let requestAborted = false;
+    const transport = async (request: Request) => {
+      calls += 1;
+      const path = new URL(request.url).pathname;
+      const artifact = fixture.artifacts.get(path);
+      if (!artifact) throw new Error("unexpected path");
+      if (path !== configPath) return new Response(artifact.body, { status: 200, headers: {
+        "Content-Type": artifact.contentType, "Docker-Content-Digest": artifact.dockerDigest,
+      } });
+      request.signal.addEventListener("abort", () => { requestAborted = true; }, { once: true });
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (size === 1) {
+            controller.enqueue(new Uint8Array([1]));
+            controller.close();
+          } else {
+            controller.enqueue(new Uint8Array(1_048_576));
+            controller.enqueue(new Uint8Array([1]));
+          }
+        },
+        cancel() { cancellations += 1; },
+      });
+      const headers = new Headers({
+        Location: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}?sig=test`,
+      });
+      if (contentLength !== undefined) headers.set("Content-Length", contentLength);
+      return new Response(body, { status: 307, headers });
+    };
+    let stderr = "";
+    const code = await runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {}, stdout: { write() {} },
+      stderr: { write(value: string) { stderr += value; } }, transport, signals: new EventEmitter(),
+    });
+    expect(code).toBe(1);
+    expect(calls).toBe(4);
+    expect(cancellations).toBe(size > 1_048_576 ? 1 : 0);
+    expect(requestAborted).toBe(size > 1_048_576);
+    expect(stderr).toBe("inspection failed: request or image validation failed\n");
+  });
+
+  it("applies the 20-second fetch-and-stream deadline to a stalled 307 body", async () => {
+    vi.useFakeTimers();
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    let calls = 0;
+    let cancellations = 0;
+    let aborted = false;
+    const transport = async (request: Request) => {
+      calls += 1;
+      const path = new URL(request.url).pathname;
+      const artifact = fixture.artifacts.get(path);
+      if (!artifact) throw new Error("unexpected path");
+      if (path !== configPath) return new Response(artifact.body, { status: 200, headers: {
+        "Content-Type": artifact.contentType, "Docker-Content-Digest": artifact.dockerDigest,
+      } });
+      request.signal.addEventListener("abort", () => { aborted = true; }, { once: true });
+      return new Response(new ReadableStream<Uint8Array>({
+        pull() { /* the redirect headers arrive, but its body never completes */ },
+        cancel() { cancellations += 1; },
+      }), { status: 307, headers: {
+        Location: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}?sig=test`,
+      } });
+    };
+    let stderr = "";
+    const promise = runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {}, stdout: { write() {} },
+      stderr: { write(value: string) { stderr += value; } }, transport, signals: new EventEmitter(),
+    });
+    await vi.advanceTimersByTimeAsync(20_000);
+    await expect(promise).resolves.toBe(1);
+    expect({ calls, cancellations, aborted }).toEqual({ calls: 4, cancellations: 1, aborted: true });
+    expect(stderr).toBe("inspection failed: request or image validation failed\n");
+  });
+
+  it.each(["status", "encoding", "content-type", "wrong-size", "digest", "further-redirect"]) (
+    "rejects a CDN follow with $fault and starts no later graph request",
+    async (fault) => {
+      const fixture = makeInspectionFixture();
+      const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+      if (!configPath) throw new Error("fixture has no config path");
+      const configArtifact = fixture.artifacts.get(configPath);
+      if (!configArtifact) throw new Error("fixture config is missing");
+      const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+      const location = `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}?sig=never-retain-this`;
+      let calls = 0;
+      const transport = async (request: Request) => {
+        calls += 1;
+        const logical = new URL(request.url);
+        if (logical.origin === CONFIG_CDN_ORIGIN) {
+          if (fault === "status") return new Response(new Uint8Array(), { status: 503 });
+          if (fault === "further-redirect") return new Response(new Uint8Array(), {
+            status: 307, headers: { Location: "https://example.invalid/blocked" },
+          });
+          let body = configArtifact.body;
+          if (fault === "wrong-size") body = new Uint8Array([...body, 0]);
+          if (fault === "digest") {
+            body = body.slice();
+            body[0] ^= 1;
+          }
+          return new Response(body, { status: 200, headers: {
+            "Content-Type": fault === "content-type" ? "application/json" : configArtifact.contentType,
+            "Docker-Content-Digest": configArtifact.dockerDigest,
+            ...(fault === "encoding" ? { "Content-Encoding": "gzip" } : {}),
+          } });
+        }
+        const artifact = fixture.artifacts.get(logical.pathname);
+        if (!artifact) throw new Error("unexpected path");
+        if (logical.pathname === configPath) return new Response(new Uint8Array(), {
+          status: 307, headers: { Location: location },
+        });
+        return new Response(artifact.body, { status: 200, headers: {
+          "Content-Type": artifact.contentType, "Docker-Content-Digest": artifact.dockerDigest,
+        } });
+      };
+      let stderr = "";
+      const code = await runCli({
+        argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {}, stdout: { write() {} },
+        stderr: { write(value: string) { stderr += value; } }, transport, signals: new EventEmitter(),
+      });
+      expect(code).toBe(1);
+      expect(calls).toBe(5);
+      expect(stderr).toBe("inspection failed: request or image validation failed\n");
+      expect(stderr).not.toContain("never-retain-this");
+    },
+  );
+
+  it("cancels an oversized CDN response without retrying", async () => {
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    let calls = 0;
+    let cancellations = 0;
+    let aborted = false;
+    const transport = async (request: Request) => {
+      calls += 1;
+      const logical = new URL(request.url);
+      if (logical.origin === CONFIG_CDN_ORIGIN) {
+        request.signal.addEventListener("abort", () => { aborted = true; }, { once: true });
+        return new Response(new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array(1_048_576));
+            controller.enqueue(new Uint8Array([1]));
+          },
+          cancel() { cancellations += 1; },
+        }), { status: 200, headers: { "Content-Type": "application/octet-stream" } });
+      }
+      const artifact = fixture.artifacts.get(logical.pathname);
+      if (!artifact) throw new Error("unexpected path");
+      if (logical.pathname === configPath) return new Response(new Uint8Array(), { status: 307, headers: {
+        Location: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}?sig=test`,
+      } });
+      return new Response(artifact.body, { status: 200, headers: {
+        "Content-Type": artifact.contentType, "Docker-Content-Digest": artifact.dockerDigest,
+      } });
+    };
+    const code = await runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {}, stdout: { write() {} }, stderr: { write() {} },
+      transport, signals: new EventEmitter(),
+    });
+    expect(code).toBe(1);
+    expect({ calls, cancellations, aborted }).toEqual({ calls: 5, cancellations: 1, aborted: true });
+  });
+
+  it("gives the 307 and CDN follow separate 20-second windows inside one overall deadline", async () => {
+    vi.useFakeTimers();
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    let redirected = false;
+    let calls = 0;
+    const transport = (request: Request): Promise<Response> => {
+      calls += 1;
+      const logical = new URL(request.url);
+      const artifactPath = logical.origin === CONFIG_CDN_ORIGIN
+        ? `/v2/felixgeisler/draw/blobs/${digest}` : logical.pathname;
+      const artifact = fixture.artifacts.get(artifactPath);
+      if (!artifact) return Promise.reject(new Error("unexpected path"));
+      const isRedirect = !redirected && logical.pathname === configPath;
+      if (isRedirect) redirected = true;
+      const response = isRedirect
+        ? new Response(new Uint8Array(), { status: 307, headers: {
+          Location: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}?sig=test`,
+        } })
+        : new Response(artifact.body, { status: 200, headers: {
+          "Content-Type": artifact.contentType, "Docker-Content-Digest": artifact.dockerDigest,
+        } });
+      if (!isRedirect && logical.origin !== CONFIG_CDN_ORIGIN) return Promise.resolve(response);
+      return new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve(response), 19_000);
+        request.signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("aborted")); }, { once: true });
+      });
+    };
+    let stderr = "";
+    const promise = runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {}, stdout: { write() {} },
+      stderr: { write(value: string) { stderr += value; } }, transport, signals: new EventEmitter(),
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(19_000);
+    await vi.advanceTimersByTimeAsync(19_000);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(promise).resolves.toBe(0);
+    expect(calls).toBe(7);
+    expect(stderr).toBe("");
+  });
+
+  it("sanitizes a transport failure that carries the opaque CDN capability", async () => {
+    const fixture = makeInspectionFixture();
+    const configPath = [...fixture.artifacts.keys()].find((path) => path.includes("/blobs/"));
+    if (!configPath) throw new Error("fixture has no config path");
+    const digest = configPath.slice(configPath.lastIndexOf("/") + 1);
+    let calls = 0;
+    const transport = async (request: Request) => {
+      calls += 1;
+      const logical = new URL(request.url);
+      if (logical.origin === CONFIG_CDN_ORIGIN) throw new Error(request.url);
+      const artifact = fixture.artifacts.get(logical.pathname);
+      if (!artifact) throw new Error("unexpected path");
+      if (logical.pathname === configPath) return new Response(new Uint8Array(), { status: 307, headers: {
+        Location: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}?signed=opaque-secret`,
+      } });
+      return new Response(artifact.body, { status: 200, headers: {
+        "Content-Type": artifact.contentType, "Docker-Content-Digest": artifact.dockerDigest,
+      } });
+    };
+    let stdout = "";
+    let stderr = "";
+    const code = await runCli({
+      argv: ["--image", "ghcr.io/felixgeisler/draw:edge"], env: {},
+      stdout: { write(value: string) { stdout += value; } }, stderr: { write(value: string) { stderr += value; } },
+      transport, signals: new EventEmitter(),
+    });
+    expect(code).toBe(1);
+    expect(calls).toBe(5);
+    expect({ stdout, stderr }).toEqual({ stdout: "", stderr: "inspection failed: request or image validation failed\n" });
+    expect(`${stdout}${stderr}`).not.toContain("opaque-secret");
   });
 
   it("supports expected mode and fails a syntactically valid revision mismatch as inspection", async () => {

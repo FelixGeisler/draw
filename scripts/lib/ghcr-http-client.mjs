@@ -2,6 +2,7 @@ import { parseStrictJson } from "./strict-json.mjs";
 import { validateOciGraph } from "./oci-graph-validator.mjs";
 
 const REGISTRY_ORIGIN = "https://ghcr.io";
+const CONFIG_CDN_ORIGIN = "https://pkg-containers.githubusercontent.com";
 const TOKEN_URL = "https://ghcr.io/token?service=ghcr.io&scope=repository%3Afelixgeisler%2Fdraw%3Apull";
 const REPOSITORY_PATH = "/v2/felixgeisler/draw";
 const INDEX_MEDIA_TYPE = "application/vnd.oci.image.index.v1+json";
@@ -12,7 +13,7 @@ const JSON_MEDIA_TYPE = "application/json";
 const MAX_RESPONSE_BYTES = 1_048_576;
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_REGISTRY_REQUESTS = 7;
-const MAX_TOTAL_REQUESTS = 8;
+const MAX_TOTAL_REQUESTS = 10;
 
 export class GhcrInspectionError extends Error {
   constructor(code) {
@@ -209,23 +210,58 @@ function makeRegistryUrl(tag, plan) {
   return `${REGISTRY_ORIGIN}${REPOSITORY_PATH}/${endpoint}/${plan.digest}`;
 }
 
-function assertCanonicalRequest(request, kind, expectedUrl, expectedAccept, expectedAuthorization) {
+function isRedirectableConfigPlan(plan) {
+  return (plan.stage === "amd64-config" || plan.stage === "arm64-config") &&
+    plan.endpoint === "blobs" && /^sha256:[0-9a-f]{64}$/.test(plan.digest);
+}
+
+function validateConfigCdnLocation(value, requestedDigest) {
+  if (typeof value !== "string" || value.length === 0) {
+    fail("config redirect location is invalid");
+  }
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    fail("config redirect location is invalid");
+  }
+  const expectedPath = new RegExp(`^/ghcrblobs[1-9][0-9]*/blobs/${requestedDigest}$`);
+  const expectedRawLocation = new RegExp(
+    `^https://pkg-containers\\.githubusercontent\\.com(?::443)?${expectedPath.source.slice(1, -1)}\\?[^#]+$`,
+  );
+  if (url.protocol !== "https:" || url.origin !== CONFIG_CDN_ORIGIN || url.port !== "" ||
+      url.username !== "" || url.password !== "" || url.hash !== "" ||
+      !expectedPath.test(url.pathname) || !expectedRawLocation.test(value) || url.search.length <= 1) {
+    fail("config redirect location is invalid");
+  }
+  return value;
+}
+
+function assertCanonicalRequest(request, kind, expectedUrl, expectedAccept, expectedAuthorization, expectedRedirect) {
   const url = new URL(request.url);
   const expectedHeaderNames = expectedAuthorization === null
     ? ["accept", "accept-encoding"]
     : ["accept", "accept-encoding", "authorization"];
-  if (request.method !== "GET" || request.redirect !== "error" || url.protocol !== "https:" ||
-      request.url !== expectedUrl || request.headers.get("accept") !== expectedAccept ||
+  const canonicalExpectedUrl = kind === "cdn" ? new URL(expectedUrl).href : expectedUrl;
+  if (request.method !== "GET" || request.redirect !== expectedRedirect || url.protocol !== "https:" ||
+      request.url !== canonicalExpectedUrl || request.headers.get("accept") !== expectedAccept ||
       request.headers.get("accept-encoding") !== "identity" ||
       request.headers.get("authorization") !== expectedAuthorization ||
       JSON.stringify([...request.headers.keys()].sort()) !== JSON.stringify(expectedHeaderNames)) {
     fail("request policy rejected dispatch");
   }
   if (kind === "token") {
-    if (request.url !== TOKEN_URL || expectedAccept !== JSON_MEDIA_TYPE || url.origin !== REGISTRY_ORIGIN) {
+    if (request.url !== TOKEN_URL || expectedAccept !== JSON_MEDIA_TYPE || url.origin !== REGISTRY_ORIGIN ||
+        expectedRedirect !== "error") {
       fail("request policy rejected dispatch");
     }
-  } else if (url.origin !== REGISTRY_ORIGIN || !url.pathname.startsWith(`${REPOSITORY_PATH}/`) || url.search || url.hash) {
+  } else if (kind === "cdn") {
+    if (expectedAuthorization !== null || expectedAccept !== OCTET_STREAM || expectedRedirect !== "error" ||
+        url.origin !== CONFIG_CDN_ORIGIN || url.hash) {
+      fail("request policy rejected dispatch");
+    }
+  } else if (url.origin !== REGISTRY_ORIGIN || !url.pathname.startsWith(`${REPOSITORY_PATH}/`) || url.search || url.hash ||
+      (expectedRedirect === "manual" && !new RegExp(`^${REPOSITORY_PATH}/blobs/sha256:[0-9a-f]{64}$`).test(url.pathname))) {
     fail("request policy rejected dispatch");
   }
 }
@@ -258,7 +294,7 @@ export async function inspectGhcrImage({
     }
   };
 
-  const dispatch = async ({ url, accept, authorization, kind }) => {
+  const dispatch = async ({ url, accept, authorization, kind, redirect = "error" }) => {
     enforceOverallDeadline();
     if (totalRequests >= MAX_TOTAL_REQUESTS || (kind === "registry" && registryRequests >= MAX_REGISTRY_REQUESTS)) {
       fail("request allowance exhausted");
@@ -273,10 +309,10 @@ export async function inspectGhcrImage({
     const request = new Request(url, {
       method: "GET",
       headers,
-      redirect: "error",
+      redirect,
       signal: combineSignals(overallSignal, requestController.signal),
     });
-    assertCanonicalRequest(request, kind, url, accept, authorization);
+    assertCanonicalRequest(request, kind, url, accept, authorization, redirect);
 
     try {
       let response;
@@ -320,13 +356,29 @@ export async function inspectGhcrImage({
   const registryRequest = async (plan, allowInitialAuth) => {
     const accept = expectedAccept(plan.stage, plan.endpoint);
     const authorization = bearerToken === null ? null : `Bearer ${bearerToken}`;
-    const result = await dispatch({
+    const redirectableConfig = isRedirectableConfigPlan(plan);
+    let result = await dispatch({
       url: makeRegistryUrl(tag, plan),
       accept,
       authorization,
       kind: "registry",
+      redirect: redirectableConfig ? "manual" : "error",
     });
-    const { response, body } = result;
+    let { response, body } = result;
+
+    if (redirectableConfig && response.status === 307) {
+      if (body.byteLength !== 0) fail("config redirect body is not empty");
+      const location = validateConfigCdnLocation(response.headers.get("location"), plan.digest);
+      result = await dispatch({
+        url: location,
+        accept: OCTET_STREAM,
+        authorization: null,
+        kind: "cdn",
+      });
+      ({ response, body } = result);
+      if (response.status !== 200) fail("config redirect target failed");
+      return result;
+    }
 
     if (response.status === 401) {
       validateJsonContentType(response);
