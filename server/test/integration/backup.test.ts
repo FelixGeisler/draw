@@ -452,6 +452,37 @@ describe("POST /api/backup/import — rejections (live data untouched)", () => {
     await expectRejected(missingIndex, /schema v18 contract/);
   });
 
+  it("rejects weakened owner CHECKs hidden behind decoy comments", async () => {
+    const weakCompletionCheck = await tamperedV18Archive((staged) => {
+      staged.exec(`
+        ALTER TABLE completions DROP COLUMN gold_awarded;
+        ALTER TABLE completions ADD COLUMN gold_awarded INTEGER NOT NULL DEFAULT 0
+          /* CHECK (gold_awarded >= 0) */;
+      `);
+    });
+    await expectRejected(weakCompletionCheck, /schema v18 contract/);
+
+    const weakAchievementCheck = await tamperedV18Archive((staged) => {
+      staged.exec(`
+        ALTER TABLE achievements DROP COLUMN claim_gold;
+        ALTER TABLE achievements ADD COLUMN claim_gold INTEGER
+          /* CHECK (claim_gold IS NULL OR claim_gold >= 0) */;
+      `);
+    });
+    await expectRejected(weakAchievementCheck, /schema v18 contract/);
+  });
+
+  it("rejects a case-mutated enum literal that validation does not probe", async () => {
+    const openingColumns =
+      "opening_order, ref, payment, back_key, rarity, duplicate, secret_chance_bp, effective_bonus, opened_at";
+    const archive = await tamperedV18Archive((staged) => {
+      rebuildContractTable(staged, "pack_openings", openingColumns, (sql) =>
+        sql.replace("'secret-rare'", "'Secret-rare'"),
+      );
+    });
+    await expectRejected(archive, /schema v18 contract/);
+  });
+
   it("rejects a v18-stamped backup missing an immutable trigger", async () => {
     const archive = await tamperedV18Archive((staged) => {
       staged.exec("DROP TRIGGER pack_openings_no_delete");
