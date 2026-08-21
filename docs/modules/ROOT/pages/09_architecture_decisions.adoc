@@ -3434,8 +3434,10 @@ only exact lower-case `stable`, `edge`, or `local` (otherwise `local`), and
 `buildSha` trims `DRAW_BUILD_SHA` but accepts only a full 40-character ASCII
 hex SHA, normalized to lower case (otherwise `null`). `buildIdentity` is
 `<channel>:<sha>` when valid and `<channel>:version-<server package version>`
-otherwise. These fields do not yet change release checking or drive a client
-consumer; client consumption and edge publication are follow-ups. First
+otherwise. These fields do not change release checking: authenticated Settings
+keeps `Draw <package version>` as the running version and separately displays
+`<channel> · <full SHA>`, or `<channel> · package <version> (SHA unavailable)`
+when no SHA was shipped. No other client surface consumes the identity. First
 sighting of a new version pays ONE notification through the #235 door, deduped
 in a settings row so restarts
 never re-send. Forced checks are throttled server-side (one outbound GET
@@ -3455,17 +3457,22 @@ only there and never on the check request, managed write-only like
 No trigger configured -> `409` plus guidance, not a broken button. No
 auto-apply: the check may run daily, but a human taps the button. After
 apply the client polls `GET /api/update` (3s, 5-minute budget) and reloads
-once the version changes; a sessionStorage flag pays one "Updated to X"
-line and is consumed — a failed poll tick during the container swap is
-never a reason to reload. A trigger that ANSWERS non-2xx is remembered as
+once the canonical `buildIdentity` differs from the identity at apply time,
+including when the package version is unchanged. A versioned, exact-key
+sessionStorage union records either the changed channel/full SHA or the
+channel/package fallback; authenticated Settings removes every present value
+on its single read and displays a valid, successfully consumed notice once.
+Malformed, legacy, or inaccessible storage is silent, and a failed poll tick
+during the container swap is never a reason to reload. A trigger that ANSWERS
+non-2xx is remembered as
 `lastApplyError` and stops the poll with an error line; a dropped or
 aborted socket stays warn-only, because that is exactly what a successful
 swap of the very container looks like.
 
-*Out of scope:* auto-apply on a schedule, client build-identity consumption,
-edge image publication/promotion, rollback automation (pin the previous tag +
-restore a backup, 7.5), and bare-npm self-restart — there the check and banner
-work, the button stays hidden.
+*Out of scope:* auto-apply on a schedule, build-identity consumption outside
+authenticated Settings, edge image publication/promotion, rollback automation
+(pin the previous tag + restore a backup, 7.5), and bare-npm self-restart —
+there the check and banner work, the button stays hidden.
 
 == ADR-71: Card-table identity — felt ground, brass accent, serif on the card face only
 
