@@ -1,0 +1,178 @@
+# Detached immutable-SHA publication (#277, ADR-53). A workflow name is only
+# routing: the job's five-part gate authorizes only successful same-repository
+# pushes to main reported by the exact CI workflow path.
+name: Edge commit publication
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge-publication-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publication:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.path == '.github/workflows/ci.yml'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 60
+    steps:
+      - name: Check out the tested commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Set up Node for the repository inspector
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Derive the one permitted target
+        id: target
+        env:
+          EVENT_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$EVENT_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "workflow_run head SHA is not full lowercase hex" >&2
+            exit 1
+          fi
+          echo "sha=$EVENT_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/felixgeisler/draw:sha-$EVENT_HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      # Exit 0 reuses the verified digest without mutation. Exit 3 alone is an
+      # authoritative absence and opens the build path; every other outcome,
+      # including malformed success JSON, fails closed.
+      - name: Inspect before any package mutation
+        id: initial
+        env:
+          OCI_REGISTRY_USERNAME: ${{ github.actor }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.target.outputs.sha }}
+          TARGET: ${{ steps.target.outputs.image }}
+        run: |
+          set -euo pipefail
+          set +e
+          result="$(node scripts/inspect-oci-image.mjs --image "$TARGET" --expected-revision "$SHA")"
+          status=$?
+          set -e
+          case "$status" in
+            0)
+              digest="$(printf '%s' "$result" | node -e '
+                const fs = require("node:fs");
+                const value = JSON.parse(fs.readFileSync(0, "utf8"));
+                const keys = value && typeof value === "object" && !Array.isArray(value)
+                  ? Object.keys(value).sort() : [];
+                if (keys.join(",") !== "digest,revision" ||
+                    !/^sha256:[0-9a-f]{64}$/.test(value.digest) ||
+                    value.revision !== process.env.SHA) process.exit(1);
+                process.stdout.write(value.digest);
+              ')"
+              echo "build=false" >> "$GITHUB_OUTPUT"
+              echo "existing-digest=$digest" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              if [[ -n "$result" ]]; then
+                echo "absence inspection emitted unexpected success output" >&2
+                exit 1
+              fi
+              echo "build=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "initial image inspection failed closed" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Set up QEMU
+        if: ${{ steps.initial.outputs.build == 'true' }}
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        if: ${{ steps.initial.outputs.build == 'true' }}
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        if: ${{ steps.initial.outputs.build == 'true' }}
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive immutable image metadata
+        if: ${{ steps.initial.outputs.build == 'true' }}
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/felixgeisler/draw
+          flavor: latest=false
+          tags: type=raw,value=sha-${{ steps.target.outputs.sha }}
+
+      - name: Build and push the absent commit tag
+        if: ${{ steps.initial.outputs.build == 'true' }}
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          provenance: false
+          build-args: |
+            DRAW_BUILD_CHANNEL=edge
+            DRAW_BUILD_SHA=${{ steps.target.outputs.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.target.outputs.sha }}
+          annotations: |
+            index:org.opencontainers.image.revision=${{ steps.target.outputs.sha }}
+
+      # A push is successful only when the repository inspector resolves the
+      # tag once and returns the exact top-level digest produced by buildx.
+      # Any absence, malformed output, failure, or mismatch wedges this SHA;
+      # automation never deletes, retries, replaces, or repairs the tag.
+      - name: Verify the pushed digest
+        if: ${{ steps.initial.outputs.build == 'true' }}
+        env:
+          OCI_REGISTRY_USERNAME: ${{ github.actor }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.target.outputs.sha }}
+          TARGET: ${{ steps.target.outputs.image }}
+          EXPECTED_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          set +e
+          result="$(node scripts/inspect-oci-image.mjs --image "$TARGET" --expected-revision "$SHA")"
+          status=$?
+          set -e
+          if [[ "$status" -ne 0 ]]; then
+            echo "post-push image inspection failed closed" >&2
+            exit 1
+          fi
+          digest="$(printf '%s' "$result" | node -e '
+            const fs = require("node:fs");
+            const value = JSON.parse(fs.readFileSync(0, "utf8"));
+            const keys = value && typeof value === "object" && !Array.isArray(value)
+              ? Object.keys(value).sort() : [];
+            if (keys.join(",") !== "digest,revision" ||
+                !/^sha256:[0-9a-f]{64}$/.test(value.digest) ||
+                value.revision !== process.env.SHA) process.exit(1);
+            process.stdout.write(value.digest);
+          ')"
+          if ! [[ "$EXPECTED_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] ||
+             [[ "$digest" != "$EXPECTED_DIGEST" ]]; then
+            echo "post-push digest does not match the build output" >&2
+            exit 1
+          fi
