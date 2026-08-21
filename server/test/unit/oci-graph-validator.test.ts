@@ -48,6 +48,25 @@ function replaceNamedBody(record: Record<string, any>, body: Uint8Array) {
   record.headers.dockerContentDigest = [digest(body)];
 }
 
+function withArrayIteratorPollution<T>(
+  substitute: (value: unknown[]) => unknown[] | null,
+  call: () => T,
+): T {
+  const descriptor = Object.getOwnPropertyDescriptor(Array.prototype, Symbol.iterator);
+  if (!descriptor || typeof descriptor.value !== "function") throw new Error("Array iterator is unavailable");
+  Object.defineProperty(Array.prototype, Symbol.iterator, {
+    ...descriptor,
+    value: function pollutedIterator(this: unknown[]) {
+      return descriptor.value.call(substitute(this) ?? this);
+    },
+  });
+  try {
+    return call();
+  } finally {
+    Object.defineProperty(Array.prototype, Symbol.iterator, descriptor);
+  }
+}
+
 describe("validateOciGraph staged contract", () => {
   it("exports exactly the validator and typed error", async () => {
     // @ts-expect-error JavaScript module has no declaration file.
@@ -327,6 +346,54 @@ describe("OCI index, descriptor, manifest, and config schemas", () => {
       index["x-extension"] = { mediaType: INDEX_MEDIA_TYPE };
     } });
     expect(caught(deriveCall([invalid.records[0]])).code).toBe("SCHEMA_INVALID");
+  });
+
+  it("derives plans from own index descriptors despite a polluted inherited array iterator", () => {
+    let descriptors: unknown[] = [];
+    const fixture = makeFixture({ mutateIndex: (index) => {
+      descriptors = structuredClone(index.manifests);
+    } });
+    const substitutes = structuredClone(descriptors) as Array<Record<string, any>>;
+    substitutes[0].digest = `sha256:${"f".repeat(64)}`;
+
+    const result = withArrayIteratorPollution(
+      (value) => value.length === 2 && typeof value[0] === "object" && value[0] !== null && Object.hasOwn(value[0], "platform")
+        ? substitutes
+        : null,
+      () => validateOciGraph(expectedCall(fixture.records.slice(0, 2))),
+    );
+
+    expect(result.fetchPlan).toEqual(expectedPlan(fixture.records[2]));
+  });
+
+  it("rejects malformed own index and layer descriptors that a polluted iterator tries to substitute", () => {
+    let validIndexDescriptors: unknown[] = [];
+    const malformedIndex = makeFixture({ mutateIndex: (index) => {
+      validIndexDescriptors = structuredClone(index.manifests);
+      index.manifests[0].digest = "invalid";
+    } });
+    const indexError = withArrayIteratorPollution(
+      (value) => value.length === 2 && typeof value[0] === "object" && value[0] !== null && Object.hasOwn(value[0], "platform")
+        ? validIndexDescriptors
+        : null,
+      () => caught(deriveCall([malformedIndex.records[0]])),
+    );
+    expect(indexError).toMatchObject({ code: "SCHEMA_INVALID", stage: "named-index" });
+
+    let validLayers: unknown[] = [];
+    const malformedManifest = makeFixture({ mutateAmd64Manifest: (manifest) => {
+      validLayers = structuredClone(manifest.layers);
+      manifest.layers[0].digest = "invalid";
+    } });
+    const layerError = withArrayIteratorPollution(
+      (value) => value.length === 1 && typeof value[0] === "object" && value[0] !== null &&
+        typeof (value[0] as Record<string, unknown>).mediaType === "string" &&
+        (value[0] as Record<string, string>).mediaType.startsWith("application/vnd.oci.image.layer.")
+        ? validLayers
+        : null,
+      () => caught(expectedCall(malformedManifest.records.slice(0, 3))),
+    );
+    expect(layerError).toMatchObject({ code: "SCHEMA_INVALID", stage: "amd64-manifest" });
   });
 
   it("accepts exactly the three unfetched OCI layer media types", () => {

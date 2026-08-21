@@ -14,12 +14,21 @@ const INDEX_MEDIA_TYPE = "application/vnd.oci.image.index.v1+json";
 const MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json";
 const CONFIG_MEDIA_TYPE = "application/vnd.oci.image.config.v1+json";
 const OCTET_STREAM = "application/octet-stream";
-const LAYER_MEDIA_TYPES = new Set([
+
+function makeSet(...values) {
+  const result = new Set();
+  for (let index = 0; index < values.length; index += 1) result.add(values[index]);
+  return result;
+}
+
+const LAYER_MEDIA_TYPES = makeSet(
   "application/vnd.oci.image.layer.v1.tar",
   "application/vnd.oci.image.layer.v1.tar+gzip",
   "application/vnd.oci.image.layer.v1.tar+zstd",
-]);
-const DESCRIPTOR_MEDIA_TYPES = new Set([INDEX_MEDIA_TYPE, MANIFEST_MEDIA_TYPE, CONFIG_MEDIA_TYPE]);
+);
+const DESCRIPTOR_MEDIA_TYPES = makeSet(INDEX_MEDIA_TYPE, MANIFEST_MEDIA_TYPE, CONFIG_MEDIA_TYPE);
+const MANIFEST_DESCRIPTOR_MEDIA_TYPES = makeSet(MANIFEST_MEDIA_TYPE);
+const CONFIG_DESCRIPTOR_MEDIA_TYPES = makeSet(CONFIG_MEDIA_TYPE);
 const STAGES = [
   "named-index",
   "digest-index",
@@ -28,9 +37,16 @@ const STAGES = [
   "arm64-manifest",
   "arm64-config",
 ];
-const STAGE_SET = new Set(STAGES);
-const ENDPOINTS = new Set(["manifests", "blobs"]);
-const PLATFORMS = new Set([null, "linux/amd64", "linux/arm64"]);
+const STAGE_SET = makeSet(
+  "named-index",
+  "digest-index",
+  "amd64-manifest",
+  "amd64-config",
+  "arm64-manifest",
+  "arm64-config",
+);
+const ENDPOINTS = makeSet("manifests", "blobs");
+const PLATFORMS = makeSet(null, "linux/amd64", "linux/arm64");
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
 const REVISION = /^[0-9a-f]{40}$/;
 const CALL_KEYS_EXPECTED = ["mode", "expectedRevision", "records"];
@@ -71,7 +87,8 @@ function inspectOwnData(value) {
   const keys = Reflect.ownKeys(value);
   const values = Object.create(null);
   let dataOnly = true;
-  for (const key of keys) {
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor || !has(descriptor, "value")) {
       dataOnly = false;
@@ -168,7 +185,8 @@ function snapshotRecordInput(inspection, stage, failureStage) {
     graphError("INPUT_INVALID", failureStage, "headers must have exact own data properties and no accessors");
   }
   const headers = Object.create(null);
-  for (const key of HEADER_KEYS) {
+  for (let index = 0; index < HEADER_KEYS.length; index += 1) {
+    const key = HEADER_KEYS[index];
     const values = snapshotDenseArray(headerInspection.values[key], { strings: true });
     if (values === null) graphError("INPUT_INVALID", failureStage, `${key} must be a dense data-only string array`);
     headers[key] = values;
@@ -179,7 +197,10 @@ function snapshotRecordInput(inspection, stage, failureStage) {
     graphError("INPUT_INVALID", failureStage, "body must be a Uint8Array");
   }
   const snapshot = Object.create(null);
-  for (const key of RECORD_KEYS) snapshot[key] = record[key];
+  for (let index = 0; index < RECORD_KEYS.length; index += 1) {
+    const key = RECORD_KEYS[index];
+    snapshot[key] = record[key];
+  }
   snapshot.headers = headers;
   snapshot.body = new Uint8Array(record.body);
   return Object.freeze(snapshot);
@@ -288,7 +309,9 @@ function requireOwn(value, key, stage, description) {
 
 function validateStringMap(value, stage, description) {
   requireObject(value, stage, description);
-  for (const key of Reflect.ownKeys(value)) {
+  const keys = Reflect.ownKeys(value);
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
     if (typeof key !== "string" || typeof read(value, key) !== "string") {
       schemaFailure(stage, `${description} values must be strings`);
     }
@@ -307,7 +330,9 @@ function validateDescriptor(value, stage, { mediaTypes, platform }) {
   if (typeof mediaType !== "string" || !mediaTypes.has(mediaType)) schemaFailure(stage, "descriptor mediaType is invalid");
   if (typeof digest !== "string" || !SHA256.test(digest)) schemaFailure(stage, "descriptor digest is invalid");
   if (!isSafeSize(size)) schemaFailure(stage, "descriptor size is invalid");
-  for (const forbidden of ["urls", "data", "artifactType"]) {
+  const forbiddenDescriptorKeys = ["urls", "data", "artifactType"];
+  for (let index = 0; index < forbiddenDescriptorKeys.length; index += 1) {
+    const forbidden = forbiddenDescriptorKeys[index];
     if (has(value, forbidden)) schemaFailure(stage, `descriptor ${forbidden} is forbidden`);
   }
   validateOptionalAnnotations(value, stage, "descriptor");
@@ -321,7 +346,9 @@ function validateDescriptor(value, stage, { mediaTypes, platform }) {
     if (os !== "linux" || (architecture !== "amd64" && architecture !== "arm64")) {
       schemaFailure(stage, "descriptor platform must be exactly linux/amd64 or linux/arm64");
     }
-    for (const forbidden of ["variant", "os.version", "os.features"]) {
+    const forbiddenPlatformKeys = ["variant", "os.version", "os.features"];
+    for (let index = 0; index < forbiddenPlatformKeys.length; index += 1) {
+      const forbidden = forbiddenPlatformKeys[index];
       if (has(platformValue, forbidden)) schemaFailure(stage, `descriptor platform ${forbidden} is forbidden`);
     }
     platformName = `linux/${architecture}`;
@@ -343,12 +370,12 @@ function validateIndex(value, stage) {
   const revision = requireOwn(annotations, "org.opencontainers.image.revision", stage, "index.annotations");
   if (typeof revision !== "string" || !REVISION.test(revision)) schemaFailure(stage, "index revision annotation is invalid");
 
-  const manifests = requireOwn(value, "manifests", stage, "index");
-  if (!Array.isArray(manifests) || manifests.length !== 2) schemaFailure(stage, "index must contain exactly two descriptors");
+  const manifests = snapshotDenseArray(requireOwn(value, "manifests", stage, "index"));
+  if (manifests === null || manifests.length !== 2) schemaFailure(stage, "index must contain exactly two own descriptors");
   const byPlatform = new Map();
-  for (const descriptorValue of manifests) {
-    const descriptor = validateDescriptor(descriptorValue, stage, {
-      mediaTypes: new Set([MANIFEST_MEDIA_TYPE]),
+  for (let index = 0; index < manifests.length; index += 1) {
+    const descriptor = validateDescriptor(manifests[index], stage, {
+      mediaTypes: MANIFEST_DESCRIPTOR_MEDIA_TYPES,
       platform: "required",
     });
     if (byPlatform.has(descriptor.platform)) schemaFailure(stage, "index platforms must be unique");
@@ -371,13 +398,13 @@ function validateManifest(value, stage) {
   validateOptionalAnnotations(value, stage, "manifest");
 
   const config = validateDescriptor(requireOwn(value, "config", stage, "manifest"), stage, {
-    mediaTypes: new Set([CONFIG_MEDIA_TYPE]),
+    mediaTypes: CONFIG_DESCRIPTOR_MEDIA_TYPES,
     platform: "forbidden",
   });
-  const layers = requireOwn(value, "layers", stage, "manifest");
-  if (!Array.isArray(layers) || layers.length === 0) schemaFailure(stage, "manifest layers must be a nonempty array");
-  for (const layer of layers) {
-    validateDescriptor(layer, stage, { mediaTypes: LAYER_MEDIA_TYPES, platform: "forbidden" });
+  const layers = snapshotDenseArray(requireOwn(value, "layers", stage, "manifest"));
+  if (layers === null || layers.length === 0) schemaFailure(stage, "manifest layers must be a nonempty own array");
+  for (let index = 0; index < layers.length; index += 1) {
+    validateDescriptor(layers[index], stage, { mediaTypes: LAYER_MEDIA_TYPES, platform: "forbidden" });
   }
   return { config };
 }
@@ -385,7 +412,9 @@ function validateManifest(value, stage) {
 function validateConfig(value, stage, platform) {
   requireObject(value, stage, "config body");
   validateOptionalAnnotations(value, stage, "config body");
-  const [os, architecture] = platform.split("/");
+  const platformParts = platform.split("/");
+  const os = platformParts[0];
+  const architecture = platformParts[1];
   if (requireOwn(value, "os", stage, "config body") !== os || requireOwn(value, "architecture", stage, "config body") !== architecture) {
     schemaFailure(stage, "config body platform does not match its parent");
   }
