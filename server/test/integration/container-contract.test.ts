@@ -77,6 +77,14 @@ describe("Dockerfile", () => {
     expect(dockerfile).toMatch(/DATA_DIR=\/data/);
   });
 
+  it("wires truthful build-identity arguments into the runtime environment", () => {
+    const runtime = dockerfile.slice(dockerfile.indexOf("FROM node:22-bookworm-slim AS runtime"));
+    expect(runtime).toMatch(/^ARG DRAW_BUILD_CHANNEL=local$/m);
+    expect(runtime).toMatch(/^ARG DRAW_BUILD_SHA=$/m);
+    expect(runtime).toMatch(/^\s*DRAW_BUILD_CHANNEL=\$\{DRAW_BUILD_CHANNEL\} \\$/m);
+    expect(runtime).toMatch(/^\s*DRAW_BUILD_SHA=\$\{DRAW_BUILD_SHA\} \\$/m);
+  });
+
   it("puts DATA_DIR on a volume and exposes the API port", () => {
     expect(dockerfile).toMatch(/VOLUME \["\/data"\]/);
     expect(dockerfile).toMatch(/EXPOSE 3001/);

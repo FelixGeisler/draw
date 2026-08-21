@@ -99,12 +99,39 @@ describe("release workflow publish", () => {
     }
   });
 
-  it("pushes to the real GHCR image path", () => {
-    expect(release).toContain(`images: ${IMAGE}`);
-    expect(release).toMatch(/push:\s*true/);
+  it("keeps every existing action reference unchanged", () => {
+    expect(release.match(/uses:\s*[^\s]+/g)).toEqual([
+      "uses: actions/checkout@v4",
+      "uses: actions/setup-node@v4",
+      "uses: actions/upload-artifact@v4",
+      "uses: actions/checkout@v4",
+      "uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130",
+      "uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f",
+      "uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9",
+      "uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051",
+      "uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8",
+    ]);
   });
 
-  it("tags the semver AND latest, but keeps latest off pre-releases", () => {
+  it("pushes to the real GHCR image path without provenance manifests", () => {
+    expect(release).toContain(`images: ${IMAGE}`);
+    expect(release).toMatch(/push:\s*true/);
+    expect(release).toMatch(/provenance:\s*false/);
+  });
+
+  it("uses the publish checkout commit as build identity for tags and dispatch refs", () => {
+    const publishJob = release.slice(release.indexOf("\n  publish:"));
+    expect(publishJob).toContain("ref: ${{ github.event.inputs.ref || github.ref }}");
+    expect(publishJob).toMatch(/id:\s*build[\s\S]*?git rev-parse HEAD/);
+    expect(publishJob).toContain(
+      "DRAW_BUILD_CHANNEL=${{ github.event_name == 'push' && 'stable' || 'local' }}",
+    );
+    expect(publishJob).toContain("DRAW_BUILD_SHA=${{ steps.build.outputs.sha }}");
+    expect(publishJob).not.toContain("DRAW_BUILD_SHA=${{ github.sha }}");
+    expect(publishJob).not.toContain("DRAW_BUILD_SHA=${{ github.event.inputs.ref }}");
+  });
+
+  it("tags semver/conditional-latest on pushes and only dryrun on dispatch", () => {
     // The version tag is push-gated on the EVENT, not the ref: a dispatch dry
     // run (even one launched from a tag ref) must never emit a real :version.
     expect(release).toMatch(
@@ -112,6 +139,9 @@ describe("release workflow publish", () => {
     );
     // `latest` is gated on a non-prerelease push (no `-` in the tag name).
     expect(release).toMatch(/type=raw,value=latest,enable=.*!contains\(github\.ref_name, '-'\)/);
+    expect(release).toContain(
+      "type=raw,value=dryrun,enable=${{ github.event_name == 'workflow_dispatch' }}",
+    );
   });
 
   it("creates a GitHub Release on tag pushes, flagging pre-releases", () => {
