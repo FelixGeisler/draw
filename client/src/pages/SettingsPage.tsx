@@ -7,9 +7,10 @@ import { useGamification } from "../hooks/useGamification";
 import { useImportBackup, type ImportSummary } from "../hooks/useBackup";
 import {
   UPDATE_NOTICE_KEY,
-  parseUpdateNotice,
+  consumeUpdateNotice,
   serializeUpdateNotice,
   shouldReloadAfterApply,
+  type BuildChannel,
 } from "../lib/updateNotice";
 import type { Category } from "../api/types";
 
@@ -452,6 +453,9 @@ interface UpdateStatus {
   checkEnabled: boolean;
   applyConfigured: boolean;
   lastApplyError: string | null;
+  buildChannel: BuildChannel;
+  buildSha: string | null;
+  buildIdentity: string;
 }
 
 /**
@@ -461,8 +465,9 @@ interface UpdateStatus {
  * itself. The trigger URL/token are managed exactly like the ntfy URL
  * (#235): saved write-only, presence flag on read. After "Update now" the
  * section polls GET /api/update every 3s (up to 5 minutes) and reloads once
- * the server reports a new version; a sessionStorage flag pays one
- * "Updated to X" line after that reload and is consumed.
+ * the server reports a changed canonical build identity. A structured
+ * sessionStorage value pays one exact update line after that reload and is
+ * consumed.
  */
 function UpdateSection() {
   const qc = useQueryClient();
@@ -480,23 +485,17 @@ function UpdateSection() {
   const [urlDraft, setUrlDraft] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
   const pollTimer = useRef<number | null>(null);
+  const noticeRead = useRef(false);
 
-  // Consume the post-reload notice: one "Updated to X" line, then the flag
-  // is gone — a second reload shows nothing (no loops, no repeat toasts).
-  // try/catch like every storage touch: a lost notice must never break the
-  // app (the deckScope rule). An effect, not a state initializer: StrictMode
-  // double-invokes initializers, and the second run would read the already-
-  // removed key.
+  // Read once and remove every present post-reload value. Only an exact,
+  // valid notice whose removal succeeded is shown; malformed/legacy data and
+  // storage failures stay silent. The ref also keeps StrictMode's development
+  // effect replay from reading the key a second time.
   useEffect(() => {
-    try {
-      const notice = parseUpdateNotice(sessionStorage.getItem(UPDATE_NOTICE_KEY));
-      if (notice !== null) {
-        sessionStorage.removeItem(UPDATE_NOTICE_KEY);
-        setUpdatedTo(notice);
-      }
-    } catch {
-      // storage disabled — nothing to announce
-    }
+    if (noticeRead.current) return;
+    noticeRead.current = true;
+    const notice = consumeUpdateNotice(sessionStorage);
+    if (notice !== null) setUpdatedTo(notice);
   }, []);
 
   // The apply poll must not outlive the section.
@@ -556,7 +555,7 @@ function UpdateSection() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["update"] }),
   });
 
-  function startPoll(startedCurrent: string) {
+  function startPoll(startedBuildIdentity: string) {
     const POLL_MS = 3_000;
     const BUDGET_MS = 5 * 60 * 1000;
     const startedAt = Date.now();
@@ -586,13 +585,32 @@ function UpdateSection() {
           setApplyPhase("failed");
           return;
         }
-        const polled = polledStatus?.current ?? null;
-        if (polled !== null && shouldReloadAfterApply(startedCurrent, polled)) {
+        if (
+          polledStatus !== null &&
+          shouldReloadAfterApply(startedBuildIdentity, polledStatus.buildIdentity)
+        ) {
           stopPoll();
           try {
-            sessionStorage.setItem(UPDATE_NOTICE_KEY, serializeUpdateNotice(polled));
+            sessionStorage.setItem(
+              UPDATE_NOTICE_KEY,
+              serializeUpdateNotice(
+                polledStatus.buildSha !== null
+                  ? {
+                      v: 1,
+                      kind: "sha",
+                      buildChannel: polledStatus.buildChannel,
+                      buildSha: polledStatus.buildSha,
+                    }
+                  : {
+                      v: 1,
+                      kind: "package",
+                      buildChannel: polledStatus.buildChannel,
+                      current: polledStatus.current,
+                    },
+              ),
+            );
           } catch {
-            // the toast is lost, the update is not
+            // the notice is lost, the update is not
           }
           // The #193 service worker serves the new bundle on this reload.
           location.reload();
@@ -613,12 +631,12 @@ function UpdateSection() {
     onSuccess: () => {
       // The button only renders once status.data is loaded (applyConfigured
       // gates it) — the early return localizes that invariant instead of
-      // polling against a "" baseline that would reload on the first tick.
-      const startedCurrent = status.data?.current;
-      if (!startedCurrent) return;
+      // polling against an empty identity that would reload on the first tick.
+      const startedBuildIdentity = status.data?.buildIdentity;
+      if (!startedBuildIdentity) return;
       setApplyError(null);
       setApplyPhase("waiting");
-      startPoll(startedCurrent);
+      startPoll(startedBuildIdentity);
     },
   });
 
@@ -633,9 +651,19 @@ function UpdateSection() {
           {s ? `Draw ${s.current}` : "…"}
         </span>
       </div>
+      <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ width: 280 }}>Build</span>
+        <span data-testid="update-build-identity" style={{ fontWeight: 700 }}>
+          {s
+            ? s.buildSha !== null
+              ? `${s.buildChannel} · ${s.buildSha}`
+              : `${s.buildChannel} · package ${s.current} (SHA unavailable)`
+            : "…"}
+        </span>
+      </div>
       {updatedTo && (
         <p style={{ margin: 0, color: "var(--ok)" }} data-testid="update-updated-notice">
-          ✓ Updated to {updatedTo}.
+          {updatedTo}
         </p>
       )}
       <label className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -712,7 +740,7 @@ function UpdateSection() {
           </button>
           {applyPhase === "waiting" && (
             <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
-              Update requested — waiting for the new version…
+              Update requested — waiting for the replacement build…
             </span>
           )}
           {applyPhase === "failed" && (
