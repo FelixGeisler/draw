@@ -29,6 +29,8 @@ const ARM64_CHILD =
   "sha256:f14f090fcc8235449da45ccbb1aea3b424ed3b101bcbd3de56526909397c2369";
 const LIST_MEDIA_TYPE =
   "application/vnd.docker.distribution.manifest.list.v2+json";
+const LIVE_COMPOSE =
+  "docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.yml";
 const EDGE_COMPOSE =
   "docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml";
 const edgeRunbook = runbook.slice(
@@ -37,6 +39,8 @@ const edgeRunbook = runbook.slice(
 );
 const anonymousPrefix =
   'env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG"';
+const privatePrefix =
+  "env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG=/home/raspberry/draw/watchtower-docker-config";
 
 function expectBoundary(source: string) {
   const text = compact(source);
@@ -143,6 +147,7 @@ describe("registry and credential gates", () => {
     expectText(runbook, "`config.json` has mode `0600`");
     expectText(runbook, "mounted read-only as `/config.json`");
     expectText(runbook, "host-default Docker login/config");
+    expectText(runbook, "is the only Docker client config that host CLI GHCR pulls may use");
     expectText(runbook, "Failed initial or rotated access stops Watchtower");
     expect(edgeCompose).toMatch(
       /^\s*# - \/home\/raspberry\/draw\/watchtower-docker-config\/config\.json:\/config\.json:ro$/m,
@@ -167,13 +172,28 @@ describe("registry and credential gates", () => {
       `${anonymousPrefix} ${EDGE_COMPOSE} pull draw watchtower`,
       "prevents Docker from consulting a host-default login, credential store, or credential helper",
       "do not log out or alter that login",
+      "Remove only the temporary anonymous directory when its gates and pulls finish",
+    ]) {
+      expectText(runbook, required);
+    }
+  });
+
+  it("uses only the dedicated read-only config for private activation pulls", () => {
+    for (const required of [
+      "The anonymous and private branches are exclusive",
+      "only after anonymous access fails",
+      `${privatePrefix} ${EDGE_COMPOSE} pull draw watchtower`,
+      "never copy it to, merge it with, or fall back to the host-default Docker login/config",
+      "the dedicated file is the only credential source",
+      "A failed private validation or pull leaves Watchtower stopped",
+      "keep the dedicated directory and read-only Watchtower mount",
     ]) {
       expectText(runbook, required);
     }
   });
 
   it("forbids secret material and assigns fallback lifecycle ownership", () => {
-    expectText(runbook, "coordinator owns initial provisioning");
+    expectText(runbook, "coordinator owns initial private provisioning");
     expectText(runbook, "designated Pi deployment operator owns rotation");
     expectText(runbook, "Never put a token, password, Docker auth/config content");
     expectText(contributing, "rendered secret configuration");
@@ -216,25 +236,33 @@ describe("backup, activation, and rollback safety", () => {
     }
   });
 
-  it("explicitly selects the approved env and edge file for every live Compose command", () => {
+  it("uses the live file only for the initial stop and the edge file thereafter", () => {
     const invocations = edgeRunbook.match(/docker compose[^`\n]*/g) ?? [];
-    expect(invocations.length).toBeGreaterThanOrEqual(10);
+    expect(invocations.length).toBeGreaterThanOrEqual(12);
     for (const invocation of invocations) {
       expect(invocation).toMatch(
-        /^docker compose --env-file \/home\/raspberry\/draw\/\.env -f \/home\/raspberry\/draw\/docker-compose\.pi-edge\.yml /,
+        /^docker compose --env-file \/home\/raspberry\/draw\/\.env -f \/home\/raspberry\/draw\/docker-compose(?:\.pi-edge)?\.yml /,
       );
     }
-    expectText(runbook, "never rely on working-directory, `COMPOSE_FILE`, or filename discovery");
+    expect(invocations.filter((command) => command.startsWith(LIVE_COMPOSE))).toEqual([
+      `${LIVE_COMPOSE} stop watchtower`,
+    ]);
+    expectText(runbook, "Every Compose invocation from that point forward must explicitly select");
+    expectText(runbook, "never rely on working-directory, `COMPOSE_FILE`, filename discovery, or the old live file");
   });
 
-  it("stops Watchtower before any Compose or env edit, then uses service-scoped operations", () => {
-    const activation = edgeRunbook.slice(edgeRunbook.indexOf("==== Safe activation"));
+  it("stops and verifies the live Watchtower before installing or using the edge file", () => {
+    const activation = compact(
+      edgeRunbook.slice(edgeRunbook.indexOf("==== Safe activation")),
+    );
     const ordered = [
-      `${EDGE_COMPOSE} stop watchtower`,
+      `${LIVE_COMPOSE} stop watchtower`,
+      "docker inspect --format '{{.State.Running}}' watchtower",
+      "returns `false`",
       "place the byte-exact reviewed `docker-compose.pi-edge.yml`",
-      "then set only the approved host `.env` values",
+      "set only the approved host `.env` values",
       `${EDGE_COMPOSE} config --quiet draw watchtower`,
-      `${EDGE_COMPOSE} pull draw watchtower`,
+      `${anonymousPrefix} ${EDGE_COMPOSE} pull draw watchtower`,
       `${EDGE_COMPOSE} up -d --no-deps draw`,
       "edge:<pre-merge-full-SHA>",
       `${EDGE_COMPOSE} up -d --no-deps watchtower`,
@@ -245,12 +273,30 @@ describe("backup, activation, and rollback safety", () => {
       expect(at).toBeGreaterThan(previous);
       previous = at;
     }
-    expectText(runbook, "do this before replacing or editing any Compose file or `.env` value");
+    expect(activation.indexOf(EDGE_COMPOSE)).toBeGreaterThan(
+      activation.indexOf("place the byte-exact reviewed `docker-compose.pi-edge.yml`"),
+    );
+    expectText(runbook, "Before installing the edge file or editing any `.env` value");
+    expectText(runbook, "A failed stop or any other result stops activation");
     expectText(runbook, `${EDGE_COMPOSE} down -v`);
     expectText(runbook, "remove `draw_draw-data`, or recreate that volume");
     expectText(runbook, "do not start polling before Draw verification");
     expectText(runbook, "127.0.0.1:3001:3001");
     expectText(runbook, "one-hop `TRUST_PROXY=1`");
+  });
+
+  it("covers isolated anonymous and private rollback pulls and fail-closed cleanup", () => {
+    for (const required of [
+      `${anonymousPrefix} ${EDGE_COMPOSE} pull draw`,
+      `${privatePrefix} ${EDGE_COMPOSE} pull draw`,
+      "If anonymous access fails, do not use host-default auth",
+      "leave Watchtower stopped and the current Draw container untouched",
+      "A failed pull leaves Watchtower stopped and the current Draw container untouched",
+      "Remove the temporary anonymous directory after its use",
+      "remove the dedicated directory only when private access is abandoned or no deployment depends on it",
+    ]) {
+      expectText(runbook, required);
+    }
   });
 
   it("defines exact immutable manual rollback with schema-aware restore", () => {

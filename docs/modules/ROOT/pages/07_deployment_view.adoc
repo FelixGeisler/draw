@@ -380,24 +380,36 @@ Public, anonymous GHCR access is the active policy. Immediately before
 activation, anonymously pull or inspect both the current immutable Draw tag and
 `edge`; configure no registry credential while that succeeds. Every repository
 inspector invocation must unset `OCI_REGISTRY_USERNAME` and
-`OCI_REGISTRY_PASSWORD`. Every Docker inspection or pull gate must additionally
-set `DOCKER_CONFIG` to a newly created temporary directory whose only
-`config.json` is `{"auths":{}}`. That isolated config prevents Docker from
+`OCI_REGISTRY_PASSWORD`. Every anonymous Docker inspection or pull gate must
+additionally set `DOCKER_CONFIG` to a newly created temporary directory whose
+only `config.json` is `{"auths":{}}`. That isolated config prevents Docker from
 consulting a host-default login, credential store, or credential helper. It is
 safe even when the operator has a host login: do not log out or alter that
-login; remove only the temporary directory when the gate finishes. A visibility
-or access failure stops activation.
+login. Remove only the temporary anonymous directory when its gates and pulls
+finish.
 
-Only if anonymous access has stopped working may the coordinator provision the
-fallback: one dedicated package-read credential with no package write/delete
-scope. `/home/raspberry/draw/watchtower-docker-config` is owned by the Pi
-deployment account with mode `0700`; its sole `config.json` has mode `0600` and
-is mounted read-only as `/config.json` in Watchtower. Do not use or depend on
-the host-default Docker login/config. The coordinator owns initial provisioning,
-redacted validation, and removal if activation is abandoned. After successful
-handoff, the designated Pi deployment operator owns rotation, revalidation,
-revocation, and removal. Failed initial or rotated access stops Watchtower
-until read-only access is restored.
+An anonymous GHCR visibility or access failure stops the anonymous branch
+before mutation. Only then may the coordinator provision the fallback: one
+dedicated package-read credential with no package write/delete scope.
+`/home/raspberry/draw/watchtower-docker-config` is owned by the Pi deployment
+account with mode `0700`; its sole `config.json` has mode `0600`, is the only
+Docker client config that host CLI GHCR pulls may use, and is mounted read-only
+as `/config.json` in Watchtower. Set
+`DOCKER_CONFIG=/home/raspberry/draw/watchtower-docker-config` only for each
+explicit private activation or rollback pull; never copy it to, merge it with,
+or fall back to the host-default Docker login/config. Keep
+`OCI_REGISTRY_USERNAME` and `OCI_REGISTRY_PASSWORD` absent in this branch too:
+the dedicated file is the only credential source.
+
+The anonymous and private branches are exclusive. The coordinator owns initial
+private provisioning, redacted validation, and removal if activation is
+abandoned. A failed private validation or pull leaves Watchtower stopped, stops
+activation or rollback, and must not be retried with host-default auth. After a
+successful private handoff, keep the dedicated directory and read-only
+Watchtower mount; the designated Pi deployment operator owns rotation,
+revalidation, revocation, and eventual removal. Failed initial or rotated
+access stops Watchtower until read-only access is restored. Do not remove the
+dedicated config while a private deployment still depends on it.
 
 Never put a token, password, Docker auth/config content, secret-bearing command
 or output, rendered Compose values, backup contents, or sensitive storage path
@@ -483,28 +495,37 @@ failure, wrong platform, or digest mismatch stops activation.
 
 ==== Safe activation
 
-Use `/home/raspberry/draw` as the sole live deployment directory. Every live
-Compose invocation must explicitly select both
-`/home/raspberry/draw/.env` and the reviewed
-`/home/raspberry/draw/docker-compose.pi-edge.yml`; never rely on working-directory,
-`COMPOSE_FILE`, or filename discovery. Perform only service-scoped operations,
-in this order:
+Use `/home/raspberry/draw` as the sole live deployment directory. The recorded
+starting deployment uses the existing live
+`/home/raspberry/draw/docker-compose.yml`; the reviewed edge file does not exist
+there yet. The initial stop is therefore the sole transitional Compose command:
+it must explicitly select the existing `.env` and live Compose file. Before
+installing the edge file or editing any `.env` value, run
+`docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.yml stop watchtower`,
+then verify `docker inspect --format '{{.State.Running}}' watchtower` returns
+`false`. A failed stop or any other result stops activation; do not install or
+edit anything while Watchtower might still be running.
 
-. stop Watchtower first with
-  `docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml stop watchtower`;
-  do this before replacing or editing any Compose file or `.env` value;
-. place the byte-exact reviewed `docker-compose.pi-edge.yml` at the path above,
-  then set only the approved host `.env` values `DRAW_TAG=edge`,
+Only after that stop is verified, place the byte-exact reviewed
+`docker-compose.pi-edge.yml` at
+`/home/raspberry/draw/docker-compose.pi-edge.yml`. Every Compose invocation
+from that point forward must explicitly select
+`/home/raspberry/draw/.env` and that reviewed edge file; never rely on
+working-directory, `COMPOSE_FILE`, filename discovery, or the old live file.
+Perform only service-scoped operations, in this order:
+
+. set only the approved host `.env` values `DRAW_TAG=edge`,
   `AUTO_UPDATE=true`, and `AUTO_UPDATE_INTERVAL_SECONDS=300`, preserving its
   secret references and other settings;
 . run
   `docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml config --quiet draw watchtower`
   without retaining rendered secret values;
-. with `OCI_REGISTRY_USERNAME` and `OCI_REGISTRY_PASSWORD` unset and
-  `DOCKER_CONFIG="$ANON_DOCKER_CONFIG"`, run
-  `env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw watchtower`
-  to pull `ghcr.io/felixgeisler/draw:edge` and the exact Watchtower
-  tag-and-digest reference without consulting host-default Docker auth;
+. choose exactly one pull branch, never host-default Docker auth:
+** while anonymous GHCR gates pass, run
+   `env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw watchtower`;
+** only after anonymous access fails, activation stops, and the dedicated
+   package-read file passes redacted validation, run
+   `env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG=/home/raspberry/draw/watchtower-docker-config docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw watchtower`;
 . recreate only Draw with
   `docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml up -d --no-deps draw`;
 . wait for green health, then require authenticated identity
@@ -525,13 +546,21 @@ Do not use project teardown and do not start polling before Draw verification.
 
 Rollback is manual and exact. Stop Watchtower first with
 `docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml stop watchtower`,
-then set `DRAW_TAG` to
+then verify it is stopped before changing the tag. Set `DRAW_TAG` to
 `sha-<full-40-sha>@sha256:<verified-oci-index-digest>`, producing exactly
 `ghcr.io/felixgeisler/draw:sha-<full-40-sha>@sha256:<verified-oci-index-digest>`.
-With the OCI credential variables unset and the isolated empty `DOCKER_CONFIG`,
-pull only Draw using
-`env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw`,
-then recreate only Draw using
+Pull only Draw through exactly one isolated access branch, with both OCI
+credential environment variables absent. If anonymous GHCR access still
+passes, use
+`env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw`.
+If anonymous access fails, do not use host-default auth: leave Watchtower
+stopped and the current Draw container untouched until the dedicated fallback
+is provisioned and redactedly validated, then use only
+`env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG=/home/raspberry/draw/watchtower-docker-config docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw`.
+A failed pull leaves Watchtower stopped and the current Draw container
+untouched. Remove the temporary anonymous directory after its use; remove the
+dedicated directory only when private access is abandoned or no deployment
+depends on it. After a successful pull, recreate only Draw using
 `docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml up -d --no-deps draw`.
 Require the expected authenticated identity, green health, `draw_draw-data` at
 `/data`, and intact selected data before optionally restarting only Watchtower
