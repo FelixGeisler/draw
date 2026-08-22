@@ -127,6 +127,33 @@ describe("MCP tool surface (tools/list)", () => {
       expect.arrayContaining(["title", "categoryId"]),
     );
 
+    const createGoal = tools.find((t) => t.name === "create_goal")!;
+    expect(createGoal.description).toBe(
+      "Create a goal: a title plus how success is measured (outcome). Tasks link to it via " +
+        "goalId and their 1–5 impact rates leverage toward it — what the draw weights by (ADR-4). " +
+        "A targetDate (YYYY-MM-DD) lets the goal show the daily pace the remaining work requires. " +
+        "New goals start active; resolving one (achieved/missed/dropped) stays in the app.",
+    );
+    const createGoalSchema = createGoal.inputSchema as {
+      properties: Record<string, { description?: string }>;
+      required?: string[];
+    };
+    expect(Object.keys(createGoalSchema.properties)).toEqual(["title", "outcome", "targetDate"]);
+    expect(createGoalSchema.required).toEqual(["title"]);
+    expect(createGoalSchema.properties.title.description).toBeUndefined();
+    expect(createGoalSchema.properties.outcome.description).toBe(
+      "How success is measured — the goal's definition of done",
+    );
+    expect(createGoalSchema.properties.targetDate.description).toBe(
+      "Calendar date as YYYY-MM-DD",
+    );
+    expect(createGoal.annotations).toEqual({
+      title: "Create goal",
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
+
     const updateTask = tools.find((t) => t.name === "update_task")!;
     const updateSchema = updateTask.inputSchema as {
       properties: Record<string, { type?: string; anyOf?: Array<{ type?: string }> }>;
@@ -165,30 +192,39 @@ describe("read tools", () => {
 });
 
 describe("create_goal", () => {
-  it("creates a goal that list_goals then returns, active with its outcome", async () => {
-    const res = await callTool("create_goal", {
+  it("creates an active goal that default list_goals returns with every supplied value", async () => {
+    const supplied = {
       title: "Ship the thesis",
       outcome: "Submitted and accepted",
       targetDate: "2026-12-01",
-    });
-    expect(res.isError).toBe(false);
-    const goal = res.json<{ id: number; status: string; targetDate: string }>();
-    expect(goal.id).toBeGreaterThan(0);
-    expect(goal.status).toBe("active");
-    expect(goal.targetDate).toBe("2026-12-01");
+    };
+    const res = await callTool("create_goal", supplied);
 
-    const goals = (await callTool("list_goals")).json<
-      Array<{ id: number; outcome: string | null }>
-    >();
-    const created = goals.find((g) => g.id === goal.id);
-    expect(created).toBeDefined();
-    expect(created!.outcome).toBe("Submitted and accepted");
+    expect(res.isError).toBe(false);
+    const goal = res.json<{
+      id: number;
+      title: string;
+      outcome: string | null;
+      targetDate: string | null;
+      status: string;
+    }>();
+    expect(goal).toMatchObject({ ...supplied, status: "active" });
+    expect(goal.id).toBeGreaterThan(0);
+
+    const goals = (await callTool("list_goals")).json<typeof goal[]>();
+    expect(goals.find((candidate) => candidate.id === goal.id)).toMatchObject({
+      id: goal.id,
+      ...supplied,
+      status: "active",
+    });
   });
 
-  it("surfaces the route's title rejection as a tool error", async () => {
+  it("passes whitespace through and surfaces the route's exact shared-convention error", async () => {
     const res = await callTool("create_goal", { title: "   " });
-    expect(res.isError).toBe(true);
-    expect(res.text).toContain("title is required");
+    expect(res).toMatchObject({
+      isError: true,
+      text: "title is required (API responded 400)",
+    });
   });
 });
 
