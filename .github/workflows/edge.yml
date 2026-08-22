@@ -210,7 +210,7 @@ jobs:
         run: |
           set -euo pipefail
           readonly public_url='https://github.com/FelixGeisler/draw.git'
-          readonly forbidden='^(http\..*\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$'
+          readonly forbidden='^(http(\..*)?\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$'
 
           reject_forbidden_config() {
             local output status
@@ -408,7 +408,7 @@ jobs:
           EDGE_REVISION: ${{ steps.existing.outputs.revision }}
         run: |
           set -euo pipefail
-          readonly forbidden='^(http\..*\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$'
+          readonly forbidden='^(http(\..*)?\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$'
           runner_root="$(realpath -e -- "$RUNNER_TEMP")"
           expected_area="$runner_root/$(basename -- "$AREA")"
           [[ "$AREA" == "$expected_area" && "$AREA" == "$runner_root"/edge-promotion.?????????? &&

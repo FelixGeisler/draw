@@ -2684,10 +2684,12 @@ undetectable without a signature or independently trusted digest anchor. #276
 accepts that residual risk and performs no registry mutation, publication, or
 promotion.
 * *The detached writer is least-privilege and commit-pinned.* The workflow
-default remains `contents: read`; its only job has exactly `contents: read` and
-`packages: write`, a 60-minute timeout, and non-cancelling per-SHA concurrency
-`edge-publication-<event-head-sha>`. Checkout, Node 22 setup, QEMU, Buildx, GHCR
-login, metadata, and build/push are the only action invocations and are pinned,
+default remains `contents: read`; its `publication` job has exactly
+`contents: read` and `packages: write`, a 60-minute timeout, and non-cancelling
+per-SHA concurrency `edge-publication-<event-head-sha>`. The distinct
+`promotion` job is separately constrained below. Publication checkout, Node 22
+setup, QEMU, Buildx, GHCR login, metadata, and build/push are the only action
+invocations in the publication job and are pinned,
 respectively, to
 `actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683`,
 `actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020`,

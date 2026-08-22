@@ -12,15 +12,30 @@ import { describe, expect, it } from "vitest";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
-const edge = fs.readFileSync(
+const normalizeNewlines = (value: string) => value.replace(/\r\n/g, "\n");
+const checkedOutEdge = fs.readFileSync(
   path.join(repoRoot, ".github/workflows/edge.yml"),
   "utf8",
 );
+const edge = normalizeNewlines(checkedOutEdge);
 
-const publicationAt = edge.indexOf("\n  publication:");
-const promotionAt = edge.indexOf("\n  promotion:");
-const publicationJob = edge.slice(publicationAt, promotionAt);
-const promotionJob = edge.slice(promotionAt);
+function workflowJob(
+  workflow: string,
+  name: string,
+  nextName?: string,
+): string {
+  const normalizedWorkflow = normalizeNewlines(workflow);
+  const start = normalizedWorkflow.indexOf(`\n  ${name}:`);
+  if (start < 0) throw new Error(`missing workflow job: ${name}`);
+  const end = nextName
+    ? normalizedWorkflow.indexOf(`\n  ${nextName}:`, start)
+    : normalizedWorkflow.length;
+  if (end < 0) throw new Error(`missing workflow job: ${nextName}`);
+  return normalizedWorkflow.slice(start, end);
+}
+
+const publicationJob = workflowJob(edge, "publication", "promotion");
+const promotionJob = workflowJob(edge, "promotion");
 const beforeSteps = publicationJob.slice(
   0,
   publicationJob.indexOf("\n    steps:"),
@@ -30,7 +45,7 @@ const publicationActions = publicationJob.match(/uses:\s*[^\s]+/g) ?? [];
 const promotionActions = promotionJob.match(/uses:\s*[^\s]+/g) ?? [];
 
 function step(name: string, scope = edge): string {
-  const normalizedScope = scope.replace(/\r\n/g, "\n");
+  const normalizedScope = normalizeNewlines(scope);
   const start = normalizedScope.indexOf(`- name: ${name}`);
   if (start < 0) throw new Error(`missing workflow step: ${name}`);
   const next = normalizedScope.indexOf("\n      - name:", start + 1);
@@ -38,10 +53,11 @@ function step(name: string, scope = edge): string {
 }
 
 function runScript(workflowStep: string): string {
+  const normalizedStep = normalizeNewlines(workflowStep);
   const marker = "\n        run: |\n";
-  const start = workflowStep.indexOf(marker);
+  const start = normalizedStep.indexOf(marker);
   if (start < 0) throw new Error("workflow step has no run script");
-  return workflowStep
+  return normalizedStep
     .slice(start + marker.length)
     .split("\n")
     .map((line) => (line.startsWith("          ") ? line.slice(10) : line))
@@ -94,6 +110,24 @@ const validRun: WorkflowRun = {
 };
 
 describe("edge workflow authorization and isolation", () => {
+  it.each([
+    ["LF", edge],
+    ["synthetic CRLF", edge.replaceAll("\n", "\r\n")],
+    ["checked-out newline form", checkedOutEdge],
+  ])("normalizes %s workflow, job, and step text", (_name, workflow) => {
+    const normalizedWorkflow = normalizeNewlines(workflow);
+    const normalizedPublication = workflowJob(
+      workflow,
+      "publication",
+      "promotion",
+    );
+    expect(normalizedWorkflow).toBe(edge);
+    expect(normalizedPublication).toBe(publicationJob);
+    expect(step("Check out the tested commit", normalizedPublication)).toBe(
+      step("Check out the tested commit", publicationJob),
+    );
+  });
+
   it("routes completed CI workflow runs but authorizes with all five predicates", () => {
     expect(edge).toMatch(
       /workflow_run:\s*[\s\S]*?workflows:\s*\["CI"\][\s\S]*?types:\s*\[completed\]/,
@@ -493,7 +527,7 @@ const postPromotionStep = step("Verify promoted edge state", promotionJob);
 const cleanupStep = step("Remove isolated promotion history", promotionJob);
 
 function promotionRunSteps(workflowJob: string): string[] {
-  return workflowJob
+  return normalizeNewlines(workflowJob)
     .split(/(?=^      - name: )/m)
     .filter(
       (candidate) =>
@@ -503,7 +537,7 @@ function promotionRunSteps(workflowJob: string): string[] {
 }
 
 const forbiddenGitConfig = (key: string) =>
-  /^(http\..*\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$/i.test(
+  /^(http(\..*)?\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$/i.test(
     key,
   );
 
@@ -579,12 +613,15 @@ type HistoryGateExecution = {
   target: string;
 };
 
-function executeHistoryGate({
-  sourceKey,
-  bareKey,
-  value = "blocked-value",
-  failFetch = false,
-}: HistoryGateOptions = {}): HistoryGateExecution {
+function executeHistoryGate(
+  {
+    sourceKey,
+    bareKey,
+    value = "blocked-value",
+    failFetch = false,
+  }: HistoryGateOptions = {},
+  workflowStep = historyStep,
+): HistoryGateExecution {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "edge-history-gate-"));
   try {
     const source = path.join(root, "source");
@@ -669,7 +706,7 @@ function executeHistoryGate({
     const script = path.join(root, "history.sh");
     fs.writeFileSync(
       script,
-      `export PATH=${shellQuote(shellPath(bin))}:"$PATH"\n${runScript(historyStep)}\n`,
+      `export PATH=${shellQuote(shellPath(bin))}:"$PATH"\n${runScript(workflowStep)}\n`,
       { mode: 0o700 },
     );
     const result = spawnSync("bash", [shellPath(script)], {
@@ -792,6 +829,7 @@ describe("promotion history authority and lifecycle contract", () => {
     expect(historyStep).toContain("git remote get-url --all origin");
     expect(historyStep).toContain("git remote get-url --all --push origin");
     for (const key of [
+      "http.extraheader",
       "http.https://github.com/.extraheader",
       "credential.helper",
       "credential.https://github.com.helper",
@@ -844,19 +882,31 @@ describe("promotion history authority and lifecycle contract", () => {
     expect(historyStep).not.toMatch(/retry|fallback/i);
   });
 
-  it("executes the real gate offline through the exact literal fetch and handoff", () => {
-    const execution = executeHistoryGate();
-    expect(execution.status, execution.stderr).toBe(0);
-    expect(execution.output).toMatch(
-      new RegExp(`^area=.+\\ntarget=${execution.target}\\n$`),
-    );
-    expect(execution.fetchAudit).toHaveLength(1);
-    expect(execution.fetchAudit[0]).toContain("-c credential.helper= fetch --no-tags");
-    expect(execution.fetchAudit[0]).toContain(
-      "https://github.com/FelixGeisler/draw.git refs/heads/main:refs/remotes/origin/main",
-    );
-    expect(execution.runnerEntries).toHaveLength(1);
-  });
+  it.each([
+    ["LF", historyStep],
+    ["synthetic CRLF", historyStep.replaceAll("\n", "\r\n")],
+    [
+      "checked-out newline form",
+      step("Establish isolated public main history", checkedOutEdge),
+    ],
+  ])(
+    "executes the real %s gate offline through the exact literal fetch and handoff",
+    (_name, workflowStep) => {
+      const execution = executeHistoryGate({}, workflowStep);
+      expect(execution.status, execution.stderr).toBe(0);
+      expect(execution.output).toMatch(
+        new RegExp(`^area=.+\\ntarget=${execution.target}\\n$`),
+      );
+      expect(execution.fetchAudit).toHaveLength(1);
+      expect(execution.fetchAudit[0]).toContain(
+        "-c credential.helper= fetch --no-tags",
+      );
+      expect(execution.fetchAudit[0]).toContain(
+        "https://github.com/FelixGeisler/draw.git refs/heads/main:refs/remotes/origin/main",
+      );
+      expect(execution.runnerEntries).toHaveLength(1);
+    },
+  );
 
   it("stops an offline fetch failure with no handoff or fallback", () => {
     const execution = executeHistoryGate({ failFetch: true });
@@ -867,7 +917,12 @@ describe("promotion history authority and lifecycle contract", () => {
   });
 
   it.each([
-    ["extraheader", "http.https://github.com/.extraheader", "Authorization: injected"],
+    ["global extraheader", "http.extraheader", "Authorization: global"],
+    [
+      "URL-specific extraheader",
+      "http.https://github.com/.extraheader",
+      "Authorization: injected",
+    ],
     ["credential helper", "credential.helper", "store"],
     ["credential store", "credential.store", "/tmp/injected-credentials"],
     ["insteadOf", "url.https://mirror.invalid/.insteadof", "https://github.com/"],
@@ -881,7 +936,12 @@ describe("promotion history authority and lifecycle contract", () => {
   });
 
   it.each([
-    ["extraheader", "http.https://github.com/.extraheader", "Authorization: injected"],
+    ["global extraheader", "http.extraheader", "Authorization: global"],
+    [
+      "URL-specific extraheader",
+      "http.https://github.com/.extraheader",
+      "Authorization: injected",
+    ],
     ["credential helper", "credential.helper", "store"],
     ["credential store", "credential.store", "/tmp/injected-credentials"],
     ["insteadOf", "url.https://mirror.invalid/.insteadof", "https://github.com/"],
