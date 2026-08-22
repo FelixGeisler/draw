@@ -1,6 +1,6 @@
-# Detached immutable-SHA publication (#277, ADR-53). A workflow name is only
-# routing: the job's five-part gate authorizes only successful same-repository
-# pushes to main reported by the exact CI workflow path.
+# Detached immutable-SHA publication and convergent edge promotion (#277, #280,
+# ADR-53). A workflow name is only routing: each job's five-part gate authorizes
+# only successful same-repository pushes to main reported by the exact CI path.
 name: Edge commit publication
 
 on:
@@ -176,3 +176,361 @@ jobs:
             echo "post-push digest does not match the build output" >&2
             exit 1
           fi
+
+  promotion:
+    needs: publication
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.path == '.github/workflows/ci.yml'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 60
+    concurrency:
+      group: edge-promotion
+      cancel-in-progress: false
+    steps:
+      - name: Check out promotion scripts without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      # This is deliberately the first shell step. The checkout supplies scripts
+      # only; all authoritative history is fetched anonymously into a fresh bare
+      # repository whose isolated configuration cannot inherit URL rewrites.
+      - name: Establish isolated public main history
+        id: history
+        shell: bash
+        run: |
+          set -euo pipefail
+          readonly public_url='https://github.com/FelixGeisler/draw.git'
+          readonly forbidden='^(http\..*\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$'
+
+          reject_forbidden_config() {
+            local output status
+            set +e
+            output="$(git config "$@" --get-regexp "$forbidden" 2>&1)"
+            status=$?
+            set -e
+            if [[ "$status" -eq 0 ]]; then
+              echo "forbidden Git credential or URL-rewrite configuration is effective" >&2
+              return 1
+            fi
+            if [[ "$status" -ne 1 ]]; then
+              printf '%s\n' "$output" >&2
+              return 1
+            fi
+          }
+
+          mapfile -t remotes < <(git remote)
+          [[ "${#remotes[@]}" -eq 1 && "${remotes[0]}" == origin ]] || {
+            echo "checkout does not have exactly the clean public origin" >&2
+            exit 1
+          }
+          mapfile -t fetch_urls < <(git remote get-url --all origin)
+          mapfile -t push_urls < <(git remote get-url --all --push origin)
+          [[ "${fetch_urls[*]}" == "$public_url" && "${push_urls[*]}" == "$public_url" ]] || {
+            echo "checkout origin is not the exact public repository URL" >&2
+            exit 1
+          }
+          reject_forbidden_config --show-origin
+
+          runner_root="$(realpath -e -- "$RUNNER_TEMP")"
+          [[ -d "$runner_root" && ! -L "$RUNNER_TEMP" ]] || {
+            echo "RUNNER_TEMP is not a safe directory" >&2
+            exit 1
+          }
+          umask 077
+          area="$(mktemp -d "$runner_root/edge-promotion.XXXXXXXXXX")"
+          cleanup_initialization() { rm -rf -- "$area"; }
+          trap cleanup_initialization EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          chmod 0700 "$area"
+          [[ ! -L "$area" && "$(dirname -- "$area")" == "$runner_root" &&
+             "$(realpath -e -- "$area")" == "$area" &&
+             "$(stat -c '%u' -- "$area")" == "$(id -u)" &&
+             "$(stat -c '%a' -- "$area")" == 700 ]] || {
+            echo "temporary history area failed lifecycle validation" >&2
+            exit 1
+          }
+
+          mkdir -- "$area/home" "$area/template"
+          bare="$area/repository.git"
+          isolated_git() {
+            env -i PATH="$PATH" HOME="$area/home" \
+              GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+              GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false \
+              git "$@"
+          }
+          isolated_git init --bare --template="$area/template" "$bare"
+          set +e
+          bare_forbidden="$(isolated_git -C "$bare" config --show-origin --get-regexp "$forbidden" 2>&1)"
+          bare_config_status=$?
+          set -e
+          if [[ "$bare_config_status" -eq 0 ]]; then
+            echo "fresh bare repository has forbidden Git configuration" >&2
+            exit 1
+          fi
+          if [[ "$bare_config_status" -ne 1 ]]; then
+            printf '%s\n' "$bare_forbidden" >&2
+            exit 1
+          fi
+          [[ ! -e "$bare/objects/info/alternates" ]] || {
+            echo "fresh bare repository unexpectedly has object alternates" >&2
+            exit 1
+          }
+          isolated_git -C "$bare" -c credential.helper= fetch --no-tags \
+            'https://github.com/FelixGeisler/draw.git' \
+            'refs/heads/main:refs/remotes/origin/main'
+          target="$(isolated_git --no-replace-objects -C "$bare" rev-parse --verify \
+            'refs/remotes/origin/main^{commit}')"
+          [[ "$target" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "fresh public main tip is not a full lowercase commit SHA" >&2
+            exit 1
+          }
+          [[ "$(isolated_git --no-replace-objects -C "$bare" rev-parse --verify \
+            'refs/remotes/origin/main^{commit}')" == "$target" ]] || exit 1
+
+          printf 'area=%s\n' "$area" >> "$GITHUB_OUTPUT"
+          printf 'target=%s\n' "$target" >> "$GITHUB_OUTPUT"
+          trap - EXIT INT TERM
+
+      - name: Set up Node for promotion inspection
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Inspect immutable current-main source
+        id: source
+        shell: bash
+        env:
+          OCI_REGISTRY_USERNAME: ${{ github.actor }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ steps.history.outputs.target }}
+        run: |
+          set -euo pipefail
+          target="ghcr.io/felixgeisler/draw:sha-$TARGET_SHA"
+          set +e
+          result="$(node scripts/inspect-oci-image.mjs --image "$target" --expected-revision "$TARGET_SHA")"
+          status=$?
+          set -e
+          case "$status" in
+            0)
+              digest="$(printf '%s' "$result" | node -e '
+                const fs = require("node:fs");
+                const value = JSON.parse(fs.readFileSync(0, "utf8"));
+                const keys = value && typeof value === "object" && !Array.isArray(value)
+                  ? Object.keys(value).sort() : [];
+                if (keys.join(",") !== "digest,revision" ||
+                    !/^sha256:[0-9a-f]{64}$/.test(value.digest) ||
+                    value.revision !== process.env.TARGET_SHA) process.exit(1);
+                process.stdout.write(value.digest);
+              ')"
+              echo "present=true" >> "$GITHUB_OUTPUT"
+              echo "digest=$digest" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              [[ -z "$result" ]] || {
+                echo "source absence emitted unexpected stdout" >&2
+                exit 1
+              }
+              echo "present=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "current-main source inspection failed closed" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Inspect existing edge state
+        if: ${{ steps.source.outputs.present == 'true' }}
+        id: existing
+        shell: bash
+        env:
+          OCI_REGISTRY_USERNAME: ${{ github.actor }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          set +e
+          result="$(node scripts/inspect-oci-image.mjs --image 'ghcr.io/felixgeisler/draw:edge')"
+          status=$?
+          set -e
+          case "$status" in
+            0)
+              printf '%s' "$result" | node -e '
+                const fs = require("node:fs");
+                const value = JSON.parse(fs.readFileSync(0, "utf8"));
+                const keys = value && typeof value === "object" && !Array.isArray(value)
+                  ? Object.keys(value).sort() : [];
+                if (keys.join(",") !== "digest,revision" ||
+                    !/^sha256:[0-9a-f]{64}$/.test(value.digest) ||
+                    !/^[0-9a-f]{40}$/.test(value.revision)) process.exit(1);
+                fs.appendFileSync(process.env.GITHUB_OUTPUT,
+                  `present=true\ndigest=${value.digest}\nrevision=${value.revision}\n`);
+              '
+              ;;
+            3)
+              [[ -z "$result" ]] || {
+                echo "edge absence emitted unexpected stdout" >&2
+                exit 1
+              }
+              echo "present=false" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "existing edge inspection failed closed" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Prove existing edge is not ahead of current main
+        if: ${{ steps.existing.outputs.present == 'true' }}
+        shell: bash
+        env:
+          AREA: ${{ steps.history.outputs.area }}
+          TARGET_SHA: ${{ steps.history.outputs.target }}
+          EDGE_REVISION: ${{ steps.existing.outputs.revision }}
+        run: |
+          set -euo pipefail
+          readonly forbidden='^(http\..*\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$'
+          runner_root="$(realpath -e -- "$RUNNER_TEMP")"
+          expected_area="$runner_root/$(basename -- "$AREA")"
+          [[ "$AREA" == "$expected_area" && "$AREA" == "$runner_root"/edge-promotion.?????????? &&
+             -d "$AREA" && ! -L "$AREA" && "$(realpath -e -- "$AREA")" == "$AREA" &&
+             "$(stat -c '%u' -- "$AREA")" == "$(id -u)" &&
+             "$(stat -c '%a' -- "$AREA")" == 700 ]] || {
+            echo "temporary history area is unsafe" >&2
+            exit 1
+          }
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ && "$EDGE_REVISION" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          bare="$AREA/repository.git"
+          [[ -d "$bare" && ! -L "$bare" && ! -e "$bare/objects/info/alternates" ]] || {
+            echo "isolated repository boundary is invalid" >&2
+            exit 1
+          }
+          isolated_git() {
+            env -i PATH="$PATH" HOME="$AREA/home" \
+              GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+              GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false \
+              git --no-replace-objects "$@"
+          }
+          set +e
+          forbidden_config="$(isolated_git -C "$bare" config --show-origin --get-regexp "$forbidden" 2>&1)"
+          config_status=$?
+          set -e
+          if [[ "$config_status" -eq 0 ]]; then
+            echo "isolated repository acquired forbidden Git configuration" >&2
+            exit 1
+          fi
+          if [[ "$config_status" -ne 1 ]]; then
+            printf '%s\n' "$forbidden_config" >&2
+            exit 1
+          fi
+          [[ -z "$(isolated_git -C "$bare" for-each-ref --format='%(refname)' refs/replace/)" ]] || {
+            echo "replace refs are forbidden" >&2
+            exit 1
+          }
+          [[ "$(isolated_git -C "$bare" rev-parse --verify \
+            'refs/remotes/origin/main^{commit}')" == "$TARGET_SHA" ]] || {
+            echo "fetched current-main ref changed after handoff" >&2
+            exit 1
+          }
+          [[ "$(isolated_git -C "$bare" cat-file -t "$EDGE_REVISION")" == commit ]] || {
+            echo "existing edge revision is not a fetched commit object" >&2
+            exit 1
+          }
+          isolated_git -C "$bare" merge-base --is-ancestor "$EDGE_REVISION" "$TARGET_SHA" || {
+            echo "existing edge revision is not a proven current-main ancestor" >&2
+            exit 1
+          }
+
+      - name: Set up Buildx for edge promotion
+        if: ${{ steps.source.outputs.present == 'true' && steps.source.outputs.digest != steps.existing.outputs.digest }}
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in for edge promotion
+        if: ${{ steps.source.outputs.present == 'true' && steps.source.outputs.digest != steps.existing.outputs.digest }}
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote verified digest to edge exactly once
+        if: ${{ steps.source.outputs.present == 'true' && steps.source.outputs.digest != steps.existing.outputs.digest }}
+        id: mutation
+        shell: bash
+        env:
+          TARGET_SHA: ${{ steps.history.outputs.target }}
+          SOURCE_DIGEST: ${{ steps.source.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ && "$SOURCE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+          verified_digest="${SOURCE_DIGEST#sha256:}"
+          docker buildx imagetools create --tag ghcr.io/felixgeisler/draw:edge \
+            "ghcr.io/felixgeisler/draw:sha-$TARGET_SHA@sha256:$verified_digest"
+
+      - name: Verify promoted edge state
+        if: ${{ steps.mutation.outcome == 'success' }}
+        shell: bash
+        env:
+          OCI_REGISTRY_USERNAME: ${{ github.actor }}
+          OCI_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_SHA: ${{ steps.history.outputs.target }}
+          SOURCE_DIGEST: ${{ steps.source.outputs.digest }}
+        run: |
+          set -euo pipefail
+          set +e
+          result="$(node scripts/inspect-oci-image.mjs --image 'ghcr.io/felixgeisler/draw:edge' --expected-revision "$TARGET_SHA")"
+          status=$?
+          set -e
+          [[ "$status" -eq 0 ]] || {
+            echo "post-promotion edge inspection failed closed" >&2
+            exit 1
+          }
+          digest="$(printf '%s' "$result" | node -e '
+            const fs = require("node:fs");
+            const value = JSON.parse(fs.readFileSync(0, "utf8"));
+            const keys = value && typeof value === "object" && !Array.isArray(value)
+              ? Object.keys(value).sort() : [];
+            if (keys.join(",") !== "digest,revision" ||
+                !/^sha256:[0-9a-f]{64}$/.test(value.digest) ||
+                value.revision !== process.env.TARGET_SHA) process.exit(1);
+            process.stdout.write(value.digest);
+          ')"
+          [[ "$digest" == "$SOURCE_DIGEST" ]] || {
+            echo "post-promotion digest does not match verified source" >&2
+            exit 1
+          }
+
+      - name: Remove isolated promotion history
+        if: always()
+        shell: bash
+        env:
+          AREA: ${{ steps.history.outputs.area }}
+        run: |
+          set -euo pipefail
+          [[ -n "$AREA" ]] || {
+            echo "isolated history path was not handed off" >&2
+            exit 1
+          }
+          runner_root="$(realpath -e -- "$RUNNER_TEMP")"
+          expected_area="$runner_root/$(basename -- "$AREA")"
+          [[ "$AREA" == "$expected_area" && "$AREA" == "$runner_root"/edge-promotion.?????????? &&
+             -d "$AREA" && ! -L "$AREA" && "$(realpath -e -- "$AREA")" == "$AREA" &&
+             "$(stat -c '%u' -- "$AREA")" == "$(id -u)" &&
+             "$(stat -c '%a' -- "$AREA")" == 700 ]] || {
+            echo "refusing to remove unsafe isolated history path" >&2
+            exit 1
+          }
+          rm -rf -- "$AREA"
+          [[ ! -e "$AREA" ]] || {
+            echo "isolated history cleanup failed" >&2
+            exit 1
+          }

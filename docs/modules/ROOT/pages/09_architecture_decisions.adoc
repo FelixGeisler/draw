@@ -2566,14 +2566,16 @@ Then `gh release create --generate-notes` cuts the GitHub Release, flagging any
 exclusive automated producer of semver/`latest` tags and GitHub Releases.
 
 A separate `.github/workflows/edge.yml` is routed by completion of the workflow
-display name `CI`, but that name is not authorization. Its sole `publication`
+display name `CI`, but that name is not authorization. Its `publication`
 job can run only when all five event facts agree: conclusion is `success`, the
 reported event is `push`, the head branch is `main`, the head repository's full
 name equals the current repository, and the reported workflow path is exactly
 `.github/workflows/ci.yml`. It checks out exactly that run's `head_sha`, never
 the edge-workflow revision or current branch tip. Because it is a
 `workflow_run` consumer rather than a PR job, immutable-SHA publication remains
-detached from required pull-request checks.
+detached from required pull-request checks. A distinct `promotion` job needs
+successful publication, repeats those five predicates independently, and
+reconciles the mutable `edge` tag to verified freshly fetched current `main`.
 
 The specifics that matter:
 
@@ -2720,14 +2722,64 @@ distinct commits retain distinct tags, but observation and push are not atomic.
 An administrator or compromised GHCR credential can write after absence was
 observed and before build/push; the latter may overwrite that external write.
 That race is accepted residual risk, not a claim of registry-enforced
-immutability or atomic create-if-absent. The workflow emits no `edge`, `latest`,
-semver, `dryrun`, or other tag and no GitHub Release. Promotion, mutable-edge
-movement, rollback implementation, operations, signatures, and trusted digest
-anchors remain outside this decision. A manually verified rollback reference
-is stably pinned as
+immutability or atomic create-if-absent. Publication emits no `edge`, `latest`,
+semver, `dryrun`, or other tag and no GitHub Release. A manually verified rollback reference is stably pinned as
 `ghcr.io/felixgeisler/draw:sha-<full-40-hex-SHA>@sha256:<verified-index-digest>`.
 This immutable publication supplies the edge identity permitted by ADR-70; it
-does not add an identity consumer or mutable edge channel.
+does not add an application identity consumer.
+* *Promotion reconciles current main rather than replaying the trigger.* The
+separate `needs: publication` job repeats all five authorization predicates and
+runs on exact GitHub-hosted `ubuntu-24.04`, with exact Bash on every shell step,
+`contents: read` plus `packages: write`, and a 60-minute timeout. Job-level
+non-cancelling `edge-promotion` concurrency implements GitHub's global one
+running/one pending rule: a newer arrival may replace pending work but never
+cancels the running job. Every admitted job therefore fetches current `main`
+afresh instead of promoting its trigger SHA; reverse publication completion,
+same-SHA reruns, replaced pending work, and later main advancement converge
+whenever the current immutable source exists.
+* *Authoritative history has an isolated, anonymous boundary.* Promotion's
+non-persisting full-history checkout is only a source of workflow and inspector
+scripts. Its immediate first Bash step requires the exact clean public origin
+and rejects effective extra headers, credential helpers/stores, and fetch/push
+URL rewrites before repository-controlled scripts or authenticated operations.
+Under `env -i`, retaining only `PATH`, a new empty `HOME`, null global/system
+Git configs, disabled prompting/askpass, and an explicitly empty template, it
+initializes a fresh bare repository in one unique current-user-owned mode-0700
+direct child of `RUNNER_TEMP`. It verifies that bare config, then fetches the
+literal public HTTPS URL and exact `main` refspec with an explicitly empty
+credential-helper chain, no named remote, no Git-config redirect, and no token
+or credential fallback. Only that fetched ref selects the target and only that
+bare object database--with alternates and replace refs rejected--may prove an
+existing edge revision is a commit ancestor by `merge-base --is-ancestor`.
+* *The temporary history lifecycle crosses steps without crossing the credential
+boundary.* An initialization-only trap removes the area on failure or
+interruption before its exact path and fetched target are handed off through
+`GITHUB_OUTPUT`; successful initialization disarms that trap so ancestry can
+reuse the bare repository. The ancestry step revalidates the output path,
+ownership, exact mode, clean config, and unchanged fetched ref. The final
+declared step runs `if: always()`, rejects an absent or unsafe path, removes the
+area after no-op, failure, or success, and fails an available runner if cleanup
+fails. Forced cancellation or runner termination may prevent that final step;
+the fixed GitHub-hosted ephemeral runner is the accepted disposal boundary, and
+the area contains only public Git objects/configuration, never credentials or
+tokens.
+* *Promotion is digest-pinned and fail-closed.* After history establishment,
+the shared inspector checks `sha-<fresh-main>` in expected-revision mode. Exit
+3 is a successful no-op for in-flight publication and every other nonzero or
+malformed result fails without mutation. Existing `edge` absence permits first
+promotion; valid presence must supply an ancestor/equal revision from isolated
+history. Equal source/edge digests are a no-op. Otherwise one pinned Buildx
+setup and GHCR login precede exactly one `imagetools create` from
+`sha-<fresh-main>@sha256:<verified-digest>` to `edge`; an expected-revision
+post-check must prove both source-digest equality and the fresh-main revision.
+Inspector credentials exist only on inspector steps, login receives only its
+three approved inputs, and history, Buildx, and imagetools receive no direct
+credential. Source absence, invalid/unprovable/non-ancestor state, mutation or
+post-check failure performs no delete, retry, rollback, replacement, or repair.
+Promotion is the exclusive automated `edge` writer and emits no `latest`,
+semver, `dryrun`, release tag, or GitHub Release. Operations, rollback
+implementation, signatures, and trusted digest anchors remain outside this
+decision.
 
 *Rationale:*
 
@@ -2743,20 +2795,25 @@ registry. Docker Hub, npm publishing, and changelog conventions beyond GitHub's
 generated notes remain out of scope.
 * *Separation of pipelines.* Tag triggering still exclusively owns release
 artifacts; a pull request never builds or publishes, and an ordinary push can
-reach only the detached immutable-SHA exception after exact successful-main-CI
-authorization. `ci.yml`, `release.yml`, and `docs.yml` are unchanged by #277.
-There is no promotion or mutable `edge` channel in this amendment.
+reach only detached immutable-SHA publication and its digest-verified mutable
+`edge` reconciliation after exact successful-main-CI authorization. `ci.yml`,
+`release.yml`, and `docs.yml` remain unchanged. Promotion does not create or
+discover a release and does not operate a deployment.
 * *Verification.* Workflows are not executable in this CI, so (as with the
 container contract) text-contract tests pin both workflow shapes. Release tests
 retain the `v*`, full-test, semver/conditional-`latest`, two-platform, and GitHub
-Release boundary. Edge tests pin the completed-run route, all five independent
-authorization predicates, event-head checkout, exact permissions/concurrency,
-seven action SHAs, Node/credential boundaries, absent-only build identity, and
-post-push digest equality. A pure state model covers reverse completion order,
-same-SHA reruns, valid presence, authoritative absence, inspector/validation
-failure, post-push mismatch, and the accepted non-atomic external-write race.
-Those tests use no credential, live registry, Docker daemon, package mutation,
-or Actions execution. The release image building on both architectures remains
+Release boundary. Edge tests pin the completed-run route, both jobs' five
+independent authorization predicates, publication's event-head checkout and seven action
+SHAs, promotion's fixed runner/Bash shell and four action SHAs, exact
+permissions/concurrency, isolated anonymous public-main history and lifecycle,
+Node/credential boundaries, absent-only publication, digest-only promotion,
+and both post-checks. Pure state models cover reverse completion order,
+same-SHA reruns, valid presence, authoritative absence, one-running/one-pending
+replacement, main advancement, non-ancestor/unprovable state,
+inspector/validation failure, post-check mismatch, no backward movement, and
+the publication path's accepted non-atomic external-write race. Those tests use
+no credential, live registry, Docker daemon, package mutation, or Actions
+execution. The release image building on both architectures remains
 proven by its separately controlled dispatch dry run.
 
 == ADR-54: Phone support as an installable PWA — responsive adaptation, app-shell service worker, no native app
@@ -3606,10 +3663,15 @@ non-2xx is remembered as
 aborted socket stays warn-only, because that is exactly what a successful
 swap of the very container looks like.
 
+Mutable-edge promotion is independent of this semver/GitHub-Release discovery
+and trigger contract: moving `edge` neither opts a deployment in, applies an
+update, nor operates a deployment. ADR-70's application behavior therefore does
+not consume the mutable tag.
+
 *Out of scope:* auto-apply on a schedule, build-identity consumption outside
-authenticated Settings, edge image publication/promotion, rollback automation
-(pin the previous tag + restore a backup, 7.5), and bare-npm self-restart —
-there the check and banner work, the button stays hidden.
+authenticated Settings, edge image publication/promotion behavior, rollback
+automation (pin the previous tag + restore a backup, 7.5), and bare-npm
+self-restart — there the check and banner work, the button stays hidden.
 
 == ADR-71: Card-table identity — felt ground, brass accent, serif on the card face only
 
