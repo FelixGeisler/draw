@@ -280,6 +280,34 @@ jobs:
               GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false \
               git "$@"
           }
+          reject_bare_remote_state() {
+            local config_output config_status remote_output remote_status
+            set +e
+            config_output="$(isolated_git -C "$bare" config --show-origin --name-only \
+              --get-regexp '^(remote|include|includeif|submodule)\.' 2>&1)"
+            config_status=$?
+            set -e
+            if [[ "$config_status" -eq 0 ]]; then
+              echo "isolated repository has named-remote, include, or submodule configuration" >&2
+              return 1
+            fi
+            if [[ "$config_status" -ne 1 ]]; then
+              printf '%s\n' "$config_output" >&2
+              return 1
+            fi
+            set +e
+            remote_output="$(isolated_git -C "$bare" remote 2>&1)"
+            remote_status=$?
+            set -e
+            if [[ "$remote_status" -ne 0 ]]; then
+              printf '%s\n' "$remote_output" >&2
+              return 1
+            fi
+            [[ -z "$remote_output" ]] || {
+              echo "isolated repository has a named remote" >&2
+              return 1
+            }
+          }
           isolated_git init --bare --template="$area/template" "$bare"
           set +e
           bare_forbidden="$(isolated_git -C "$bare" config --show-origin --get-regexp "$forbidden" 2>&1)"
@@ -300,6 +328,7 @@ jobs:
           isolated_git -C "$bare" -c credential.helper= fetch --no-tags \
             'https://github.com/FelixGeisler/draw.git' \
             'refs/heads/main:refs/remotes/origin/main'
+          reject_bare_remote_state
           target="$(isolated_git --no-replace-objects -C "$bare" rev-parse --verify \
             'refs/remotes/origin/main^{commit}')"
           [[ "$target" =~ ^[0-9a-f]{40}$ ]] || {
@@ -441,6 +470,34 @@ jobs:
               GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/false \
               git --no-replace-objects "$@"
           }
+          reject_bare_remote_state() {
+            local config_output config_status remote_output remote_status
+            set +e
+            config_output="$(isolated_git -C "$bare" config --show-origin --name-only \
+              --get-regexp '^(remote|include|includeif|submodule)\.' 2>&1)"
+            config_status=$?
+            set -e
+            if [[ "$config_status" -eq 0 ]]; then
+              echo "isolated repository has named-remote, include, or submodule configuration" >&2
+              return 1
+            fi
+            if [[ "$config_status" -ne 1 ]]; then
+              printf '%s\n' "$config_output" >&2
+              return 1
+            fi
+            set +e
+            remote_output="$(isolated_git -C "$bare" remote 2>&1)"
+            remote_status=$?
+            set -e
+            if [[ "$remote_status" -ne 0 ]]; then
+              printf '%s\n' "$remote_output" >&2
+              return 1
+            fi
+            [[ -z "$remote_output" ]] || {
+              echo "isolated repository has a named remote" >&2
+              return 1
+            }
+          }
           set +e
           forbidden_config="$(isolated_git -C "$bare" config --show-origin --get-regexp "$forbidden" 2>&1)"
           config_status=$?
@@ -466,6 +523,7 @@ jobs:
             echo "existing edge revision is not a fetched commit object" >&2
             exit 1
           }
+          reject_bare_remote_state
           isolated_git -C "$bare" merge-base --is-ancestor "$EDGE_REVISION" "$TARGET_SHA" || {
             echo "existing edge revision is not a proven current-main ancestor" >&2
             exit 1

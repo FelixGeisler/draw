@@ -611,6 +611,8 @@ type HistoryGateExecution = {
   output: string;
   fetchAudit: string[];
   runnerEntries: string[];
+  namedRemotes: string[];
+  remoteConfigKeys: string[];
   target: string;
 };
 
@@ -680,7 +682,13 @@ function executeHistoryGate(
         `  "$real_git" "$@" || exit $?\n` +
         `  if [[ -n "$bare_key" ]]; then\n` +
         `    created="\${!#}"\n` +
-        `    "$real_git" -C "$created" config "$bare_key" "$bare_value" || exit $?\n` +
+        `    if [[ "$bare_key" == include.path && "$bare_value" == __remote_include__ ]]; then\n` +
+        `      included="$created/injected.config"\n` +
+        `      "$real_git" config -f "$included" remote.included.url https://evil.invalid/repository.git || exit $?\n` +
+        `      "$real_git" -C "$created" config include.path "$included" || exit $?\n` +
+        `    else\n` +
+        `      "$real_git" -C "$created" config "$bare_key" "$bare_value" || exit $?\n` +
+        `    fi\n` +
         `  fi\n` +
         `  exit 0\n` +
         `fi\n` +
@@ -714,16 +722,159 @@ function executeHistoryGate(
         RUNNER_TEMP: shellPath(runnerTemp),
       },
     });
+    const outputText = fs.readFileSync(output, "utf8");
+    const area = outputText.match(/^area=(.+)$/m)?.[1];
+    let namedRemotes: string[] = [];
+    let remoteConfigKeys: string[] = [];
+    if (area !== undefined) {
+      const entry = fs.readdirSync(runnerTemp)[0];
+      if (entry === undefined) throw new Error("history handoff omitted its area");
+      const bare = path.join(runnerTemp, entry, "repository.git");
+      namedRemotes = checked("git", ["-C", bare, "remote"])
+        .split(/\r?\n/)
+        .filter(Boolean);
+      const remoteConfig = spawnSync(
+        "git",
+        ["-C", bare, "config", "--local", "--name-only", "--get-regexp", "^remote\\."],
+        { encoding: "utf8" },
+      );
+      if (remoteConfig.status === 0) {
+        remoteConfigKeys = remoteConfig.stdout.split(/\r?\n/).filter(Boolean);
+      } else if (remoteConfig.status !== 1) {
+        throw new Error(`bare remote-config inspection failed: ${remoteConfig.stderr}`);
+      }
+    }
     return {
       status: result.status,
       stderr: result.stderr,
-      output: fs.readFileSync(output, "utf8"),
+      output: outputText,
       fetchAudit: fs
         .readFileSync(audit, "utf8")
         .split(/\r?\n/)
         .filter(Boolean),
       runnerEntries: fs.readdirSync(runnerTemp),
+      namedRemotes,
+      remoteConfigKeys,
       target,
+    };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+type AncestryGateOptions = {
+  bareKey?: string;
+  value?: string;
+};
+
+type AncestryGateExecution = {
+  status: number | null;
+  stderr: string;
+  mergeBaseAudit: string[];
+  reachedMutation: boolean;
+};
+
+function executeAncestryGate({
+  bareKey,
+  value = "https://evil.invalid/repository.git",
+}: AncestryGateOptions = {}): AncestryGateExecution {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "edge-ancestry-gate-"));
+  try {
+    const runnerTemp = path.join(root, "runner");
+    fs.mkdirSync(runnerTemp);
+    checked("bash", [
+      "-lc",
+      `umask 077; area=$(mktemp -d ${shellQuote(shellPath(runnerTemp))}/edge-promotion.XXXXXXXXXX); chmod 0700 "$area"`,
+    ]);
+    const areaEntry = fs.readdirSync(runnerTemp)[0];
+    if (areaEntry === undefined) throw new Error("failed to create ancestry area");
+    const area = path.join(runnerTemp, areaEntry);
+    const bare = path.join(area, "repository.git");
+    const fixture = path.join(root, "fixture");
+    const template = path.join(area, "template");
+    const bin = path.join(root, "bin");
+    const mergeAudit = path.join(root, "merge-base-audit");
+    const mutationAudit = path.join(root, "mutation-audit");
+    fs.mkdirSync(path.join(area, "home"));
+    fs.mkdirSync(template);
+    fs.mkdirSync(fixture);
+    fs.mkdirSync(bin);
+    fs.writeFileSync(mergeAudit, "");
+    fs.writeFileSync(mutationAudit, "");
+
+    checked("git", ["init"], fixture);
+    checked("git", ["config", "user.name", "Contract Test"], fixture);
+    checked("git", ["config", "user.email", "contract@example.invalid"], fixture);
+    fs.writeFileSync(path.join(fixture, "fixture.txt"), "offline history\n");
+    checked("git", ["add", "fixture.txt"], fixture);
+    checked("git", ["commit", "-m", "offline fixture"], fixture);
+    checked("git", ["branch", "-M", "main"], fixture);
+    const target = checked("git", ["rev-parse", "HEAD"], fixture);
+    checked("git", ["init", "--bare", `--template=${template}`, bare]);
+    checked("git", [
+      "-C",
+      bare,
+      "-c",
+      "credential.helper=",
+      "fetch",
+      "--no-tags",
+      fixture,
+      "refs/heads/main:refs/remotes/origin/main",
+    ]);
+    if (bareKey === "include.path" && value === "__remote_include__") {
+      const included = path.join(area, "injected.config");
+      checked("git", ["config", "-f", included, "remote.included.url", "https://evil.invalid/repository.git"]);
+      checked("git", ["-C", bare, "config", bareKey, included]);
+    } else if (bareKey !== undefined) {
+      checked("git", ["-C", bare, "config", bareKey, value]);
+    }
+
+    const realGit = checked("bash", ["-lc", "command -v git"]);
+    const wrapper = path.join(
+      bin,
+      process.platform === "win32" ? "git.exe" : "git",
+    );
+    fs.writeFileSync(
+      wrapper,
+      `#!/usr/bin/env bash\n` +
+        `real_git=${shellQuote(realGit)}\n` +
+        `audit=${shellQuote(shellPath(mergeAudit))}\n` +
+        `for argument in "$@"; do\n` +
+        `  if [[ "$argument" == merge-base ]]; then printf '%s\\n' "$*" >> "$audit"; fi\n` +
+        `done\n` +
+        `exec "$real_git" "$@"\n`,
+    );
+    fs.chmodSync(wrapper, 0o700);
+
+    const script = path.join(root, "ancestry.sh");
+    fs.writeFileSync(
+      script,
+      `export PATH=${shellQuote(shellPath(bin))}:"$PATH"\n` +
+        `umask 077\n` +
+        `chmod 0700 ${shellQuote(shellPath(area))}\n` +
+        `${runScript(ancestryStep)}\n` +
+        `printf 'reached\\n' >> ${shellQuote(shellPath(mutationAudit))}\n`,
+      { mode: 0o700 },
+    );
+    const result = spawnSync("bash", [shellPath(script)], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        AREA: shellPath(area),
+        EDGE_REVISION: target,
+        RUNNER_TEMP: shellPath(runnerTemp),
+        TARGET_SHA: target,
+      },
+    });
+    return {
+      status: result.status,
+      stderr: result.stderr,
+      mergeBaseAudit: fs
+        .readFileSync(mergeAudit, "utf8")
+        .split(/\r?\n/)
+        .filter(Boolean),
+      reachedMutation: fs.readFileSync(mutationAudit, "utf8") === "reached\n",
     };
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -839,10 +990,18 @@ describe("promotion history authority and lifecycle contract", () => {
     ]) {
       expect(forbiddenGitConfig(key)).toBe(true);
     }
-    for (const key of ["core.bare", "remote.origin.url", "user.email"]) {
+    for (const key of ["core.bare", "user.email"]) {
       expect(forbiddenGitConfig(key)).toBe(false);
     }
     expect(historyStep.match(/reject_forbidden_config/g)).toHaveLength(2);
+    expect(historyStep).toContain(
+      "--get-regexp '^(remote|include|includeif|submodule)\\.'",
+    );
+    expect(historyStep.match(/reject_bare_remote_state/g)).toHaveLength(2);
+    expect(ancestryStep).toContain(
+      "--get-regexp '^(remote|include|includeif|submodule)\\.'",
+    );
+    expect(ancestryStep.match(/reject_bare_remote_state/g)).toHaveLength(2);
     expect(historyStep).toContain(
       'bare_forbidden="$(isolated_git -C "$bare" config --show-origin --get-regexp "$forbidden" 2>&1)"',
     );
@@ -878,6 +1037,12 @@ describe("promotion history authority and lifecycle contract", () => {
       /remote add|Authorization|GITHUB_TOKEN|git -C \.|git fetch origin/,
     );
     expect(historyStep).toContain("'refs/remotes/origin/main^{commit}'");
+    expect(historyStep.lastIndexOf("reject_bare_remote_state")).toBeGreaterThan(
+      historyStep.indexOf("fetch --no-tags"),
+    );
+    expect(historyStep.lastIndexOf("reject_bare_remote_state")).toBeLessThan(
+      historyStep.indexOf("target=\"$(isolated_git"),
+    );
     expect(historyStep).not.toContain("workflow_run.head_sha");
     expect(historyStep).not.toMatch(/retry|fallback/i);
   });
@@ -905,6 +1070,8 @@ describe("promotion history authority and lifecycle contract", () => {
         "https://github.com/FelixGeisler/draw.git refs/heads/main:refs/remotes/origin/main",
       );
       expect(execution.runnerEntries).toHaveLength(1);
+      expect(execution.namedRemotes).toEqual([]);
+      expect(execution.remoteConfigKeys).toEqual([]);
     },
   );
 
@@ -947,6 +1114,20 @@ describe("promotion history authority and lifecycle contract", () => {
     expect(execution.status).not.toBe(0);
     expect(execution.output).toBe("");
     expect(execution.fetchAudit).toEqual([]);
+    expect(execution.runnerEntries).toEqual([]);
+  });
+
+  it.each([
+    ["even an exact literal origin", "remote.origin.url", "https://github.com/FelixGeisler/draw.git"],
+    ["an alternate named remote", "remote.backup.url", "https://github.com/FelixGeisler/draw.git"],
+    ["a malicious origin URL", "remote.origin.url", "https://evil.invalid/repository.git"],
+    ["included named-remote config", "include.path", "__remote_include__"],
+    ["submodule URL config", "submodule.injection.url", "https://evil.invalid/repository.git"],
+  ])("rejects %s after the bounded direct fetch and before handoff", (_name, bareKey, value) => {
+    const execution = executeHistoryGate({ bareKey, value });
+    expect(execution.status).not.toBe(0);
+    expect(execution.output).toBe("");
+    expect(execution.fetchAudit).toHaveLength(1);
     expect(execution.runnerEntries).toEqual([]);
   });
 
@@ -994,6 +1175,26 @@ describe("promotion history authority and lifecycle contract", () => {
     expect(execution.output).toBe("");
     expect(execution.fetchAudit).toEqual([]);
     expect(execution.runnerEntries).toEqual([]);
+  });
+
+  it("executes clean no-remote ancestry and reaches the downstream boundary", () => {
+    const execution = executeAncestryGate();
+    expect(execution.status, execution.stderr).toBe(0);
+    expect(execution.mergeBaseAudit).toHaveLength(1);
+    expect(execution.reachedMutation).toBe(true);
+  });
+
+  it.each([
+    ["even an exact literal origin", "remote.origin.url", "https://github.com/FelixGeisler/draw.git"],
+    ["an alternate named remote", "remote.backup.url", "https://github.com/FelixGeisler/draw.git"],
+    ["a malicious origin URL", "remote.origin.url", "https://evil.invalid/repository.git"],
+    ["included named-remote config", "include.path", "__remote_include__"],
+    ["submodule URL config", "submodule.injection.url", "https://evil.invalid/repository.git"],
+  ])("revalidates and rejects %s immediately before ancestry and mutation", (_name, bareKey, value) => {
+    const execution = executeAncestryGate({ bareKey, value });
+    expect(execution.status).not.toBe(0);
+    expect(execution.mergeBaseAudit).toEqual([]);
+    expect(execution.reachedMutation).toBe(false);
   });
 
   it("hands off one exact persistent path, revalidates it, and cleans it last with always", () => {
@@ -1159,6 +1360,12 @@ describe("promotion inspector, credential, and mutation contract", () => {
     expect(ancestryStep).toContain(')" == commit ]]');
     expect(ancestryStep).toContain(
       'merge-base --is-ancestor "$EDGE_REVISION" "$TARGET_SHA"',
+    );
+    expect(ancestryStep.lastIndexOf("reject_bare_remote_state")).toBeGreaterThan(
+      ancestryStep.indexOf('cat-file -t "$EDGE_REVISION"'),
+    );
+    expect(ancestryStep.lastIndexOf("reject_bare_remote_state")).toBeLessThan(
+      ancestryStep.indexOf("merge-base --is-ancestor"),
     );
     expect(ancestryStep).not.toMatch(/workflow_run|git -C \.|\.git\/config/);
   });
