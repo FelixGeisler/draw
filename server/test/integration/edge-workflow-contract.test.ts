@@ -1048,14 +1048,14 @@ describe("promotion history authority and lifecycle contract", () => {
   });
 
   it.each([
-    ["LF", historyStep],
-    ["synthetic CRLF", historyStep.replaceAll("\n", "\r\n")],
+    ["LF workflow source", historyStep],
+    ["synthetic CRLF workflow source", historyStep.replaceAll("\n", "\r\n")],
     [
-      "checked-out newline form",
+      "checked-out workflow source",
       step("Establish isolated public main history", checkedOutEdge),
     ],
   ])(
-    "executes the real %s gate offline through the exact literal fetch and handoff",
+    "extracts and executes the real gate from %s after newline normalization",
     (_name, workflowStep) => {
       const execution = executeHistoryGate({}, workflowStep);
       expect(execution.status, execution.stderr).toBe(0);
