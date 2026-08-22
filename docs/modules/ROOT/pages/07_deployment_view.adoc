@@ -335,6 +335,447 @@ contract leaves the live deployment untouched. *Bare-npm path:* `git pull`, `npm
 `npm run build`, restart `npm start` — the check and the banner work the
 same; only the trigger button is container-specific.
 
+=== 7.5.1 Pi-only `edge` polling runbook (#286)
+
+This is the one explicit opt-in exception recorded by ADR-70, not a general
+update mode. Only the designated operator may opt Tailscale host `raspberry` into the
+operational `edge` channel with `docker-compose.pi-edge.yml`. The external,
+digest-pinned Watchtower polls every 300 seconds; Draw still performs no
+scheduled apply and never receives `docker.sock`. Base, stable, and local
+Compose remain non-edge and polling-off by default, and ADR-70's manual
+HTTP-API/trigger boundary remains unchanged everywhere else. `edge` is
+continuous operational promotion from protected `main`, not GitHub Release
+discovery. ADR-53 governs the detached immutable-SHA publication and promotion
+evidence used by the preactivation and post-merge gates.
+
+The opt-in must resolve to all of these values before it is used:
+
+* Draw image `ghcr.io/felixgeisler/draw:edge` through `DRAW_TAG=edge`, with
+  `AUTO_UPDATE=true` and `AUTO_UPDATE_INTERVAL_SECONDS=300`;
+* only Draw labeled `com.centurylinklabs.watchtower.enable=true`; Watchtower
+  has no enable label;
+* Watchtower image
+  `containrrr/watchtower:1.7.1@sha256:6dd50763bbd632a83cb154d5451700530d1e44200b268a4e9488fefdfcf2b038`;
+* `WATCHTOWER_LABEL_ENABLE=true`, `WATCHTOWER_CLEANUP=true`,
+  `WATCHTOWER_HTTP_API_PERIODIC_POLLS=true`, and
+  `WATCHTOWER_POLL_INTERVAL=300`; and
+* the existing non-secret settings `DOCKER_API_VERSION=1.43`,
+  `WATCHTOWER_HTTP_API_UPDATE=true`,
+  `WATCHTOWER_HTTP_API_TOKEN=$\{WATCHTOWER_TOKEN}`, `TZ`, ADR-52's backup
+  settings, ADR-55's `127.0.0.1:3001:3001` and one-hop `TRUST_PROXY=1`, and
+  ADR-51's `draw-data:/data` mapping (the deployed volume is
+  `draw_draw-data`).
+
+The Watchtower digest above is the verified top-level registry manifest-list
+digest in that exact tag-and-digest pull reference. It is not a local Docker
+image ID. Mounting `/var/run/docker.sock` gives Watchtower root-equivalent host
+control. Polling may replace Draw without another prompt; changing the
+Watchtower digest requires review; cleanup removes superseded local images,
+not GHCR immutable tags. Draw never receives the socket. There is no automatic
+rollback and no automatic backup restoration.
+
+==== Registry access and secret boundary
+
+Public, anonymous GHCR access is the active policy. Immediately before
+activation, anonymously pull or inspect both the current immutable Draw tag and
+`edge`; configure no registry credential while that succeeds. Every repository
+inspector invocation must unset `OCI_REGISTRY_USERNAME` and
+`OCI_REGISTRY_PASSWORD`. Every anonymous Docker inspection or pull gate must
+additionally set `DOCKER_CONFIG` to a newly created temporary directory whose
+only `config.json` is `{"auths":{}}`. That isolated config prevents Docker from
+consulting a host-default login, credential store, or credential helper. It is
+safe even when the operator has a host login: do not log out or alter that
+login. Remove only the temporary anonymous directory when its gates and pulls
+finish.
+
+An anonymous GHCR visibility or access failure stops the anonymous branch
+before mutation. Only then may the coordinator provision the fallback: one
+dedicated package-read credential with no package write/delete scope.
+`/home/raspberry/draw/watchtower-docker-config` is owned by the Pi deployment
+account with mode `0700`; its sole `config.json` has mode `0600`, is the only
+Docker client config that host CLI GHCR pulls may use, and is mounted read-only
+as `/config.json` in Watchtower. Set
+`DOCKER_CONFIG=/home/raspberry/draw/watchtower-docker-config` only for each
+explicit private activation or rollback pull; never copy it to, merge it with,
+or fall back to the host-default Docker login/config. Keep
+`OCI_REGISTRY_USERNAME` and `OCI_REGISTRY_PASSWORD` absent in this branch too:
+the dedicated file is the only credential source.
+
+The anonymous and private branches are exclusive. The checked-in edge Compose
+file is the public form: its SHA-256 is
+`7031afeddadcd924c893ad10f4f73a5a84b6ff63f69fce10d1f794f8378a970b`, and its
+resolved Watchtower service has no `/config.json` mount. The private branch's
+sole permitted divergence is the deterministic transition in Safe activation:
+it changes exactly the one reviewed commented marker to
+`/home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro`.
+The resulting private file SHA-256 is
+`0c162cc00286f0a2ee8aac51210eff1eeb4266b66ac9e41c7c3e884c4810cfd2`. Do not
+use broad `sed`, a manual editor, or any other unreviewed mutation. The two
+checksums and the one-line mount diff are non-secret evidence; rendered Compose
+or credential content is not.
+
+The coordinator owns initial private provisioning, redacted validation, the
+reviewed transition, and restoration/removal if activation is abandoned. A
+failed private validation or pull leaves Watchtower stopped, stops activation
+or rollback, and must not be retried with host-default auth. A failed
+precondition, transition, or resolved-model check has the same fail-closed
+result. After a successful private handoff, keep the
+dedicated directory and read-only Watchtower mount; the designated Pi
+deployment operator owns rotation, revalidation, revocation, and eventual
+removal. Failed initial or rotated access stops Watchtower until read-only
+access is restored. Do not remove the dedicated config while a private
+deployment still depends on it.
+
+Never put a token, password, Docker auth/config content, secret-bearing command
+or output, rendered Compose values, backup contents, or sensitive storage path
+in Git, documentation, an issue/PR, logs, or evidence. Evidence records only
+redacted pass/fail and the approved non-secret identifiers below.
+
+==== Preactivation gates and backup
+
+Do not mutate the Pi until every gate passes. #280 and PR #283 must be merged.
+Renew the read-only `main` protection check: required `test` from GitHub Actions
+app ID `15368`, force pushes disabled, and branch deletion disabled. Under
+ADR-53, wait for successful protected-`main` `test`, detached immutable-SHA
+publication, and promotion for the exact current `main` SHA. From a trusted
+clean checkout, run the repository inspector with both credential variables
+absent against both images:
+
+[source,console]
+----
+env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD node scripts/inspect-oci-image.mjs --image ghcr.io/felixgeisler/draw:sha-<current-main-full-40-sha> --expected-revision <current-main-full-40-sha>
+env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD node scripts/inspect-oci-image.mjs --image ghcr.io/felixgeisler/draw:edge --expected-revision <current-main-full-40-sha>
+----
+
+Both revisions must equal current `main`; both reported top-level OCI-index
+digests must be exactly equal. Absence, invalidity, access failure, failed
+workflow, revision mismatch, or digest mismatch stops activation.
+
+Create a current verified activation backup immediately before activation:
+
+. use the authenticated Draw export to create a fresh, complete ADR-26 export;
+. copy it off-host as the deployment operator required by ADR-52;
+. require a non-empty file, a passing ZIP integrity check (for example
+  `unzip -t` without retaining its file listing), and identical SHA-256 on the
+  Pi and off-host copies; and
+. record only filename, UTC creation time, byte size, SHA-256, and the literal
+  result `off-host copy verified`.
+
+File presence, age, or an ADR-52 scheduled-backup log alone does not pass:
+scheduled archives remain on ADR-51's volume, while off-host copying and restore
+readiness are operator responsibilities. Restore is ADR-26 import of the
+complete export. Keep tested off-host backups after handoff.
+
+Before any change, record the currently running Draw image reference/digest,
+the verified pre-merge immutable rollback reference, `draw_draw-data` mounted
+at `/data`, and one preselected existing-data continuity check without copying
+its content into evidence. Never run
+`docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml down -v`,
+remove `draw_draw-data`, or recreate that volume.
+
+==== Watchtower registry and Pi platform proof
+
+Before editing Compose or `.env`, create an isolated empty Docker client config
+and rerun this registry inspection with the OCI credential variables absent:
+
+[source,console]
+----
+ANON_DOCKER_CONFIG="$(mktemp -d)"
+trap 'rm -rf "$ANON_DOCKER_CONFIG"' EXIT
+printf '%s\n' '{"auths":{}}' > "$ANON_DOCKER_CONFIG/config.json"
+env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker buildx imagetools inspect containrrr/watchtower:1.7.1
+----
+
+Require name `docker.io/containrrr/watchtower:1.7.1`, media type
+`application/vnd.docker.distribution.manifest.list.v2+json`, top-level digest
+`sha256:6dd50763bbd632a83cb154d5451700530d1e44200b268a4e9488fefdfcf2b038`,
+and linux/arm64/v8 child manifest
+`sha256:f14f090fcc8235449da45ccbb1aea3b424ed3b101bcbd3de56526909397c2369`.
+Then, on the Pi, pull the exact tag-and-digest reference and inspect that same
+reference:
+
+[source,console]
+----
+WATCHTOWER_REF='containrrr/watchtower:1.7.1@sha256:6dd50763bbd632a83cb154d5451700530d1e44200b268a4e9488fefdfcf2b038'
+env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker pull "$WATCHTOWER_REF"
+env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker image inspect --format '{{.Os}}/{{.Architecture}}/{{.Variant}} {{join .RepoDigests " "}}' "$WATCHTOWER_REF"
+----
+
+Require platform linux/arm64/v8 and a RepoDigest carrying the same top-level
+digest. The registry list/child mapping plus the Pi platform/RepoDigest proves
+selection of the recorded arm64/v8 child. Record the command, exact reference,
+platform, RepoDigest, and registry list/child mapping without secret output.
+Never compare or relabel a local image ID as a registry digest. Drift, pull
+failure, wrong platform, or digest mismatch stops activation.
+
+==== Safe activation
+
+Use `/home/raspberry/draw` as the sole live deployment directory. The recorded
+starting deployment uses the existing live
+`/home/raspberry/draw/docker-compose.yml`; the reviewed edge file does not exist
+there yet. The initial stop is therefore the sole transitional Compose command:
+it must explicitly select the existing `.env` and live Compose file. Before
+installing the edge file or editing any `.env` value, run
+`docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.yml stop watchtower`,
+then verify `docker inspect --format '{{.State.Running}}' watchtower` returns
+`false`. A failed stop or any other result stops activation; do not install or
+edit anything while Watchtower might still be running.
+
+Only after that stop is verified, install the initial byte-exact reviewed
+public `docker-compose.pi-edge.yml` at
+`/home/raspberry/draw/docker-compose.pi-edge.yml`. Before any edit or edge-file
+Compose command, require its exact checked-in SHA-256:
+
+[source,console]
+----
+printf '%s  %s\n' '7031afeddadcd924c893ad10f4f73a5a84b6ff63f69fce10d1f794f8378a970b' '/home/raspberry/draw/docker-compose.pi-edge.yml' | sha256sum --check --strict
+----
+
+A zero, multiple, or mismatched marker, an unexpected active mount, or a
+checksum mismatch stops activation. Every Compose invocation from that point
+forward must explicitly select `/home/raspberry/draw/.env` and that installed
+edge file; never rely on working-directory, `COMPOSE_FILE`, filename discovery,
+or the old live file. Perform only service-scoped operations, in this order:
+
+. set only the approved host `.env` values `DRAW_TAG=edge`,
+  `AUTO_UPDATE=true`, and `AUTO_UPDATE_INTERVAL_SECONDS=300`, preserving its
+  secret references and other settings;
+. select exactly one access branch before validating the edge Compose model:
+** while anonymous GHCR gates pass, leave the byte-exact public file unchanged,
+   require its public checksum again, and set `EXPECTED_CONFIG_MOUNT=absent`;
+** only after anonymous access fails, activation stops, and the dedicated
+   package-read file passes redacted validation, perform exactly this reviewed
+   transition before any edge-file Compose validation or Watchtower start:
++
+[source,console]
+----
+EDGE_FILE=/home/raspberry/draw/docker-compose.pi-edge.yml
+EDGE_MOUNT_MODE=private python3 - "$EDGE_FILE" <<'PY'
+import difflib
+import hashlib
+import os
+from pathlib import Path
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+public = b"      # - /home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro\n"
+private = b"      - /home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro\n"
+public_sha = "7031afeddadcd924c893ad10f4f73a5a84b6ff63f69fce10d1f794f8378a970b"
+private_sha = "0c162cc00286f0a2ee8aac51210eff1eeb4266b66ac9e41c7c3e884c4810cfd2"
+data = path.read_bytes()
+if os.environ.get("EDGE_MOUNT_MODE") != "private":
+    raise SystemExit("refusing transition: EDGE_MOUNT_MODE must be private")
+if hashlib.sha256(data).hexdigest() != public_sha:
+    raise SystemExit("refusing transition: public Compose checksum mismatch")
+if data.count(public) != 1 or data.count(private) != 0:
+    raise SystemExit("refusing transition: expected exactly one commented marker and no active mount")
+updated = data.replace(public, private, 1)
+if hashlib.sha256(updated).hexdigest() != private_sha:
+    raise SystemExit("refusing transition: private Compose checksum mismatch")
+with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name + ".", delete=False) as output:
+    temporary = Path(output.name)
+    os.fchmod(output.fileno(), path.stat().st_mode & 0o777)
+    output.write(updated)
+    output.flush()
+    os.fsync(output.fileno())
+os.replace(temporary, path)
+print("public sha256 " + public_sha)
+print("private sha256 " + private_sha)
+print("".join(difflib.unified_diff(data.decode().splitlines(True), updated.decode().splitlines(True), fromfile="reviewed-public", tofile="private-fallback", n=0)), end="")
+PY
+EXPECTED_CONFIG_MOUNT=private
+----
++
+   This exact-checksum and exact-marker transition is the only approved edit.
+   It fails without writing if the installed file is not byte-exact public
+   input or if the marker is absent, duplicated, already active, or otherwise
+   mismatched. Its output contains only the two expected checksums and the
+   reviewed one-line non-secret diff.
+. run
+  `docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml config --quiet draw watchtower`
+  without retaining rendered secret values, then immediately verify the
+  resolved Watchtower model for the selected branch without logging or storing
+  the JSON:
++
+[source,console]
+----
+docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml config --format json |
+  EXPECTED_CONFIG_MOUNT="$EXPECTED_CONFIG_MOUNT" python3 -c 'import json, os, sys; expected=os.environ["EXPECTED_CONFIG_MOUNT"]; volumes=json.load(sys.stdin)["services"]["watchtower"].get("volumes", []); mounts=[v for v in volumes if v.get("target")=="/config.json"]; valid=(not mounts) if expected=="absent" else (expected=="private" and len(mounts)==1 and mounts[0].get("type")=="bind" and mounts[0].get("source")=="/home/raspberry/draw/watchtower-docker-config/config.json" and mounts[0].get("read_only") is True); sys.exit(0 if valid else "resolved Watchtower /config.json mount mismatch")'
+----
++
+   Public operation must resolve zero `/config.json` mounts. Private operation
+   must resolve exactly one bind from
+   `/home/raspberry/draw/watchtower-docker-config/config.json` to
+   `/config.json` with `read_only: true`. Any other model stops activation with
+   Watchtower still stopped.
+. pull through the already selected branch, never host-default Docker auth:
+** for public access run
+   `env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw watchtower`;
+** for private access run only after the transition and both validation steps
+   pass:
+   `env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG=/home/raspberry/draw/watchtower-docker-config docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw watchtower`;
+. recreate only Draw with
+  `docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml up -d --no-deps draw`;
+. wait for green health, then require authenticated identity
+  `edge:<pre-merge-full-SHA>`, `draw_draw-data` still mounted at `/data`, and
+  the preselected existing data still available; and
+. only after all Draw checks pass, recreate/start only Watchtower with
+  `docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml up -d --no-deps watchtower`,
+  then inspect the resolved environment and labels to require the approved
+  polling, 300-second interval, cleanup, label scope, exact image, and no
+  Watchtower enable label. Do not retain the API token or rendered secret
+  output.
+
+Any registry, transition, resolved-model, pull, config, recreation, identity,
+health, volume, or data failure leaves Watchtower stopped and restores the
+previously recorded exact Draw image. Do not use project teardown and do not
+start polling before Draw verification.
+
+==== Immutable rollback
+
+Rollback is manual and exact. Stop Watchtower first with
+`docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml stop watchtower`,
+then verify it is stopped before changing the tag. Set `DRAW_TAG` to
+`sha-<full-40-sha>@sha256:<verified-oci-index-digest>`, producing exactly
+`ghcr.io/felixgeisler/draw:sha-<full-40-sha>@sha256:<verified-oci-index-digest>`.
+Pull only Draw through exactly one isolated access branch, with both OCI
+credential environment variables absent. If anonymous GHCR access still
+passes, use
+`env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG" docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw`.
+If anonymous access fails, do not use host-default auth: leave Watchtower
+stopped and the current Draw container untouched until the dedicated fallback
+is provisioned and redactedly validated, then use only
+`env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG=/home/raspberry/draw/watchtower-docker-config docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml pull draw`.
+A failed pull leaves Watchtower stopped and the current Draw container
+untouched. Remove the temporary anonymous directory after its use; remove the
+dedicated directory only when private access is abandoned or no deployment
+depends on it. After a successful pull, recreate only Draw using
+`docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml up -d --no-deps draw`.
+Require the expected authenticated identity, green health, `draw_draw-data` at
+`/data`, and intact selected data before optionally restarting only Watchtower
+in manual-only mode (`AUTO_UPDATE=false`) with
+`docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml up -d --no-deps watchtower`.
+If rollback crosses a schema change, import the matching ADR-26 complete export
+for that image/schema and repeat every check. Never promise or infer automatic
+rollback or restoration.
+
+==== Restore the byte-exact public file
+
+When GHCR visibility is public again or private activation is abandoned, first
+stop Watchtower through the explicit edge Compose selection and verify
+`docker inspect --format '{{.State.Running}}' watchtower` returns `false`. If
+the file already has the exact public checksum, do not edit it. If it has the
+exact private checksum, remove the mount only with this deterministic reverse
+transition; any other checksum or marker state fails without writing:
+
+[source,console]
+----
+EDGE_FILE=/home/raspberry/draw/docker-compose.pi-edge.yml
+EDGE_MOUNT_MODE=public python3 - "$EDGE_FILE" <<'PY'
+import difflib
+import hashlib
+import os
+from pathlib import Path
+import sys
+import tempfile
+
+path = Path(sys.argv[1])
+public = b"      # - /home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro\n"
+private = b"      - /home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro\n"
+public_sha = "7031afeddadcd924c893ad10f4f73a5a84b6ff63f69fce10d1f794f8378a970b"
+private_sha = "0c162cc00286f0a2ee8aac51210eff1eeb4266b66ac9e41c7c3e884c4810cfd2"
+data = path.read_bytes()
+if os.environ.get("EDGE_MOUNT_MODE") != "public":
+    raise SystemExit("refusing restore: EDGE_MOUNT_MODE must be public")
+if hashlib.sha256(data).hexdigest() != private_sha:
+    raise SystemExit("refusing restore: private Compose checksum mismatch")
+if data.count(private) != 1 or data.count(public) != 0:
+    raise SystemExit("refusing restore: expected exactly one active mount and no commented marker")
+updated = data.replace(private, public, 1)
+if hashlib.sha256(updated).hexdigest() != public_sha:
+    raise SystemExit("refusing restore: public Compose checksum mismatch")
+with tempfile.NamedTemporaryFile(dir=path.parent, prefix=path.name + ".", delete=False) as output:
+    temporary = Path(output.name)
+    os.fchmod(output.fileno(), path.stat().st_mode & 0o777)
+    output.write(updated)
+    output.flush()
+    os.fsync(output.fileno())
+os.replace(temporary, path)
+print("private sha256 " + private_sha)
+print("public sha256 " + public_sha)
+print("".join(difflib.unified_diff(data.decode().splitlines(True), updated.decode().splitlines(True), fromfile="private-fallback", tofile="reviewed-public", n=0)), end="")
+PY
+----
+
+Require the exact public checksum with `sha256sum --check --strict`, then set
+`EXPECTED_CONFIG_MOUNT=absent` and rerun both edge Compose validation and the
+resolved-model command from Safe activation. It must report no `/config.json`
+mount. Only after that passes, remove
+`/home/raspberry/draw/watchtower-docker-config/config.json`, remove the now-empty
+`watchtower-docker-config` directory, and verify both paths are absent. Do not
+record the removed file's content.
+
+If activation is abandoned, leave Watchtower stopped. If operation is to
+continue publicly, first renew the anonymous empty-`DOCKER_CONFIG` access and
+pull gates, then recreate only Watchtower with the byte-exact public file and
+inspect its container mounts to verify `/config.json` is absent before handoff.
+This restoration is the only permitted divergence reversal; it removes both
+the private Compose mount and the credential instead of leaving dormant private
+access behind.
+
+==== Preactivation evidence and lifecycle transition
+
+Until criterion 5's complete evidence is linked, the docs/config PR state is
+`PRE_ACTIVATION_EVIDENCE_PENDING`; it is not
+`MERGE_PENDING_PRODUCTION_ACCEPTANCE` and must not merge. Only the successful
+pre-merge activation above permits the coordinator to transition the PR to
+`MERGE_PENDING_PRODUCTION_ACCEPTANCE`. Its body links #286, accepted
+issue-body SHA-256
+`eeb0568faa31b6130f297f61172672a29aaa5afe53c612cbadeaa7d397d25461`, the
+same-digest readiness attestation, #280, and PR #283; it deliberately has no
+issue-closing keyword. Merge leaves #286 open and is not operational
+acceptance.
+
+For the exact docs/config merge SHA, record successful protected-`main` CI and,
+under ADR-53, the immutable detached publication/promotion run URL, ID, and
+conclusion. From a trusted clean checkout, inspect `sha-<merge-full-SHA>` and
+then `edge` with both credential variables absent:
+
+[source,console]
+----
+env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD node scripts/inspect-oci-image.mjs --image ghcr.io/felixgeisler/draw:sha-<merge-full-40-sha> --expected-revision <merge-full-40-sha>
+env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD node scripts/inspect-oci-image.mjs --image ghcr.io/felixgeisler/draw:edge --expected-revision <merge-full-40-sha>
+----
+
+Require both full revisions and OCI-index digests to equal the full merge SHA
+and each other. Start the acceptance clock only at that verified equality
+timestamp.
+
+Allow at most 10 minutes (two configured 300-second polls) for Watchtower to
+replace Draw automatically. During that window do not invoke its HTTP update
+endpoint, run
+`docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml up draw`,
+manually pull, recreate, restart, or force replacement in any way. Pass only if the Draw container ID changes,
+authenticated identity changes from `edge:<pre-merge-full-SHA>` to
+`edge:<full-docs-merge-SHA>`, health stays green, the same `draw_draw-data`
+remains at `/data`, and the preselected data remains available. Timeout or any
+failed check stops Watchtower, performs the exact immutable rollback, and
+leaves #286 open.
+
+Create one immutable, secret-free evidence packet containing: protected-main
+check result; GHCR visibility result; Watchtower registry command/reference,
+manifest-list media type/top-level digest, arm64/v8 child mapping, and Pi
+platform/RepoDigest result; workflow URL/ID/conclusion; full merge SHA;
+immutable tag/index digest; `edge` digest/revision; equality and observation
+timestamps; before/after container IDs and identities; bounded replacement
+evidence; health results; backup non-secret identity; volume name/mount;
+data-continuity result; whether any forbidden manual action occurred; and final
+PASS/FAIL. Compute its SHA-256. Only the human's explicit
+`ACCEPT <packet-sha256>` for that exact packet permits issue closure. The exact
+`REJECT <packet-sha256>`, timeout, missing evidence, mismatch, or any failure
+leaves the issue open in polling-stopped rollback state. Nothing auto-closes.
+
 == 7.6 Summary — install, run, configure
 
 [cols="1,3",options="header"]

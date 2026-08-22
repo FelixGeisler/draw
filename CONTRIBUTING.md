@@ -98,6 +98,23 @@ Antora resolves `url: .` through git, so it builds the **committed** state of
 your branch — commit diagram edits before building, and build from a normal
 clone (Antora cannot read a `git worktree` checkout).
 
+### Pi edge operations
+
+The dedicated `docker-compose.pi-edge.yml` is not a general self-hosting
+sample. It records the explicit, single-Pi `edge` opt-in governed by issue #286
+and ADR-70. The complete backup, registry/platform verification, activation,
+rollback, and post-merge acceptance runbook is deployment view 7.5.1. Editing
+or merging these repository files does **not** authorize a Pi mutation.
+
+The PR begins in `PRE_ACTIVATION_EVIDENCE_PENDING`: it must not close #286 or
+merge while criterion 5's preactivation evidence is incomplete. Only after all
+of those gates pass may the coordinator transition it to
+`MERGE_PENDING_PRODUCTION_ACCEPTANCE`. Merge still does not prove unattended
+replacement; #286 stays open until the secret-free production evidence packet
+receives the human's exact `ACCEPT <packet-sha256>` statement. Never put a
+password, token, Docker auth content, rendered secret configuration, or
+sensitive backup path in a commit, PR, issue, log, or evidence packet.
+
 ## Releasing
 
 Releases are tag-driven (#192, ADR-53). Pushing a semver tag `v<x.y.z>` (final)
