@@ -3687,10 +3687,36 @@ and trigger contract: moving `edge` neither opts a deployment in, applies an
 update, nor operates a deployment. ADR-70's application behavior therefore does
 not consume the mutable tag.
 
-*Out of scope:* auto-apply on a schedule, build-identity consumption outside
-authenticated Settings, edge image publication/promotion behavior, rollback
-automation (pin the previous tag + restore a backup, 7.5), and bare-npm
-self-restart — there the check and banner work, the button stays hidden.
+*Pi-only explicit-opt-in amendment (#286):* One deployment is an intentional,
+narrow exception to the polling-off rule above. Only an operator who
+explicitly opts Tailscale host `raspberry` into the operational `edge` channel
+may run the externally pinned Watchtower in periodic-poll mode. That sidecar,
+not Draw, polls every 300 seconds and may replace only the labeled Draw
+container. Draw still performs no scheduled apply and never receives
+`docker.sock`; its release check remains GitHub Release discovery, while
+`edge` is a separately promoted operational channel, not Release discovery.
+The ordinary base, stable, and local deployments stay non-edge and
+polling-off by default. Everywhere outside this one opt-in, the manual
+HTTP-API/trigger boundaries above remain the complete apply contract.
+
+The exception is configured only by `docker-compose.pi-edge.yml`: `DRAW_TAG=edge`,
+`AUTO_UPDATE=true`, `AUTO_UPDATE_INTERVAL_SECONDS=300`, and the reviewed
+`containrrr/watchtower:1.7.1@sha256:6dd50763bbd632a83cb154d5451700530d1e44200b268a4e9488fefdfcf2b038`
+registry manifest-list reference. It does not weaken the existing deployment
+contracts. ADR-26 still requires complete export/import for restore; ADR-51
+still owns `/data` on the preserved `draw_draw-data` named volume; ADR-52 still
+makes verified off-host backup copying and retention the deployment operator's
+responsibility; and ADR-55 still requires loopback-only publication plus the
+one-hop `TRUST_PROXY=1` boundary behind Tailscale Serve. Watchtower's socket is
+root-equivalent host control, so digest changes require review and there is no
+automatic rollback or backup restoration. Deployment view 7.5.1 defines the
+fail-closed activation and exact-digest human production-acceptance gates.
+
+*Out of scope:* auto-apply on a schedule outside the explicit Pi-only exception,
+build-identity consumption outside authenticated Settings, edge image
+publication/promotion behavior, rollback automation (pin the previous tag +
+restore a backup, 7.5), and bare-npm self-restart — there the check and banner
+work, the button stays hidden.
 
 == ADR-71: Card-table identity — felt ground, brass accent, serif on the card face only
 

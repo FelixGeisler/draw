@@ -7,6 +7,11 @@
 # Works as-is on a Raspberry Pi: `up` builds the arm64 image locally and runs
 # it. Your tasks and materials live on the `draw-data` named volume and survive
 # `down`, recreation, and image upgrades.
+#
+# This base/local sample deliberately has no Watchtower service, does not use
+# the operational `edge` channel, and does not poll for replacement images.
+# The single-Pi explicit opt-in is isolated in docker-compose.pi-edge.yml and
+# deployment view 7.5.1 (#286, ADR-70); it is never a default deployment mode.
 
 services:
   draw:
