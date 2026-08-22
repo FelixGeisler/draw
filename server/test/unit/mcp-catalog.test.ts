@@ -36,6 +36,7 @@ function tool(name: string) {
 
 const EXPECTED_TOOLS = [
   "complete_task",
+  "create_goal",
   "create_subtasks",
   "create_task",
   "draw_card",
@@ -267,6 +268,92 @@ describe("ADR-4 wording in tool descriptions (issue #76)", () => {
     expect(tool("create_task").description).toContain("Non-neutral impact (≠3)");
     expect(tool("update_task").description).toContain("non-neutral impact (≠3)");
     expect(tool("update_task").description).toContain("omit impact when unlinking");
+  });
+});
+
+describe("create_goal", () => {
+  const definition = tool("create_goal");
+  const schema = z.object(definition.inputSchema);
+
+  it("publishes the approved description, field descriptions, and write annotations", () => {
+    expect(definition.description).toBe(
+      "Create a goal: a title plus how success is measured (outcome). Tasks link to it via " +
+        "goalId and their 1–5 impact rates leverage toward it — what the draw weights by (ADR-4). " +
+        "A targetDate (YYYY-MM-DD) lets the goal show the daily pace the remaining work requires. " +
+        "New goals start active; resolving one (achieved/missed/dropped) stays in the app.",
+    );
+    expect(Object.keys(definition.inputSchema)).toEqual(["title", "outcome", "targetDate"]);
+    expect((definition.inputSchema.title as z.ZodType).description).toBeUndefined();
+    expect((definition.inputSchema.outcome as z.ZodType).description).toBe(
+      "How success is measured — the goal's definition of done",
+    );
+    expect(
+      (definition.inputSchema.targetDate as z.ZodOptional<z.ZodType>).unwrap().description,
+    ).toBe("Calendar date as YYYY-MM-DD");
+    expect(definition.annotations).toEqual({
+      title: "Create goal",
+      readOnlyHint: false,
+      destructiveHint: false,
+      openWorldHint: false,
+    });
+  });
+
+  it("requires a non-empty title and accepts title-only or all approved fields", () => {
+    expect(schema.safeParse({}).success).toBe(false);
+    expect(schema.safeParse({ title: "" }).success).toBe(false);
+    expect(schema.safeParse({ title: "Pass the exam" }).success).toBe(true);
+    expect(
+      schema.safeParse({
+        title: "Pass the exam",
+        outcome: "Grade 2.0 or better",
+        targetDate: "2026-09-30",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("uses the shared YYYY-MM-DD shape check without MCP-only calendar semantics", () => {
+    for (const targetDate of ["2026-9-30", "30.09.2026", "2026-09-30T10:00:00Z", "Sept 30"]) {
+      expect(schema.safeParse({ title: "Pass the exam", targetDate }).success).toBe(false);
+    }
+    expect(schema.safeParse({ title: "Pass the exam", targetDate: "2026-02-31" }).success).toBe(
+      true,
+    );
+  });
+
+  it("POSTs /api/goals once with validated args unchanged and returns the created payload", async () => {
+    const created = {
+      id: 3,
+      title: "  Pass the exam  ",
+      outcome: "Grade 2.0 or better",
+      targetDate: "2026-09-30",
+      status: "active",
+    };
+    const args = {
+      title: "  Pass the exam  ",
+      outcome: "Grade 2.0 or better",
+      targetDate: "2026-09-30",
+    };
+    const { api, calls } = stubApi((method, path) =>
+      method === "POST" && path === "/api/goals" ? { status: 201, body: created } : undefined,
+    );
+
+    const outcome = await executeTool("create_goal", api, args);
+
+    expect(outcome).toEqual({ text: JSON.stringify(created, null, 2) });
+    expect(calls).toEqual([{ method: "POST", path: "/api/goals", body: args }]);
+  });
+
+  it("passes whitespace to the API and surfaces its exact shared-convention error", async () => {
+    const { api, calls } = stubApi((method, path) =>
+      method === "POST" && path === "/api/goals"
+        ? { status: 400, body: { error: "title is required" } }
+        : undefined,
+    );
+
+    const outcome = await executeTool("create_goal", api, { title: "   " });
+
+    expect(outcome).toEqual({ isError: true, text: "title is required (API responded 400)" });
+    expect(calls).toEqual([{ method: "POST", path: "/api/goals", body: { title: "   " } }]);
   });
 });
 
