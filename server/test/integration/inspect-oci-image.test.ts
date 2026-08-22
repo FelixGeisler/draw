@@ -68,7 +68,7 @@ function redirectedConfigRoute(fixture = makeInspectionFixture(), observeCapabil
   const configArtifacts = [...fixture.artifacts.entries()].filter(([path]) => path.includes("/blobs/"));
   return (request, response) => {
     const logical = new URL(request.url ?? "/", "http://test.invalid");
-    const cdnMatch = logical.pathname.match(/^\/ghcrblobs(?:11|12)\/blobs\/(sha256:[0-9a-f]{64})$/);
+    const cdnMatch = logical.pathname.match(/^\/ghcrblobs(?:04|17)\/blobs\/(sha256:[0-9a-f]{64})$/);
     if (cdnMatch) {
       observeCapability?.(logical.search === TEST_CAPABILITY_QUERY);
       const artifact = fixture.artifacts.get(`/v2/felixgeisler/draw/blobs/${cdnMatch[1]}`);
@@ -82,7 +82,7 @@ function redirectedConfigRoute(fixture = makeInspectionFixture(), observeCapabil
     const configIndex = configArtifacts.findIndex(([path]) => path === logical.pathname);
     if (configIndex >= 0) {
       const digest = logical.pathname.slice(logical.pathname.lastIndexOf("/") + 1);
-      const cdnPath = `/ghcrblobs${configIndex === 0 ? "11" : "12"}/blobs/${digest}`;
+      const cdnPath = `/ghcrblobs${configIndex === 0 ? "04" : "17"}/blobs/${digest}`;
       response.writeHead(307, {
         "Content-Type": "application/octet-stream",
         "Content-Encoding": "identity",
@@ -197,7 +197,7 @@ describe("bounded GHCR inspector integration", () => {
   it.each([
     { mode: "derive", challenged: false, requests: 8 },
     { mode: "expected", challenged: true, requests: 10 },
-  ])("follows both constrained config redirects in $mode mode (challenged: $challenged)", async ({ mode, challenged, requests }) => {
+  ])("follows constrained config redirects through shards 04 and 17 in $mode mode (challenged: $challenged)", async ({ mode, challenged, requests }) => {
     const fixture = makeInspectionFixture();
     let challengeSent = false;
     const capabilityChecks: boolean[] = [];
@@ -229,9 +229,9 @@ describe("bounded GHCR inspector integration", () => {
       const fixturePaths = [...fixture.artifacts.keys()];
       const successOrder = [
         fixturePaths[0], fixturePaths[1], fixturePaths[2], fixturePaths[3],
-        `/ghcrblobs11/blobs/${fixturePaths[3].slice(fixturePaths[3].lastIndexOf("/") + 1)}`,
+        `/ghcrblobs04/blobs/${fixturePaths[3].slice(fixturePaths[3].lastIndexOf("/") + 1)}`,
         fixturePaths[4], fixturePaths[5],
-        `/ghcrblobs12/blobs/${fixturePaths[5].slice(fixturePaths[5].lastIndexOf("/") + 1)}`,
+        `/ghcrblobs17/blobs/${fixturePaths[5].slice(fixturePaths[5].lastIndexOf("/") + 1)}`,
       ];
       expect(test.observed.map((item) => new URL(item.url).pathname)).toEqual(challenged
         ? [fixturePaths[0], "/token", ...successOrder]
@@ -335,8 +335,9 @@ describe("bounded GHCR inspector integration", () => {
     { label: "path-normalization material", status: 307, location: "normalized-path" },
     { label: "wrong digest", status: 307, location: "digest" },
     { label: "zero ghcrblobs number", status: 307, location: "zero" },
-    { label: "leading-zero ghcrblobs number", status: 307, location: "leading-zero" },
+    { label: "zero-only padded ghcrblobs number", status: 307, location: "zero-padded" },
     { label: "signed ghcrblobs number", status: 307, location: "signed" },
+    { label: "non-digit ghcrblobs number", status: 307, location: "non-digit" },
     { label: "decimal ghcrblobs number", status: 307, location: "decimal" },
     { label: "missing ghcrblobs number", status: 307, location: "missing-number" },
     { label: "extra path", status: 307, location: "extra" },
@@ -360,8 +361,9 @@ describe("bounded GHCR inspector integration", () => {
       "normalized-path": `${CONFIG_CDN_ORIGIN}/ignored/../ghcrblobs1/blobs/${digest}?sig=test`,
       digest: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/sha256:${"f".repeat(64)}?sig=test`,
       zero: `${CONFIG_CDN_ORIGIN}/ghcrblobs0/blobs/${digest}?sig=test`,
-      "leading-zero": `${CONFIG_CDN_ORIGIN}/ghcrblobs01/blobs/${digest}?sig=test`,
+      "zero-padded": `${CONFIG_CDN_ORIGIN}/ghcrblobs00/blobs/${digest}?sig=test`,
       signed: `${CONFIG_CDN_ORIGIN}/ghcrblobs+1/blobs/${digest}?sig=test`,
+      "non-digit": `${CONFIG_CDN_ORIGIN}/ghcrblobsabc/blobs/${digest}?sig=test`,
       decimal: `${CONFIG_CDN_ORIGIN}/ghcrblobs1.0/blobs/${digest}?sig=test`,
       "missing-number": `${CONFIG_CDN_ORIGIN}/ghcrblobs/blobs/${digest}?sig=test`,
       extra: `${CONFIG_CDN_ORIGIN}/ghcrblobs1/blobs/${digest}/extra?sig=test`,
