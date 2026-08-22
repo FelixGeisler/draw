@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -28,10 +30,42 @@ const publicationActions = publicationJob.match(/uses:\s*[^\s]+/g) ?? [];
 const promotionActions = promotionJob.match(/uses:\s*[^\s]+/g) ?? [];
 
 function step(name: string, scope = edge): string {
-  const start = scope.indexOf(`- name: ${name}`);
+  const normalizedScope = scope.replace(/\r\n/g, "\n");
+  const start = normalizedScope.indexOf(`- name: ${name}`);
   if (start < 0) throw new Error(`missing workflow step: ${name}`);
-  const next = scope.indexOf("\n      - name:", start + 1);
-  return scope.slice(start, next < 0 ? scope.length : next);
+  const next = normalizedScope.indexOf("\n      - name:", start + 1);
+  return normalizedScope.slice(start, next < 0 ? normalizedScope.length : next);
+}
+
+function runScript(workflowStep: string): string {
+  const marker = "\n        run: |\n";
+  const start = workflowStep.indexOf(marker);
+  if (start < 0) throw new Error("workflow step has no run script");
+  return workflowStep
+    .slice(start + marker.length)
+    .split("\n")
+    .map((line) => (line.startsWith("          ") ? line.slice(10) : line))
+    .join("\n");
+}
+
+const shellPath = (value: string) => {
+  const normalized = value.replaceAll("\\", "/");
+  const drive = normalized.match(/^([A-Za-z]):\/(.*)$/);
+  return drive === null
+    ? normalized
+    : `/${drive[1].toLowerCase()}/${drive[2]}`;
+};
+const shellQuote = (value: string) =>
+  `'${value.replaceAll("'", "'\"'\"'")}'`;
+
+function checked(command: string, args: string[], cwd?: string) {
+  const result = spawnSync(command, args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} failed (${result.status}): ${result.stderr}`,
+    );
+  }
+  return result.stdout.trim();
 }
 
 type WorkflowRun = {
@@ -473,6 +507,199 @@ const forbiddenGitConfig = (key: string) =>
     key,
   );
 
+// These harnesses execute the committed Bash controller bodies. Their wrappers
+// replace only external inspector/network effects, so config gates, byte-level
+// stdout handling, output handoff, and cleanup run exactly as committed.
+type ControllerExecution = {
+  status: number | null;
+  output: Buffer;
+  temporaryFiles: string[];
+};
+
+function executeInspectionController(
+  workflowStep: string,
+  inspectorStdout: string,
+): ControllerExecution {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "edge-controller-"));
+  try {
+    const runnerTemp = path.join(root, "runner");
+    const output = path.join(root, "github-output");
+    const wrapper = path.join(root, "inspector-node");
+    const script = path.join(root, "controller.sh");
+    fs.mkdirSync(runnerTemp);
+    fs.writeFileSync(output, "");
+    fs.writeFileSync(
+      wrapper,
+      `#!/usr/bin/env bash\n` +
+        `"$REAL_NODE" -e 'process.stdout.write(Buffer.from(process.env.FAKE_STDOUT_BASE64, "base64"))'\n` +
+        `exit "$FAKE_STATUS"\n`,
+    );
+    fs.chmodSync(wrapper, 0o700);
+    const controller = runScript(workflowStep).replace(
+      "node scripts/inspect-oci-image.mjs",
+      `${shellQuote(shellPath(wrapper))} scripts/inspect-oci-image.mjs`,
+    );
+    fs.writeFileSync(script, `${controller}\n`, { mode: 0o700 });
+    const result = spawnSync("bash", [shellPath(script)], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FAKE_STATUS: "3",
+        FAKE_STDOUT_BASE64: Buffer.from(inspectorStdout).toString("base64"),
+        GITHUB_OUTPUT: shellPath(output),
+        REAL_NODE: shellPath(process.execPath),
+        RUNNER_TEMP: shellPath(runnerTemp),
+        TARGET_SHA: sha("a"),
+      },
+    });
+    return {
+      status: result.status,
+      output: fs.readFileSync(output),
+      temporaryFiles: fs.readdirSync(runnerTemp),
+    };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+type HistoryGateOptions = {
+  sourceKey?: string;
+  bareKey?: string;
+  value?: string;
+  failFetch?: boolean;
+};
+
+type HistoryGateExecution = {
+  status: number | null;
+  stderr: string;
+  output: string;
+  fetchAudit: string[];
+  runnerEntries: string[];
+  target: string;
+};
+
+function executeHistoryGate({
+  sourceKey,
+  bareKey,
+  value = "blocked-value",
+  failFetch = false,
+}: HistoryGateOptions = {}): HistoryGateExecution {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "edge-history-gate-"));
+  try {
+    const source = path.join(root, "source");
+    const fixture = path.join(root, "fixture");
+    const runnerTemp = path.join(root, "runner");
+    const home = path.join(root, "home");
+    const bin = path.join(root, "bin");
+    const output = path.join(root, "github-output");
+    const audit = path.join(root, "fetch-audit");
+    fs.mkdirSync(source);
+    fs.mkdirSync(fixture);
+    fs.mkdirSync(runnerTemp);
+    fs.mkdirSync(home);
+    fs.mkdirSync(bin);
+    fs.writeFileSync(output, "");
+    fs.writeFileSync(audit, "");
+
+    checked("git", ["init"], source);
+    checked(
+      "git",
+      [
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/FelixGeisler/draw.git",
+      ],
+      source,
+    );
+    if (sourceKey !== undefined)
+      checked("git", ["config", "--local", sourceKey, value], source);
+
+    checked("git", ["init"], fixture);
+    checked("git", ["config", "user.name", "Contract Test"], fixture);
+    checked("git", ["config", "user.email", "contract@example.invalid"], fixture);
+    fs.writeFileSync(path.join(fixture, "fixture.txt"), "offline history\n");
+    checked("git", ["add", "fixture.txt"], fixture);
+    checked("git", ["commit", "-m", "offline fixture"], fixture);
+    checked("git", ["branch", "-M", "main"], fixture);
+    const target = checked("git", ["rev-parse", "HEAD"], fixture);
+    const realGit = checked("bash", ["-lc", "command -v git"]);
+    const wrapper = path.join(
+      bin,
+      process.platform === "win32" ? "git.exe" : "git",
+    );
+    const bareInjection = bareKey ?? "";
+    fs.writeFileSync(
+      wrapper,
+      `#!/usr/bin/env bash\n` +
+        `set -u\n` +
+        `real_git=${shellQuote(realGit)}\n` +
+        `audit=${shellQuote(shellPath(audit))}\n` +
+        `fixture=${shellQuote(shellPath(fixture))}\n` +
+        `bare_key=${shellQuote(bareInjection)}\n` +
+        `bare_value=${shellQuote(value)}\n` +
+        `is_init=false\n` +
+        `bare=''\n` +
+        `for ((index=1; index <= $#; index++)); do\n` +
+        `  argument="\${!index}"\n` +
+        `  [[ "$argument" == init ]] && is_init=true\n` +
+        `  if [[ "$argument" == -C ]]; then next=$((index + 1)); bare="\${!next}"; fi\n` +
+        `done\n` +
+        `if [[ "$is_init" == true ]]; then\n` +
+        `  "$real_git" "$@" || exit $?\n` +
+        `  if [[ -n "$bare_key" ]]; then\n` +
+        `    created="\${!#}"\n` +
+        `    "$real_git" -C "$created" config "$bare_key" "$bare_value" || exit $?\n` +
+        `  fi\n` +
+        `  exit 0\n` +
+        `fi\n` +
+        `for argument in "$@"; do\n` +
+        `  if [[ "$argument" == fetch ]]; then\n` +
+        `    printf '%s\\n' "$*" >> "$audit"\n` +
+        (failFetch
+          ? `    exit 71\n`
+          : `    "$real_git" -C "$bare" -c credential.helper= fetch --no-tags "$fixture" 'refs/heads/main:refs/remotes/origin/main'\n    exit $?\n`) +
+        `  fi\n` +
+        `done\n` +
+        `exec "$real_git" "$@"\n`,
+    );
+    fs.chmodSync(wrapper, 0o700);
+
+    const script = path.join(root, "history.sh");
+    fs.writeFileSync(
+      script,
+      `export PATH=${shellQuote(shellPath(bin))}:"$PATH"\n${runScript(historyStep)}\n`,
+      { mode: 0o700 },
+    );
+    const result = spawnSync("bash", [shellPath(script)], {
+      cwd: source,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GITHUB_OUTPUT: shellPath(output),
+        GIT_CONFIG_GLOBAL: "/dev/null",
+        GIT_CONFIG_SYSTEM: "/dev/null",
+        HOME: shellPath(home),
+        RUNNER_TEMP: shellPath(runnerTemp),
+      },
+    });
+    return {
+      status: result.status,
+      stderr: result.stderr,
+      output: fs.readFileSync(output, "utf8"),
+      fetchAudit: fs
+        .readFileSync(audit, "utf8")
+        .split(/\r?\n/)
+        .filter(Boolean),
+      runnerEntries: fs.readdirSync(runnerTemp),
+      target,
+    };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
 describe("promotion workflow authorization, runner, and action boundary", () => {
   it("is a separate globally serialized job after publication with all five gates", () => {
     expect(promotionBeforeSteps).toContain("needs: publication");
@@ -509,7 +736,7 @@ describe("promotion workflow authorization, runner, and action boundary", () => 
   it("declares exact Bash on every promotion shell step", () => {
     const runSteps = promotionRunSteps(promotionJob);
     expect(
-      runSteps.map((candidate) => candidate.match(/- name: ([^\n]+)/)?.[1]),
+      runSteps.map((candidate) => candidate.match(/- name: ([^\r\n]+)/)?.[1]),
     ).toEqual([
       "Establish isolated public main history",
       "Inspect immutable current-main source",
@@ -617,6 +844,56 @@ describe("promotion history authority and lifecycle contract", () => {
     expect(historyStep).not.toMatch(/retry|fallback/i);
   });
 
+  it("executes the real gate offline through the exact literal fetch and handoff", () => {
+    const execution = executeHistoryGate();
+    expect(execution.status, execution.stderr).toBe(0);
+    expect(execution.output).toMatch(
+      new RegExp(`^area=.+\\ntarget=${execution.target}\\n$`),
+    );
+    expect(execution.fetchAudit).toHaveLength(1);
+    expect(execution.fetchAudit[0]).toContain("-c credential.helper= fetch --no-tags");
+    expect(execution.fetchAudit[0]).toContain(
+      "https://github.com/FelixGeisler/draw.git refs/heads/main:refs/remotes/origin/main",
+    );
+    expect(execution.runnerEntries).toHaveLength(1);
+  });
+
+  it("stops an offline fetch failure with no handoff or fallback", () => {
+    const execution = executeHistoryGate({ failFetch: true });
+    expect(execution.status, execution.stderr).toBe(71);
+    expect(execution.output).toBe("");
+    expect(execution.fetchAudit).toHaveLength(1);
+    expect(execution.runnerEntries).toEqual([]);
+  });
+
+  it.each([
+    ["extraheader", "http.https://github.com/.extraheader", "Authorization: injected"],
+    ["credential helper", "credential.helper", "store"],
+    ["credential store", "credential.store", "/tmp/injected-credentials"],
+    ["insteadOf", "url.https://mirror.invalid/.insteadof", "https://github.com/"],
+    ["pushInsteadOf", "url.https://mirror.invalid/.pushinsteadof", "https://github.com/"],
+  ])("rejects actual source %s configuration before fetch", (_name, key, value) => {
+    const execution = executeHistoryGate({ sourceKey: key, value });
+    expect(execution.status).not.toBe(0);
+    expect(execution.output).toBe("");
+    expect(execution.fetchAudit).toEqual([]);
+    expect(execution.runnerEntries).toEqual([]);
+  });
+
+  it.each([
+    ["extraheader", "http.https://github.com/.extraheader", "Authorization: injected"],
+    ["credential helper", "credential.helper", "store"],
+    ["credential store", "credential.store", "/tmp/injected-credentials"],
+    ["insteadOf", "url.https://mirror.invalid/.insteadof", "https://github.com/"],
+    ["pushInsteadOf", "url.https://mirror.invalid/.pushinsteadof", "https://github.com/"],
+  ])("rejects actual bare %s configuration before fetch", (_name, key, value) => {
+    const execution = executeHistoryGate({ bareKey: key, value });
+    expect(execution.status).not.toBe(0);
+    expect(execution.output).toBe("");
+    expect(execution.fetchAudit).toEqual([]);
+    expect(execution.runnerEntries).toEqual([]);
+  });
+
   it("hands off one exact persistent path, revalidates it, and cleans it last with always", () => {
     expect(historyStep).toContain("trap cleanup_initialization EXIT");
     expect(historyStep).toContain("trap 'exit 130' INT");
@@ -714,6 +991,39 @@ describe("promotion inspector, credential, and mutation contract", () => {
     expect(sourceStep).toMatch(/\*\)[\s\S]*exit 1/);
     expect(existingStep).toContain("--image 'ghcr.io/felixgeisler/draw:edge'");
     expect(existingStep).not.toContain("--expected-revision");
+  });
+
+  it.each([
+    ["source", sourceStep],
+    ["existing edge", existingStep],
+  ])("executes the actual %s controller and accepts only a zero-byte exit-3 output", (_name, controller) => {
+    const execution = executeInspectionController(controller, "");
+    expect(execution.status).toBe(0);
+    expect(execution.output.toString("utf8")).toBe("present=false\n");
+    expect(execution.temporaryFiles).toEqual([]);
+  });
+
+  it.each([
+    ["source", sourceStep, "\n"],
+    ["source", sourceStep, " "],
+    ["source", sourceStep, "\t\n"],
+    ["existing edge", existingStep, "\n"],
+    ["existing edge", existingStep, " "],
+    ["existing edge", existingStep, "\t\n"],
+  ])("fails the actual %s controller on exit-3 stdout %j without downstream outputs", (_name, controller, stdout) => {
+    const execution = executeInspectionController(controller, stdout);
+    expect(execution.status).not.toBe(0);
+    expect(execution.output).toHaveLength(0);
+    expect(execution.temporaryFiles).toEqual([]);
+  });
+
+  it("captures absence stdout in owned temporary files instead of command substitution", () => {
+    for (const controller of [sourceStep, existingStep]) {
+      expect(controller).toContain('inspection_output="$(mktemp "$RUNNER_TEMP/');
+      expect(controller).toContain('trap cleanup_inspection_output EXIT');
+      expect(controller).toContain('[[ -f "$inspection_output" && ! -s "$inspection_output" ]]');
+      expect(controller).not.toMatch(/result="\$\(node scripts\/inspect-oci-image/);
+    }
   });
 
   it("binds credentials only to each inspector and the exact login inputs", () => {

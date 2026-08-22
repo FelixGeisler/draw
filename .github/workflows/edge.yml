@@ -317,27 +317,32 @@ jobs:
         run: |
           set -euo pipefail
           target="ghcr.io/felixgeisler/draw:sha-$TARGET_SHA"
+          umask 077
+          inspection_output="$(mktemp "$RUNNER_TEMP/source-inspection.XXXXXXXXXX")"
+          cleanup_inspection_output() { rm -f -- "$inspection_output"; }
+          trap cleanup_inspection_output EXIT
           set +e
-          result="$(node scripts/inspect-oci-image.mjs --image "$target" --expected-revision "$TARGET_SHA")"
+          node scripts/inspect-oci-image.mjs --image "$target" \
+            --expected-revision "$TARGET_SHA" > "$inspection_output"
           status=$?
           set -e
           case "$status" in
             0)
-              digest="$(printf '%s' "$result" | node -e '
+              digest="$(node -e '
                 const fs = require("node:fs");
-                const value = JSON.parse(fs.readFileSync(0, "utf8"));
+                const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
                 const keys = value && typeof value === "object" && !Array.isArray(value)
                   ? Object.keys(value).sort() : [];
                 if (keys.join(",") !== "digest,revision" ||
                     !/^sha256:[0-9a-f]{64}$/.test(value.digest) ||
                     value.revision !== process.env.TARGET_SHA) process.exit(1);
                 process.stdout.write(value.digest);
-              ')"
+              ' "$inspection_output")"
               echo "present=true" >> "$GITHUB_OUTPUT"
               echo "digest=$digest" >> "$GITHUB_OUTPUT"
               ;;
             3)
-              [[ -z "$result" ]] || {
+              [[ -f "$inspection_output" && ! -s "$inspection_output" ]] || {
                 echo "source absence emitted unexpected stdout" >&2
                 exit 1
               }
@@ -358,15 +363,20 @@ jobs:
           OCI_REGISTRY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          umask 077
+          inspection_output="$(mktemp "$RUNNER_TEMP/edge-inspection.XXXXXXXXXX")"
+          cleanup_inspection_output() { rm -f -- "$inspection_output"; }
+          trap cleanup_inspection_output EXIT
           set +e
-          result="$(node scripts/inspect-oci-image.mjs --image 'ghcr.io/felixgeisler/draw:edge')"
+          node scripts/inspect-oci-image.mjs --image 'ghcr.io/felixgeisler/draw:edge' \
+            > "$inspection_output"
           status=$?
           set -e
           case "$status" in
             0)
-              printf '%s' "$result" | node -e '
+              node -e '
                 const fs = require("node:fs");
-                const value = JSON.parse(fs.readFileSync(0, "utf8"));
+                const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
                 const keys = value && typeof value === "object" && !Array.isArray(value)
                   ? Object.keys(value).sort() : [];
                 if (keys.join(",") !== "digest,revision" ||
@@ -374,10 +384,10 @@ jobs:
                     !/^[0-9a-f]{40}$/.test(value.revision)) process.exit(1);
                 fs.appendFileSync(process.env.GITHUB_OUTPUT,
                   `present=true\ndigest=${value.digest}\nrevision=${value.revision}\n`);
-              '
+              ' "$inspection_output"
               ;;
             3)
-              [[ -z "$result" ]] || {
+              [[ -f "$inspection_output" && ! -s "$inspection_output" ]] || {
                 echo "edge absence emitted unexpected stdout" >&2
                 exit 1
               }
