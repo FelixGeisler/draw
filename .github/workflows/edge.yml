@@ -64,28 +64,73 @@ jobs:
           TARGET: ${{ steps.target.outputs.image }}
         run: |
           set -euo pipefail
+          inspection_output=''
+          cleanup_initialization() {
+            if [[ -n "$inspection_output" ]]; then
+              rm -f -- "$inspection_output"
+            fi
+          }
+          trap cleanup_initialization EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+
+          runner_root="$(realpath -e -- "$RUNNER_TEMP")"
+          [[ -d "$runner_root" && ! -L "$RUNNER_TEMP" ]] || {
+            echo "publication inspection temporary directory is unsafe" >&2
+            exit 1
+          }
+          umask 077
+          inspection_output="$(mktemp "$runner_root/publication-inspection.XXXXXXXXXX")"
+          chmod 0600 "$inspection_output"
+          validate_inspection_output() {
+            [[ "$inspection_output" == "$runner_root"/publication-inspection.?????????? &&
+               -f "$inspection_output" && ! -L "$inspection_output" &&
+               "$(dirname -- "$inspection_output")" == "$runner_root" &&
+               "$(realpath -e -- "$inspection_output")" == "$inspection_output" &&
+               "$(stat -c '%u' -- "$inspection_output")" == "$(id -u)" &&
+               "$(stat -c '%a' -- "$inspection_output")" == 600 ]]
+          }
+          validate_inspection_output || {
+            echo "publication inspection output failed lifecycle validation" >&2
+            exit 1
+          }
+
           set +e
-          result="$(node scripts/inspect-oci-image.mjs --image "$TARGET" --expected-revision "$SHA")"
+          node scripts/inspect-oci-image.mjs --image "$TARGET" --expected-revision "$SHA" > "$inspection_output"
           status=$?
           set -e
+          validate_inspection_output || {
+            echo "publication inspection output failed lifecycle validation" >&2
+            exit 1
+          }
+
+          printf 'inspection_output=%s\n' "$inspection_output" >> "$GITHUB_OUTPUT"
+          trap - EXIT INT TERM
           case "$status" in
             0)
-              digest="$(printf '%s' "$result" | node -e '
+              if ! digest="$(node -e '
                 const fs = require("node:fs");
-                const value = JSON.parse(fs.readFileSync(0, "utf8"));
-                const keys = value && typeof value === "object" && !Array.isArray(value)
-                  ? Object.keys(value).sort() : [];
-                if (keys.join(",") !== "digest,revision" ||
-                    !/^sha256:[0-9a-f]{64}$/.test(value.digest) ||
-                    value.revision !== process.env.SHA) process.exit(1);
-                process.stdout.write(value.digest);
-              ')"
+                try {
+                  const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                  const keys = value && typeof value === "object" && !Array.isArray(value)
+                    ? Object.keys(value).sort() : [];
+                  if (keys.join(",") !== "digest,revision" ||
+                      !/^sha256:[0-9a-f]{64}$/.test(value.digest) ||
+                      value.revision !== process.env.SHA) process.exit(1);
+                  process.stdout.write(value.digest);
+                } catch {
+                  process.exit(1);
+                }
+              ' "$inspection_output")"; then
+                echo "initial image inspection returned invalid output" >&2
+                exit 1
+              fi
               echo "build=false" >> "$GITHUB_OUTPUT"
               echo "existing-digest=$digest" >> "$GITHUB_OUTPUT"
               ;;
             3)
-              if [[ -n "$result" ]]; then
-                echo "absence inspection emitted unexpected success output" >&2
+              if [[ "$(stat -c '%s' -- "$inspection_output")" != 0 ]]; then
+                echo "absence inspection emitted unexpected output" >&2
                 exit 1
               fi
               echo "build=true" >> "$GITHUB_OUTPUT"
@@ -95,6 +140,50 @@ jobs:
               exit 1
               ;;
           esac
+
+      - name: Remove initial inspection output
+        if: always()
+        env:
+          INSPECTION_OUTPUT: ${{ steps.initial.outputs.inspection_output }}
+        run: |
+          set -euo pipefail
+          umask 077
+          runner_root="$(realpath -e -- "$RUNNER_TEMP")"
+          [[ -d "$runner_root" && ! -L "$RUNNER_TEMP" ]] || {
+            echo "publication inspection temporary directory is unsafe" >&2
+            exit 1
+          }
+          if [[ -z "$INSPECTION_OUTPUT" ]]; then
+            shopt -s nullglob
+            residue=("$runner_root"/publication-inspection.??????????)
+            [[ "${#residue[@]}" -eq 0 ]] || {
+              echo "publication inspection initialization cleanup failed" >&2
+              exit 1
+            }
+            exit 0
+          fi
+
+          expected_output="$runner_root/$(basename -- "$INSPECTION_OUTPUT")"
+          [[ "$INSPECTION_OUTPUT" == "$expected_output" &&
+             "$INSPECTION_OUTPUT" == "$runner_root"/publication-inspection.?????????? &&
+             -f "$INSPECTION_OUTPUT" && ! -L "$INSPECTION_OUTPUT" &&
+             "$(realpath -e -- "$INSPECTION_OUTPUT")" == "$INSPECTION_OUTPUT" &&
+             "$(stat -c '%u' -- "$INSPECTION_OUTPUT")" == "$(id -u)" &&
+             "$(stat -c '%a' -- "$INSPECTION_OUTPUT")" == 600 ]] || {
+            echo "refusing to remove unsafe publication inspection output" >&2
+            exit 1
+          }
+          rm -f -- "$INSPECTION_OUTPUT"
+          [[ ! -e "$INSPECTION_OUTPUT" && ! -L "$INSPECTION_OUTPUT" ]] || {
+            echo "publication inspection output cleanup failed" >&2
+            exit 1
+          }
+          shopt -s nullglob
+          residue=("$runner_root"/publication-inspection.??????????)
+          [[ "${#residue[@]}" -eq 0 ]] || {
+            echo "publication inspection output cleanup left residue" >&2
+            exit 1
+          }
 
       - name: Set up QEMU
         if: ${{ steps.initial.outputs.build == 'true' }}

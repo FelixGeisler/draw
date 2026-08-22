@@ -43,6 +43,14 @@ const beforeSteps = publicationJob.slice(
 const actionReferences = edge.match(/uses:\s*[^\s]+/g) ?? [];
 const publicationActions = publicationJob.match(/uses:\s*[^\s]+/g) ?? [];
 const promotionActions = promotionJob.match(/uses:\s*[^\s]+/g) ?? [];
+const publicationInspectionStep = step(
+  "Inspect before any package mutation",
+  publicationJob,
+);
+const publicationInspectionCleanupStep = step(
+  "Remove initial inspection output",
+  publicationJob,
+);
 
 function step(name: string, scope = edge): string {
   const normalizedScope = normalizeNewlines(scope);
@@ -126,6 +134,12 @@ describe("edge workflow authorization and isolation", () => {
     expect(step("Check out the tested commit", normalizedPublication)).toBe(
       step("Check out the tested commit", publicationJob),
     );
+    expect(
+      step("Inspect before any package mutation", normalizedPublication),
+    ).toBe(publicationInspectionStep);
+    expect(
+      step("Remove initial inspection output", normalizedPublication),
+    ).toBe(publicationInspectionCleanupStep);
   });
 
   it("routes completed CI workflow runs but authorizes with all five predicates", () => {
@@ -300,6 +314,164 @@ describe("edge workflow inspector controller and credential boundary", () => {
     expect(postPush).toContain('keys.join(",") !== "digest,revision"');
     expect(postPush).toContain('[[ "$digest" != "$EXPECTED_DIGEST" ]]');
     expect(postPush).not.toMatch(/\b(delete|retry|repair|replace)\b/i);
+  });
+});
+
+describe("publication byte-exact preflight and lifecycle", () => {
+  it("captures inspector stdout directly in one owned mode-0600 file", () => {
+    expect(publicationInspectionStep).toContain(
+      'inspection_output="$(mktemp "$runner_root/publication-inspection.XXXXXXXXXX")"',
+    );
+    expect(publicationInspectionStep).toContain('chmod 0600 "$inspection_output"');
+    expect(publicationInspectionStep).toContain("stat -c '%u'");
+    expect(publicationInspectionStep).toContain("stat -c '%a'");
+    expect(publicationInspectionStep).toContain(
+      'node scripts/inspect-oci-image.mjs --image "$TARGET" --expected-revision "$SHA" > "$inspection_output"',
+    );
+    expect(publicationInspectionStep).toContain(
+      'JSON.parse(fs.readFileSync(process.argv[1], "utf8"))',
+    );
+    expect(publicationInspectionStep).toContain(
+      '[[ "$(stat -c \'%s\' -- "$inspection_output")" != 0 ]]',
+    );
+    expect(publicationInspectionStep).not.toMatch(
+      /result="\$\(node scripts\/inspect-oci-image/,
+    );
+  });
+
+  it("hands off safely, then runs cleanup immediately before every mutation-capable step", () => {
+    expect(publicationInspectionStep).toContain(
+      "trap cleanup_initialization EXIT",
+    );
+    expect(publicationInspectionStep).toContain(
+      'printf \'inspection_output=%s\\n\' "$inspection_output" >> "$GITHUB_OUTPUT"',
+    );
+    expect(publicationInspectionStep).toContain("trap - EXIT INT TERM");
+    expect(publicationInspectionCleanupStep).toContain("if: always()");
+    expect(publicationInspectionCleanupStep).toContain(
+      "INSPECTION_OUTPUT: ${{ steps.initial.outputs.inspection_output }}",
+    );
+    expect(publicationInspectionCleanupStep).toContain(
+      'rm -f -- "$INSPECTION_OUTPUT"',
+    );
+    expect(publicationInspectionCleanupStep).toContain(
+      '[[ ! -e "$INSPECTION_OUTPUT" && ! -L "$INSPECTION_OUTPUT" ]]',
+    );
+    const initialAt = publicationJob.indexOf(publicationInspectionStep);
+    const cleanupAt = publicationJob.indexOf(publicationInspectionCleanupStep);
+    const qemuAt = publicationJob.indexOf("- name: Set up QEMU");
+    expect(cleanupAt).toBeGreaterThan(initialAt);
+    expect(qemuAt).toBeGreaterThan(cleanupAt);
+    expect(
+      publicationJob.slice(initialAt + publicationInspectionStep.length, cleanupAt),
+    ).not.toContain("- name:");
+  });
+
+  it("enables the mutation path only for exit 3 with exactly zero stdout bytes", () => {
+    const execution = executePublicationController({ status: 3, stdout: Buffer.alloc(0) });
+    expect(execution.initialStatus, execution.stderr).toBe(0);
+    expect(execution.cleanupStatus, execution.stderr).toBe(0);
+    expect(execution.outputs.build).toBe("true");
+    expect(execution.mutationReached).toBe(true);
+    expect(execution.temporaryFiles).toEqual([]);
+  });
+
+  it.each([
+    ["LF only", Buffer.from("\n")],
+    ["CRLF only", Buffer.from("\r\n")],
+    ["whitespace ending in newlines", Buffer.from(" \t\r\n")],
+    ["visible bytes", Buffer.from("CAPTURED_PAYLOAD_MUST_STAY_PRIVATE")],
+    ["NUL and non-UTF-8 bytes", Buffer.from([0x00, 0xff, 0x80, 0x0a])],
+  ])("fails closed on exit-3 %s without exposing or retaining the payload", (_name, payload) => {
+    const execution = executePublicationController({ status: 3, stdout: payload });
+    expect(execution.initialStatus).not.toBe(0);
+    expect(execution.cleanupStatus, execution.stderr).toBe(0);
+    expect(execution.outputs.build).toBeUndefined();
+    expect(execution.mutationReached).toBe(false);
+    expect(execution.temporaryFiles).toEqual([]);
+    expect(execution.stderr.trim()).toBe(
+      "absence inspection emitted unexpected output",
+    );
+  });
+
+  it.each([1, 2, 4, 42])(
+    "fails closed on inspector exit %i without mutation, disclosure, or residue",
+    (status) => {
+      const payload = `PRIVATE_EXIT_${status}_PAYLOAD`;
+      const execution = executePublicationController({ status, stdout: payload });
+      expect(execution.initialStatus).not.toBe(0);
+      expect(execution.cleanupStatus, execution.stderr).toBe(0);
+      expect(execution.outputs.build).toBeUndefined();
+      expect(execution.mutationReached).toBe(false);
+      expect(execution.temporaryFiles).toEqual([]);
+      expect(execution.stderr.trim()).toBe(
+        "initial image inspection failed closed",
+      );
+      expect(execution.stderr).not.toContain(payload);
+    },
+  );
+
+  it("reuses exact valid exit-0 JSON from the file without mutation", () => {
+    const revision = sha("a");
+    const existingDigest = digest("1");
+    const execution = executePublicationController({
+      status: 0,
+      stdout: JSON.stringify({ digest: existingDigest, revision }),
+    });
+    expect(execution.initialStatus, execution.stderr).toBe(0);
+    expect(execution.cleanupStatus, execution.stderr).toBe(0);
+    expect(execution.outputs.build).toBe("false");
+    expect(execution.outputs["existing-digest"]).toBe(existingDigest);
+    expect(execution.mutationReached).toBe(false);
+    expect(execution.temporaryFiles).toEqual([]);
+  });
+
+  it.each([
+    ["malformed JSON", "PRIVATE_MALFORMED_JSON"],
+    ["extra key", JSON.stringify({ digest: digest("1"), revision: sha("a"), extra: true })],
+    ["missing key", JSON.stringify({ digest: digest("1") })],
+    ["invalid digest", JSON.stringify({ digest: "sha256:not-a-digest", revision: sha("a") })],
+    ["mismatched revision", JSON.stringify({ digest: digest("1"), revision: sha("b") })],
+  ])("fails closed on exit-0 %s with sanitized diagnostics and cleanup", (_name, payload) => {
+    const execution = executePublicationController({ status: 0, stdout: payload });
+    expect(execution.initialStatus).not.toBe(0);
+    expect(execution.cleanupStatus, execution.stderr).toBe(0);
+    expect(execution.outputs.build).toBeUndefined();
+    expect(execution.outputs["existing-digest"]).toBeUndefined();
+    expect(execution.mutationReached).toBe(false);
+    expect(execution.temporaryFiles).toEqual([]);
+    expect(execution.stderr.trim()).toBe(
+      "initial image inspection returned invalid output",
+    );
+    expect(execution.stderr).not.toContain(payload);
+  });
+
+  it("uses the initialization trap before handoff and lets always-cleanup confirm no residue", () => {
+    const execution = executePublicationController({
+      status: 3,
+      stdout: Buffer.alloc(0),
+      failInitialization: true,
+    });
+    expect(execution.initialStatus).not.toBe(0);
+    expect(execution.cleanupStatus, execution.stderr).toBe(0);
+    expect(execution.outputs).toEqual({});
+    expect(execution.mutationReached).toBe(false);
+    expect(execution.temporaryFiles).toEqual([]);
+  });
+
+  it("rejects an unsafe handed-off file before the mutation boundary", () => {
+    const execution = executePublicationController({
+      status: 3,
+      stdout: Buffer.alloc(0),
+      tamperBeforeCleanup: true,
+    });
+    expect(execution.initialStatus, execution.stderr).toBe(0);
+    expect(execution.cleanupStatus).not.toBe(0);
+    expect(execution.mutationReached).toBe(false);
+    expect(execution.stderr).toContain(
+      "refusing to remove unsafe publication inspection output",
+    );
+    expect(execution.temporaryFiles).toHaveLength(1);
   });
 });
 
@@ -590,6 +762,124 @@ function executeInspectionController(
     return {
       status: result.status,
       output: fs.readFileSync(output),
+      temporaryFiles: fs.readdirSync(runnerTemp),
+    };
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+type PublicationControllerExecution = {
+  initialStatus: number | null;
+  cleanupStatus: number | null;
+  stderr: string;
+  outputs: Record<string, string>;
+  mutationReached: boolean;
+  temporaryFiles: string[];
+};
+
+type PublicationControllerOptions = {
+  status: number;
+  stdout: Buffer | string;
+  failInitialization?: boolean;
+  tamperBeforeCleanup?: boolean;
+};
+
+function executePublicationController({
+  status,
+  stdout,
+  failInitialization = false,
+  tamperBeforeCleanup = false,
+}: PublicationControllerOptions): PublicationControllerExecution {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "edge-publication-controller-"));
+  try {
+    const runnerTemp = path.join(root, "runner");
+    const output = path.join(root, "github-output");
+    const wrapper = path.join(root, "inspector-node");
+    const initialScript = path.join(root, "initial.sh");
+    const cleanupScript = path.join(root, "cleanup.sh");
+    fs.mkdirSync(runnerTemp);
+    fs.writeFileSync(output, "");
+    fs.writeFileSync(
+      wrapper,
+      `#!/usr/bin/env bash\n` +
+        `"$REAL_NODE" -e 'process.stdout.write(Buffer.from(process.env.FAKE_STDOUT_BASE64, "base64"))'\n` +
+        `exit "$FAKE_STATUS"\n`,
+      { mode: 0o700 },
+    );
+
+    let initialController = runScript(publicationInspectionStep).replace(
+      "node scripts/inspect-oci-image.mjs",
+      `${shellQuote(shellPath(wrapper))} scripts/inspect-oci-image.mjs`,
+    );
+    if (failInitialization) {
+      const chmod = 'chmod 0600 "$inspection_output"';
+      if (!initialController.includes(chmod))
+        throw new Error("publication initialization chmod contract changed");
+      initialController = initialController.replace(chmod, "false");
+    }
+    fs.writeFileSync(initialScript, `${initialController}\n`, { mode: 0o700 });
+    fs.writeFileSync(
+      cleanupScript,
+      `${runScript(publicationInspectionCleanupStep)}\n`,
+      { mode: 0o700 },
+    );
+
+    const commonEnv = {
+      ...process.env,
+      FAKE_STATUS: String(status),
+      FAKE_STDOUT_BASE64: Buffer.from(stdout).toString("base64"),
+      GITHUB_OUTPUT: shellPath(output),
+      REAL_NODE: shellPath(process.execPath),
+      RUNNER_TEMP: shellPath(runnerTemp),
+      SHA: sha("a"),
+      TARGET: `ghcr.io/felixgeisler/draw:sha-${sha("a")}`,
+    };
+    const initial = spawnSync("bash", [shellPath(initialScript)], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: commonEnv,
+    });
+    const outputText = fs.readFileSync(output, "utf8");
+    const outputs = Object.fromEntries(
+      outputText
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const separator = line.indexOf("=");
+          return [line.slice(0, separator), line.slice(separator + 1)];
+        }),
+    );
+
+    if (tamperBeforeCleanup) {
+      const temporary = fs
+        .readdirSync(runnerTemp)
+        .find((entry) => entry.startsWith("publication-inspection."));
+      if (temporary === undefined)
+        throw new Error("publication output was not available for cleanup tamper");
+      const temporaryPath = path.join(runnerTemp, temporary);
+      fs.unlinkSync(temporaryPath);
+      fs.mkdirSync(temporaryPath);
+    }
+
+    const cleanup = spawnSync("bash", [shellPath(cleanupScript)], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: {
+        ...commonEnv,
+        INSPECTION_OUTPUT: outputs.inspection_output ?? "",
+      },
+    });
+    const mutationReached =
+      initial.status === 0 &&
+      cleanup.status === 0 &&
+      outputs.build === "true";
+    return {
+      initialStatus: initial.status,
+      cleanupStatus: cleanup.status,
+      stderr: `${initial.stderr}${cleanup.stderr}`,
+      outputs,
+      mutationReached,
       temporaryFiles: fs.readdirSync(runnerTemp),
     };
   } finally {
