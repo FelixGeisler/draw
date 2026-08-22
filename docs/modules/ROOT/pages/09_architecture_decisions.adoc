@@ -2709,9 +2709,10 @@ environment or input directly.
 workflow derives one lowercase full-40-hex event SHA and one target,
 `ghcr.io/felixgeisler/draw:sha-<full-SHA>`, then invokes #276's inspector in
 expected-revision mode. Exit 0 must carry valid JSON: its verified index digest
-is consumed and no build or package mutation occurs. Exit 3 alone is
-an authoritative absence and enables QEMU/Buildx/login/metadata plus one push;
-every other exit or malformed success output wedges the SHA without mutation.
+is consumed and no build or package mutation occurs. Exit 3 with exactly
+zero-byte stdout alone is an authoritative absence and enables
+QEMU/Buildx/login/metadata plus one push; every other exit or any nonempty or
+malformed output wedges the SHA without mutation.
 The absent path builds exactly ADR-51's `linux/amd64,linux/arm64`, with
 provenance disabled, `DRAW_BUILD_CHANNEL=edge`, `DRAW_BUILD_SHA=<full-SHA>`, and
 that revision on the image index annotation and both platform config labels.
