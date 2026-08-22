@@ -67,6 +67,12 @@ levels, and streaks are computed from it. Reopening a task deletes its latest
 completion (no XP farming).
 *Rationale:* Stored counters drift; a log can be re-aggregated and audited.
 
+*Amendment (#263, schema v18):* XP is permanent. The exact aggregate is
+completion XP + claimed-achievement XP + only `xp_ledger` rows whose reason is
+`challenge`; every retained legacy shop reason is inert. Gold follows the same
+log-over-counter rule, derived unclamped from `completions.gold_awarded`,
+`achievements.claim_gold`, and `gold_ledger.amount`. No mutable balance exists.
+
 == ADR-6: Recurring tasks stay open, due date advances
 
 *Context:* Weekly chores must reappear without recreating tasks.
@@ -533,7 +539,11 @@ achievements), and nothing is marked destructive. Read-heavy state ships as
 resources: `draw://deck` (backed by the new side-effect-free
 `GET /api/draw/pool`, reusing the ADR-2 candidate query), `draw://gamification`,
 and `draw://materials/\{id}`. No `ANTHROPIC_API_KEY` is needed anywhere — the
-intelligence is the MCP client's.
+intelligence is the MCP client's. The `update_task` pause/wake binding follows
+this same boundary: MCP passes `deferredUntil` and `blocked` through one HTTP
+PATCH without its own clock, normalization, or pause state; ADR-17 remains the
+authoritative source for timed/indefinite pause, automatic expiry, retained wake
+timestamps, `blocked` precedence, and the manual-resume pair.
 *Rationale:* Trade-off accepted: the dev server must be running —
 `ECONNREFUSED` maps to an actionable tool error naming `npm run dev`. In
 exchange, no invariant is duplicated, no second migration runner exists, and
@@ -869,11 +879,9 @@ database — the torn-DB hazard), *copy* `app.db` to `app.db.bak` (copy, not
 rename: the live path never disappears, so a crash cannot boot into a fresh
 empty DB), swap `files/` (previous kept as `files.bak`), and last the
 staged snapshot is renamed onto `app.db` — a single same-volume rename, the
-atomic commit point. Reopen (`db` is an exported `let`; ESM live bindings
-update every importer) runs `migrate()`, so older backups move forward
-exactly like an old database would on boot. The whole swap is one
-synchronous block: better-sqlite3 is synchronous, so no request can
-interleave with a half-swapped state.
+atomic commit point. The whole swap is one synchronous block:
+better-sqlite3 is synchronous, so no request can interleave with a
+half-swapped state.
 *Rationale:* one archive keeps backups self-contained (acceptance was
 export → wipe → import → byte-identical material files); validating on
 staged copies means every rejection is a 400 with live data untouched; and
@@ -881,6 +889,16 @@ ordering the swap around a final atomic rename means a crash at any step
 boots either the complete old state or the complete new state. `adm-zip`
 handles both zip directions synchronously, fitting the no-framework
 guardrails; `multer` (already a dependency) receives the upload.
+
+*Amendment (#263, schema v18):* import accepts versions through v18 and rejects
+anything newer. A v17-or-older archive is migrated in staging _before_ swap;
+the staging handle must then prove the complete v18 runtime contract, including
+both Gold owner columns, exact table CHECK/unique/AUTOINCREMENT definitions,
+all six immutable trigger definitions and behavior, and
+`idx_xp_ledger_reason`. Missing or weakened contracts are rejected while live
+data remains untouched. Reopen after swap sees an already migrated, validated
+file. Non-empty opening rows and `sqlite_sequence` survive round trips.
+
 *Accepted limitation (#103):* `adm-zip` inflates each entry fully in memory,
 so peak RSS during export/import scales with the largest entry — the DB
 snapshot, plus one material at a time. Accepted, not fixed: this is a local
@@ -997,6 +1015,12 @@ exact drift ADR-5 exists to prevent. Deriving consumption keeps reads pure,
 re-aggregatable, and auditable, and the append-only log plus UNIQUE
 milestone day is the entire anti-farming story — no trigger, no counter,
 no reconciliation job.
+
+*Amendment (#263):* historical shop freezes remain replay facts: only
+`xp_ledger.reason='buy:freeze'` timestamps are converted by the existing local
+calendar-day function and merged with milestone days. No other XP-ledger reason
+and no `pack_openings.effective_bonus` participates before #266; the ordered
+cap-2 fold, consumption, rest-day and expiry semantics are unchanged.
 
 == ADR-29: Focus mode is a derived view — timer plus current draw decide, nothing is persisted
 
@@ -1839,6 +1863,10 @@ can be claimed ONCE ever (idempotent by the primary key + a guarded
 This deliberately widens ADR-5's "XP is the completions log": a claim is
 still an honest, idempotent event fact, so there is still no stored `xp`
 counter to drift — the total is derived from two logs instead of one.
+Schema v18 (#263) adds nullable `claim_gold` as Gold owned by the same
+achievement row, with no backfill and no producer in this cutover; it does not
+change claim-for-XP behavior. Permanent XP subsequently narrows ledger
+participation to challenge rows (ADR-5 amendment).
 `POST /api/achievements/:key/claim` returns `200 {xpAwarded, levelUp}`,
 `400` for an unknown or not-yet-unlocked key, `409` for a repeat. `claim_xp`
 is stamped from the SERVER tier table at claim time — the client is never
@@ -2510,14 +2538,17 @@ disk must not take the app down. Off-device targets (S3, rsync) and a Settings
 UI are out of scope (#194): copying `DATA_DIR/backups/` off the box is a
 deployment concern, deliberately left to the operator.
 
-== ADR-53: Tag-triggered release pipeline — full-test gate, multi-arch GHCR push, GitHub Release, all from one `v*` tag
+== ADR-53: Tag releases, bounded OCI inspection, and detached immutable-SHA publication
 
 *Context:* ADR-51 shipped the container image (#191) but explicitly left
 "registry/release automation" out — the image was built locally and had *never
 been built by CI at all*. 1.0.0 needs a repeatable way to cut a release: run the
 tests, publish a pullable image, and record a Release, with no manual packaging.
-Two existing workflows must stay untouched — `ci.yml` (PRs + `main`) and
-`docs.yml` (Pages) — and the build must not fire on ordinary pushes/PRs.
+The release path must remain isolated from `ci.yml` (PRs + `main`) and `docs.yml`
+(Pages), and ordinary pushes/PRs must never produce semver/`latest` tags or a
+GitHub Release. #277 adds one narrower exception after those original claims:
+a successful protected-`main` push may, in a detached workflow, publish only its
+immutable full-commit-SHA tag. It creates no release or mutable channel.
 
 *Decision:* A new `.github/workflows/release.yml` triggered on `push` tags
 matching `v*` (and a `workflow_dispatch` dry run). Two jobs:
@@ -2531,7 +2562,20 @@ never publish an image or a Release.
 always, and `latest` *only* for a final release (a tag with no `-` suffix), so a
 pre-release like `v1.0.0-rc.1` publishes `1.0.0-rc.1` without moving `latest`.
 Then `gh release create --generate-notes` cuts the GitHub Release, flagging any
-`-` (pre-release) tag `--prerelease`.
+`-` (pre-release) tag `--prerelease`. This tag-triggered workflow remains the
+exclusive automated producer of semver/`latest` tags and GitHub Releases.
+
+A separate `.github/workflows/edge.yml` is routed by completion of the workflow
+display name `CI`, but that name is not authorization. Its `publication`
+job can run only when all five event facts agree: conclusion is `success`, the
+reported event is `push`, the head branch is `main`, the head repository's full
+name equals the current repository, and the reported workflow path is exactly
+`.github/workflows/ci.yml`. It checks out exactly that run's `head_sha`, never
+the edge-workflow revision or current branch tip. Because it is a
+`workflow_run` consumer rather than a PR job, immutable-SHA publication remains
+detached from required pull-request checks. A distinct `promotion` job needs
+successful publication, repeats those five predicates independently, and
+reconciles the mutable `edge` tag to verified freshly fetched current `main`.
 
 The specifics that matter:
 
@@ -2566,25 +2610,230 @@ first real `v*` tag. It is only dispatchable once the file is on the default
 branch (a GitHub constraint), so the practical sequence is: merge → dispatch a
 `:dryrun` build to confirm the image builds on both arches → then tag
 `v1.0.0-rc.1` for the end-to-end acceptance check.
+* *Identity comes from the publish checkout.* Immediately after its checkout,
+the `publish` job resolves the full commit with `git rev-parse HEAD` and passes
+that value as `DRAW_BUILD_SHA`; this remains truthful when a dispatch supplies
+an optional `ref`. Tag pushes pass `DRAW_BUILD_CHANNEL=stable`, while dispatch
+dry runs pass `local`. The Dockerfile exposes both build arguments at runtime;
+an ordinary local build defaults to channel `local` and an empty SHA. This
+contract does not publish an `edge` image or claim that an identity consumer
+exists.
+* *A bounded, repository-specific inspector is the reusable publication
+foundation.* The strict JSON and staged OCI graph core from #274 is integrated
+by #276 behind `node scripts/inspect-oci-image.mjs --image
+<ghcr.io/felixgeisler/draw:tag> [--expected-revision <sha>]`. The CLI either
+checks the supplied revision or derives the revision from the index, and emits a
+digest-pinned result only after the named index, digest-pinned index, amd64
+manifest/config, and arm64 manifest/config validate sequentially; the core's
+one-item plan is the sole authority for the next request and layers are never
+fetched. The fixed GHCR boundary permits one fail-closed Bearer exchange for
+the exact combined `WWW-Authenticate` value exposed by Fetch (without claiming
+visibility of physical header-field cardinality), confines optional paired
+Basic credentials to the exact token endpoint and Bearer credentials to the
+registry origin, retries only the authenticated named restart, and uses one
+resource-specific non-wildcard `Accept` value. Named/digest indexes, manifests,
+tokens, and errors still reject every redirect. The sole exception is an
+`amd64-config` or `arm64-config` digest-pinned blob GET: it may accept one empty
+307 and manually follow one HTTPS Location on
+`pkg-containers.githubusercontent.com` whose exact
+`/ghcrblobs<positive-decimal>/blobs/<requested-digest>` path, where the shard
+is one or more decimal digits with numeric value greater than zero and leading
+zeros are permitted, binds it to that config. The complete nonempty signed query
+remains opaque and is passed through without application-level query parsing,
+normalization, or reserialization. The
+follow carries only octet-stream and
+identity Accept headers--no Authorization, Cookie, or Referer--and rejects any
+further redirect.
+* *Transport evidence is bounded before interpretation.* Every registry,
+challenge/error, token, redirect, and CDN response requests identity encoding,
+rejects any Fetch-visible coding other than absent or exact `identity`, and
+streams at most 1 MiB of bytes exposed by Fetch before strict parsing or OCI
+validation. The 307 body must be exactly empty; the followed 200 config still
+passes descriptor size, content type, digest, and optional Docker digest checks.
+Six physical requests complete an unchallenged direct graph and eight complete
+one with both config redirects. A challenge adds one failed named request and
+one token request, so challenged success uses eight direct requests or at most
+ten with both redirects. Registry and token allowances do not increase. Every
+307 and CDN follow has its own 20-second fetch-and-stream deadline inside the
+same non-resetting 90-second overall deadline. Requests remain sequential, stop
+at the first failure, and SIGINT/SIGTERM abort the active operation. Exit 0 is
+the sole JSON success; structured initial-name absence is exit 3;
+usage/credential setup is exit 2; authentication, transport, timeout,
+strict-JSON, and graph failures are exit 1. Output is one bounded sanitized line
+where applicable and never includes credentials, tokens, capability queries,
+complete capability URLs, challenge/error bodies, or ignored error details.
+* *The test seam does not widen production policy.* Production always constructs
+and validates canonical HTTPS `Request` objects before calling Node 22 global
+`fetch`; it has no transport selector or capture facility. Deterministic tests
+may inject a trusted Fetch-compatible adapter that maps those already-validated
+requests to local HTTP and retains only in-memory, authorization-redacted and
+capability-query-redacted evidence. This adapter can technically inspect,
+alter, ignore, or replace a request and is not a security boundary. The runner
+remains the single policy path, so future publication can call the same
+expected-revision CLI without reimplementing registry or OCI rules.
+* *The CDN exception is calibrated compatibility, not a provider contract.* Its
+GitHub-owned host and path shape reflect GHCR's observed config delivery; any
+status, origin, path-shape, or query-presence drift fails closed pending another
+reviewed compatibility change. The client deliberately does not interpret the
+provider's signed query, and the exception makes no CDN-availability promise.
+* *Consistency is not provenance authenticity.* Digest, size, media, platform,
+and revision agreement closes internal graph substitution after name
+resolution, and descriptor-size plus digest validation detects substituted CDN
+config bytes, but an authorized substitution before resolution remains
+undetectable without a signature or independently trusted digest anchor. #276
+accepts that residual risk and performs no registry mutation, publication, or
+promotion.
+* *The detached writer is least-privilege and commit-pinned.* The workflow
+default remains `contents: read`; its `publication` job has exactly
+`contents: read` and `packages: write`, a 60-minute timeout, and non-cancelling
+per-SHA concurrency `edge-publication-<event-head-sha>`. The distinct
+`promotion` job is separately constrained below. Publication checkout, Node 22
+setup, QEMU, Buildx, GHCR login, metadata, and build/push are the only action
+invocations in the publication job and are pinned,
+respectively, to
+`actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683`,
+`actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020`,
+`docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130`,
+`docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f`,
+`docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9`,
+`docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051`,
+and
+`docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8`.
+No dependency installation is needed for the repository inspector. Its two
+invocations alone receive `OCI_REGISTRY_USERNAME`/`OCI_REGISTRY_PASSWORD` as
+step-scoped environment bindings. The pinned login action separately receives
+only `ghcr.io`, `github.actor`, and `GITHUB_TOKEN` through its `with` inputs;
+build/push inherits that Docker authentication and receives no credential
+environment or input directly.
+* *Automation-policy first-write-wins, with a fail-closed state machine.* The
+workflow derives one lowercase full-40-hex event SHA and one target,
+`ghcr.io/felixgeisler/draw:sha-<full-SHA>`, then invokes #276's inspector in
+expected-revision mode. Exit 0 must carry valid JSON: its verified index digest
+is consumed and no build or package mutation occurs. Exit 3 with exactly
+zero-byte stdout alone is an authoritative absence and enables
+QEMU/Buildx/login/metadata plus one push; every other exit or any nonempty or
+malformed output wedges the SHA without mutation.
+The absent path builds exactly ADR-51's `linux/amd64,linux/arm64`, with
+provenance disabled, `DRAW_BUILD_CHANNEL=edge`, `DRAW_BUILD_SHA=<full-SHA>`, and
+that revision on the image index annotation and both platform config labels.
+Afterward, one expected-revision inspection must return exit 0, valid JSON, and
+an index digest exactly equal to the build action's top-level digest. Absence,
+failure, malformed output, or mismatch wedges the SHA; automation performs no
+delete, retry, replacement, or repair.
+* *Exclusive automation is a policy, not registry immutability.* This workflow
+is the only automated writer of workflow-managed `sha-<commit>` tags.
+Non-cancelling per-SHA concurrency makes same-SHA automation runs converge while
+distinct commits retain distinct tags, but observation and push are not atomic.
+An administrator or compromised GHCR credential can write after absence was
+observed and before build/push; the latter may overwrite that external write.
+That race is accepted residual risk, not a claim of registry-enforced
+immutability or atomic create-if-absent. Publication emits no `edge`, `latest`,
+semver, `dryrun`, or other tag and no GitHub Release. A manually verified rollback reference is stably pinned as
+`ghcr.io/felixgeisler/draw:sha-<full-40-hex-SHA>@sha256:<verified-index-digest>`.
+This immutable publication supplies the edge identity permitted by ADR-70; it
+does not add an application identity consumer.
+* *Promotion reconciles current main rather than replaying the trigger.* The
+separate `needs: publication` job repeats all five authorization predicates and
+runs on exact GitHub-hosted `ubuntu-24.04`, with exact Bash on every shell step,
+`contents: read` plus `packages: write`, and a 60-minute timeout. Job-level
+non-cancelling `edge-promotion` concurrency implements GitHub's global one
+running/one pending rule: a newer arrival may replace pending work but never
+cancels the running job. Every admitted job therefore fetches current `main`
+afresh instead of promoting its trigger SHA; reverse publication completion,
+same-SHA reruns, replaced pending work, and later main advancement converge
+whenever the current immutable source exists.
+* *Authoritative history has an isolated, anonymous boundary.* Promotion's
+non-persisting full-history checkout is only a source of workflow and inspector
+scripts. Its immediate first Bash step accepts the clean public source origin
+only as exact `https://github.com/FelixGeisler/draw` or exact
+`https://github.com/FelixGeisler/draw.git`, normalizing only an optional terminal
+`.git` for equality; every other scheme, host, port, path, query, fragment,
+userinfo/credential, spelling, case, suffix, or variation is rejected. The gate
+also rejects effective extra headers, credential helpers/stores, and fetch/push
+URL rewrites before repository-controlled scripts or authenticated operations.
+Under `env -i`, retaining only `PATH`, a new empty `HOME`, null global/system
+Git configs, disabled prompting/askpass, and an explicitly empty template, it
+initializes a fresh bare repository in one unique current-user-owned mode-0700
+direct child of `RUNNER_TEMP`. It verifies that bare config, then fetches exact
+literal `https://github.com/FelixGeisler/draw.git` and the exact `main` refspec
+with an explicitly empty credential-helper chain, no named remote, no Git-config
+redirect, and no token or credential fallback. Immediately after that direct
+fetch and again immediately before ancestry, the workflow fails unless the bare
+repository still has zero named remotes and no effective `remote.*`, include,
+or submodule configuration; even an `origin` carrying the literal approved URL
+is rejected because this boundary creates no named remote. The source checkout's
+bounded no-suffix allowance does not apply to this authoritative bare fetch.
+Only the fetched ref selects the target and only that bare object database--with
+alternates and replace refs rejected--may prove an existing edge revision is a
+commit ancestor by `merge-base --is-ancestor`.
+* *The temporary history lifecycle crosses steps without crossing the credential
+boundary.* An initialization-only trap removes the area on failure or
+interruption before its exact path and fetched target are handed off through
+`GITHUB_OUTPUT`; successful initialization disarms that trap so ancestry can
+reuse the bare repository. The ancestry step revalidates the output path,
+ownership, exact mode, clean no-named-remote state, and unchanged fetched ref.
+The final
+declared step runs `if: always()`, rejects an absent or unsafe path, removes the
+area after no-op, failure, or success, and fails an available runner if cleanup
+fails. Forced cancellation or runner termination may prevent that final step;
+the fixed GitHub-hosted ephemeral runner is the accepted disposal boundary, and
+the area contains only public Git objects/configuration, never credentials or
+tokens.
+* *Promotion is digest-pinned and fail-closed.* After history establishment,
+the shared inspector checks `sha-<fresh-main>` in expected-revision mode. Exit
+3 is a successful no-op for in-flight publication and every other nonzero or
+malformed result fails without mutation. Existing `edge` absence permits first
+promotion; valid presence must supply an ancestor/equal revision from isolated
+history. Equal source/edge digests are a no-op. Otherwise one pinned Buildx
+setup and GHCR login precede exactly one `imagetools create` from
+`sha-<fresh-main>@sha256:<verified-digest>` to `edge`; an expected-revision
+post-check must prove both source-digest equality and the fresh-main revision.
+Inspector credentials exist only on inspector steps, login receives only its
+three approved inputs, and history, Buildx, and imagetools receive no direct
+credential. Source absence, invalid/unprovable/non-ancestor state, mutation or
+post-check failure performs no delete, retry, rollback, replacement, or repair.
+Promotion is the exclusive automated `edge` writer and emits no `latest`,
+semver, `dryrun`, release tag, or GitHub Release. Operations, rollback
+implementation, signatures, and trusted digest anchors remain outside this
+decision.
 
 *Rationale:*
 
-* *Amends ADR-51's deferral, nothing else.* ADR-51 named "#192" as the excluded
-automation; this is that piece and only that piece. Docker Hub, npm publishing,
-and changelog conventions beyond GitHub's generated notes remain out of scope.
-No production code changes — the version bump to 1.0.0 (the `package.json`
-files) is a separate concern and is *not* performed by this workflow.
-* *Separation of pipelines.* Tag-only triggering means a normal push or PR never
-builds or publishes; `ci.yml` and `docs.yml` are byte-for-byte unchanged.
+* *Completes the release-and-inspection deferral without changing the app
+runtime.* ADR-51 named "#192" as the excluded release automation; that workflow
+still makes no application production-code change, and the version bump to
+1.0.0 (the `package.json` files) remains a separate concern. #276 separately
+adds the production inspector CLI and HTTP client: their boundary ends at
+bounded, encoding-checked registry/token/Distribution responses and the strict
+#274 graph core, including fail-closed authentication and error classification.
+They do not alter the server/client runtime, publish an image, or mutate a
+registry. Docker Hub, npm publishing, and changelog conventions beyond GitHub's
+generated notes remain out of scope.
+* *Separation of pipelines.* Tag triggering still exclusively owns release
+artifacts; a pull request never builds or publishes, and an ordinary push can
+reach only detached immutable-SHA publication and its digest-verified mutable
+`edge` reconciliation after exact successful-main-CI authorization. `ci.yml`,
+`release.yml`, and `docs.yml` remain unchanged. Promotion does not create or
+discover a release and does not operate a deployment.
 * *Verification.* Workflows are not executable in this CI, so (as with the
-container contract) a text-contract test pins the workflow's shape — the `v*`
-trigger, the `needs: test` gate reproducing `ci.yml`'s coverage, the
-`amd64,arm64` platforms, the exact GHCR path (kept in sync with the compose
-`image:` line), the least-privilege split (workflow read-only, write only on
-`publish`, no permissions on the test gate), the SHA-pinned `docker/*` actions,
-the event-gated `latest`-off-pre-release and version tags, and the Release step
-— so a miswire fails a unit run rather than half-publishing on a live tag. The
-image building on both arches is proven by the dispatch dry run described above.
+container contract) text-contract tests pin both workflow shapes. Release tests
+retain the `v*`, full-test, semver/conditional-`latest`, two-platform, and GitHub
+Release boundary. Edge tests pin the completed-run route, both jobs' five
+independent authorization predicates, publication's event-head checkout and seven action
+SHAs, promotion's fixed runner/Bash shell and four action SHAs, exact
+permissions/concurrency, both exact checkout-compatible source-origin forms and
+adversarial near-match rejection, isolated anonymous literal-`.git` public-main
+history with post-fetch and pre-ancestry no-named-remote revalidation and
+lifecycle, Node/credential boundaries, absent-only publication,
+digest-only promotion,
+and both post-checks. Pure state models cover reverse completion order,
+same-SHA reruns, valid presence, authoritative absence, one-running/one-pending
+replacement, main advancement, non-ancestor/unprovable state,
+inspector/validation failure, post-check mismatch, no backward movement, and
+the publication path's accepted non-atomic external-write race. Those tests use
+no credential, live registry, Docker daemon, package mutation, or Actions
+execution. The release image building on both architectures remains
+proven by its separately controlled dispatch dry run.
 
 == ADR-54: Phone support as an installable PWA — responsive adaptation, app-shell service worker, no native app
 
@@ -3112,6 +3361,16 @@ charge — a refusal that costs XP is a bug, not a rule.
 *Out of scope:* consumable items beyond the freeze, trading/duplicates
 protection beyond the flat refund, and pack pity timers.
 
+*Amendment (#263, schema v18):* the XP purchase model is retired. Historical
+rows remain immutable history, but only `challenge` contributes to permanent
+XP; `buy:freeze` remains solely a historical freeze-replay input. The shop GET
+is transitional Gold + bank + settings-owned collection/equipment, with no XP
+or costs. Every purchase POST reaching the route returns
+`400 {"error":"shop purchases are unavailable"}` without RNG or writes. Pack
+and direct-freeze controls are removed. The existing card-back settings and
+equip/Draw behavior remain authoritative. Empty append-only `gold_ledger` and
+immutable `pack_openings` establish the next contract without a producer.
+
 == ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
 
 *Context:* The deck deals work but never sets a stake (#231). A small daily
@@ -3142,6 +3401,11 @@ budget, and the payout path is integration-tested.
 
 *Out of scope:* challenge streaks/history, rerolls, difficulty tiers, and
 pack rewards (the payout stays plain XP; what it buys is the shop's business).
+
+*Amendment (#263):* `challenge` is now the only XP-ledger reason included by
+`totalXp()`. The existing +50 XP producer is unchanged. `challenge` is reserved
+as a future Gold-ledger reason, but v18 adds no Gold producer and does not copy
+challenge payouts into Gold.
 
 == ADR-64: The estimation hint becomes tap-to-apply and reaches the triage strip — and applying dismisses it
 
@@ -3377,8 +3641,18 @@ a default-on feature off would be a setting that lies (the
 fields, prereleases offered only to prerelease runners, unparseable tags
 fail closed — and the running version is `server/package.json`, read once
 (the root package.json and the MCP banner literal are not sources of
-truth; a test pins the choice). First sighting of a new version pays ONE
-notification through the #235 door, deduped in a settings row so restarts
+truth; a test pins the choice). The authenticated status also reports flat
+build-identity fields: `buildChannel` trims `DRAW_BUILD_CHANNEL` but accepts
+only exact lower-case `stable`, `edge`, or `local` (otherwise `local`), and
+`buildSha` trims `DRAW_BUILD_SHA` but accepts only a full 40-character ASCII
+hex SHA, normalized to lower case (otherwise `null`). `buildIdentity` is
+`<channel>:<sha>` when valid and `<channel>:version-<server package version>`
+otherwise. These fields do not change release checking: authenticated Settings
+keeps `Draw <package version>` as the running version and separately displays
+`<channel> · <full SHA>`, or `<channel> · package <version> (SHA unavailable)`
+when no SHA was shipped. No other client surface consumes the identity. First
+sighting of a new version pays ONE notification through the #235 door, deduped
+in a settings row so restarts
 never re-send. Forced checks are throttled server-side (one outbound GET
 per 30s window, cache served inside it) so a hammered button cannot burn
 GitHub's unauthenticated rate budget, and a failed re-check retains the
@@ -3396,17 +3670,53 @@ only there and never on the check request, managed write-only like
 No trigger configured -> `409` plus guidance, not a broken button. No
 auto-apply: the check may run daily, but a human taps the button. After
 apply the client polls `GET /api/update` (3s, 5-minute budget) and reloads
-once the version changes; a sessionStorage flag pays one "Updated to X"
-line and is consumed — a failed poll tick during the container swap is
-never a reason to reload. A trigger that ANSWERS non-2xx is remembered as
+once the canonical `buildIdentity` differs from the identity at apply time,
+including when the package version is unchanged. A versioned, exact-key
+sessionStorage union records either the changed channel/full SHA or the
+channel/package fallback; authenticated Settings removes every present value
+on its single read and displays a valid, successfully consumed notice once.
+Malformed, legacy, or inaccessible storage is silent, and a failed poll tick
+during the container swap is never a reason to reload. A trigger that ANSWERS
+non-2xx is remembered as
 `lastApplyError` and stops the poll with an error line; a dropped or
 aborted socket stays warn-only, because that is exactly what a successful
 swap of the very container looks like.
 
-*Out of scope:* auto-apply on a schedule, update channels beyond
-stable-vs-prerelease, rollback automation (pin the previous tag + restore a
-backup, 7.5), and bare-npm self-restart — there the check and banner work,
-the button stays hidden.
+Mutable-edge promotion is independent of this semver/GitHub-Release discovery
+and trigger contract: moving `edge` neither opts a deployment in, applies an
+update, nor operates a deployment. ADR-70's application behavior therefore does
+not consume the mutable tag.
+
+*Pi-only explicit-opt-in amendment (#286):* One deployment is an intentional,
+narrow exception to the polling-off rule above. Only an operator who
+explicitly opts Tailscale host `raspberry` into the operational `edge` channel
+may run the externally pinned Watchtower in periodic-poll mode. That sidecar,
+not Draw, polls every 300 seconds and may replace only the labeled Draw
+container. Draw still performs no scheduled apply and never receives
+`docker.sock`; its release check remains GitHub Release discovery, while
+`edge` is a separately promoted operational channel, not Release discovery.
+The ordinary base, stable, and local deployments stay non-edge and
+polling-off by default. Everywhere outside this one opt-in, the manual
+HTTP-API/trigger boundaries above remain the complete apply contract.
+
+The exception is configured only by `docker-compose.pi-edge.yml`: `DRAW_TAG=edge`,
+`AUTO_UPDATE=true`, `AUTO_UPDATE_INTERVAL_SECONDS=300`, and the reviewed
+`containrrr/watchtower:1.7.1@sha256:6dd50763bbd632a83cb154d5451700530d1e44200b268a4e9488fefdfcf2b038`
+registry manifest-list reference. It does not weaken the existing deployment
+contracts. ADR-26 still requires complete export/import for restore; ADR-51
+still owns `/data` on the preserved `draw_draw-data` named volume; ADR-52 still
+makes verified off-host backup copying and retention the deployment operator's
+responsibility; and ADR-55 still requires loopback-only publication plus the
+one-hop `TRUST_PROXY=1` boundary behind Tailscale Serve. Watchtower's socket is
+root-equivalent host control, so digest changes require review and there is no
+automatic rollback or backup restoration. Deployment view 7.5.1 defines the
+fail-closed activation and exact-digest human production-acceptance gates.
+
+*Out of scope:* auto-apply on a schedule outside the explicit Pi-only exception,
+build-identity consumption outside authenticated Settings, edge image
+publication/promotion behavior, rollback automation (pin the previous tag +
+restore a backup, 7.5), and bare-npm self-restart — there the check and banner
+work, the button stays hidden.
 
 == ADR-71: Card-table identity — felt ground, brass accent, serif on the card face only
 

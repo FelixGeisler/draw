@@ -79,6 +79,12 @@ jobs:
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
 
+      # Resolve identity from what this job actually checked out. This remains
+      # truthful for dispatch dry runs whose optional ref differs from the event.
+      - name: Resolve checked-out build SHA
+        id: build
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       # Third-party actions in this credential-bearing job are pinned to full
       # commit SHAs (the trailing comment tracks the human version) so a moved
       # tag cannot slip new code next to a packages:write token. First-party
@@ -126,6 +132,9 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            DRAW_BUILD_CHANNEL=${{ github.event_name == 'push' && 'stable' || 'local' }}
+            DRAW_BUILD_SHA=${{ steps.build.outputs.sha }}
           # A clean multi-arch image index (no extra unknown/unknown provenance
           # manifest entries in the GHCR package view).
           provenance: false

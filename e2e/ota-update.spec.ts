@@ -1,24 +1,68 @@
-import { request as apiRequest, expect, test } from "@playwright/test";
+import { request as apiRequest, expect, test, type Page, type Route } from "@playwright/test";
 
 /**
- * OTA update (#247): the Settings About/Update surface.
- *
- * Determinism: playwright.config.ts pins UPDATE_CHECK_URL to a closed
- * loopback port (the notify-settings.spec.ts trick), so "Check now" fails
- * fast without any network and the update-available banner can never light
- * up mid-suite. The banner + apply/poll/reload flow therefore need a
- * reachable release fixture this repo does not ship (nothing in
- * client/public per the #247 contract) — that path is carried by
- * server/test/integration/update.test.ts and client/src/lib/updateNotice.test.ts
- * instead. This spec pins what IS visible on a stock install: the running
- * version, the default-on toggle, the calm degraded check, and the
- * unconfigured apply state (guidance, no button).
- *
- * Shared serial DB: the second test configures a trigger URL (privileged —
- * posting to it restarts the app) and removes it again; the afterAll is the
- * backstop so later specs never inherit a configured trigger.
+ * OTA update (#247, #272): authenticated Settings is the only client
+ * consumer of the server's build identity. All replacement-specific cases
+ * use local route fixtures and sessionStorage; they never contact a release
+ * service or invoke a real update trigger.
  */
 test.describe.configure({ mode: "serial" });
+
+const OLD_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const NEW_SHA = "0123456789abcdef0123456789abcdef01234567";
+
+type UpdateStatusFixture = {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  releaseUrl: string | null;
+  checkedAt: string | null;
+  checkEnabled: boolean;
+  applyConfigured: boolean;
+  lastApplyError: string | null;
+  buildChannel: "stable" | "edge" | "local";
+  buildSha: string | null;
+  buildIdentity: string;
+};
+
+function updateStatus(overrides: Partial<UpdateStatusFixture> = {}): UpdateStatusFixture {
+  return {
+    current: "1.1.0",
+    latest: null,
+    updateAvailable: false,
+    releaseUrl: null,
+    checkedAt: null,
+    checkEnabled: true,
+    applyConfigured: false,
+    lastApplyError: null,
+    buildChannel: "edge",
+    buildSha: OLD_SHA,
+    buildIdentity: `edge:${OLD_SHA}`,
+    ...overrides,
+  };
+}
+
+async function routeUpdateApi(
+  page: Page,
+  handler: (route: Route, pathname: string) => Promise<void> | void,
+) {
+  await page.route("**/*", async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname === "/api/update" || pathname === "/api/update/apply") {
+      await handler(route, pathname);
+      return;
+    }
+    await route.fallback();
+  });
+}
+
+async function seedNotice(page: Page, raw: string) {
+  await page.goto("/");
+  await page.evaluate(
+    ({ key, value }) => sessionStorage.setItem(key, value),
+    { key: "draw.updateNotice", value: raw },
+  );
+}
 
 test.afterAll(async ({}, testInfo) => {
   const ctx = await apiRequest.newContext({ baseURL: testInfo.project.use.baseURL });
@@ -26,45 +70,213 @@ test.afterAll(async ({}, testInfo) => {
   await ctx.dispose();
 });
 
-test("Settings shows the running version and the check controls", async ({ page }) => {
+test("Settings shows the exact running version and server build identity", async ({ page }) => {
   await page.goto("/settings");
 
-  // The version on screen is the one the server reports — not a hardcoded
-  // string the client could let drift.
   const status = await (await page.request.get("/api/update")).json();
-  await expect(page.getByTestId("update-current-version")).toContainText(status.current);
+  await expect(page.getByTestId("update-current-version")).toHaveText(`Draw ${status.current}`);
+  await expect(page.getByTestId("update-build-identity")).toHaveText(
+    status.buildSha
+      ? `${status.buildChannel} · ${status.buildSha}`
+      : `${status.buildChannel} · package ${status.current} (SHA unavailable)`,
+  );
 
-  // The daily check is default-ON, visibly.
   await expect(page.getByTestId("update-check-toggle")).toBeChecked();
-
-  // "Check now" against the closed-port UPDATE_CHECK_URL: a calm result
-  // line, no error spam, and definitely no banner from a failed check.
   await page.getByTestId("update-check-now").click();
   await expect(page.getByTestId("update-check-result")).toBeVisible();
   await expect(page.getByTestId("update-banner")).toHaveCount(0);
 });
 
+test("Build row renders full SHA and exact package fallback fixture values", async ({ page }) => {
+  let fixture = updateStatus();
+  await routeUpdateApi(page, async (route, pathname) => {
+    expect(pathname).toBe("/api/update");
+    await route.fulfill({ json: fixture });
+  });
+
+  await page.goto("/settings");
+  await expect(page.getByTestId("update-current-version")).toHaveText("Draw 1.1.0");
+  await expect(page.getByTestId("update-build-identity")).toHaveText(`edge · ${OLD_SHA}`);
+
+  fixture = updateStatus({
+    current: "2.3.4-rc.1",
+    buildChannel: "local",
+    buildSha: null,
+    buildIdentity: "local:version-2.3.4-rc.1",
+  });
+  await page.reload();
+  await expect(page.getByTestId("update-current-version")).toHaveText("Draw 2.3.4-rc.1");
+  await expect(page.getByTestId("update-build-identity")).toHaveText(
+    "local · package 2.3.4-rc.1 (SHA unavailable)",
+  );
+});
+
+test("changed buildIdentity reloads once at the same package version", async ({ page }) => {
+  let applied = false;
+  let updateGets = 0;
+  const original = updateStatus({ applyConfigured: true });
+  const replacement = updateStatus({
+    applyConfigured: true,
+    buildSha: NEW_SHA,
+    buildIdentity: `edge:${NEW_SHA}`,
+  });
+
+  await routeUpdateApi(page, async (route, pathname) => {
+    if (pathname === "/api/update/apply") {
+      applied = true;
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    updateGets += 1;
+    await route.fulfill({ json: applied ? replacement : original });
+  });
+
+  let documentLoads = 0;
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) documentLoads += 1;
+  });
+  await page.goto("/settings");
+  const loadsBeforeApply = documentLoads;
+  await page.getByTestId("update-apply").click();
+
+  await expect(page.getByTestId("update-updated-notice")).toHaveText(
+    "Updated to edge build 0123456789ab",
+    { timeout: 10_000 },
+  );
+  await expect(page.getByTestId("update-current-version")).toHaveText("Draw 1.1.0");
+  await expect(page.getByTestId("update-build-identity")).toHaveText(`edge · ${NEW_SHA}`);
+  expect(documentLoads).toBe(loadsBeforeApply + 1);
+  expect(updateGets).toBe(3); // initial status, changed poll, post-reload status
+
+  await page.waitForTimeout(3_500);
+  expect(documentLoads).toBe(loadsBeforeApply + 1);
+  await expect
+    .poll(() => page.evaluate(() => sessionStorage.getItem("draw.updateNotice")))
+    .toBeNull();
+
+  await page.reload();
+  await expect(page.getByTestId("update-updated-notice")).toHaveCount(0);
+  expect(documentLoads).toBe(loadsBeforeApply + 2);
+});
+
+test("unchanged, null, and failed poll results never reload", async ({ page }) => {
+  let applied = false;
+  let poll = 0;
+  const original = updateStatus({ applyConfigured: true });
+
+  await routeUpdateApi(page, async (route, pathname) => {
+    if (pathname === "/api/update/apply") {
+      applied = true;
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    if (!applied) {
+      await route.fulfill({ json: original });
+      return;
+    }
+    poll += 1;
+    if (poll === 1) {
+      await route.fulfill({ json: original }); // unchanged identity
+    } else if (poll === 2) {
+      await route.fulfill({ json: { ...original, buildIdentity: null } });
+    } else {
+      await route.abort("failed");
+    }
+  });
+
+  let documentLoads = 0;
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) documentLoads += 1;
+  });
+  await page.goto("/settings");
+  const loadsBeforeApply = documentLoads;
+  await page.getByTestId("update-apply").click();
+  await page.waitForTimeout(9_500);
+
+  expect(poll).toBeGreaterThanOrEqual(3);
+  expect(documentLoads).toBe(loadsBeforeApply);
+  await expect(page.getByTestId("update-updated-notice")).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem("draw.updateNotice"))).toBeNull();
+});
+
+test("valid SHA and package notices show exact messages and are consumed once", async ({ page }) => {
+  await routeUpdateApi(page, async (route) => route.fulfill({ json: updateStatus() }));
+  await seedNotice(
+    page,
+    JSON.stringify({ v: 1, kind: "sha", buildChannel: "edge", buildSha: NEW_SHA }),
+  );
+  await page.goto("/settings");
+  await expect(page.getByTestId("update-updated-notice")).toHaveText(
+    "Updated to edge build 0123456789ab",
+  );
+  expect(await page.evaluate(() => sessionStorage.getItem("draw.updateNotice"))).toBeNull();
+  await page.reload();
+  await expect(page.getByTestId("update-updated-notice")).toHaveCount(0);
+
+  await page.evaluate(() =>
+    sessionStorage.setItem(
+      "draw.updateNotice",
+      JSON.stringify({
+        v: 1,
+        kind: "package",
+        buildChannel: "local",
+        current: "2.3.4-rc.1",
+      }),
+    ),
+  );
+  await page.reload();
+  await expect(page.getByTestId("update-updated-notice")).toHaveText(
+    "Updated to Draw 2.3.4-rc.1 (local build)",
+  );
+  expect(await page.evaluate(() => sessionStorage.getItem("draw.updateNotice"))).toBeNull();
+  await page.reload();
+  await expect(page.getByTestId("update-updated-notice")).toHaveCount(0);
+});
+
+test("absent and invalid notice values are silent and every present value is removed", async ({
+  page,
+}) => {
+  await routeUpdateApi(page, async (route) => route.fulfill({ json: updateStatus() }));
+  await page.goto("/settings");
+  await expect(page.getByTestId("update-updated-notice")).toHaveCount(0);
+
+  const invalidValues = [
+    "1.2.3", // legacy bare version
+    "{", // malformed JSON
+    JSON.stringify({ v: 1, kind: "sha", buildChannel: "edge", buildSha: NEW_SHA, extra: true }),
+    JSON.stringify({ v: "1", kind: "sha", buildChannel: "edge", buildSha: NEW_SHA }),
+    JSON.stringify({ v: 1, kind: "sha", buildChannel: "Edge", buildSha: NEW_SHA }),
+    JSON.stringify({ v: 1, kind: "sha", buildChannel: "edge", buildSha: "ABC" }),
+    JSON.stringify({ v: 1, kind: "package", buildChannel: "stable", current: "v1.2.3" }),
+  ];
+
+  for (const raw of invalidValues) {
+    await page.evaluate(
+      ({ key, value }) => sessionStorage.setItem(key, value),
+      { key: "draw.updateNotice", value: raw },
+    );
+    await page.reload();
+    await expect(page.getByTestId("update-updated-notice")).toHaveCount(0);
+    expect(await page.evaluate(() => sessionStorage.getItem("draw.updateNotice"))).toBeNull();
+  }
+});
+
 test("the unconfigured apply state guides instead of offering a button", async ({ page }) => {
   await page.goto("/settings");
 
-  // No trigger configured: no "Update now" anywhere, guidance instead.
   await expect(page.getByTestId("update-apply")).toHaveCount(0);
   const trigger = page.getByTestId("update-trigger-status");
   await expect(trigger).toContainText("No update trigger configured");
 
-  // Configure write-only, exactly like the ntfy URL block (#235): the field
-  // clears, only a presence flag comes back, and the button appears.
   await page.getByTestId("update-trigger-url-input").fill("http://127.0.0.1:9/draw-e2e-trigger");
   await page.getByTestId("update-trigger-save").click();
   await expect(trigger).toContainText("Update trigger configured");
   await expect(page.getByTestId("update-trigger-url-input")).toHaveValue("");
   await expect(page.getByTestId("update-apply")).toBeVisible();
 
-  // The privileged URL never leaks through the public settings payload.
   const settings = await (await page.request.get("/api/settings")).json();
   expect(JSON.stringify(settings)).not.toContain("draw-e2e-trigger");
 
-  // Remove turns it off — later specs must see the stock unconfigured state.
   await page.getByTestId("update-trigger-remove").click();
   await expect(trigger).toContainText("No update trigger configured");
   await expect(page.getByTestId("update-apply")).toHaveCount(0);

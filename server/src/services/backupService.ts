@@ -9,8 +9,10 @@ import {
   db,
   dbPath,
   filesDir,
+  migrateDatabase,
   reopenDatabase,
 } from "../db.js";
+import { validateV18Contract } from "../schemaV18.js";
 
 // Backup archive layout (#61, ADR-26): one zip holding a `VACUUM INTO`
 // snapshot of the database, every material file, and a manifest that lets
@@ -363,8 +365,9 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
       );
     }
     // A forged user_version on an arbitrary SQLite file would pass the checks
-    // above, swap in, and 500 every request until the user digs out app.db.bak.
-    // Require the v1 core tables (present in every schema version) up front.
+    // above. Require the v1 core before running any migration, then migrate
+    // this staging file (never the live DB) and validate the complete v18
+    // runtime contract before the swap commit point (ADR-26).
     const REQUIRED_TABLES = [
       "categories",
       "goals",
@@ -378,11 +381,25 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
     const hasTable = staged.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
     );
-    const missing = REQUIRED_TABLES.filter((t) => !hasTable.get(t));
+    const missing = REQUIRED_TABLES.filter((table) => !hasTable.get(table));
     if (missing.length > 0) {
       throw new BackupError(
         400,
         `the backup database is missing required tables: ${missing.join(", ")}`,
+      );
+    }
+    try {
+      migrateDatabase(staged);
+      validateV18Contract(staged);
+      if (staged.pragma("integrity_check", { simple: true }) !== "ok") {
+        throw new Error("integrity_check failed after migration");
+      }
+    } catch (error) {
+      throw new BackupError(
+        400,
+        `the backup database does not satisfy the schema v18 contract: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
   } finally {
@@ -469,8 +486,8 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string) {
     }
   } finally {
     // Reopens whichever app.db is now in place (new on success, old on a
-    // failed swap) and runs migrate(), so older backups move forward to
-    // CURRENT_VERSION exactly like an old database would on boot.
+    // failed swap). The staged database was already migrated and fully
+    // validated before this swap, so reopenDatabase() is a no-op migration.
     reopenDatabase();
   }
 }

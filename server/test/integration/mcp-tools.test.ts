@@ -65,6 +65,8 @@ interface TaskJson {
   parentId: number | null;
   categoryId: number;
   dueDate: string | null;
+  deferredUntil: string | null;
+  blocked: boolean;
   status: string;
   subtasks?: TaskJson[];
 }
@@ -123,6 +125,25 @@ describe("MCP tool surface (tools/list)", () => {
     );
     expect((createTask.inputSchema as { required?: string[] }).required).toEqual(
       expect.arrayContaining(["title", "categoryId"]),
+    );
+
+    const updateTask = tools.find((t) => t.name === "update_task")!;
+    const updateSchema = updateTask.inputSchema as {
+      properties: Record<string, { type?: string; anyOf?: Array<{ type?: string }> }>;
+      required?: string[];
+    };
+    expect(updateSchema.required ?? []).not.toContain("deferredUntil");
+    expect(updateSchema.required ?? []).not.toContain("blocked");
+    expect(updateSchema.properties.deferredUntil.anyOf?.map((part) => part.type)).toEqual(
+      expect.arrayContaining(["string", "null"]),
+    );
+    expect(updateSchema.properties.blocked.type).toBe("boolean");
+    expect(updateTask.description).toContain(
+      "{ id, deferredUntil: <future ISO datetime>, blocked: false }",
+    );
+    expect(updateTask.description).toContain("{ id, blocked: true }");
+    expect(updateTask.description).toContain(
+      "{ id, deferredUntil: <current ISO datetime>, blocked: false }",
     );
   });
 });
@@ -234,6 +255,119 @@ describe("update_task", () => {
 
     const tasks = (await callTool("list_tasks")).json<TaskJson[]>();
     expect(tasks.find((t) => t.id === parentId)!.impact).toBe(3);
+  });
+
+  it("pauses and resumes through the real MCP-to-HTTP path under ADR-17", async () => {
+    const goal = (await restJson("POST", "/api/goals", { title: "MCP pause parity" })) as {
+      id: number;
+    };
+    const task = (
+      await callTool("create_task", {
+        title: "Pause and wake through MCP",
+        categoryId: 1,
+        goalId: goal.id,
+        effortMinutes: 10,
+      })
+    ).json<TaskJson>();
+
+    const deckIds = async () => {
+      const res = await client.readResource({ uri: "draw://deck" });
+      const deck = JSON.parse((res.contents[0] as { text: string }).text) as {
+        candidates: Array<{ id: number }>;
+      };
+      return deck.candidates.map((candidate) => candidate.id);
+    };
+    expect(await deckIds()).toContain(task.id); // otherwise drawable
+
+    // Timed pause from any prior state: the route, not MCP, normalizes the
+    // supplied offset and the otherwise-drawable task leaves the pool.
+    const timed = await callTool("update_task", {
+      id: task.id,
+      deferredUntil: "2099-07-20T10:00:00+02:00",
+      blocked: false,
+    });
+    expect(timed.isError).toBe(false);
+    expect(timed.json<{ task: TaskJson }>().task).toMatchObject({
+      deferredUntil: "2099-07-20T08:00:00.000Z",
+      blocked: false,
+    });
+    expect(await deckIds()).not.toContain(task.id);
+
+    // Manual resume from the timed mode is the documented pair in one call;
+    // null is deliberately not used, so the wake timestamp remains visible.
+    const timedWake = new Date(Date.now() - 1_000).toISOString();
+    const wokeTimed = await callTool("update_task", {
+      id: task.id,
+      deferredUntil: timedWake,
+      blocked: false,
+    });
+    expect(wokeTimed.json<{ task: TaskJson }>().task).toMatchObject({
+      deferredUntil: timedWake,
+      blocked: false,
+    });
+    expect(await deckIds()).toContain(task.id);
+
+    // The indefinite recipe needs only blocked: true. It stays out even with
+    // an expired timed pause retained underneath: blocked takes precedence.
+    const blocked = await callTool("update_task", { id: task.id, blocked: true });
+    expect(blocked.json<{ task: TaskJson }>().task).toMatchObject({
+      deferredUntil: timedWake,
+      blocked: true,
+    });
+    expect(await deckIds()).not.toContain(task.id);
+
+    const expiredBehindBlock = new Date(Date.now() - 3_600_000).toISOString();
+    const stillBlocked = await callTool("update_task", {
+      id: task.id,
+      deferredUntil: expiredBehindBlock,
+    });
+    expect(stillBlocked.json<{ task: TaskJson }>().task).toMatchObject({
+      deferredUntil: expiredBehindBlock,
+      blocked: true,
+    });
+    expect(await deckIds()).not.toContain(task.id);
+
+    const blockedWake = new Date(Date.now() - 1_000).toISOString();
+    const wokeBlocked = await callTool("update_task", {
+      id: task.id,
+      deferredUntil: blockedWake,
+      blocked: false,
+    });
+    expect(wokeBlocked.json<{ task: TaskJson }>().task).toMatchObject({
+      deferredUntil: blockedWake,
+      blocked: false,
+    });
+    expect(await deckIds()).toContain(task.id);
+
+    // Expiry resumes automatically: reading the pool performs no wake write
+    // and the retained timestamp remains the staleness base (ADR-17).
+    const expired = new Date(Date.now() - 3_600_000).toISOString();
+    await callTool("update_task", { id: task.id, deferredUntil: expired, blocked: false });
+    const db = await testDb();
+    const storedBefore = db
+      .prepare("SELECT deferred_until AS deferredUntil FROM tasks WHERE id = ?")
+      .get(task.id) as { deferredUntil: string | null };
+    expect(storedBefore.deferredUntil).toBe(expired);
+    expect(await deckIds()).toContain(task.id);
+    const storedAfter = db
+      .prepare("SELECT deferred_until AS deferredUntil FROM tasks WHERE id = ?")
+      .get(task.id) as { deferredUntil: string | null };
+    expect(storedAfter.deferredUntil).toBe(expired);
+
+    // String shape is accepted by MCP and rejected by the authoritative API;
+    // its existing 400 text is surfaced verbatim rather than reimplemented.
+    const invalid = await callTool("update_task", {
+      id: task.id,
+      deferredUntil: "not-a-date",
+    });
+    expect(invalid.isError).toBe(true);
+    expect(invalid.text).toBe(
+      "deferredUntil must be null or an ISO datetime (API responded 400)",
+    );
+
+    expect((await callTool("update_task", { id: task.id, status: "archived" })).isError).toBe(
+      false,
+    );
   });
 
   it("resets impact to the neutral default when unlinking the goal", async () => {

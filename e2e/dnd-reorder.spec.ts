@@ -11,12 +11,22 @@ import { taskTree } from "./helpers.js";
 // the activation threshold first, then measures the gap.
 test.describe.configure({ mode: "serial" });
 
-const CATEGORY = "Reorder e2e";
-const GOAL = "Reorder e2e goal";
-const PARENT = "Reorder e2e outline";
-const STEP_A = "reorder step alpha";
-const STEP_B = "reorder step bravo";
-const STEP_C = "reorder step charlie";
+let CATEGORY: string;
+let GOAL: string;
+let PARENT: string;
+let STEP_A: string;
+let STEP_B: string;
+let STEP_C: string;
+
+function configureScenario(repeatEachIndex: number) {
+  const suffix = ` [repeat ${repeatEachIndex}]`;
+  CATEGORY = `Reorder e2e${suffix}`;
+  GOAL = `Reorder e2e goal${suffix}`;
+  PARENT = `Reorder e2e outline${suffix}`;
+  STEP_A = `reorder step alpha${suffix}`;
+  STEP_B = `reorder step bravo${suffix}`;
+  STEP_C = `reorder step charlie${suffix}`;
+}
 
 let goalId: number;
 let parentId: number;
@@ -117,9 +127,11 @@ async function dragToGap(page: Page, subtaskTitle: string, gapLocator: Locator) 
   await page.mouse.up();
 }
 
-test("dragging a middle subtask to first place makes the sequential queue expose it", async ({
-  page,
-}) => {
+test("dragging a middle subtask to first place makes the sequential queue expose it", async (
+  { page },
+  testInfo,
+) => {
+  configureScenario(testInfo.repeatEachIndex);
   await seed(page.request);
   await page.goto("/tasks");
 
@@ -137,7 +149,8 @@ test("dragging a middle subtask to first place makes the sequential queue expose
   expect(await poolIds(page)).toEqual([subId[STEP_B]]);
 });
 
-test("the new order persists across a reload", async ({ page }) => {
+test("the new order persists across a reload", async ({ page }, testInfo) => {
+  configureScenario(testInfo.repeatEachIndex);
   await page.goto("/tasks");
   // Order set by the previous test survives a full reload (stored sort_order).
   expect(await childTitles(page)).toEqual([STEP_B, STEP_A, STEP_C]);
@@ -149,10 +162,14 @@ test("the new order persists across a reload", async ({ page }) => {
   }).toPass();
 
   await page.reload();
-  const domOrder = await taskTree(page)
+  const expectedTitle = new RegExp(
+    `^(?:${[STEP_A, STEP_B, STEP_C].map((title) => title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})$`,
+  );
+  const persistedRows = taskTree(page)
     .locator(`[data-dnd-row]`)
-    .filter({ hasText: /reorder step/ })
-    .allInnerTexts();
+    .filter({ has: page.getByText(expectedTitle) });
+  await expect(persistedRows).toHaveCount(3);
+  const domOrder = await persistedRows.allInnerTexts();
   // The three steps render in the persisted order in the DOM after reload.
   const seen = domOrder.join(" | ");
   expect(seen.indexOf("bravo")).toBeLessThan(seen.indexOf("charlie"));
@@ -160,7 +177,8 @@ test("the new order persists across a reload", async ({ page }) => {
   expect(await poolIds(page)).toEqual([subId[STEP_B]]);
 });
 
-test("the reorder drag works identically under reduced motion", async ({ page }) => {
+test("the reorder drag works identically under reduced motion", async ({ page }, testInfo) => {
+  configureScenario(testInfo.repeatEachIndex);
   // The acceptance criterion is that gap motion is decorative: with animations
   // off, the drag path must still reorder.
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -174,9 +192,11 @@ test("the reorder drag works identically under reduced motion", async ({ page })
   expect(await poolIds(page)).toEqual([subId[STEP_A]]);
 });
 
-test("a reorder gap outranks the fixed root-zone banner so it is never occluded (#173)", async ({
-  page,
-}) => {
+test("a reorder gap outranks the fixed root-zone banner so it is never occluded (#173)", async (
+  { page },
+  testInfo,
+) => {
+  configureScenario(testInfo.repeatEachIndex);
   await page.goto("/tasks");
   // Start a subtask drag but do NOT drop — crossing the 5px threshold mounts
   // both the gap zones and the fixed "promote to top level" banner.

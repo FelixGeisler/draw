@@ -104,7 +104,7 @@
 |The append-only `draws(id, task_id, drawn_at, was_warmup)` table (#156, ADR-42) — one row per card dealt. `task_id` is `ON DELETE SET NULL` (a draw HAPPENED even if the task is later deleted, never CASCADE); `was_warmup` marks handed-out warm-up deals (ADR-30). Source of truth for the draws achievement chain, which counts non-warmup rows only
 
 |*Claim (claim-for-XP)*
-|`POST /api/achievements/:key/claim` pays an unlocked achievement's rarity-scaled XP ONCE ever (`achievements.claimed_at` / `claim_xp`, stamped from the server tier table; idempotent by primary key — a repeat 409s). A SECOND stored XP source amending ADR-5: `totalXp = SUM(completions.xp_awarded) + SUM(achievements.claim_xp)` (#156, ADR-42)
+|`POST /api/achievements/:key/claim` pays an unlocked achievement's rarity-scaled XP ONCE ever (`achievements.claimed_at` / `claim_xp`, stamped from the server tier table; idempotent by primary key — a repeat 409s). Claim XP remains a permanent XP source. Schema v18 also reserves nullable `claim_gold` on the owning row, with no backfill or producer yet (#156/#263, ADR-42)
 
 |*Streak*
 |Count of REAL completion days in an unbroken run of local calendar days; rest and frozen days keep the run alive but never increment it (ADR-28)
@@ -125,10 +125,16 @@
 |A goal's remaining work rendered as an opponent's HP bar (#229, ADR-61): max HP = effort over ALL non-archived leaves (`totalEffortMinutes`), current HP = the open remainder, completions deal the difference as damage. Enrage = the feasibility chip's `infeasible` verdict restyled — one classifier, two costumes. Goals without estimated leaves keep the count-based progress bar
 
 |*XP ledger*
-|Migration v17 (#230, ADR-62): the third stored XP source after completions and claims — shop purchases negative, refunds/payouts positive, `totalXp()` sums all three; `UNIQUE(reason, ref)` makes every purchase/payout idempotent (retry = 409, never a double charge)
+|Append-only historical effects introduced in v17 (#230, ADR-62). Since v18 (#263), only `reason='challenge'` contributes to permanent XP; legacy purchase/refund/unknown rows remain stored but are inert. `buy:freeze` timestamps remain historical freeze-replay inputs only
+
+|*Gold ledger*
+|Schema-v18 append-only effects not owned by a completion or achievement: `(amount, reason, ref, created_at)` with unique `(reason, ref)`. Gold is the unclamped sum of completion Gold, achievement Gold and this ledger. Reserved reasons are `challenge`, `buy:pack`, `refund:duplicate`, and `bonus:pouch`; v18 creates no producer
+
+|*Pack opening*
+|An immutable future replay fact ordered by AUTOINCREMENT `opening_order`, idempotent by unique `ref`, recording payment, back, rarity, duplicate flag, applied Secret chance and post-cap bonus. Schema v18 leaves the table empty; openings begin in #266
 
 |*Booster pack / card back*
-|The XP shop's purchase unit (#230): 250 XP opens two rarity-weighted card-back pulls on the #224 stage; duplicates refund 75 XP. Owned/equipped backs live in settings; the Draw page front face wears the equipped weave via `data-back`, defaulting to the classic for unknown keys. A bought streak freeze is its own `buy:freeze` ledger row — the token derives from the purchase day, never a `streak_freezes` write
+|Card backs remain settings-owned (`owned_card_backs` / `equipped_card_back`) and Draw renders the equipped weave with Classic fallback. The old XP pack/direct-freeze purchase controls are retired in v18; the transitional shop is read-only until Gold openings launch in #266
 
 |*Daily challenge*
 |One derived objective per LOCAL day (#231, ADR-63): the day string hashes into an append-only pool; progress derives from the day's rows (localDayBounds); completing it pays +50 XP as an `xp_ledger` row keyed `(challenge, day)` — exactly once, landed by completeTask or timer-stop through one shared function, never by a GET

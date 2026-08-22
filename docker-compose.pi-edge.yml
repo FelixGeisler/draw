@@ -1,0 +1,75 @@
+# Dedicated, explicit opt-in configuration for the single Pi edge deployment
+# governed by issue #286 and ADR-70. The operational edge channel is not GitHub
+# Release discovery. External Watchtower polling is the exception: Draw has no
+# scheduled apply, never receives docker.sock, and retains its manual API/trigger
+# boundary elsewhere. The ordinary base/stable/local docker-compose.yml remains
+# polling-off and non-edge by default, with no Watchtower service.
+# ADR-26 complete export/import, ADR-51 named-volume persistence, ADR-52 verified
+# off-host backup ownership, and ADR-55 loopback/one-hop trust remain mandatory.
+#
+# Required non-secret .env selections for this opt-in:
+#   DRAW_TAG=edge
+#   AUTO_UPDATE=true
+#   AUTO_UPDATE_INTERVAL_SECONDS=300
+# Keep DRAW_PASSWORD and WATCHTOWER_TOKEN only in the host .env; never commit or
+# render them into evidence. Public GHCR needs no registry credential.
+
+name: draw
+
+services:
+  draw:
+    image: ghcr.io/felixgeisler/draw:${DRAW_TAG:-edge}
+    container_name: draw
+    restart: unless-stopped
+    ports:
+      # ADR-55: Tailscale Serve is the only front door.
+      - "127.0.0.1:3001:3001"
+    environment:
+      DRAW_PASSWORD: "${DRAW_PASSWORD}"
+      TRUST_PROXY: "1"
+      BACKUP_INTERVAL_HOURS: "${BACKUP_INTERVAL_HOURS:-24}"
+      BACKUP_RETENTION: "${BACKUP_RETENTION:-7}"
+      TZ: "${TZ:-Europe/Berlin}"
+    volumes:
+      # ADR-51: preserve this named volume; never recreate or remove it.
+      - draw-data:/data
+    labels:
+      # Watchtower may replace Draw; Watchtower itself has no enable label.
+      - com.centurylinklabs.watchtower.enable=true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  watchtower:
+    # Verified top-level registry manifest-list digest, not a local image ID.
+    # Changing this reviewed tag-and-digest reference requires a new review.
+    image: containrrr/watchtower:1.7.1@sha256:6dd50763bbd632a83cb154d5451700530d1e44200b268a4e9488fefdfcf2b038
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      # Root-equivalent host control. Draw never receives this socket.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # The byte-exact reviewed public file keeps this sole marker commented.
+      # Only deployment view 7.5.1's deterministic private transition may
+      # enable it after anonymous access fails; no other edit is permitted.
+      # - /home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro
+    environment:
+      DOCKER_API_VERSION: "1.43"
+      WATCHTOWER_HTTP_API_UPDATE: "true"
+      WATCHTOWER_HTTP_API_TOKEN: "${WATCHTOWER_TOKEN}"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_HTTP_API_PERIODIC_POLLS: "${AUTO_UPDATE:-true}"
+      WATCHTOWER_POLL_INTERVAL: "${AUTO_UPDATE_INTERVAL_SECONDS:-300}"
+      TZ: "${TZ:-Europe/Berlin}"
+    # No published API port: the manual trigger remains Compose-network-only.
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  draw-data:

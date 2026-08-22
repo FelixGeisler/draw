@@ -71,6 +71,9 @@ export const FORCED_CHECK_MIN_INTERVAL_MS = 30_000;
 /** The GET /api/update payload — also what checkForUpdate resolves to. */
 export interface UpdateStatus {
   current: string;
+  buildChannel: "stable" | "edge" | "local";
+  buildSha: string | null;
+  buildIdentity: string;
   latest: string | null;
   updateAvailable: boolean;
   releaseUrl: string | null;
@@ -124,11 +127,34 @@ export function applyConfigured(): boolean {
   return Boolean(getSettingString(UPDATE_TRIGGER_URL_SETTING));
 }
 
+export type BuildChannel = "stable" | "edge" | "local";
+
+/** Exact, case-sensitive channel allow-list; unknown build inputs fail to local. */
+export function normalizeBuildChannel(value: string | undefined): BuildChannel {
+  const channel = value?.trim();
+  return channel === "stable" || channel === "edge" || channel === "local"
+    ? channel
+    : "local";
+}
+
+/** A build SHA is usable only when it is one full ASCII hexadecimal commit ID. */
+export function normalizeBuildSha(value: string | undefined): string | null {
+  const sha = value?.trim() ?? "";
+  return /^[0-9a-fA-F]{40}$/.test(sha) ? sha.toLowerCase() : null;
+}
+
 /** Current cached state — NO network. What GET /api/update serves. */
 export function updateStatus(): UpdateStatus {
   const current = appVersion();
+  const buildChannel = normalizeBuildChannel(process.env.DRAW_BUILD_CHANNEL);
+  const buildSha = normalizeBuildSha(process.env.DRAW_BUILD_SHA);
   return {
     current,
+    buildChannel,
+    buildSha,
+    buildIdentity: buildSha
+      ? `${buildChannel}:${buildSha}`
+      : `${buildChannel}:version-${current}`,
     latest: latestSeen,
     updateAvailable: latestSeen !== null && isUpdateAvailable(current, latestSeen),
     releaseUrl: latestReleaseUrl,

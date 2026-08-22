@@ -49,6 +49,8 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v2Schema = current
+    .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
+    .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
     // v15 (#157): strip the sort_order column (its comment block, the column,
     // and the comma that made window_end non-final) plus its stamping trigger,
     // so the reconstructed pre-v15 file carries neither — the v15 migration ADDs
@@ -296,10 +298,10 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v17 (deferred_until, blocked, subtask_order_mode, window_*, card_art, re-parenting, streak_freezes, was_warmup, anthropic_file_id, goal resolution, daily-hand removal, draws log + claim columns, sibling sort_order, achievement customizations, xp_ledger)", () => {
-  it("bumps user_version to 17", async () => {
+describe("migration v2 → v18 (including Gold/opening infrastructure and permanent XP)", () => {
+  it("bumps user_version to 18", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(17);
+    expect(db.pragma("user_version", { simple: true })).toBe(18);
   });
 
   it("creates the xp_ledger table, empty (#230, ADR-62)", async () => {
