@@ -51,9 +51,9 @@ services:
     volumes:
       # Root-equivalent host control. Draw never receives this socket.
       - /var/run/docker.sock:/var/run/docker.sock
-      # Private-GHCR fallback ONLY after anonymous access fails and activation
-      # stops: uncomment this sole read-only file mount after applying the
-      # ownership/mode/credential policy in deployment view 7.5.1.
+      # The byte-exact reviewed public file keeps this sole marker commented.
+      # Only deployment view 7.5.1's deterministic private transition may
+      # enable it after anonymous access fails; no other edit is permitted.
       # - /home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro
     environment:
       DOCKER_API_VERSION: "1.43"

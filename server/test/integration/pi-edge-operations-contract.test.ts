@@ -1,4 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -41,6 +44,83 @@ const anonymousPrefix =
   'env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG"';
 const privatePrefix =
   "env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG=/home/raspberry/draw/watchtower-docker-config";
+const PUBLIC_MOUNT_MARKER =
+  "      # - /home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro\n";
+const PRIVATE_MOUNT =
+  "      - /home/raspberry/draw/watchtower-docker-config/config.json:/config.json:ro\n";
+const PUBLIC_COMPOSE_SHA256 =
+  "7031afeddadcd924c893ad10f4f73a5a84b6ff63f69fce10d1f794f8378a970b";
+const PRIVATE_COMPOSE_SHA256 =
+  "0c162cc00286f0a2ee8aac51210eff1eeb4266b66ac9e41c7c3e884c4810cfd2";
+
+type MountMode = "public" | "private";
+
+const sha256 = (source: string) =>
+  createHash("sha256").update(source, "utf8").digest("hex");
+const occurrences = (source: string, value: string) =>
+  source.split(value).length - 1;
+
+function transitionMount(source: string, target: MountMode) {
+  const from = target === "private" ? PUBLIC_MOUNT_MARKER : PRIVATE_MOUNT;
+  const to = target === "private" ? PRIVATE_MOUNT : PUBLIC_MOUNT_MARKER;
+  const sourceSha =
+    target === "private" ? PUBLIC_COMPOSE_SHA256 : PRIVATE_COMPOSE_SHA256;
+  const targetSha =
+    target === "private" ? PRIVATE_COMPOSE_SHA256 : PUBLIC_COMPOSE_SHA256;
+
+  if (
+    sha256(source) !== sourceSha ||
+    occurrences(source, from) !== 1 ||
+    occurrences(source, to) !== 0
+  ) {
+    throw new Error("refusing transition: checksum or exact marker mismatch");
+  }
+  const updated = source.replace(from, to);
+  if (sha256(updated) !== targetSha) {
+    throw new Error("refusing transition: resulting checksum mismatch");
+  }
+  return updated;
+}
+
+function resolveConfigMounts(source: string) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "draw-edge-compose-"));
+  const composeFile = path.join(directory, "docker-compose.pi-edge.yml");
+  fs.writeFileSync(composeFile, source, "utf8");
+  try {
+    const output = execFileSync(
+      "docker",
+      ["compose", "-f", composeFile, "config", "--format", "json"],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          DRAW_PASSWORD: "contract-test-only",
+          WATCHTOWER_TOKEN: "contract-test-only",
+          DRAW_TAG: "edge",
+          AUTO_UPDATE: "true",
+          AUTO_UPDATE_INTERVAL_SECONDS: "300",
+        },
+      },
+    );
+    const model = JSON.parse(output) as {
+      services: {
+        watchtower: {
+          volumes?: Array<{
+            type?: string;
+            source?: string;
+            target?: string;
+            read_only?: boolean;
+          }>;
+        };
+      };
+    };
+    return (model.services.watchtower.volumes ?? []).filter(
+      (volume) => volume.target === "/config.json",
+    );
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+}
 
 function expectBoundary(source: string) {
   const text = compact(source);
@@ -152,6 +232,47 @@ describe("registry and credential gates", () => {
     expect(edgeCompose).toMatch(
       /^\s*# - \/home\/raspberry\/draw\/watchtower-docker-config\/config\.json:\/config\.json:ro$/m,
     );
+    expectText(runbook, "sole permitted divergence is the deterministic transition");
+    expectText(runbook, "Do not use broad `sed`, a manual editor, or any other unreviewed mutation");
+  });
+
+  it("resolves public without the mount and private with exactly one read-only mount", () => {
+    expect(sha256(edgeCompose)).toBe(PUBLIC_COMPOSE_SHA256);
+    expect(occurrences(edgeCompose, PUBLIC_MOUNT_MARKER)).toBe(1);
+    expect(occurrences(edgeCompose, PRIVATE_MOUNT)).toBe(0);
+    expect(resolveConfigMounts(edgeCompose)).toEqual([]);
+
+    const privateCompose = transitionMount(edgeCompose, "private");
+    expect(resolveConfigMounts(privateCompose)).toEqual([
+      expect.objectContaining({
+        type: "bind",
+        source:
+          "/home/raspberry/draw/watchtower-docker-config/config.json",
+        target: "/config.json",
+        read_only: true,
+      }),
+    ]);
+  });
+
+  it("fails private transition mismatches and restores byte-exact public Compose", () => {
+    for (const mismatched of [
+      edgeCompose.replace(PUBLIC_MOUNT_MARKER, ""),
+      edgeCompose.replace(PUBLIC_MOUNT_MARKER, PUBLIC_MOUNT_MARKER.repeat(2)),
+      edgeCompose.replace(PUBLIC_MOUNT_MARKER, PRIVATE_MOUNT),
+      `${edgeCompose}# unrelated mutation\n`,
+    ]) {
+      expect(() => transitionMount(mismatched, "private")).toThrow(
+        /checksum or exact marker mismatch/,
+      );
+    }
+
+    const privateCompose = transitionMount(edgeCompose, "private");
+    const restored = transitionMount(privateCompose, "public");
+    expect(restored).toBe(edgeCompose);
+    expect(sha256(restored)).toBe(PUBLIC_COMPOSE_SHA256);
+    expect(resolveConfigMounts(restored)).toEqual([]);
+    expectText(runbook, "remove the now-empty `watchtower-docker-config` directory");
+    expectText(runbook, "verify both paths are absent");
   });
 
   it("runs every public inspection with an empty OCI credential environment", () => {
@@ -259,9 +380,13 @@ describe("backup, activation, and rollback safety", () => {
       `${LIVE_COMPOSE} stop watchtower`,
       "docker inspect --format '{{.State.Running}}' watchtower",
       "returns `false`",
-      "place the byte-exact reviewed `docker-compose.pi-edge.yml`",
+      "install the initial byte-exact reviewed public `docker-compose.pi-edge.yml`",
+      "7031afeddadcd924c893ad10f4f73a5a84b6ff63f69fce10d1f794f8378a970b",
       "set only the approved host `.env` values",
+      "perform exactly this reviewed transition before any edge-file Compose validation or Watchtower start",
+      "EDGE_MOUNT_MODE=private python3",
       `${EDGE_COMPOSE} config --quiet draw watchtower`,
+      "EXPECTED_CONFIG_MOUNT=\"$EXPECTED_CONFIG_MOUNT\" python3",
       `${anonymousPrefix} ${EDGE_COMPOSE} pull draw watchtower`,
       `${EDGE_COMPOSE} up -d --no-deps draw`,
       "edge:<pre-merge-full-SHA>",
@@ -274,9 +399,18 @@ describe("backup, activation, and rollback safety", () => {
       previous = at;
     }
     expect(activation.indexOf(EDGE_COMPOSE)).toBeGreaterThan(
-      activation.indexOf("place the byte-exact reviewed `docker-compose.pi-edge.yml`"),
+      activation.indexOf("install the initial byte-exact reviewed public `docker-compose.pi-edge.yml`"),
     );
     expectText(runbook, "Before installing the edge file or editing any `.env` value");
+    expect(activation.indexOf("EDGE_MOUNT_MODE=private python3")).toBeLessThan(
+      activation.indexOf(`${EDGE_COMPOSE} config --quiet draw watchtower`),
+    );
+    expect(activation.indexOf(`${EDGE_COMPOSE} config --quiet draw watchtower`)).toBeLessThan(
+      activation.indexOf(`${EDGE_COMPOSE} up -d --no-deps watchtower`),
+    );
+    expectText(runbook, "Public operation must resolve zero `/config.json` mounts");
+    expectText(runbook, "Private operation must resolve exactly one bind");
+    expectText(runbook, "with `read_only: true`");
     expectText(runbook, "A failed stop or any other result stops activation");
     expectText(runbook, `${EDGE_COMPOSE} down -v`);
     expectText(runbook, "remove `draw_draw-data`, or recreate that volume");
