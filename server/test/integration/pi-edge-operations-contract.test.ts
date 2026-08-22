@@ -12,8 +12,14 @@ import { describe, expect, it } from "vitest";
 // GHCR, GitHub settings, or the Pi.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
-const read = (relativePath: string) =>
+const readCheckoutText = (relativePath: string) =>
   fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
+// Git may materialize text files with CRLF when core.autocrlf=true. Models and
+// digest fixtures use the canonical LF deployment bytes committed to Git; the
+// Pi runbook still checks raw bytes and never normalizes a deployed file.
+const canonicalLf = (source: string) => source.replace(/\r\n/g, "\n");
+const read = (relativePath: string) =>
+  canonicalLf(readCheckoutText(relativePath));
 
 const adr = read("docs/modules/ROOT/pages/09_architecture_decisions.adoc");
 const runbook = read("docs/modules/ROOT/pages/07_deployment_view.adoc");
@@ -217,6 +223,24 @@ describe("committed opt-in Compose contract", () => {
 });
 
 describe("registry and credential gates", () => {
+  it("canonicalizes LF and CRLF fixtures to the same deployment bytes", () => {
+    const syntheticCrlf = edgeCompose.replace(/\n/g, "\r\n");
+    expect(syntheticCrlf).not.toBe(edgeCompose);
+
+    for (const checkoutText of [edgeCompose, syntheticCrlf]) {
+      const canonicalPublic = canonicalLf(checkoutText);
+      expect(canonicalPublic).toBe(edgeCompose);
+      expect(sha256(canonicalPublic)).toBe(PUBLIC_COMPOSE_SHA256);
+
+      const canonicalPrivate = transitionMount(canonicalPublic, "private");
+      expect(sha256(canonicalPrivate)).toBe(PRIVATE_COMPOSE_SHA256);
+      expect(transitionMount(canonicalPrivate, "public")).toBe(edgeCompose);
+    }
+
+    expect(occurrences(edgeRunbook, "data = path.read_bytes()")).toBe(2);
+    expectText(runbook, "sha256sum --check --strict");
+  });
+
   it("keeps anonymous GHCR active and defines only the approved private fallback", () => {
     expectText(runbook, "Public, anonymous GHCR access is the active policy");
     expectText(runbook, "configure no registry credential while that succeeds");
