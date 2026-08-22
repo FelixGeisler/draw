@@ -29,6 +29,14 @@ const ARM64_CHILD =
   "sha256:f14f090fcc8235449da45ccbb1aea3b424ed3b101bcbd3de56526909397c2369";
 const LIST_MEDIA_TYPE =
   "application/vnd.docker.distribution.manifest.list.v2+json";
+const EDGE_COMPOSE =
+  "docker compose --env-file /home/raspberry/draw/.env -f /home/raspberry/draw/docker-compose.pi-edge.yml";
+const edgeRunbook = runbook.slice(
+  runbook.indexOf("=== 7.5.1 Pi-only `edge` polling runbook (#286)"),
+  runbook.indexOf("== 7.6 Summary"),
+);
+const anonymousPrefix =
+  'env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD DOCKER_CONFIG="$ANON_DOCKER_CONFIG"';
 
 function expectBoundary(source: string) {
   const text = compact(source);
@@ -54,6 +62,11 @@ describe("Pi edge opt-in boundary", () => {
         expect(source).toContain(governingAdr);
       }
     }
+    expect(runbook).toContain("ADR-53");
+    expectText(
+      runbook,
+      "ADR-53 governs the detached immutable-SHA publication and promotion evidence",
+    );
 
     for (const source of [adr, runbook, edgeCompose, baseCompose, contributing]) {
       expect(source).not.toMatch(/automatic updates? (?:are|is) enabled by default/i);
@@ -136,6 +149,29 @@ describe("registry and credential gates", () => {
     );
   });
 
+  it("runs every public inspection with an empty OCI credential environment", () => {
+    const inspectorCommands = edgeRunbook.match(
+      /^env -u OCI_REGISTRY_USERNAME -u OCI_REGISTRY_PASSWORD node scripts\/inspect-oci-image\.mjs .+$/gm,
+    );
+    expect(inspectorCommands).toHaveLength(4);
+    expectText(runbook, "Every repository inspector invocation must unset");
+    expectText(runbook, "`OCI_REGISTRY_USERNAME` and `OCI_REGISTRY_PASSWORD`");
+  });
+
+  it("isolates anonymous Docker gates from host-default authentication", () => {
+    for (const required of [
+      'ANON_DOCKER_CONFIG="$(mktemp -d)"',
+      `printf '%s\\n' '{"auths":{}}' > "$ANON_DOCKER_CONFIG/config.json"`,
+      `${anonymousPrefix} docker buildx imagetools inspect containrrr/watchtower:1.7.1`,
+      `${anonymousPrefix} docker pull "$WATCHTOWER_REF"`,
+      `${anonymousPrefix} ${EDGE_COMPOSE} pull draw watchtower`,
+      "prevents Docker from consulting a host-default login, credential store, or credential helper",
+      "do not log out or alter that login",
+    ]) {
+      expectText(runbook, required);
+    }
+  });
+
   it("forbids secret material and assigns fallback lifecycle ownership", () => {
     expectText(runbook, "coordinator owns initial provisioning");
     expectText(runbook, "designated Pi deployment operator owns rotation");
@@ -180,21 +216,37 @@ describe("backup, activation, and rollback safety", () => {
     }
   });
 
-  it("uses service-scoped staged recreation while preserving data and trust", () => {
+  it("explicitly selects the approved env and edge file for every live Compose command", () => {
+    const invocations = edgeRunbook.match(/docker compose[^`\n]*/g) ?? [];
+    expect(invocations.length).toBeGreaterThanOrEqual(10);
+    for (const invocation of invocations) {
+      expect(invocation).toMatch(
+        /^docker compose --env-file \/home\/raspberry\/draw\/\.env -f \/home\/raspberry\/draw\/docker-compose\.pi-edge\.yml /,
+      );
+    }
+    expectText(runbook, "never rely on working-directory, `COMPOSE_FILE`, or filename discovery");
+  });
+
+  it("stops Watchtower before any Compose or env edit, then uses service-scoped operations", () => {
+    const activation = edgeRunbook.slice(edgeRunbook.indexOf("==== Safe activation"));
     const ordered = [
-      "docker compose stop watchtower",
-      "docker compose config --quiet",
-      "docker compose up -d --no-deps draw",
+      `${EDGE_COMPOSE} stop watchtower`,
+      "place the byte-exact reviewed `docker-compose.pi-edge.yml`",
+      "then set only the approved host `.env` values",
+      `${EDGE_COMPOSE} config --quiet draw watchtower`,
+      `${EDGE_COMPOSE} pull draw watchtower`,
+      `${EDGE_COMPOSE} up -d --no-deps draw`,
       "edge:<pre-merge-full-SHA>",
-      "docker compose up -d --no-deps watchtower",
+      `${EDGE_COMPOSE} up -d --no-deps watchtower`,
     ];
     let previous = -1;
     for (const step of ordered) {
-      const at = runbook.indexOf(step);
+      const at = activation.indexOf(step);
       expect(at).toBeGreaterThan(previous);
       previous = at;
     }
-    expectText(runbook, "Never run `docker compose down -v`");
+    expectText(runbook, "do this before replacing or editing any Compose file or `.env` value");
+    expectText(runbook, `${EDGE_COMPOSE} down -v`);
     expectText(runbook, "remove `draw_draw-data`, or recreate that volume");
     expectText(runbook, "do not start polling before Draw verification");
     expectText(runbook, "127.0.0.1:3001:3001");
@@ -214,14 +266,20 @@ describe("backup, activation, and rollback safety", () => {
   });
 });
 
-describe("merge-pending production acceptance", () => {
-  it("pins traceability and keeps issue closure behind exact-digest human acceptance", () => {
-    expectText(runbook, "`MERGE_PENDING_PRODUCTION_ACCEPTANCE`");
+describe("preactivation and production-acceptance lifecycle", () => {
+  it("keeps the PR preactivation-pending until criterion 5 permits transition", () => {
+    for (const source of [runbook, contributing]) {
+      expectText(source, "`PRE_ACTIVATION_EVIDENCE_PENDING`");
+      expectText(source, "criterion 5");
+      expectText(source, "`MERGE_PENDING_PRODUCTION_ACCEPTANCE`");
+    }
+    expectText(runbook, "it is not `MERGE_PENDING_PRODUCTION_ACCEPTANCE` and must not merge");
+    expectText(runbook, "Only the successful pre-merge activation above permits");
     expectText(runbook, "eeb0568faa31b6130f297f61172672a29aaa5afe53c612cbadeaa7d397d25461");
     expectText(runbook, "#280, and PR #283");
     expectText(runbook, "deliberately has no issue-closing keyword");
     expectText(runbook, "Merge leaves #286 open");
-    expectText(contributing, "does not prove unattended replacement");
+    expectText(contributing, "Merge still does not prove unattended replacement");
     expectText(runbook, "`ACCEPT <packet-sha256>`");
     expectText(runbook, "Nothing auto-closes");
   });
