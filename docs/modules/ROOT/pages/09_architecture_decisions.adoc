@@ -2636,9 +2636,11 @@ tokens, and errors still reject every redirect. The sole exception is an
 `amd64-config` or `arm64-config` digest-pinned blob GET: it may accept one empty
 307 and manually follow one HTTPS Location on
 `pkg-containers.githubusercontent.com` whose exact
-`/ghcrblobs<positive-decimal>/blobs/<requested-digest>` path binds it to that
-config. The complete nonempty signed query remains opaque and is passed through
-without application-level query parsing, normalization, or reserialization. The
+`/ghcrblobs<positive-decimal>/blobs/<requested-digest>` path, where the shard
+is one or more decimal digits with numeric value greater than zero and leading
+zeros are permitted, binds it to that config. The complete nonempty signed query
+remains opaque and is passed through without application-level query parsing,
+normalization, or reserialization. The
 follow carries only octet-stream and
 identity Accept headers--no Authorization, Cookie, or Referer--and rejects any
 further redirect.

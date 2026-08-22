@@ -225,7 +225,7 @@ function validateConfigCdnLocation(value, requestedDigest) {
   } catch {
     fail("config redirect location is invalid");
   }
-  const expectedPath = new RegExp(`^/ghcrblobs[1-9][0-9]*/blobs/${requestedDigest}$`);
+  const expectedPath = new RegExp(`^/ghcrblobs(?:0*[1-9][0-9]*)/blobs/${requestedDigest}$`);
   const expectedRawLocation = new RegExp(
     `^https://pkg-containers\\.githubusercontent\\.com(?::443)?${expectedPath.source.slice(1, -1)}\\?[^#]+$`,
   );
