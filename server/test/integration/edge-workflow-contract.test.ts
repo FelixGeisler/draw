@@ -598,6 +598,7 @@ function executeInspectionController(
 }
 
 type HistoryGateOptions = {
+  sourceUrl?: string;
   sourceKey?: string;
   bareKey?: string;
   value?: string;
@@ -615,6 +616,7 @@ type HistoryGateExecution = {
 
 function executeHistoryGate(
   {
+    sourceUrl = "https://github.com/FelixGeisler/draw.git",
     sourceKey,
     bareKey,
     value = "blocked-value",
@@ -640,16 +642,7 @@ function executeHistoryGate(
     fs.writeFileSync(audit, "");
 
     checked("git", ["init"], source);
-    checked(
-      "git",
-      [
-        "remote",
-        "add",
-        "origin",
-        "https://github.com/FelixGeisler/draw.git",
-      ],
-      source,
-    );
+    checked("git", ["remote", "add", "origin", sourceUrl], source);
     if (sourceKey !== undefined)
       checked("git", ["config", "--local", sourceKey, value], source);
 
@@ -822,10 +815,17 @@ describe("promotion history authority and lifecycle contract", () => {
     ).toBeLessThan(promotionJob.indexOf("merge-base --is-ancestor"));
   });
 
-  it("requires the clean literal origin and rejects every credential/rewrite key", () => {
+  it("allows only the two exact source origins and rejects every credential/rewrite key", () => {
+    expect(historyStep).toContain(
+      "readonly source_url='https://github.com/FelixGeisler/draw'",
+    );
     expect(historyStep).toContain(
       "readonly public_url='https://github.com/FelixGeisler/draw.git'",
     );
+    expect(historyStep).toContain(
+      'if [[ "$candidate" == "$public_url" ]]; then',
+    );
+    expect(historyStep).toContain('candidate="${candidate%.git}"');
     expect(historyStep).toContain("git remote get-url --all origin");
     expect(historyStep).toContain("git remote get-url --all --push origin");
     for (const key of [
@@ -907,6 +907,48 @@ describe("promotion history authority and lifecycle contract", () => {
       expect(execution.runnerEntries).toHaveLength(1);
     },
   );
+
+  it.each([
+    "https://github.com/FelixGeisler/draw",
+    "https://github.com/FelixGeisler/draw.git",
+  ])("executes the actual source gate for approved origin %s", (sourceUrl) => {
+    const execution = executeHistoryGate({ sourceUrl });
+    expect(execution.status, execution.stderr).toBe(0);
+    expect(execution.output).toMatch(
+      new RegExp(`^area=.+\\ntarget=${execution.target}\\n$`),
+    );
+    expect(execution.fetchAudit).toEqual([
+      expect.stringContaining(
+        "https://github.com/FelixGeisler/draw.git refs/heads/main:refs/remotes/origin/main",
+      ),
+    ]);
+  });
+
+  it.each([
+    ["alternate scheme", "http://github.com/FelixGeisler/draw"],
+    ["Git transport scheme", "git://github.com/FelixGeisler/draw.git"],
+    ["alternate host", "https://www.github.com/FelixGeisler/draw.git"],
+    ["explicit port", "https://github.com:443/FelixGeisler/draw.git"],
+    ["path suffix", "https://github.com/FelixGeisler/draw/"],
+    ["different path", "https://github.com/FelixGeisler/draw-other.git"],
+    ["query", "https://github.com/FelixGeisler/draw.git?ref=main"],
+    ["fragment", "https://github.com/FelixGeisler/draw.git#main"],
+    ["userinfo", "https://FelixGeisler@github.com/FelixGeisler/draw.git"],
+    [
+      "credential",
+      "https://FelixGeisler:secret@github.com/FelixGeisler/draw.git",
+    ],
+    ["owner case variation", "https://github.com/felixgeisler/draw.git"],
+    ["repository case variation", "https://github.com/FelixGeisler/Draw.git"],
+    ["suffix case variation", "https://github.com/FelixGeisler/draw.GIT"],
+    ["repeated suffix", "https://github.com/FelixGeisler/draw.git.git"],
+  ])("rejects actual source origin %s", (_name, sourceUrl) => {
+    const execution = executeHistoryGate({ sourceUrl });
+    expect(execution.status).not.toBe(0);
+    expect(execution.output).toBe("");
+    expect(execution.fetchAudit).toEqual([]);
+    expect(execution.runnerEntries).toEqual([]);
+  });
 
   it("stops an offline fetch failure with no handoff or fallback", () => {
     const execution = executeHistoryGate({ failFetch: true });

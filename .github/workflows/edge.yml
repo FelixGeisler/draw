@@ -209,8 +209,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          readonly source_url='https://github.com/FelixGeisler/draw'
           readonly public_url='https://github.com/FelixGeisler/draw.git'
           readonly forbidden='^(http(\..*)?\.extraheader|credential(\..*)?\.(helper|store)|url\..*\.(insteadof|pushinsteadof))$'
+
+          normalize_source_url() {
+            local candidate="$1"
+            if [[ "$candidate" == "$public_url" ]]; then
+              candidate="${candidate%.git}"
+            fi
+            printf '%s\n' "$candidate"
+          }
 
           reject_forbidden_config() {
             local output status
@@ -235,8 +244,10 @@ jobs:
           }
           mapfile -t fetch_urls < <(git remote get-url --all origin)
           mapfile -t push_urls < <(git remote get-url --all --push origin)
-          [[ "${fetch_urls[*]}" == "$public_url" && "${push_urls[*]}" == "$public_url" ]] || {
-            echo "checkout origin is not the exact public repository URL" >&2
+          [[ "${#fetch_urls[@]}" -eq 1 && "${#push_urls[@]}" -eq 1 &&
+             "$(normalize_source_url "${fetch_urls[0]-}")" == "$source_url" &&
+             "$(normalize_source_url "${push_urls[0]-}")" == "$source_url" ]] || {
+            echo "checkout origin is not one of the two exact approved public repository URLs" >&2
             exit 1
           }
           reject_forbidden_config --show-origin

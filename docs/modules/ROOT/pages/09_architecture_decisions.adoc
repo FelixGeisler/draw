@@ -2743,18 +2743,25 @@ same-SHA reruns, replaced pending work, and later main advancement converge
 whenever the current immutable source exists.
 * *Authoritative history has an isolated, anonymous boundary.* Promotion's
 non-persisting full-history checkout is only a source of workflow and inspector
-scripts. Its immediate first Bash step requires the exact clean public origin
-and rejects effective extra headers, credential helpers/stores, and fetch/push
+scripts. Its immediate first Bash step accepts the clean public source origin
+only as exact `https://github.com/FelixGeisler/draw` or exact
+`https://github.com/FelixGeisler/draw.git`, normalizing only an optional terminal
+`.git` for equality; every other scheme, host, port, path, query, fragment,
+userinfo/credential, spelling, case, suffix, or variation is rejected. The gate
+also rejects effective extra headers, credential helpers/stores, and fetch/push
 URL rewrites before repository-controlled scripts or authenticated operations.
 Under `env -i`, retaining only `PATH`, a new empty `HOME`, null global/system
 Git configs, disabled prompting/askpass, and an explicitly empty template, it
 initializes a fresh bare repository in one unique current-user-owned mode-0700
-direct child of `RUNNER_TEMP`. It verifies that bare config, then fetches the
-literal public HTTPS URL and exact `main` refspec with an explicitly empty
-credential-helper chain, no named remote, no Git-config redirect, and no token
-or credential fallback. Only that fetched ref selects the target and only that
-bare object database--with alternates and replace refs rejected--may prove an
-existing edge revision is a commit ancestor by `merge-base --is-ancestor`.
+direct child of `RUNNER_TEMP`. It verifies that bare config, then fetches exact
+literal `https://github.com/FelixGeisler/draw.git` and the exact `main` refspec
+with an explicitly empty credential-helper chain, no named remote, no Git-config
+redirect, and no token or credential fallback. The source checkout's bounded
+no-suffix allowance does not apply to this authoritative bare fetch or to any
+bare `origin` URL if one is present. Only that fetched ref selects the target
+and only that bare object database--with alternates and replace refs
+rejected--may prove an existing edge revision is a commit ancestor by
+`merge-base --is-ancestor`.
 * *The temporary history lifecycle crosses steps without crossing the credential
 boundary.* An initialization-only trap removes the area on failure or
 interruption before its exact path and fetched target are handed off through
@@ -2809,8 +2816,10 @@ retain the `v*`, full-test, semver/conditional-`latest`, two-platform, and GitHu
 Release boundary. Edge tests pin the completed-run route, both jobs' five
 independent authorization predicates, publication's event-head checkout and seven action
 SHAs, promotion's fixed runner/Bash shell and four action SHAs, exact
-permissions/concurrency, isolated anonymous public-main history and lifecycle,
-Node/credential boundaries, absent-only publication, digest-only promotion,
+permissions/concurrency, both exact checkout-compatible source-origin forms and
+adversarial near-match rejection, isolated anonymous literal-`.git` public-main
+history and lifecycle, Node/credential boundaries, absent-only publication,
+digest-only promotion,
 and both post-checks. Pure state models cover reverse completion order,
 same-SHA reruns, valid presence, authoritative absence, one-running/one-pending
 replacement, main advancement, non-ancestor/unprovable state,
