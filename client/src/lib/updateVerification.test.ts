@@ -25,7 +25,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function harness(poll: () => Promise<Status>) {
+function harness(poll: (signal: AbortSignal) => Promise<Status>) {
   const callbacks = {
     poll: vi.fn(poll),
     onPhase: vi.fn(),
@@ -100,10 +100,11 @@ describe("UpdateVerifier", () => {
   });
 
   it("stops on an answered trigger failure without waiting for the deadline", async () => {
-    const { callbacks, verifier } = harness(async () => ({
-      ...unchanged,
-      lastApplyError: "HTTP 401",
-    }));
+    const signals: AbortSignal[] = [];
+    const { callbacks, verifier } = harness(async (signal) => {
+      signals.push(signal);
+      return { ...unchanged, lastApplyError: "HTTP 401" };
+    });
 
     verifier.start(ORIGINAL);
     await vi.advanceTimersByTimeAsync(UPDATE_POLL_MS);
@@ -111,44 +112,72 @@ describe("UpdateVerifier", () => {
     expect(callbacks.onTriggerFailure).toHaveBeenCalledWith("HTTP 401");
     expect(callbacks.onTimeout).not.toHaveBeenCalled();
     expect(verifier.isActive()).toBe(false);
+    expect(signals[0]?.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("completes once, with no duplicate polls or completion effects", async () => {
+  it("completes once, aborts its transport, and has no duplicate effects", async () => {
     const replacement = {
       buildIdentity: "edge:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       lastApplyError: null,
       buildSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
     };
-    const { callbacks, verifier } = harness(async () => replacement);
+    const signals: AbortSignal[] = [];
+    const { callbacks, verifier } = harness(async (signal) => {
+      signals.push(signal);
+      return replacement;
+    });
 
     verifier.start(ORIGINAL);
     await vi.advanceTimersByTimeAsync(UPDATE_POLL_MS);
     expect(callbacks.onComplete).toHaveBeenCalledOnce();
     expect(callbacks.onComplete).toHaveBeenCalledWith(replacement);
+    expect(signals[0]?.aborted).toBe(true);
     await vi.advanceTimersByTimeAsync(UPDATE_BUDGET_MS);
     expect(callbacks.poll).toHaveBeenCalledOnce();
     expect(callbacks.onComplete).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("never overlaps a slow request and ignores its late completion after timeout", async () => {
-    const pending = deferred<Status>();
-    const { callbacks, verifier } = harness(() => pending.promise);
+  it("aborts an unresolved timeout poll and prevents timeout → resume overlap", async () => {
+    const first = deferred<Status>();
+    const second = deferred<Status>();
+    const signals: AbortSignal[] = [];
+    const { callbacks, verifier } = harness((signal) => {
+      signals.push(signal);
+      return signals.length === 1 ? first.promise : second.promise;
+    });
 
     verifier.start(ORIGINAL);
     await vi.advanceTimersByTimeAsync(UPDATE_POLL_MS);
     expect(callbacks.poll).toHaveBeenCalledOnce();
-    await vi.advanceTimersByTimeAsync(UPDATE_BUDGET_MS - UPDATE_POLL_MS);
-    expect(callbacks.poll).toHaveBeenCalledOnce();
-    expect(callbacks.onTimeout).toHaveBeenCalledOnce();
+    expect(signals[0]?.aborted).toBe(false);
 
-    pending.resolve({
-      buildIdentity: "edge:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-      lastApplyError: null,
-      buildSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    });
+    await vi.advanceTimersByTimeAsync(UPDATE_BUDGET_MS - UPDATE_POLL_MS);
+    expect(callbacks.onTimeout).toHaveBeenCalledOnce();
+    expect(signals[0]?.aborted).toBe(true);
+
+    // Resume may establish a fresh bounded window immediately, but the one
+    // shared guard remains until the aborted promise settles.
+    expect(verifier.start(ORIGINAL)).toBe(true);
+    await vi.advanceTimersByTimeAsync(UPDATE_POLL_MS);
+    expect(callbacks.poll).toHaveBeenCalledOnce();
+
+    first.reject(new DOMException("aborted", "AbortError"));
+    await expect(first.promise).rejects.toMatchObject({ name: "AbortError" });
     await Promise.resolve();
+    expect(callbacks.onPhase).not.toHaveBeenCalledWith("reconnecting");
+
+    await vi.advanceTimersByTimeAsync(UPDATE_POLL_MS);
+    expect(callbacks.poll).toHaveBeenCalledTimes(2);
+    expect(signals[1]?.aborted).toBe(false);
+
+    verifier.cancel();
+    expect(signals[1]?.aborted).toBe(true);
+    second.reject(new DOMException("aborted", "AbortError"));
+    await expect(second.promise).rejects.toMatchObject({ name: "AbortError" });
+    await Promise.resolve();
+    expect(callbacks.onPhase).not.toHaveBeenCalledWith("reconnecting");
     expect(callbacks.onComplete).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -167,18 +196,25 @@ describe("UpdateVerifier", () => {
     expect(callbacks.onTimeout).toHaveBeenCalledOnce();
   });
 
-  it("rejects repeated starts and cancellation makes an in-flight response inert", async () => {
+  it("rejects repeated starts and cancellation aborts an in-flight response", async () => {
     const pending = deferred<Status>();
-    const { callbacks, verifier } = harness(() => pending.promise);
+    const signals: AbortSignal[] = [];
+    const { callbacks, verifier } = harness((signal) => {
+      signals.push(signal);
+      return pending.promise;
+    });
 
     expect(verifier.start(ORIGINAL)).toBe(true);
     expect(verifier.start("local:other")).toBe(false);
     await vi.advanceTimersByTimeAsync(UPDATE_POLL_MS);
     verifier.cancel();
-    pending.reject(new Error("late network failure"));
+    expect(signals[0]?.aborted).toBe(true);
+    pending.reject(new DOMException("aborted", "AbortError"));
+    await expect(pending.promise).rejects.toMatchObject({ name: "AbortError" });
     await Promise.resolve();
 
     expect(callbacks.poll).toHaveBeenCalledOnce();
+    expect(callbacks.onPhase).not.toHaveBeenCalledWith("reconnecting");
     expect(callbacks.onComplete).not.toHaveBeenCalled();
     expect(callbacks.onTriggerFailure).not.toHaveBeenCalled();
     expect(callbacks.onTimeout).not.toHaveBeenCalled();

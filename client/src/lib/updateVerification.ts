@@ -12,7 +12,7 @@ export interface UpdateVerificationStatus {
 }
 
 interface UpdateVerificationCallbacks<T extends UpdateVerificationStatus> {
-  poll: () => Promise<T>;
+  poll: (signal: AbortSignal) => Promise<T>;
   onPhase: (phase: UpdateVerificationPhase) => void;
   onElapsed: (elapsedSeconds: number) => void;
   onComplete: (status: T) => void;
@@ -44,7 +44,7 @@ export function formatElapsedWait(elapsedSeconds: number): string {
  */
 export class UpdateVerifier<T extends UpdateVerificationStatus> {
   private active = false;
-  private inFlight = false;
+  private inFlight: { generation: number; controller: AbortController } | null = null;
   private generation = 0;
   private startedAt = 0;
   private originalIdentity = "";
@@ -59,7 +59,6 @@ export class UpdateVerifier<T extends UpdateVerificationStatus> {
     if (this.active) return false;
 
     this.active = true;
-    this.inFlight = false;
     this.generation += 1;
     this.startedAt = Date.now();
     this.originalIdentity = originalIdentity;
@@ -101,13 +100,16 @@ export class UpdateVerifier<T extends UpdateVerificationStatus> {
       return;
     }
 
-    this.inFlight = true;
+    const request = { generation, controller: new AbortController() };
+    this.inFlight = request;
     try {
       let status: T;
       try {
-        status = await this.callbacks.poll();
+        status = await this.callbacks.poll(request.controller.signal);
       } catch {
-        if (this.isCurrent(generation)) this.callbacks.onPhase("reconnecting");
+        if (this.isCurrent(generation) && !request.controller.signal.aborted) {
+          this.callbacks.onPhase("reconnecting");
+        }
         return;
       }
 
@@ -124,7 +126,7 @@ export class UpdateVerifier<T extends UpdateVerificationStatus> {
       }
       this.callbacks.onPhase("waiting");
     } finally {
-      if (this.generation === generation) this.inFlight = false;
+      if (this.inFlight === request) this.inFlight = null;
     }
   }
 
@@ -136,7 +138,6 @@ export class UpdateVerifier<T extends UpdateVerificationStatus> {
 
   private stop(): void {
     this.active = false;
-    this.inFlight = false;
     this.generation += 1;
     if (this.pollTimer !== null) clearInterval(this.pollTimer);
     if (this.elapsedTimer !== null) clearInterval(this.elapsedTimer);
@@ -144,5 +145,9 @@ export class UpdateVerifier<T extends UpdateVerificationStatus> {
     this.pollTimer = null;
     this.elapsedTimer = null;
     this.deadlineTimer = null;
+    // Keep the shared guard until the promise settles. A resumed window may
+    // start immediately, but cannot issue another authenticated GET while an
+    // abort-resistant callback from the previous window remains unresolved.
+    this.inFlight?.controller.abort();
   }
 }

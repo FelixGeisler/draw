@@ -463,6 +463,12 @@ interface UpdateStatus {
   buildIdentity: string;
 }
 
+async function pollUpdateStatus(signal: AbortSignal): Promise<UpdateStatus> {
+  const response = await fetch("/api/update", { signal });
+  if (!response.ok) throw new Error(response.statusText);
+  return response.json() as Promise<UpdateStatus>;
+}
+
 /**
  * Updates over the air (#247, ADR-70): the running version, the default-on
  * daily release check, and a write-only apply trigger — one POST to a
@@ -500,7 +506,7 @@ function UpdateSection() {
 
   if (verifier.current === null) {
     verifier.current = new UpdateVerifier<UpdateStatus>({
-      poll: () => api.get<UpdateStatus>("/api/update"),
+      poll: pollUpdateStatus,
       onPhase: setApplyPhase,
       onElapsed: setElapsedSeconds,
       onTriggerFailure: (message) => {
@@ -611,15 +617,13 @@ function UpdateSection() {
   });
 
   const apply = useMutation({
-    mutationFn: () => api.post<{ ok: boolean }>("/api/update/apply", {}),
-    onSuccess: () => {
+    mutationFn: (_startedBuildIdentity: string) =>
+      api.post<{ ok: boolean }>("/api/update/apply", {}),
+    onSuccess: (_response, startedBuildIdentity) => {
       // A slow apply response must not resurrect verification after Settings
-      // unmounts. The button only renders once status.data is loaded.
+      // unmounts. The immutable mutation argument is the identity captured
+      // before the POST, even if another status request updates the cache.
       if (!mounted.current) return;
-      // Keep this original identity across every resume window.
-      const startedBuildIdentity = status.data?.buildIdentity;
-      if (!startedBuildIdentity) return;
-      originalIdentity.current = startedBuildIdentity;
       setApplyError(null);
       verifier.current?.start(startedBuildIdentity);
     },
@@ -630,8 +634,15 @@ function UpdateSection() {
 
   function requestApply() {
     if (applyRequested.current) return;
+    const startedBuildIdentity = status.data?.buildIdentity;
+    if (!startedBuildIdentity) return;
+
+    // Capture the authoritative currently rendered identity synchronously,
+    // before the privileged apply POST can trigger replacement or race a
+    // status/cache update. Every resume window keeps this exact baseline.
+    originalIdentity.current = startedBuildIdentity;
     applyRequested.current = true;
-    apply.mutate();
+    apply.mutate(startedBuildIdentity);
   }
 
   function resumeChecking() {

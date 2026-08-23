@@ -53,7 +53,11 @@ async function routeUpdateApi(
 ) {
   await page.route("**/*", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
-    if (pathname === "/api/update" || pathname === "/api/update/apply") {
+    if (
+      pathname === "/api/update" ||
+      pathname === "/api/update/apply" ||
+      pathname === "/api/update/check"
+    ) {
       await handler(route, pathname);
       return;
     }
@@ -179,6 +183,59 @@ test("changed buildIdentity reloads once at the same package version", async ({ 
   await page.reload();
   await expect(page.getByTestId("update-updated-notice")).toHaveCount(0);
   expect(documentLoads).toBe(loadsBeforeApply + 2);
+});
+
+test("apply keeps the pre-POST identity when status changes before acceptance", async ({
+  page,
+}) => {
+  let statusChanged = false;
+  let applyPosts = 0;
+  let heldApply: Route | null = null;
+  let markApplyReceived!: () => void;
+  const applyReceived = new Promise<void>((resolve) => {
+    markApplyReceived = resolve;
+  });
+  const original = updateStatus({ applyConfigured: true });
+  const intervening = updateStatus({
+    applyConfigured: true,
+    buildSha: NEW_SHA,
+    buildIdentity: `edge:${NEW_SHA}`,
+  });
+
+  await routeUpdateApi(page, async (route, pathname) => {
+    if (pathname === "/api/update/apply") {
+      applyPosts += 1;
+      heldApply = route;
+      markApplyReceived();
+      return;
+    }
+    if (pathname === "/api/update/check") {
+      statusChanged = true;
+      await route.fulfill({ json: intervening });
+      return;
+    }
+    await route.fulfill({ json: statusChanged ? intervening : original });
+  });
+
+  await page.goto("/settings");
+  await expect(page.getByTestId("update-build-identity")).toContainText(OLD_SHA);
+  await page.getByTestId("update-apply").click();
+  await applyReceived;
+
+  // This answered status request updates React Query while the apply POST is
+  // still unresolved. It must not replace the synchronously captured baseline.
+  await page.getByTestId("update-check-now").click();
+  await expect(page.getByTestId("update-check-result")).toBeVisible();
+  await expect(page.getByTestId("update-build-identity")).toContainText(NEW_SHA);
+
+  if (heldApply === null) throw new Error("apply route was not captured");
+  await heldApply.fulfill({ json: { ok: true } });
+
+  await expect(page.getByTestId("update-updated-notice")).toHaveText(
+    "Updated to edge build 0123456789ab",
+    { timeout: 10_000 },
+  );
+  expect(applyPosts).toBe(1);
 });
 
 test("the accessible indeterminate status moves Waiting → Reconnecting → Waiting", async ({
