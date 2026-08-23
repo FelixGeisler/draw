@@ -12,7 +12,7 @@ import { gamificationRouter } from "./routes/gamification.js";
 import { achievementsRouter } from "./routes/achievements.js";
 import { goalsRouter } from "./routes/goals.js";
 import { searchRouter } from "./routes/search.js";
-import { shopRouter } from "./routes/shop.js";
+import { createShopRouter } from "./routes/shop.js";
 import { challengeRouter } from "./routes/challenge.js";
 import { notifyRouter } from "./routes/notify.js";
 import { updateRouter } from "./routes/update.js";
@@ -47,7 +47,12 @@ export interface AppOptions {
   trustProxy?: boolean | number | string;
 }
 
-export function createApp(options: AppOptions = {}) {
+export interface AppDependencies {
+  /** Internal deterministic seam for in-process pack API tests. */
+  shopRandom?: () => number;
+}
+
+export function createApp(options: AppOptions = {}, dependencies: AppDependencies = {}) {
   const app = express();
   // No framework fingerprint — LAN exposure is a supported configuration
   // since #189.
@@ -94,7 +99,7 @@ export function createApp(options: AppOptions = {}) {
   app.use("/api/activity", activityRouter);
   app.use("/api/gamification", gamificationRouter);
   app.use("/api/achievements", achievementsRouter);
-  app.use("/api/shop", shopRouter);
+  app.use("/api/shop", createShopRouter(dependencies.shopRandom ?? Math.random));
   app.use("/api/challenge", challengeRouter);
   app.use("/api/notify", notifyRouter);
   // OTA update surface (#247) — deliberately BELOW the gate: the running

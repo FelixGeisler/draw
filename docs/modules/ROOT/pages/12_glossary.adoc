@@ -113,7 +113,7 @@
 |A weekday configured in `streak_rest_weekdays`; without a completion it neither breaks nor extends the streak — with one it counts like any other day
 
 |*Freeze token*
-|Earned every 7th real streak day (append-only `streak_freezes` log, max 2 banked); auto-covers a missed non-rest day inside a run — consumption is derived at read time, never stored, and a gap the bank cannot cover breaks the run and expires the bank (ADR-28)
+|Earned every 7th real streak day, by a historical direct purchase, or by an effective pack Freeze (`pack_openings` read in opening order); max 2 banked. It auto-covers a later missed non-rest day inside a run — consumption is derived at read time, never stored, and a gap the bank cannot cover breaks the run and expires the bank (ADR-28/#266)
 
 |*Goal outcome*
 |Free-text description of how goal success is measured ("written exam, 60% to pass") — the anchor for impact ratings and backward planning
@@ -128,13 +128,16 @@
 |Append-only historical effects introduced in v17 (#230, ADR-62). Since v18 (#263), only `reason='challenge'` contributes to permanent XP; legacy purchase/refund/unknown rows remain stored but are inert. `buy:freeze` timestamps remain historical freeze-replay inputs only
 
 |*Gold ledger*
-|Schema-v18 append-only effects not owned by a completion or achievement: `(amount, reason, ref, created_at)` with unique `(reason, ref)`. Gold is the unclamped sum of completion Gold, achievement Gold and this ledger. #264 activates `challenge` as +20 paired atomically with challenge XP; future `buy:pack`, `refund:duplicate`, and `bonus:pouch` remain owned by later work
+|Schema-v18 append-only effects not owned by a completion or achievement: `(amount, reason, ref, created_at)` with unique `(reason, ref)`. Gold is the unclamped sum of completion Gold, achievement Gold and this ledger. `challenge` is +20 paired with challenge XP; #266 adds atomic `buy:pack=-100`, tier-scaled `refund:duplicate=10/20/40/100`, and `bonus:pouch=50` effects. Ticket payment writes no Gold row
 
 |*Pack opening*
-|An immutable future replay fact ordered by AUTOINCREMENT `opening_order`, idempotent by unique `ref`, recording payment, back, rarity, duplicate flag, applied Secret chance and effective post-cap bonus. #265 supplies only pure calculations: next Secret basis points are `min(500 + 50 * trailing non-Secret outcomes, 1500)` in oldest-to-newest order; one explicit finite `[0,1)` sample selects Secret then the 45:32:18 remainder, and a separate sample selects uniformly within its tier. Schema v18 leaves the table empty; production randomness, effects and openings begin in #266
+|An immutable replay fact ordered by AUTOINCREMENT `opening_order`, idempotent by trimmed case-sensitive unique `ref`, recording payment, back, rarity, duplicate flag, applied Secret chance, effective post-cap bonus and timestamp. #266 creates it with charge/grant/refund/Pouch effects in one immediate transaction after exactly three server samples. Same-payment replay maps the row byte-equivalently with a fresh shop and no RNG/write/repair; changed payment conflicts. Next Secret basis points are `min(500 + 50 * trailing non-Secret outcomes, 1500)` in opening order
 
 |*Booster pack / card back*
-|The stable registry order is `classic`; common `ember`, `tide`, `midnight`, `parchment`, `graphite`; rare `meadow`, `royal`, `sakura`, `circuit`, `frost`; ultra-rare `aurum`, `aurora`, `obsidian`; secret-rare `prism`. Their names in the same order are Classic weave, Ember lattice, Tide glass, Midnight stars, Aged parchment, Graphite weave, Meadow braid, Royal filigree, Sakura glass, Neon circuit, Frost lattice, Aurum crest, Aurora silk, Obsidian gold and Prism foil. Settings still own/equip them (`owned_card_backs` / `equipped_card_back`) and Draw uses Classic as always-owned/unknown fallback; Classic is not pullable or refundable. Duplicate Gold is 10/20/40/100. Effective bonuses are Freeze/Pouch/Ticket/none at 5/5/2/88%, with bank-2 Freeze resolving to Pouch. Inputs are explicit and invalid values throw; #265 adds no RNG or opening activation. The transitional shop remains read-only until #266; CSS designs are #267
+|A one-background opening costing 100 Gold or one explicit Golden Ticket. The stable registry order is `classic`; common `ember`, `tide`, `midnight`, `parchment`, `graphite`; rare `meadow`, `royal`, `sakura`, `circuit`, `frost`; ultra-rare `aurum`, `aurora`, `obsidian`; secret-rare `prism`. Their names in the same order are Classic weave, Ember lattice, Tide glass, Midnight stars, Aged parchment, Graphite weave, Meadow braid, Royal filigree, Sakura glass, Neon circuit, Frost lattice, Aurum crest, Aurora silk, Obsidian gold and Prism foil. Settings own/equip them and Classic is the always-owned, non-pullable fallback. New grants preserve unknown strings and do not equip. Duplicate Gold is 10/20/40/100; bonuses are Freeze/Pouch/Ticket/none at 5/5/2/88%, with bank-2 Freeze becoming Pouch. CSS/reveal are #267
+
+|*Golden Ticket*
+|A derived pack payment resource: count of immutable Ticket bonuses minus count of Ticket-paid openings, without clamp, repair or mutable counter. A fresh Ticket payment needs at least one before its opening; replay ignores the current balance
 
 |*Daily challenge*
 |One derived objective per LOCAL day (#231/#264, ADR-63): the day string hashes into an append-only pool; progress derives from the day's rows (`localDayBounds`); completing it atomically pays same-ref +50 XP and +20 Gold with the triggering completion or timer stop, never by a GET. `paid` remains XP-row truth: XP-only is immutable legacy, both rows are paid, and Gold-only is displayed as inconsistent and aborts a payout attempt without repair

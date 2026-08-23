@@ -39,7 +39,7 @@ package "server/ — Express 5" {
   package "services/ — domain logic" {
     component "drawService\ndrawability, weights,\nwarm-up, current draw" as drawSvc
     component "gamificationService\ncompleteTask(): XP,\nstreaks, achievements" as gamSvc
-    component "shopService + packCatalog\ncollection snapshot + pure\ncatalog/probability rules" as shopSvc
+    component "shopService + packCatalog\natomic opening/replay + derived snapshot\npure catalog/probability rules" as shopSvc
     component "statsService\nactivityService" as statsSvc
     component "aiService\ncardArtService" as aiSvc
     component "backupService" as backupSvc
@@ -109,8 +109,8 @@ server/src/
 │   │                        GET /api/stats/estimation-bias (all-history, ADR-27)
 │   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
 │   ├── gamification.ts      GET /api/gamification
-│   ├── shop.ts              read-only Gold/collection snapshot + equip compatibility;
-│   │                        purchases remain unavailable until #266
+│   ├── shop.ts              exact Gold/Ticket pack HTTP contract + collection snapshot;
+│   │                        validates before the atomic shop service (#266)
 │   ├── settings.ts          key-value settings
 │   ├── backup.ts            GET /api/backup/export, POST /api/backup/import (ADR-26)
 │   ├── cardArt.ts           GET /api/card-art — cache-only batch reads (#114),
@@ -124,7 +124,8 @@ server/src/
     ├── activityService.ts   per-day card derivation for the Stats History calendar (pure core + SQL fetch)
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
     ├── streak.ts            pure streak fold: rest days, freeze tokens (ADR-28)
-    ├── shopService.ts       settings-owned collection/equipment compatibility
+    ├── shopService.ts       per-request immediate pack transaction, replay, derived snapshot,
+    │                        settings-owned collection/equipment and durable effects (#266)
     ├── packCatalog.ts       pure fixed catalog, Secret progression, rarity/item selection,
     │                        duplicate refund and effective bonus selection (#265, ADR-62)
     ├── backupService.ts     zip export/import of app.db + files/ (ADR-26)
@@ -157,8 +158,8 @@ server/src/
 |Derived read-side from `time_entries` + `completions`, bucketed by *local* day; a worked-but-uncompleted day stays face-down forever
 
 |`shopService` + `packCatalog`
-|Read-only collection compatibility plus pack catalog/probability calculations
-|Classic is always-owned fallback and never pullable; every calculation requires explicit validated inputs and performs no RNG, clock, request, database or write work
+|Atomic pack purchase/replay, derived shop state and settings-owned collection, over pure catalog/probability calculations
+|Classic is always-owned fallback and never pullable; each fresh opening is one immediate transaction and three server-supplied samples, while replay consumes no RNG and reapplies no fact
 
 |`aiService`
 |Claude API access
@@ -187,8 +188,15 @@ chance and divides the remainder 45:32:18; a separate sample selects uniformly
 within the chosen tier; duplicate Gold is 10/20/40/100; and bonus intervals are
 Freeze 5%, Pouch 5%, Ticket 2%, none 88%, with a would-be Freeze resolving to
 Pouch at the bank cap of 2. Invalid inputs throw rather than clamp or coerce.
-There is no default/production RNG or opening behavior here: payment,
-persistence, effects and production openings begin in #266.
+`packCatalog.ts` still owns no RNG or persistence. #266 composes `Math.random`
+at `createApp` into a per-app shop router and calls the pure functions with
+exactly three samples only after replay and payment checks. `shopService.ts`
+owns the current-handle `db.transaction(fn).immediate()` boundary: canonical
+ref lookup, derived Gold/Ticket/Secret/Freeze reads, opening insert,
+settings-owned grant, and charge/refund/Pouch effects commit or roll back as
+one unit. It maps immutable opening facts separately from the fresh shop
+snapshot; same-ref/same-payment replay returns the same opening without RNG or
+repair. No client, schema, backup-format, or test endpoint participates.
 
 == 5.3 Whitebox: Client
 

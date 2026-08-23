@@ -17,6 +17,7 @@ import { createBackupArchive, MANIFEST_APP } from "../../src/services/backupServ
 // order-dependent (they share one DATA_DIR and deliberately replace it).
 
 let app: express.Express;
+const backupPackSamples = [0.1, 0, 0.5];
 const dataDir = () => process.env.DATA_DIR!;
 const filesDir = () => path.join(dataDir(), "files");
 
@@ -95,19 +96,20 @@ async function tamperedV18Archive(mutate: (database: Database.Database) => void)
 
 /** Full API snapshot used to prove "identical" and "untouched". */
 async function apiSnapshot() {
-  const [tasks, goals, settings, gamification] = await Promise.all([
+  const [tasks, goals, settings, gamification, shop] = await Promise.all([
     request(app).get("/api/tasks").expect(200),
     request(app).get("/api/goals").expect(200),
     request(app).get("/api/settings").expect(200),
-    // Derived from completions + rest setting + freeze earn log (ADR-28) —
-    // equality here proves the streak inputs made the round trip.
+    // Derived from completions + rest setting + every Freeze earn fact.
     request(app).get("/api/gamification").expect(200),
+    request(app).get("/api/shop").expect(200),
   ]);
   return {
     tasks: tasks.body,
     goals: goals.body,
     settings: settings.body,
     gamification: gamification.body,
+    shop: shop.body,
   };
 }
 
@@ -116,7 +118,7 @@ let taskId: number;
 let materialId: number;
 
 beforeAll(async () => {
-  app = await freshApp();
+  app = await freshApp({ shopRandom: () => backupPackSamples.shift()! });
 
   // Seed: a goal with a real uploaded file, a linked task, a completion
   // (gamification history), a changed setting, and a stored API key.
@@ -176,6 +178,12 @@ beforeAll(async () => {
   db.prepare(
     "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (-3, 'buy:pack', 'backup-gold', ?)",
   ).run("2026-08-20T10:00:00.000Z");
+  // Leaves enough derived Gold for one real post-restore opening, proving the
+  // restored sequence is consumed through the production API rather than a
+  // direct fixture insert.
+  db.prepare(
+    "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (103, 'backup:seed', 'backup-funds', ?)",
+  ).run("2026-08-20T10:00:30.000Z");
   db.prepare(
     `INSERT INTO pack_openings
      (opening_order, ref, payment, back_key, rarity, duplicate, secret_chance_bp, effective_bonus, opened_at)
@@ -283,6 +291,7 @@ describe("POST /api/backup/import — round trip", () => {
     expect(after.goals).toEqual(before.goals);
     expect(after.settings).toEqual(before.settings);
     expect(after.gamification).toEqual(before.gamification);
+    expect(after.shop).toEqual(before.shop);
     // The display customization (#177) survived the round trip — the new
     // achievement_customizations table rode ADR-26's whole-file snapshot and the
     // reopen-and-remigrate on import.
@@ -297,6 +306,7 @@ describe("POST /api/backup/import — round trip", () => {
     expect(restored.prepare("SELECT COUNT(*) AS n FROM streak_freezes").get()).toEqual({ n: 1 });
     expect(restored.prepare("SELECT amount, reason, ref FROM gold_ledger").all()).toEqual([
       { amount: -3, reason: "buy:pack", ref: "backup-gold" },
+      { amount: 103, reason: "backup:seed", ref: "backup-funds" },
     ]);
     expect(
       restored.prepare("SELECT opening_order AS openingOrder, ref FROM pack_openings").all(),
@@ -304,14 +314,28 @@ describe("POST /api/backup/import — round trip", () => {
     expect(
       restored.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'pack_openings'").get(),
     ).toEqual({ seq: 5 });
-    const later = restored
-      .prepare(
-        `INSERT INTO pack_openings
-         (ref, payment, back_key, rarity, duplicate, secret_chance_bp, effective_bonus, opened_at)
-         VALUES ('backup-opening-later', 'ticket', 'classic', 'rare', 1, 550, 'ticket', ?)`,
-      )
-      .run("2026-08-20T10:02:00.000Z");
-    expect(Number(later.lastInsertRowid)).toBeGreaterThan(5);
+    const replay = await request(app)
+      .post("/api/shop/buy")
+      .send({ item: "pack", payment: "gold", ref: "backup-opening" })
+      .expect(200);
+    expect(replay.body).toMatchObject({
+      replayed: true,
+      opening: {
+        openingOrder: 5,
+        ref: "backup-opening",
+        payment: "gold",
+        appliedSecretChanceBps: 500,
+        openedAt: "2026-08-20T10:01:00.000Z",
+      },
+      shop: before.shop,
+    });
+
+    const later = await request(app)
+      .post("/api/shop/buy")
+      .send({ item: "pack", payment: "gold", ref: "backup-opening-later" })
+      .expect(200);
+    expect(later.body.opening.openingOrder).toBeGreaterThan(5);
+    expect(later.body.opening.appliedSecretChanceBps).toBe(550);
 
     const download = await request(app)
       .get(`/api/materials/${materialId}/download`)
