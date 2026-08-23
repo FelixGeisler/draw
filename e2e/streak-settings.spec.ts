@@ -22,7 +22,12 @@ test.describe("streak settings", () => {
 
     // The freeze bank is displayed read-only right next to the toggles.
     await expect(streakPanel.getByText(/Freezes banked/)).toBeVisible();
-    await expect(streakPanel.getByText("🧊 0/2")).toBeVisible();
+    // Playwright specs share one throwaway suite database, so the earlier
+    // real-production-RNG shop journey may persist a random Freeze pack bonus.
+    const gamificationResponse = await page.request.get("/api/gamification");
+    expect(gamificationResponse.ok()).toBe(true);
+    const { freezesBanked, freezeBankCap } = await gamificationResponse.json();
+    await expect(streakPanel.getByText(`🧊 ${freezesBanked}/${freezeBankCap}`)).toBeVisible();
 
     await page.reload();
     await expect(sat).toHaveAttribute("aria-pressed", "true");
