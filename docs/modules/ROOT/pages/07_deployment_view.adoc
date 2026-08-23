@@ -270,18 +270,23 @@ timer) the server GETs the GitHub latest-release endpoint
 (`UPDATE_CHECK_URL` overrides it), compares the tag against its own
 `server/package.json` version — numeric semver fields, prereleases offered
 only to prerelease runners — and caches the result in memory. The
-`update_check_enabled` setting (Settings -> Updates, default on) gates every
-call including the scheduled tick: off means zero outbound calls, the #235
-rule. The first check runs ~60s after boot with jitter, never in the boot
-path. A failed re-check (network, non-2xx, or a reachable feed answering
+persisted `update_check_enabled` setting (default on) gates every call
+including the scheduled tick: off means zero outbound calls, the #235 rule.
+Operators may manage that retained setting through the authenticated settings
+API; it is no longer exposed as a Settings control. The first check runs ~60s
+after boot with jitter, never in the boot path. A failed re-check (network, non-2xx, or a reachable feed answering
 without a `tag_name`) retains the last successful sighting — one blip must
-not un-light the banner until the next daily tick.
+not discard a known latest version until the next daily tick.
 
-*Tell.* Settings -> Updates shows the running version, a "Check now" button
-and — when a newer release is out — a banner with the release-notes link.
-Forced checks are throttled server-side (one outbound GET per 30s; within
-the window the cached status is served), so a hammered button cannot burn
-GitHub's unauthenticated 60-req/hr budget.
+*Tell.* Settings -> Updates is deliberately minimal: **Current Version** is
+always present as `Draw <package>`, with ` · Edge <first-12-sha>` or
+` · Local <first-12-sha>` only for SHA-bearing edge/local builds. **Latest
+Version** appears only when the server knows one and preserves that value
+unchanged; **Update** appears only when `updateAvailable` is true. The release-feed result, forced-check control,
+banner, release-notes link, channel guide, and separate build row are not
+Settings UI. The retained forced-check API is throttled server-side (one
+outbound GET per 30s; within the window the cached status is served), so API
+clients cannot burn GitHub's unauthenticated 60-req/hr budget.
 The first sighting of a new version additionally sends one notification
 through the existing `notify_url` door (#235), deduped in the
 `update_last_notified_version` settings row so re-checks and restarts never
@@ -309,19 +314,23 @@ with periodic polling off (the trigger is the only actor):
     #   image: ghcr.io/felixgeisler/draw:latest   (image, not build:)
 ----
 
-In Settings -> Updates, save `http://watchtower:8080/v1/update` plus the
-token as the update trigger (write-only, presence flag on read, excluded
-from `GET /api/settings` like `notify_url`). "Update now" then POSTs the
-trigger with `Authorization: Bearer <token>` — the bearer never rides the
-check request — answers `202`, and the client polls `GET /api/update` every
-3s (up to 5 minutes) until the reported version changes, then reloads
-through the #193 service-worker path and pays one "Updated to X" line. A
-trigger that answers non-2xx (token typo'd, wrong URL) is remembered as
-`lastApplyError` in the status and stops the poll with an error line instead
-of a five-minute wait; a dropped or aborted socket is deliberately NOT a
-failure — that is what a successful swap of the very container looks like.
-No trigger configured: the apply endpoint answers `409` and Settings shows
-this section instead of a button.
+Configure `http://watchtower:8080/v1/update` plus its optional token through
+the authenticated deployment/API path, `PUT /api/update/trigger` with
+`{"url":"...","token":"..."}` (write-only, presence flag on read, excluded
+from `GET /api/settings` like `notify_url`); remove it with
+`DELETE /api/update/trigger`. Settings does not expose trigger fields. **Update**
+POSTs the existing apply endpoint regardless of trigger presence. The trigger
+receives `Authorization: Bearer <token>` — the bearer never rides the check
+request — answers `202`, and the client polls `GET /api/update` every 3s (up
+to 5 minutes) until canonical `buildIdentity` changes, then reloads through
+the #193 service-worker path and pays one completion line. While applying or
+verifying, the action is the disabled indeterminate **Updating…**. A trigger
+that answers non-2xx is remembered as `lastApplyError` and stops polling with
+`Update failed: <server error>`; a dropped or aborted socket is deliberately
+NOT a failure — that is what a successful swap of the very container looks
+like. At five minutes, **Resume checking** starts a fresh verification window
+without POSTing the trigger again. No trigger configured: the apply endpoint
+answers the existing `409`, shown through the same concise error policy.
 
 *Rollback:* pin the previous image tag in the compose file
 (`image: ghcr.io/felixgeisler/draw:v1.2.3`), `docker compose up -d`, and —
@@ -332,8 +341,9 @@ is the supported direction). Current images accept backups through schema
 v18: older files migrate and undergo complete v18 schema/immutability
 validation in staging before the live database moves; a missing or weakened
 contract leaves the live deployment untouched. *Bare-npm path:* `git pull`, `npm ci`,
-`npm run build`, restart `npm start` — the check and the banner work the
-same; only the trigger button is container-specific.
+`npm run build`, restart `npm start` — release discovery and the minimal status
+work the same; without an operator-configured trigger, **Update** receives the
+existing `409` and bare-npm updating remains manual.
 
 [#edge-deployment-opt-in]
 === 7.5.1 Pi-only `edge` polling runbook (#286)
@@ -839,7 +849,7 @@ Notifications: a fire-and-forget plain-text POST (ntfy-compatible) on
 achievement unlocks, achieved goals, and completed daily challenges (unset,
 the default, means zero outbound calls from the notification path) —
 `api.github.com`, one GET per `UPDATE_CHECK_INTERVAL_HOURS` (default daily)
-for the release check (#247/ADR-70; the Settings toggle or
-`UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls, `UPDATE_CHECK_URL`
-redirects it) — and the user-configured update trigger URL, one POST per
-explicit "Update now" click, never automatically.
+for the release check (#247/ADR-70; the retained `update_check_enabled`
+setting or `UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls,
+`UPDATE_CHECK_URL` redirects it) — and the user-configured update trigger URL,
+one POST per explicit **Update** action, never automatically.

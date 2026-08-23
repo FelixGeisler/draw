@@ -19,6 +19,8 @@ jobs:
         run: npm run build -w server && npx tsc --noEmit -p client/tsconfig.json
       - name: Unit + integration tests
         run: npm test
+      - name: Documentation build
+        run: npm run docs:build
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests
