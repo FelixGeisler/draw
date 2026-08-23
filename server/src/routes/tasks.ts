@@ -161,6 +161,11 @@ export function breakdownAllDone(childStatuses: string[]): boolean {
   );
 }
 
+function completionPayload(result: CompletionResult): Omit<CompletionResult, "challengePayout"> {
+  const { challengePayout: _committedNotificationIdentity, ...payload } = result;
+  return payload;
+}
+
 /**
  * Auto-complete an open, non-recurring parent whose breakdown just became
  * all-done (#111, ADR-32). Evaluated after every write that changes a
@@ -620,16 +625,21 @@ tasksRouter.patch("/:id", (req, res) => {
       ...outcome.result.newAchievements,
       ...(outcome.parentCompletion?.newAchievements ?? []),
     ]);
-    if (outcome.result.challengeCompleted || outcome.parentCompletion?.challengeCompleted) {
-      notifyChallengeCompleted();
-    }
+    const challengePayout =
+      outcome.result.challengePayout ?? outcome.parentCompletion?.challengePayout;
+    if (challengePayout) notifyChallengeCompleted(challengePayout);
     return res.json({
       task: getTask(id),
-      ...outcome.result,
+      ...completionPayload(outcome.result),
       // Surfaced so the client and MCP can announce the parent's XP,
       // achievements and level-up without a second request (#111).
       ...(outcome.parentCompletion
-        ? { parentCompletion: { task: getTask(raw.parent_id!), ...outcome.parentCompletion } }
+        ? {
+            parentCompletion: {
+              task: getTask(raw.parent_id!),
+              ...completionPayload(outcome.parentCompletion),
+            },
+          }
         : {}),
     });
   }
@@ -875,6 +885,10 @@ tasksRouter.patch("/:id", (req, res) => {
     return completion;
   })();
 
+  if (parentCompletion?.challengePayout) {
+    notifyChallengeCompleted(parentCompletion.challengePayout);
+  }
+
   const task = getTask(id)!;
   // Snoozing/blocking the current draw dismisses the card, so the persisted
   // pointer is cleared eagerly here, mirroring completeTask() — this is a
@@ -910,7 +924,12 @@ tasksRouter.patch("/:id", (req, res) => {
   res.json({
     task,
     ...(parentCompletion
-      ? { parentCompletion: { task: getTask(parentAfter!), ...parentCompletion } }
+      ? {
+          parentCompletion: {
+            task: getTask(parentAfter!),
+            ...completionPayload(parentCompletion),
+          },
+        }
       : {}),
   });
 });
@@ -969,13 +988,21 @@ tasksRouter.delete("/:id", (req, res) => {
   // a freed id (no AUTOINCREMENT) could be re-bound to the next captured
   // task before the lazy restore validation ever runs.
   clearDanglingDraw();
+  if (parentCompletion?.challengePayout) {
+    notifyChallengeCompleted(parentCompletion.challengePayout);
+  }
   res.json({
     ok: true,
     // Same cascade surface as the completion paths (#111): XP, achievements
     // and level-up without a second request. The client's delete mutation
     // invalidates gamification/stats/tasks anyway; MCP flows read it.
     ...(parentCompletion
-      ? { parentCompletion: { task: getTask(row.parentId!), ...parentCompletion } }
+      ? {
+          parentCompletion: {
+            task: getTask(row.parentId!),
+            ...completionPayload(parentCompletion),
+          },
+        }
       : {}),
   });
 });

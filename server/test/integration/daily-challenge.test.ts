@@ -44,6 +44,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   setFetchForTests(null);
   db.exec("ROLLBACK");
 });
@@ -157,8 +158,9 @@ describe("payChallengeIfDue", () => {
     }
 
     expect(challengeState().completed).toBe(true);
-    expect(payChallengeIfDue()).toBe(true); // this call lands the payout
-    expect(payChallengeIfDue()).toBe(false); // idempotent forever after
+    const state = challengeState();
+    expect(payChallengeIfDue()).toEqual({ day: state.day, key: state.key, label: state.label });
+    expect(payChallengeIfDue()).toBeNull(); // idempotent forever after
     const xpRows = db
       .prepare("SELECT amount, ref FROM xp_ledger WHERE reason = 'challenge'")
       .all() as { amount: number; ref: string }[];
@@ -176,7 +178,7 @@ describe("payChallengeIfDue", () => {
   });
 
   it("pays nothing while the objective is unmet", () => {
-    expect(payChallengeIfDue()).toBe(false);
+    expect(payChallengeIfDue()).toBeNull();
     expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM gold_ledger").get()).toEqual({ n: 0 });
   });
@@ -189,7 +191,7 @@ describe("payChallengeIfDue", () => {
     db.prepare(
       "INSERT INTO xp_ledger (amount, reason, ref, created_at) VALUES (50, 'challenge', ?, ?)",
     ).run(day, new Date().toISOString());
-    expect(payChallengeIfDue()).toBe(false);
+    expect(payChallengeIfDue()).toBeNull();
     expect(challengeState()).toMatchObject({ paid: true, goldPaid: false, goldAwarded: 0 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM gold_ledger").get()).toEqual({ n: 0 });
 
@@ -197,7 +199,7 @@ describe("payChallengeIfDue", () => {
     db.prepare(
       "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (17, 'challenge', ?, ?)",
     ).run(day, new Date().toISOString());
-    expect(payChallengeIfDue()).toBe(false);
+    expect(payChallengeIfDue()).toBeNull();
     expect(challengeState()).toMatchObject({ paid: true, goldPaid: true, goldAwarded: 17 });
   });
 
@@ -291,6 +293,138 @@ describe("the payout rides the completion transaction", () => {
       expect(send).not.toHaveBeenCalled();
     });
   }
+});
+
+describe("completion challenge notifications", () => {
+  function finishingBreakdown(title: string): { parentId: number; openChildId: number } {
+    const now = new Date().toISOString();
+    const parentId = Number(
+      db
+        .prepare(
+          "INSERT INTO tasks (title, category_id, impact, created_at) VALUES (?, 1, 3, ?)",
+        )
+        .run(`${title} parent`, now).lastInsertRowid,
+    );
+    db.prepare(
+      "INSERT INTO tasks (title, category_id, parent_id, impact, status, created_at) VALUES (?, 1, ?, 3, 'done', ?)",
+    ).run(`${title} done`, parentId, now);
+    const openChildId = Number(
+      db
+        .prepare(
+          "INSERT INTO tasks (title, category_id, parent_id, impact, created_at) VALUES (?, 1, ?, 3, ?)",
+        )
+        .run(`${title} open`, parentId, now).lastInsertRowid,
+    );
+    return { parentId, openChildId };
+  }
+
+  const finishers = [
+    {
+      name: "archive",
+      run: (childId: number) =>
+        request(app).patch(`/api/tasks/${childId}`).send({ status: "archived" }),
+    },
+    {
+      name: "delete",
+      run: (childId: number) => request(app).delete(`/api/tasks/${childId}`),
+    },
+  ];
+
+  for (const finisher of finishers) {
+    it(`notifies the committed challenge after ${finisher.name}-driven parent completion`, async () => {
+      satisfyEveryChallenge();
+      const expected = challengeState();
+      const { openChildId } = finishingBreakdown(finisher.name);
+      const send = vi.fn().mockResolvedValue({ ok: true });
+      setFetchForTests(send);
+      await request(app).put("/api/notify/url").send({ url: "https://ntfy.sh/challenge-test" });
+      send.mockClear();
+
+      const response = await finisher.run(openChildId);
+      expect(response.status).toBe(200);
+      expect(response.body.parentCompletion.challengeCompleted).toBe(true);
+      expect(response.body.parentCompletion).not.toHaveProperty("challengePayout");
+      const challengeCalls = send.mock.calls.filter(
+        ([, init]) => (init.headers as Record<string, string>).Title === "Daily challenge complete",
+      );
+      expect(challengeCalls).toHaveLength(1);
+      expect(String(challengeCalls[0][1].body)).toBe(
+        `✅ ${expected.label} — +50 XP · +20 Gold`,
+      );
+    });
+
+    it(`rolls back ${finisher.name}-driven parent completion without notifying`, async () => {
+      satisfyEveryChallenge();
+      const { parentId, openChildId } = finishingBreakdown(`${finisher.name} rollback`);
+      db.exec(`CREATE TRIGGER test_${finisher.name}_parent_challenge_failure
+        BEFORE INSERT ON gold_ledger WHEN NEW.reason = 'challenge' BEGIN
+          SELECT RAISE(ABORT, 'forced ${finisher.name} challenge failure');
+        END`);
+      const send = vi.fn().mockResolvedValue({ ok: true });
+      setFetchForTests(send);
+      await request(app).put("/api/notify/url").send({ url: "https://ntfy.sh/challenge-test" });
+      send.mockClear();
+
+      const response = await finisher.run(openChildId);
+      expect(response.status).toBe(500);
+      expect(db.prepare("SELECT status FROM tasks WHERE id = ?").get(parentId)).toEqual({
+        status: "open",
+      });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM completions WHERE task_id = ?").get(parentId)).toEqual({
+        n: 0,
+      });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM gold_ledger").get()).toEqual({ n: 0 });
+      if (finisher.name === "archive") {
+        expect(db.prepare("SELECT status FROM tasks WHERE id = ?").get(openChildId)).toEqual({
+          status: "open",
+        });
+      } else {
+        expect(db.prepare("SELECT 1 FROM tasks WHERE id = ?").get(openChildId)).toBeDefined();
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(send).not.toHaveBeenCalled();
+    });
+  }
+
+  it("keeps the committed local-day label when post-commit delivery crosses midnight", async () => {
+    const beforeMidnight = new Date(2026, 7, 1, 23, 59, 59);
+    const afterMidnight = new Date(2026, 7, 2, 0, 0, 1);
+    vi.useFakeTimers({ now: beforeMidnight, toFake: ["Date"] });
+    const committedDay = localDate(beforeMidnight);
+    const nextDay = localDate(afterMidnight);
+    const committedChallenge = challengeForDay(committedDay);
+    expect(challengeForDay(nextDay).label).not.toBe(committedChallenge.label);
+    satisfyEveryChallenge();
+    db.prepare("DELETE FROM achievements").run();
+    const fresh = Number(
+      db
+        .prepare(
+          "INSERT INTO tasks (title, category_id, impact, created_at) VALUES ('midnight completion', 1, 3, ?)",
+        )
+        .run(beforeMidnight.toISOString()).lastInsertRowid,
+    );
+    const sent: { title: string; body: string }[] = [];
+    setFetchForTests((_url, init) => {
+      const headers = init.headers as Record<string, string>;
+      sent.push({ title: headers.Title, body: String(init.body) });
+      if (headers.Title.includes("chievement")) vi.setSystemTime(afterMidnight);
+      return Promise.resolve({ ok: true });
+    });
+    await request(app).put("/api/notify/url").send({ url: "https://ntfy.sh/challenge-test" });
+    sent.length = 0;
+
+    const response = await request(app)
+      .patch(`/api/tasks/${fresh}`)
+      .send({ status: "done" })
+      .expect(200);
+
+    expect(response.body).not.toHaveProperty("challengePayout");
+    expect(localDate(new Date())).toBe(nextDay);
+    expect(sent.find((event) => event.title === "Daily challenge complete")?.body).toBe(
+      `✅ ${committedChallenge.label} — +50 XP · +20 Gold`,
+    );
+  });
 });
 
 describe("the payout rides the timer-stop transaction", () => {

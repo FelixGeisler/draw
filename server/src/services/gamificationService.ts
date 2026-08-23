@@ -4,7 +4,7 @@ import { claimGoldForKey, claimXpForKey } from "../../../shared/achievementTiers
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
 import { addDays, localDate, localDayBounds } from "./localDay.js";
 import { nextOccurrence } from "./recurrence.js";
-import { payChallengeIfDue } from "./challengeService.js";
+import { payChallengeIfDue, type ChallengePayout } from "./challengeService.js";
 import {
   computeStreak,
   FREEZE_BANK_CAP,
@@ -62,6 +62,8 @@ export interface CompletionResult {
   levelUp: boolean;
   /** True when THIS completion landed the daily challenge payout (#231). */
   challengeCompleted: boolean;
+  /** Internal committed identity for the route's post-commit notification. */
+  challengePayout: ChallengePayout | null;
 }
 
 /**
@@ -233,7 +235,7 @@ export function completeTask(
   // objective — pay it inside the same transaction. The level comparison sits
   // AFTER the payout so a challenge bonus that crosses a level threshold
   // reports levelUp honestly.
-  const challengeCompleted = payChallengeIfDue(now);
+  const challengePayout = payChallengeIfDue(now);
   const levelAfter = levelFromXp(totalXp()).level;
 
   return {
@@ -243,7 +245,8 @@ export function completeTask(
     newAchievements,
     recurring,
     levelUp: levelAfter > levelBefore,
-    challengeCompleted,
+    challengeCompleted: challengePayout != null,
+    challengePayout,
   };
 }
 

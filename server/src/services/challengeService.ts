@@ -149,16 +149,22 @@ export function challengeState(now: Date = new Date()): ChallengeState {
  * has a single name to grep for. The XP row remains the `paid` idempotency
  * marker; both owner inserts share the caller transaction.
  *
- * Returns true only when THIS call landed the payout — the caller's cue to
- * announce it.
+ * Returns the committed day/key/label only when THIS call landed the payout —
+ * the caller carries that identity to its post-commit announcement.
  */
-export function payChallengeIfDue(now: Date = new Date()): boolean {
+export interface ChallengePayout {
+  day: string;
+  key: string;
+  label: string;
+}
+
+export function payChallengeIfDue(now: Date = new Date()): ChallengePayout | null {
   const state = challengeState(now);
-  if (!state.completed) return false;
+  if (!state.completed) return null;
   // XP remains the definition of `paid`: an XP-only legacy day is immutable
   // and receives no Gold backfill. Gold without XP is the forbidden inverse;
   // stop the triggering mutation instead of repairing or paying independently.
-  if (state.paid) return false;
+  if (state.paid) return null;
   if (state.goldPaid) {
     throw new Error(`inconsistent challenge payout for ${state.day}: Gold exists without XP`);
   }
@@ -171,6 +177,6 @@ export function payChallengeIfDue(now: Date = new Date()): boolean {
     db.prepare(
       "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (?, 'challenge', ?, ?)",
     ).run(CHALLENGE_GOLD, state.day, createdAt);
-    return true;
+    return { day: state.day, key: state.key, label: state.label };
   })();
 }

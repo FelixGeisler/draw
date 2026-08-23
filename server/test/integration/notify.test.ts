@@ -7,6 +7,7 @@ import {
   setFetchForTests,
   type NotifyEvent,
 } from "../../src/services/notifyService.js";
+import { challengeForDay } from "../../src/services/challengeService.js";
 
 /**
  * Outbound notifications (#235, ADR-67). Every test runs against the
@@ -114,7 +115,9 @@ describe("event delivery", () => {
 
   it("uses the exact cumulative XP and Gold challenge notification", async () => {
     await request(app).put("/api/notify/url").send({ url: "https://ntfy.sh/t" });
-    notifyChallengeCompleted();
+    const day = "2026-08-22";
+    const challenge = challengeForDay(day);
+    notifyChallengeCompleted({ day, key: challenge.key, label: challenge.label });
     const ping = sent.find((e) => e.title === "Daily challenge complete");
     expect(ping).toBeDefined();
     expect(ping!.body).toMatch(/^✅ .+ — \+50 XP · \+20 Gold$/);

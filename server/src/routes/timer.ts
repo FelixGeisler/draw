@@ -55,16 +55,16 @@ timerRouter.post("/stop", (_req, res) => {
     );
     // Timer close and both challenge owners are one transaction. Any XP/Gold
     // failure (including a Gold-only anomaly) leaves the entry running.
-    const challengeCompleted = payChallengeIfDue(now);
+    const challengePayout = payChallengeIfDue(now);
     const stopped = db.prepare(`${ENTRY_SELECT} WHERE id = ?`).get(entry.id) as Record<
       string,
       unknown
     >;
-    return { challengeCompleted, stopped };
+    return { challengePayout, stopped };
   })();
-  if (outcome.challengeCompleted) notifyChallengeCompleted(now); // post-commit (#235)
+  if (outcome.challengePayout) notifyChallengeCompleted(outcome.challengePayout); // post-commit (#235)
   res.json(
-    outcome.challengeCompleted
+    outcome.challengePayout
       ? { ...outcome.stopped, challengeCompleted: true }
       : outcome.stopped,
   );
