@@ -2,7 +2,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import {
   applyPackPurchaseSnapshot,
-  PACK_BONUS_LABELS,
   PackResponseError,
   PackTransportError,
   type PackPayment,
@@ -19,6 +18,16 @@ import {
   type PackPurchaseAttempt,
   type PackPurchaseIntent,
 } from "../hooks/shopPurchaseIntent";
+import { celebrate, prefersReducedMotion } from "../lib/celebrate";
+import { PackRevealModal } from "./PackRevealModal";
+import {
+  createPackRevealSession,
+  samePackReveal,
+  transitionPackReveal,
+  type PackRevealAction,
+  type PackRevealIdentity,
+  type PackRevealSession,
+} from "./packRevealState";
 import "./ShopPanel.css";
 
 type PendingAction = "resume" | "retry" | null;
@@ -58,7 +67,10 @@ export function ShopPanel() {
   const [purchaseBusy, setPurchaseBusy] = useState(false);
   const purchaseLock = useRef(false);
   const [purchaseError, setPurchaseError] = useState<string | null>(recovery.error);
-  const [result, setResult] = useState<PackPurchaseResult | null>(null);
+  const [reveal, setReveal] = useState<PackRevealSession | null>(null);
+  const revealRef = useRef<PackRevealSession | null>(null);
+  const revealTriggerRef = useRef<HTMLElement | null>(null);
+  const shopHeadingRef = useRef<HTMLHeadingElement>(null);
 
   if (!shop.data) return null;
   const state = shop.data;
@@ -68,13 +80,19 @@ export function ShopPanel() {
   const publish = (response: PackPurchaseResult) =>
     applyPackPurchaseSnapshot(queryClient, response);
 
+  function openReveal(response: PackPurchaseResult) {
+    const session = createPackRevealSession(response, prefersReducedMotion());
+    revealRef.current = session;
+    setReveal(session);
+  }
+
   function applyAttempt(attempt: PackPurchaseAttempt) {
     if (attempt.kind === "stale") return;
     if (attempt.kind === "success") {
       setIntent(null);
       setPendingAction(null);
       setPurchaseError(null);
-      setResult(attempt.response);
+      openReveal(attempt.response);
       return;
     }
     if (attempt.kind === "definitive-error") {
@@ -90,6 +108,8 @@ export function ShopPanel() {
 
   async function openPack(payment: PackPayment) {
     if (purchaseLock.current || purchaseBusy || intent) return;
+    revealTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     purchaseLock.current = true;
     setPurchaseBusy(true);
     setPurchaseError(null);
@@ -125,6 +145,8 @@ export function ShopPanel() {
 
   async function continuePurchase() {
     if (purchaseLock.current || purchaseBusy || !intent) return;
+    revealTriggerRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     purchaseLock.current = true;
     setPurchaseBusy(true);
     setPurchaseError(null);
@@ -140,11 +162,39 @@ export function ShopPanel() {
     }
   }
 
-  const purchasesBlocked = purchaseBusy || intent !== null;
+  function revealAction(identity: PackRevealIdentity, action: PackRevealAction) {
+    const current = revealRef.current;
+    if (!current) return;
+    const transition = transitionPackReveal(current, { identity, action });
+    if (transition.session === current) return;
+    revealRef.current = transition.session;
+    setReveal(transition.session);
+    if (transition.celebrate) {
+      celebrate({ particleCount: 90, spread: 70, origin: { y: 0.65 } });
+    }
+  }
+
+  function closeReveal(identity: PackRevealIdentity) {
+    const current = revealRef.current;
+    if (!current || !samePackReveal(current.identity, identity)) return;
+    revealRef.current = null;
+    setReveal(null);
+    requestAnimationFrame(() => {
+      const trigger = revealTriggerRef.current;
+      revealTriggerRef.current = null;
+      if (trigger?.isConnected && !(trigger instanceof HTMLButtonElement && trigger.disabled)) {
+        trigger.focus();
+      } else {
+        shopHeadingRef.current?.focus();
+      }
+    });
+  }
+
+  const purchasesBlocked = purchaseBusy || intent !== null || reveal !== null;
 
   return (
     <section className="shop-panel" data-testid="shop">
-      <h3>Shop</h3>
+      <h3 ref={shopHeadingRef} tabIndex={-1}>Shop</h3>
       <div className="shop-state" aria-label="Current shop balances">
         <span>{state.gold} Gold</span>
         <span>{state.goldenTickets} Golden Tickets</span>
@@ -181,14 +231,6 @@ export function ShopPanel() {
       {purchaseError && <p className="shop-error" role="alert">{purchaseError}</p>}
       {equip.error && <p className="shop-error" role="alert">{equip.error.message}</p>}
 
-      {result && (
-        <p className="shop-result" role="status" aria-live="polite">
-          <strong>{result.opening.back.name}</strong> · {result.opening.back.rarity} ·{" "}
-          {result.opening.duplicate ? "Duplicate" : "New background"} · Duplicate refund:{" "}
-          {result.opening.duplicateRefundGold} Gold · {PACK_BONUS_LABELS[result.opening.bonus]}
-        </p>
-      )}
-
       <div className="shop-backs">
         {state.backs.map((back) => (
           <button
@@ -214,6 +256,10 @@ export function ShopPanel() {
           </button>
         ))}
       </div>
+
+      {reveal && (
+        <PackRevealModal session={reveal} onAction={revealAction} onClose={closeReveal} />
+      )}
     </section>
   );
 }
