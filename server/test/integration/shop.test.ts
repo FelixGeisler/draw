@@ -46,8 +46,41 @@ function stateSnapshot() {
 }
 
 const exactKeys = ["gold", "freezesBanked", "freezeBankCap", "backs", "equipped"].sort();
+const exactCatalog = [
+  ["classic", "Classic weave", "common"],
+  ["ember", "Ember lattice", "common"],
+  ["tide", "Tide glass", "common"],
+  ["midnight", "Midnight stars", "common"],
+  ["parchment", "Aged parchment", "common"],
+  ["graphite", "Graphite weave", "common"],
+  ["meadow", "Meadow braid", "rare"],
+  ["royal", "Royal filigree", "rare"],
+  ["sakura", "Sakura glass", "rare"],
+  ["circuit", "Neon circuit", "rare"],
+  ["frost", "Frost lattice", "rare"],
+  ["aurum", "Aurum crest", "ultra-rare"],
+  ["aurora", "Aurora silk", "ultra-rare"],
+  ["obsidian", "Obsidian gold", "ultra-rare"],
+  ["prism", "Prism foil", "secret-rare"],
+] as const;
 
 describe("GET /api/shop — exact transitional shape", () => {
+  it("exposes the expanded registry read-only with Classic as the sole fallback owner", async () => {
+    const before = stateSnapshot();
+    const response = await request(app).get("/api/shop").expect(200);
+    expect(
+      response.body.backs.map(
+        (back: { key: string; name: string; rarity: string }) => [back.key, back.name, back.rarity],
+      ),
+    ).toEqual(exactCatalog);
+    expect(
+      response.body.backs
+        .filter((back: { owned: boolean }) => back.owned)
+        .map((back: { key: string }) => back.key),
+    ).toEqual(["classic"]);
+    expect(stateSnapshot()).toEqual(before);
+  });
+
   it.each([
     { completion: 0, claim: null, ledger: 0, expected: 0 },
     { completion: 20, claim: 5, ledger: 7, expected: 32 },
@@ -87,19 +120,23 @@ describe("GET /api/shop — exact transitional shape", () => {
     });
   });
 
-  it("preserves settings-owned collection/equipment and unknown fallback without rewriting", async () => {
-    const owned = '["classic","ember","unknown-future-key"]';
+  it("preserves every shipped ownership/equipment key and unknown fallback without rewriting", async () => {
+    const shipped = ["classic", "ember", "tide", "meadow", "royal", "aurum", "prism"];
+    const owned = JSON.stringify([...shipped, "unknown-future-key"]);
     db.prepare("INSERT INTO settings (key, value) VALUES ('owned_card_backs', ?)").run(owned);
-    db.prepare("INSERT INTO settings (key, value) VALUES ('equipped_card_back', 'ember')").run();
-    let response = await request(app).get("/api/shop").expect(200);
-    expect(response.body.equipped).toBe("ember");
-    expect(response.body.backs.find((back: { key: string }) => back.key === "ember").owned).toBe(true);
+    db.prepare("INSERT INTO settings (key, value) VALUES ('equipped_card_back', 'classic')").run();
+
+    for (const key of shipped) {
+      const response = await request(app).post("/api/shop/equip").send({ back: key }).expect(200);
+      expect(response.body.equipped).toBe(key);
+      expect(response.body.backs.find((back: { key: string }) => back.key === key).owned).toBe(true);
+    }
     expect(db.prepare("SELECT value FROM settings WHERE key = 'owned_card_backs'").get()).toEqual({
       value: owned,
     });
 
     db.prepare("UPDATE settings SET value = 'unknown' WHERE key = 'equipped_card_back'").run();
-    response = await request(app).get("/api/shop").expect(200);
+    const response = await request(app).get("/api/shop").expect(200);
     expect(response.body.equipped).toBe("classic");
     expect(db.prepare("SELECT value FROM settings WHERE key = 'equipped_card_back'").get()).toEqual({
       value: "unknown",

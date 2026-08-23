@@ -35,10 +35,11 @@ package "client/ — React SPA" {
 
 package "server/ — Express 5" {
   component "tools/ — MCP adapter\nno domain logic (ADR-19)" as mcpAdapter
-  component "routes/ — HTTP layer\ntasks, draw, timer, goals, stats,\nactivity, gamification, ai, backup" as routes
+  component "routes/ — HTTP layer\ntasks, draw, timer, goals, stats,\nactivity, gamification, shop, ai, backup" as routes
   package "services/ — domain logic" {
     component "drawService\ndrawability, weights,\nwarm-up, current draw" as drawSvc
     component "gamificationService\ncompleteTask(): XP,\nstreaks, achievements" as gamSvc
+    component "shopService + packCatalog\ncollection snapshot + pure\ncatalog/probability rules" as shopSvc
     component "statsService\nactivityService" as statsSvc
     component "aiService\ncardArtService" as aiSvc
     component "backupService" as backupSvc
@@ -59,11 +60,13 @@ mcpClient --> mcpAdapter : stdio
 mcpAdapter --> routes : "HTTP 127.0.0.1:3001"
 routes --> drawSvc
 routes --> gamSvc
+routes --> shopSvc
 routes --> statsSvc
 routes --> aiSvc
 routes --> backupSvc
 drawSvc -[hidden]-> gamSvc
-gamSvc -[hidden]-> statsSvc
+gamSvc -[hidden]-> shopSvc
+shopSvc -[hidden]-> statsSvc
 statsSvc -[hidden]-> aiSvc
 aiSvc -[hidden]-> backupSvc
 drawSvc --> dbmod
@@ -106,6 +109,8 @@ server/src/
 │   │                        GET /api/stats/estimation-bias (all-history, ADR-27)
 │   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
 │   ├── gamification.ts      GET /api/gamification
+│   ├── shop.ts              read-only Gold/collection snapshot + equip compatibility;
+│   │                        purchases remain unavailable until #266
 │   ├── settings.ts          key-value settings
 │   ├── backup.ts            GET /api/backup/export, POST /api/backup/import (ADR-26)
 │   ├── cardArt.ts           GET /api/card-art — cache-only batch reads (#114),
@@ -119,6 +124,9 @@ server/src/
     ├── activityService.ts   per-day card derivation for the Stats History calendar (pure core + SQL fetch)
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
     ├── streak.ts            pure streak fold: rest days, freeze tokens (ADR-28)
+    ├── shopService.ts       settings-owned collection/equipment compatibility
+    ├── packCatalog.ts       pure fixed catalog, Secret progression, rarity/item selection,
+    │                        duplicate refund and effective bonus selection (#265, ADR-62)
     ├── backupService.ts     zip export/import of app.db + files/ (ADR-26)
     ├── aiService.ts         Anthropic client, material blocks, prompts, token guard
     ├── aiPostprocess.ts     deterministic generate-tasks shaping (ADR-14): pure, SDK-/DB-free
@@ -148,6 +156,10 @@ server/src/
 |Per-day history card derivation (History calendar)
 |Derived read-side from `time_entries` + `completions`, bucketed by *local* day; a worked-but-uncompleted day stays face-down forever
 
+|`shopService` + `packCatalog`
+|Read-only collection compatibility plus pack catalog/probability calculations
+|Classic is always-owned fallback and never pullable; every calculation requires explicit validated inputs and performs no RNG, clock, request, database or write work
+
 |`aiService`
 |Claude API access
 |Requests blocked without key (503) or above 180K input tokens (400)
@@ -156,6 +168,27 @@ server/src/
 |Card art safety, cost and variety (ADR-22)
 |Only allowlist-re-serialized SVG is ever stored or served; at most one generation *in flight* per task; style directives are a pure function of the task id; regenerate is the only path that replaces a row (generate-then-replace)
 |===
+
+=== Gold pack catalog boundary (#265)
+
+`packCatalog.ts` owns one registry in this exact order: `classic` (Classic
+weave); common `ember` (Ember lattice), `tide` (Tide glass), `midnight`
+(Midnight stars), `parchment` (Aged parchment), `graphite` (Graphite weave);
+rare `meadow` (Meadow braid), `royal` (Royal filigree), `sakura` (Sakura
+glass), `circuit` (Neon circuit), `frost` (Frost lattice); ultra-rare `aurum`
+(Aurum crest), `aurora` (Aurora silk), `obsidian` (Obsidian gold); and
+secret-rare `prism` (Prism foil). Classic is the common fallback only, leaving
+pullable tier sizes 5/5/3/1.
+
+Its functions are side-effect-free and require explicit finite `[0,1)`
+samples: trailing non-Secret outcomes increase the next Secret chance from
+500 by 50 basis points to a 1500 cap; rarity selection reserves that Secret
+chance and divides the remainder 45:32:18; a separate sample selects uniformly
+within the chosen tier; duplicate Gold is 10/20/40/100; and bonus intervals are
+Freeze 5%, Pouch 5%, Ticket 2%, none 88%, with a would-be Freeze resolving to
+Pouch at the bank cap of 2. Invalid inputs throw rather than clamp or coerce.
+There is no default/production RNG or opening behavior here: payment,
+persistence, effects and production openings begin in #266.
 
 == 5.3 Whitebox: Client
 
