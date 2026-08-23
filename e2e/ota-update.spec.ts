@@ -9,6 +9,8 @@ test.describe.configure({ mode: "serial" });
 
 const OLD_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const NEW_SHA = "0123456789abcdef0123456789abcdef01234567";
+const NO_UPDATE_TRIGGER_ERROR =
+  "no update trigger configured — see the deployment guide (docs, Deployment View §7.5) for the Watchtower setup";
 
 type UpdateStatusFixture = {
   current: string;
@@ -153,7 +155,7 @@ test("unconfigured updates still POST once and show the concise 409 error", asyn
   await routeUpdateApi(page, async (route, pathname) => {
     if (pathname === "/api/update/apply") {
       applyPosts += 1;
-      await route.fulfill({ status: 409, json: { error: "No update trigger configured" } });
+      await route.fulfill({ status: 409, json: { error: NO_UPDATE_TRIGGER_ERROR } });
       return;
     }
     await route.fulfill({ json: fixture });
@@ -161,9 +163,9 @@ test("unconfigured updates still POST once and show the concise 409 error", asyn
 
   await page.goto("/settings");
   await page.getByTestId("update-apply").click();
-  await expect(page.getByTestId("update-apply-error")).toHaveText(
-    "Update failed: No update trigger configured",
-  );
+  const renderedError = page.getByTestId("update-apply-error");
+  await expect(renderedError).toHaveCount(1);
+  await expect(renderedError).toHaveText(`Update failed: ${NO_UPDATE_TRIGGER_ERROR}`);
   await expect(page.getByTestId("update-apply")).toBeEnabled();
   await expect(page.getByTestId("update-apply")).toHaveText("Update");
   expect(applyPosts).toBe(1);
