@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
-import { agentApplyMutation } from "./useAssistant";
+import { agentApplyMutation, type StagedOp } from "./useAssistant";
 import { api, ApiError } from "../api/client";
 
 // The apply mutation's #143 contract, exercised through query-core's own
@@ -44,6 +44,60 @@ describe("agentApplyMutation (#143)", () => {
       expect.objectContaining({ sessionId: "s1", changesetVersion: 1 }),
     );
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["tasks"] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["shop"] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["challenge"] });
+  });
+
+  it.each<[string, StagedOp]>([
+    [
+      "a task created under an existing parent",
+      {
+        kind: "create_task",
+        draftId: "draft-1",
+        task: { title: "step", categoryId: 1, parentId: 7 },
+      },
+    ],
+    [
+      "subtasks created under an existing parent",
+      {
+        kind: "create_subtasks",
+        draftId: "draft-2",
+        parentId: 7,
+        subtasks: [{ draftId: "step-1", title: "step" }],
+      },
+    ],
+  ])("invalidates shop and challenge when applying %s", async (_label, operation) => {
+    const qc = new QueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const observer = new MutationObserver(qc, agentApplyMutation(qc));
+    postMock.mockResolvedValueOnce({ created: MAPPING });
+
+    await observer.mutate({ operations: [operation] });
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["shop"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["challenge"] });
+  });
+
+  it("keeps draft-parent-only applies out of completion-owner invalidation", async () => {
+    const qc = new QueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+    const observer = new MutationObserver(qc, agentApplyMutation(qc));
+    postMock.mockResolvedValueOnce({ created: MAPPING });
+
+    await observer.mutate({
+      operations: [
+        { kind: "create_task", draftId: "parent", task: { title: "parent", categoryId: 1 } },
+        {
+          kind: "create_subtasks",
+          draftId: "children",
+          parentId: "parent",
+          subtasks: [{ draftId: "step-1", title: "step" }],
+        },
+      ],
+    });
+
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["shop"] });
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: ["challenge"] });
   });
 
   it("treats a 409 WITH the original mapping as success and flags alreadyApplied", async () => {

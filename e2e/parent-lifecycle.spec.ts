@@ -71,7 +71,7 @@ test("completing the last subtask flips the parent to done without manual action
   await page.goto("/");
   const trophy = page.locator(".trophy-card", { hasText: PARENT_TITLE });
   await expect(trophy).toBeVisible();
-  await expect(trophy.locator(".trophy-card-xp")).toHaveText("+1");
+  await expect(trophy.locator(".trophy-card-xp")).toHaveText("+1 XP · +1 Gold");
   await expect(trophy.locator(".trophy-card-glyph")).toHaveText("✅");
 });
 

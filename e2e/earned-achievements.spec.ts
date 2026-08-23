@@ -291,7 +291,7 @@ test("claiming an unlocked card raises the header XP and is idempotent", async (
   await page.goto("/stats");
 
   // early_bird was unlocked by the first test in this file and never claimed —
-  // the launch-payday state (unlocked, claimable). It is a rare card → 50 XP.
+  // the launch-payday state (unlocked, claimable). It is rare → 50 XP / 10 Gold.
   const before = await (await page.request.get("/api/gamification")).json();
   const earlyBird = before.achievements.find((a: { key: string }) => a.key === "early_bird");
   expect(earlyBird.unlockedAt).not.toBeNull();
@@ -302,18 +302,23 @@ test("claiming an unlocked card raises the header XP and is idempotent", async (
   await expect(claimBtn).toBeVisible();
   await claimBtn.click();
 
-  // The card flips to its claimed state — button gone, "claimed +50 XP" shown.
-  await expect(cardEl.locator(".ach-claimed")).toContainText("claimed +50 XP");
+  // The card flips to its stamped cumulative payout state.
+  await expect(cardEl.locator(".ach-claimed")).toContainText(
+    "claimed +50 XP · +10 Gold",
+  );
   await expect(cardEl.getByRole("button", { name: /Claim/ })).toHaveCount(0);
 
-  // The header total rose by the rare payout, live via the gamification invalidate.
-  await expect(page.getByText(`${before.xp + 50} XP`, { exact: true })).toBeVisible();
+  // Both server totals rose, live via gamification/shop invalidation and refetch.
+  await expect(
+    page.getByText(`${before.xp + 50} XP · ${before.totalGold + 10} Gold`, { exact: true }),
+  ).toBeVisible();
 
   // Idempotent under retry: a second claim 409s and the total does not double.
   const retry = await page.request.post("/api/achievements/early_bird/claim");
   expect(retry.status()).toBe(409);
   const after = await (await page.request.get("/api/gamification")).json();
   expect(after.xp).toBe(before.xp + 50);
+  expect(after.totalGold).toBe(before.totalGold + 10);
 });
 
 test("the heading counts KEYS and chain cards wear tier pips (#222)", async ({ page }) => {

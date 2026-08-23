@@ -71,19 +71,19 @@
 |Manual return to the deck: sets `deferred_until = now` (not `NULL`) and clears `blocked`, so staleness counts from the wake
 
 |*Completion*
-|A row in the `completions` table — the atomic fact behind XP, streaks, trophy deck, and history
+|A row in the `completions` table — the atomic fact behind XP, completion Gold, streaks, trophy deck, and history. New rows stamp `gold_awarded = max(1, Math.round(final XP / 10))`; legacy rows are zero, and reopen/delete remove the owner rather than guessing a refund
 
 |*Was drawn*
 |A completion that followed a recent draw (explicit flag, or last-drawn within 6 h); pays 1.5× XP
 
 |*Trophy deck*
-|Today's completed cards, fanned at the bottom of the Draw page
+|Today's completed cards, fanned at the bottom of the Draw page; every card and the pile heading show exact completion-owned XP and Gold
 
 |*Rarity (holo / silver)*
 |Deterministic rarity on completed-task cards, derived at render time from `(wasDrawn, impact)`: drawn + impact 5 = holo (an iridescent shimmer, also on the standing drawn card — #123), drawn + impact 4 = silver, else plain. The trophy pile and the standing card wear it as a sheen; the History calendar marks a day's rarest completion with a corner gem (holo/silver). Pure CSS — never stored (#62, ADR-2/ADR-5 pattern)
 
 |*History calendar*
-|The Stats page's activity view (#53; a GitHub-style contribution calendar since #174/ADR-45): one tile per LOCAL day in Monday-first week columns, shaded by activity intensity, with a day's tasks (completions vs. started-but-unfinished work), XP and rarity revealed in a docked detail panel on hover/focus/tap. Loads backward in 26-week windows up to ten years. Was the house-of-cards skyline until #174; lived on its own History page until #155 merged that page into Stats (ADR-41)
+|The Stats page's activity view (#53; a GitHub-style contribution calendar since #174/ADR-45): one tile per LOCAL day in Monday-first week columns, shaded by activity intensity, with a day's tasks (completions vs. started-but-unfinished work), completion-owned XP/Gold and rarity revealed in a docked detail panel on hover/focus/tap. Loads backward in 26-week windows up to ten years. Was the house-of-cards skyline until #174; lived on its own History page until #155 merged that page into Stats (ADR-41)
 
 |*Achievement card*
 |An achievement rendered as a collectible card on the Stats page (#124, extended #156/#177/#183): earned = face-up (committed SVG art or an emoji-glyph fallback, name, earned date), unearned = face-down (the app's card-back weave over a darkened silhouette) with — on a CHAIN card — a progress bar toward the next threshold. Since #177 the face is NAME-ONLY: the description reveals on hover/focus, and a ✎ button opens an inline editor to rename/rewrite/hide the card (ADR-44). An earned-but-unclaimed card shows a Claim button. Since #183 a chain shows only ONE card — its current tier (ADR-47) — so the face a user sees for a chain evolves as they claim; since #222 (ADR-59) that card wears a PIP ROW (one dot per tier: gold claimed, bright unlocked, dim locked) and the grid heading counts unlocked KEYS over total non-hidden keys, never collapsed slots. Same card language as the task cards (ADR-33) — no TCG furniture
@@ -92,7 +92,7 @@
 |User-editable DISPLAY metadata for an achievement (#177, ADR-44): a renamed title, a rewritten description, and a `hidden` flag, stored in the `achievement_customizations` side table keyed by achievement key (so it covers LOCKED keys too). `PATCH /api/achievements/:key` upserts; `title`/`description` = null clears that override (default restored); the row is deleted when nothing remains overridden. `gamificationState()` ships `COALESCE(custom, default)` for title/description plus `hidden`/`customized`. DISPLAY-ONLY: unlock, claim, XP, rarity and the shared key set are untouched — a hidden achievement (moved to the Stats "Hidden (N)" section) still unlocks and is still claimable
 
 |*Achievement rarity (common / rare / super-rare / ultra-rare / secret-rare)*
-|A SECOND, separate rarity vocabulary from the holo/silver above — it ranks an achievement's real unlock difficulty, not a completion's leverage. Since #156 the ladder is 5 TCG tiers living in `shared/achievementTiers.ts`, imported by BOTH the server (it prices claim XP by tier — common 25 → secret-rare 500) and the client (`lib/achievementRarity` is now a thin lookup over it), so the two cannot drift (ADR-42). Migrated from the old ladder: epic → super-rare, legendary → ultra-rare. Four tiers reuse the two shipped sheens (ultra-rare/secret-rare drift on their own, super-rare/rare sweep on hover); Secret Rare adds ONE deliberate treatment — a dark/negative frame + holo + a distinct violet border. Only earned cards shimmer; `trophyRarity` stays its own 3-tier vocabulary, untouched
+|A SECOND, separate rarity vocabulary from the holo/silver above — it ranks an achievement's real unlock difficulty, not a completion's leverage. Since #156 the ladder is 5 TCG tiers living in `shared/achievementTiers.ts`, imported by BOTH the server (it prices claim XP by tier — common 25 → secret-rare 500 — and claim Gold 5/10/25/50/100) and the client (`lib/achievementRarity` is now a thin lookup over it), so the two cannot drift (ADR-42). Migrated from the old ladder: epic → super-rare, legendary → ultra-rare. Four tiers reuse the two shipped sheens (ultra-rare/secret-rare drift on their own, super-rare/rare sweep on hover); Secret Rare adds ONE deliberate treatment — a dark/negative frame + holo + a distinct violet border. Only earned cards shimmer; `trophyRarity` stays its own 3-tier vocabulary, untouched
 
 |*Achievement chain*
 |A multi-level achievement (#156) where each level is its own key sharing one running metric — draws (non-warmup), completions, streak, level, achieved goals, tracked hours, drawn completions, or completed steps (#223) — e.g. draws 1 → 10 → 100 → 1000 → 10000. One shared threshold table (`CHAIN_SPECS`) drives both the unlock condition and the progress bar, so a full bar is always a real unlock. Since #183 the Stats grid COLLAPSES a chain to a single evolving card (ADR-47): it shows only the *current tier* — the lowest level not yet claimed, or the maxed level once all are claimed — and claiming advances it to the next. The client groups the payload by chain via `shared/achievementChains.ts`, a dependency-free map of chained key → `{ chainId (= metric), order (= target) }` projected from `CHAIN_SPECS` and drift-guarded against it (the anti-drift pattern of `shared/achievementKeys.ts` / `shared/achievementTiers.ts`)
@@ -104,7 +104,7 @@
 |The append-only `draws(id, task_id, drawn_at, was_warmup)` table (#156, ADR-42) — one row per card dealt. `task_id` is `ON DELETE SET NULL` (a draw HAPPENED even if the task is later deleted, never CASCADE); `was_warmup` marks handed-out warm-up deals (ADR-30). Source of truth for the draws achievement chain, which counts non-warmup rows only
 
 |*Claim (claim-for-XP)*
-|`POST /api/achievements/:key/claim` pays an unlocked achievement's rarity-scaled XP ONCE ever (`achievements.claimed_at` / `claim_xp`, stamped from the server tier table; idempotent by primary key — a repeat 409s). Claim XP remains a permanent XP source. Schema v18 also reserves nullable `claim_gold` on the owning row, with no backfill or producer yet (#156/#263, ADR-42)
+|`POST /api/achievements/:key/claim` pays an unlocked achievement's rarity-scaled XP and Gold ONCE ever, stamping `claimed_at`, `claim_xp`, and `claim_gold` in one guarded update. Claim XP and Gold remain permanent owner facts. Pre-v18 claimed rows keep `claim_gold = NULL`, no backfill, and XP-only wording; a pre-v18 unlock first claimed now receives both current payouts (#156/#263/#264, ADR-42)
 
 |*Streak*
 |Count of REAL completion days in an unbroken run of local calendar days; rest and frozen days keep the run alive but never increment it (ADR-28)
@@ -128,7 +128,7 @@
 |Append-only historical effects introduced in v17 (#230, ADR-62). Since v18 (#263), only `reason='challenge'` contributes to permanent XP; legacy purchase/refund/unknown rows remain stored but are inert. `buy:freeze` timestamps remain historical freeze-replay inputs only
 
 |*Gold ledger*
-|Schema-v18 append-only effects not owned by a completion or achievement: `(amount, reason, ref, created_at)` with unique `(reason, ref)`. Gold is the unclamped sum of completion Gold, achievement Gold and this ledger. Reserved reasons are `challenge`, `buy:pack`, `refund:duplicate`, and `bonus:pouch`; v18 creates no producer
+|Schema-v18 append-only effects not owned by a completion or achievement: `(amount, reason, ref, created_at)` with unique `(reason, ref)`. Gold is the unclamped sum of completion Gold, achievement Gold and this ledger. #264 activates `challenge` as +20 paired atomically with challenge XP; future `buy:pack`, `refund:duplicate`, and `bonus:pouch` remain owned by later work
 
 |*Pack opening*
 |An immutable future replay fact ordered by AUTOINCREMENT `opening_order`, idempotent by unique `ref`, recording payment, back, rarity, duplicate flag, applied Secret chance and post-cap bonus. Schema v18 leaves the table empty; openings begin in #266
@@ -137,7 +137,7 @@
 |Card backs remain settings-owned (`owned_card_backs` / `equipped_card_back`) and Draw renders the equipped weave with Classic fallback. The old XP pack/direct-freeze purchase controls are retired in v18; the transitional shop is read-only until Gold openings launch in #266
 
 |*Daily challenge*
-|One derived objective per LOCAL day (#231, ADR-63): the day string hashes into an append-only pool; progress derives from the day's rows (localDayBounds); completing it pays +50 XP as an `xp_ledger` row keyed `(challenge, day)` — exactly once, landed by completeTask or timer-stop through one shared function, never by a GET
+|One derived objective per LOCAL day (#231/#264, ADR-63): the day string hashes into an append-only pool; progress derives from the day's rows (`localDayBounds`); completing it atomically pays same-ref +50 XP and +20 Gold with the triggering completion or timer stop, never by a GET. `paid` remains XP-row truth: XP-only is immutable legacy, both rows are paid, and Gold-only is displayed as inconsistent and aborts a payout attempt without repair
 
 |*Weekly run report*
 |The "This week" recap card atop Stats (#233, ADR-65): completions, minutes, XP, minted trophy rarities, best day, and deltas against the previous seven days — folded client-side (`lib/weeklyReport.ts`) from the activity payload over Monday-first LOCAL weeks; no new API, no stored aggregates, hidden when the week is empty

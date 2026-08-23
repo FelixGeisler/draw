@@ -18,6 +18,7 @@ export interface ActivityCompletionRow {
   taskId: number;
   completedAt: string; // UTC ISO
   xpAwarded: number;
+  goldAwarded: number;
   wasDrawn: number; // SQLite 0 | 1
 }
 
@@ -45,6 +46,8 @@ export interface ActivityCard {
   /** Upright (completed on this local day) vs face-down (worked, not done). */
   completed: boolean;
   xpAwarded: number;
+  /** Completion-owned Gold represented by this task/day card. */
+  goldAwarded: number;
   wasDrawn: boolean;
 }
 
@@ -84,6 +87,7 @@ interface CardAcc {
   minutes: number;
   completed: boolean;
   xp: number;
+  gold: number;
   wasDrawn: boolean;
 }
 
@@ -114,7 +118,16 @@ export function buildActivityDays(
     const key = `${day}|${taskId}`;
     let acc = accs.get(key);
     if (!acc) {
-      acc = { taskId, day, firstActivity: at, minutes: 0, completed: false, xp: 0, wasDrawn: false };
+      acc = {
+        taskId,
+        day,
+        firstActivity: at,
+        minutes: 0,
+        completed: false,
+        xp: 0,
+        gold: 0,
+        wasDrawn: false,
+      };
       accs.set(key, acc);
     } else if (at < acc.firstActivity) {
       acc.firstActivity = at;
@@ -135,6 +148,7 @@ export function buildActivityDays(
     const acc = accFor(co.taskId, day, co.completedAt);
     acc.completed = true;
     acc.xp += co.xpAwarded; // recurring tasks can complete twice a day
+    acc.gold += co.goldAwarded;
     if (co.wasDrawn) acc.wasDrawn = true;
   }
 
@@ -164,6 +178,7 @@ export function buildActivityDays(
         trackedMinutes: Math.round(acc.minutes),
         completed: acc.completed,
         xpAwarded: acc.xp,
+        goldAwarded: acc.gold,
         wasDrawn: acc.wasDrawn,
       };
     });
@@ -206,7 +221,7 @@ export function computeActivity(from: string, to: string): ActivityDay[] {
   const completions = db
     .prepare(
       `SELECT co.task_id AS taskId, co.completed_at AS completedAt,
-              co.xp_awarded AS xpAwarded,
+              co.xp_awarded AS xpAwarded, co.gold_awarded AS goldAwarded,
               (co.was_drawn AND NOT co.was_warmup) AS wasDrawn
        FROM completions co WHERE co.completed_at >= ? AND co.completed_at < ?`,
     )

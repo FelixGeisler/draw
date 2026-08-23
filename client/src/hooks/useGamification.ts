@@ -3,6 +3,8 @@ import { api } from "../api/client";
 
 export interface GamificationState {
   xp: number;
+  /** Unclamped server-derived total from all three Gold owners. */
+  totalGold: number;
   level: number;
   levelProgress: { intoLevel: number; needed: number };
   /** Real completion days in the unbroken run — rest/frozen days never count. */
@@ -21,6 +23,7 @@ export interface GamificationState {
     completedAt: string;
     wasDrawn: number;
     xpAwarded: number;
+    goldAwarded: number;
     taskId: number;
     title: string;
     categoryId: number;
@@ -48,6 +51,8 @@ export interface GamificationState {
     claimedAt: string | null;
     /** The XP stamped at claim time, or null until claimed. */
     claimXp: number | null;
+    /** Gold stamped at claim time; null for unclaimed and pre-v18 claims. */
+    claimGold: number | null;
     /** Chain progress toward the next threshold, or null for a one-off. */
     progress: { current: number; target: number } | null;
   }[];
@@ -62,6 +67,7 @@ export function useGamification() {
 
 export interface ClaimResponse {
   xpAwarded: number;
+  goldAwarded: number;
   levelUp: boolean;
   /** Achievements the claim's XP unlocked in the same transaction (a level
    *  crossing, #156) — toasted like any other unlock. */
@@ -73,17 +79,22 @@ export interface ClaimResponse {
  * query is invalidated so the header XP/level and the card's claimed state
  * refresh from the server — the client never computes the new total itself.
  */
-export function useClaimAchievement() {
-  const queryClient = useQueryClient();
-  return useMutation({
+export function claimAchievementMutation(queryClient: QueryClient) {
+  return {
     mutationFn: (key: string) => api.post<ClaimResponse>(`/api/achievements/${key}/claim`, {}),
-    onSuccess: (data) => {
+    onSuccess: (data: ClaimResponse) => {
       queryClient.invalidateQueries({ queryKey: ["gamification"] });
+      queryClient.invalidateQueries({ queryKey: ["shop"] });
       // A claim can tip the level bar and unlock the level_N card — announce
       // it so the toast fires just as it would for a draw/completion unlock.
       announceAchievements(data.newAchievements);
     },
-  });
+  };
+}
+
+export function useClaimAchievement() {
+  const queryClient = useQueryClient();
+  return useMutation(claimAchievementMutation(queryClient));
 }
 
 /** A display override (#177): the fields PATCH /api/achievements/:key accepts.

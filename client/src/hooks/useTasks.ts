@@ -58,31 +58,59 @@ export function useTasks(
   });
 }
 
+export function invalidateTaskMutationQueries(
+  qc: ReturnType<typeof useQueryClient>,
+  completionCapable = false,
+) {
+  qc.invalidateQueries({ queryKey: ["tasks"] });
+  qc.invalidateQueries({ queryKey: ["gamification"] });
+  qc.invalidateQueries({ queryKey: ["challenge"] });
+  // Only mutations that can create/remove a completion owner refresh the
+  // independent shop snapshot. Never copy or optimistically derive Gold.
+  if (completionCapable) qc.invalidateQueries({ queryKey: ["shop"] });
+  qc.invalidateQueries({ queryKey: ["stats"] });
+  // Completions/reopens/deletes change the History calendar's day cards (Stats page).
+  qc.invalidateQueries({ queryKey: ["activity"] });
+  // Task mutations can clear or invalidate the server-persisted current
+  // draw (complete/delete clear it, edits can push it out of the deck).
+  // refetchType "all": the DrawPage derives its standing card from this
+  // query (#110), so the dismissal must reach the cache even while the
+  // page is unmounted — remounting must not flash the stale card.
+  qc.invalidateQueries({ queryKey: ["draw", "current"], refetchType: "all" });
+  // Goal cards derive taskCount/doneCount from tasks — keep them in sync.
+  qc.invalidateQueries({ queryKey: ["goals"] });
+}
+
+export function taskMutationCanChangeCompletion(
+  kind: "create" | "update" | "delete" | "split" | "reorder" | "subtasks",
+  variables?: object,
+): boolean {
+  switch (kind) {
+    case "create":
+      return variables != null && "parentId" in variables && variables.parentId != null;
+    case "update":
+      return variables != null && ("status" in variables || "parentId" in variables);
+    case "delete":
+    case "subtasks":
+      return true;
+    case "split":
+    case "reorder":
+      return false;
+  }
+}
+
 function useInvalidateTasks() {
   const qc = useQueryClient();
-  return () => {
-    qc.invalidateQueries({ queryKey: ["tasks"] });
-    qc.invalidateQueries({ queryKey: ["gamification"] });
-    qc.invalidateQueries({ queryKey: ["challenge"] });
-    qc.invalidateQueries({ queryKey: ["stats"] });
-    // Completions/reopens/deletes change the History calendar's day cards (Stats page).
-    qc.invalidateQueries({ queryKey: ["activity"] });
-    // Task mutations can clear or invalidate the server-persisted current
-    // draw (complete/delete clear it, edits can push it out of the deck).
-    // refetchType "all": the DrawPage derives its standing card from this
-    // query (#110), so the dismissal must reach the cache even while the
-    // page is unmounted — remounting must not flash the stale card.
-    qc.invalidateQueries({ queryKey: ["draw", "current"], refetchType: "all" });
-    // Goal cards derive taskCount/doneCount from tasks — keep them in sync.
-    qc.invalidateQueries({ queryKey: ["goals"] });
-  };
+  return (completionCapable = false) =>
+    invalidateTaskMutationQueries(qc, completionCapable);
 }
 
 export function useCreateTask() {
   const invalidate = useInvalidateTasks();
   return useMutation({
     mutationFn: (task: NewTask) => api.post<Task>("/api/tasks", task),
-    onSuccess: invalidate,
+    onSuccess: (_data, variables) =>
+      invalidate(taskMutationCanChangeCompletion("create", variables)),
   });
 }
 
@@ -92,8 +120,8 @@ export function useUpdateTask() {
   return useMutation({
     mutationFn: ({ id, ...patch }: { id: number } & Record<string, unknown>) =>
       api.patch<CompletionResponse>(`/api/tasks/${id}`, patch),
-    onSuccess: (data) => {
-      invalidate();
+    onSuccess: (data, variables) => {
+      invalidate(taskMutationCanChangeCompletion("update", variables));
       // Completing a task may have closed its running timer server-side.
       qc.invalidateQueries({ queryKey: ["timer"] });
       // A subtask completion can auto-complete its parent (#111, ADR-32) —
@@ -111,7 +139,7 @@ export function useDeleteTask() {
   const invalidate = useInvalidateTasks();
   return useMutation({
     mutationFn: (id: number) => api.delete<{ ok: boolean }>(`/api/tasks/${id}`),
-    onSuccess: invalidate,
+    onSuccess: () => invalidate(taskMutationCanChangeCompletion("delete")),
   });
 }
 
@@ -133,7 +161,7 @@ export function useSplitTask() {
       parts: { title: string; effortMinutes: number; description?: string }[];
     }) => api.post<Task[]>(`/api/tasks/${id}/split`, { parts }),
     onSuccess: () => {
-      invalidate();
+      invalidate(taskMutationCanChangeCompletion("split"));
       // The split closes a running time entry on the original server-side
       // (ADR-12 mirror) — refresh the TimerBar now instead of letting it
       // show a dead timer until the next 60 s poll.
@@ -152,7 +180,7 @@ export function useReorderSubtask() {
     // source of the new order rather than a guessed optimistic splice.
     mutationFn: ({ id, beforeId }: { id: number; beforeId: number | null }) =>
       api.post<Task>(`/api/tasks/${id}/reorder`, { beforeId }),
-    onSuccess: invalidate,
+    onSuccess: () => invalidate(taskMutationCanChangeCompletion("reorder")),
   });
 }
 
@@ -170,6 +198,6 @@ export function useCreateSubtasks() {
       subtasks: NewSubtask[];
       orderMode?: Task["subtaskOrderMode"];
     }) => api.post<Task[]>(`/api/tasks/${parentId}/subtasks`, { subtasks, orderMode }),
-    onSuccess: invalidate,
+    onSuccess: () => invalidate(taskMutationCanChangeCompletion("subtasks")),
   });
 }

@@ -210,7 +210,7 @@ test("completing the drawn 5★ mints a holo trophy with a full-bleed art face",
   // Drawn impact-5 → the holo tier (replacing #107's foil), announced in the
   // aria-label after the (drawn) XP part, painted as the sheen overlay.
   await expect(trophy).toHaveClass(/rarity-holo/);
-  await expect(trophy).toHaveAttribute("aria-label", /XP \(drawn\), holo$/);
+  await expect(trophy).toHaveAttribute("aria-label", /XP · \+\d+ Gold \(drawn\), holo$/);
   const sheen = await trophy.evaluate(
     (el) => getComputedStyle(el.querySelector(".trophy-card-inner")!, "::after").backgroundImage,
   );

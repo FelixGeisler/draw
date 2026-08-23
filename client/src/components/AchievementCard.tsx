@@ -5,7 +5,7 @@ import { celebrate } from "../lib/celebrate";
 import { useClaimAchievement, useUpdateAchievement } from "../hooks/useGamification";
 import { buildAchievementPatch, resetAchievementPatch } from "../lib/achievementEdit";
 import type { TierState } from "../lib/achievementChains";
-import { claimXpForKey } from "../../../shared/achievementTiers";
+import { claimGoldForKey, claimXpForKey } from "../../../shared/achievementTiers";
 import "./AchievementCard.css";
 
 /** Exactly the achievement shape the /api/gamification payload delivers
@@ -26,6 +26,8 @@ export interface AchievementCardData {
   claimedAt: string | null;
   /** XP stamped at claim time, null until claimed. */
   claimXp: number | null;
+  /** Gold stamped at claim time; null on pre-v18 claimed rows. */
+  claimGold: number | null;
   /** Chain progress toward the threshold, null for a one-off. */
   progress: { current: number; target: number } | null;
 }
@@ -206,11 +208,14 @@ export function AchievementCard({
               onClick={onClaim}
               disabled={claim.isPending}
             >
-              Claim +{claimXpForKey(achievement.key)} XP
+              Claim +{claimXpForKey(achievement.key)} XP · +{claimGoldForKey(achievement.key)} Gold
             </button>
           )}
           {unlocked && achievement.claimedAt != null && (
-            <div className="ach-claimed">claimed +{achievement.claimXp} XP</div>
+            <div className="ach-claimed">
+              claimed +{achievement.claimXp} XP
+              {achievement.claimGold != null && ` · +${achievement.claimGold} Gold`}
+            </div>
           )}
         </div>
 

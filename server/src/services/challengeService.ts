@@ -6,12 +6,13 @@ import { localDate, localDayBounds } from "./localDay.js";
  * picked deterministically from a pool by hashing the day string — derived,
  * no storage, no config: the same day names the same challenge on every
  * device and every restart. Progress is derived from today's rows
- * (localDayBounds, the #219 rules), and the payout is an xp_ledger row with
- * UNIQUE(reason='challenge', ref=<day>) — idempotent by construction, at most
- * one payout per calendar day no matter how many events re-evaluate it.
+ * (localDayBounds, the #219 rules), and a new payout is one atomic same-ref
+ * XP/Gold ledger pair. UNIQUE(reason='challenge', ref=<day>) on both ledgers
+ * makes it at most one payout per calendar day.
  */
 
 export const CHALLENGE_XP = 50;
+export const CHALLENGE_GOLD = 20;
 
 export interface ChallengeDef {
   key: string;
@@ -107,6 +108,10 @@ export interface ChallengeState {
   /** The +XP already landed in the ledger (exactly-once per day). */
   paid: boolean;
   xp: number;
+  /** Advertised reward; the actual stamped amount is goldAwarded. */
+  gold: number;
+  goldPaid: boolean;
+  goldAwarded: number;
 }
 
 export function challengeState(now: Date = new Date()): ChallengeState {
@@ -118,6 +123,9 @@ export function challengeState(now: Date = new Date()): ChallengeState {
       .prepare("SELECT 1 FROM xp_ledger WHERE reason = 'challenge' AND ref = ?")
       .get(day),
   );
+  const goldRow = db
+    .prepare("SELECT amount FROM gold_ledger WHERE reason = 'challenge' AND ref = ?")
+    .get(day) as { amount: number } | undefined;
   return {
     day,
     key: def.key,
@@ -127,6 +135,9 @@ export function challengeState(now: Date = new Date()): ChallengeState {
     completed: progress >= def.target,
     paid,
     xp: CHALLENGE_XP,
+    gold: CHALLENGE_GOLD,
+    goldPaid: goldRow != null,
+    goldAwarded: goldRow?.amount ?? 0,
   };
 }
 
@@ -135,19 +146,37 @@ export function challengeState(now: Date = new Date()): ChallengeState {
  * that can satisfy a challenge — completeTask and the timer-stop route (the
  * track challenge's satisfying event is a stop, not a completion). Both call
  * THIS one function, so the R8 concern (a new event path skipping the check)
- * has a single name to grep for. INSERT OR IGNORE + UNIQUE(reason, ref) makes
- * a double evaluation pay nothing twice.
+ * has a single name to grep for. The XP row remains the `paid` idempotency
+ * marker; both owner inserts share the caller transaction.
  *
- * Returns true only when THIS call landed the payout — the caller's cue to
- * announce it.
+ * Returns the committed day/key/label only when THIS call landed the payout —
+ * the caller carries that identity to its post-commit announcement.
  */
-export function payChallengeIfDue(now: Date = new Date()): boolean {
+export interface ChallengePayout {
+  day: string;
+  key: string;
+  label: string;
+}
+
+export function payChallengeIfDue(now: Date = new Date()): ChallengePayout | null {
   const state = challengeState(now);
-  if (!state.completed || state.paid) return false;
-  const r = db
-    .prepare(
-      "INSERT OR IGNORE INTO xp_ledger (amount, reason, ref, created_at) VALUES (?, 'challenge', ?, ?)",
-    )
-    .run(CHALLENGE_XP, state.day, now.toISOString());
-  return r.changes > 0;
+  if (!state.completed) return null;
+  // XP remains the definition of `paid`: an XP-only legacy day is immutable
+  // and receives no Gold backfill. Gold without XP is the forbidden inverse;
+  // stop the triggering mutation instead of repairing or paying independently.
+  if (state.paid) return null;
+  if (state.goldPaid) {
+    throw new Error(`inconsistent challenge payout for ${state.day}: Gold exists without XP`);
+  }
+
+  return db.transaction(() => {
+    const createdAt = now.toISOString();
+    db.prepare(
+      "INSERT INTO xp_ledger (amount, reason, ref, created_at) VALUES (?, 'challenge', ?, ?)",
+    ).run(CHALLENGE_XP, state.day, createdAt);
+    db.prepare(
+      "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (?, 'challenge', ?, ?)",
+    ).run(CHALLENGE_GOLD, state.day, createdAt);
+    return { day: state.day, key: state.key, label: state.label };
+  })();
 }

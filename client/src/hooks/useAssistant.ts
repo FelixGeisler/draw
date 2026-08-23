@@ -91,6 +91,14 @@ export function useAgentMessage() {
   });
 }
 
+export function agentApplyCanChangeCompletion(operations: StagedOp[]): boolean {
+  return operations.some((operation) =>
+    operation.kind === "create_task"
+      ? typeof operation.task.parentId === "number"
+      : typeof operation.parentId === "number",
+  );
+}
+
 /** Exported for unit tests (the useAi.ts precedent): the exact options useAgentApply mounts. */
 export function agentApplyMutation(qc: QueryClient) {
   return {
@@ -112,11 +120,15 @@ export function agentApplyMutation(qc: QueryClient) {
     // invalidation set the task mutations use — new rows change lists, goal
     // counts and (via drawability) the deck-derived surfaces. Runs for the
     // reconciled 409 too — the tasks exist either way.
-    onSuccess: () => {
+    onSuccess: (_result: ApplyResult, input: ApplyInput) => {
       qc.invalidateQueries({ queryKey: ["tasks"] });
       qc.invalidateQueries({ queryKey: ["goals"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["gamification"] });
+      if (agentApplyCanChangeCompletion(input.operations)) {
+        qc.invalidateQueries({ queryKey: ["shop"] });
+        qc.invalidateQueries({ queryKey: ["challenge"] });
+      }
       qc.invalidateQueries({ queryKey: ["draw", "current"], refetchType: "all" });
     },
   };

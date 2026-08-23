@@ -1,6 +1,6 @@
 import { getSettingString } from "../db.js";
 import { ACHIEVEMENTS } from "./gamificationService.js";
-import { challengeState } from "./challengeService.js";
+import type { ChallengePayout } from "./challengeService.js";
 
 /**
  * Outbound notifications (#235, ADR-67): fire-and-forget POSTs to a
@@ -86,8 +86,10 @@ export function notifyGoalAchieved(title: string): void {
   notify({ title: "Goal achieved", body: `🏆 ${title}`, tags: "tada" });
 }
 
-export function notifyChallengeCompleted(now: Date = new Date()): void {
-  // Read-only label lookup; the payout row was already committed.
-  const label = challengeState(now).label;
-  notify({ title: "Daily challenge complete", body: `✅ ${label} — +50 XP`, tags: "dart" });
+export function notifyChallengeCompleted(payout: ChallengePayout): void {
+  notify({
+    title: "Daily challenge complete",
+    body: `✅ ${payout.label} — +50 XP · +20 Gold`,
+    tags: "dart",
+  });
 }

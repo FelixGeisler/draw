@@ -198,6 +198,7 @@ describe("warm-up XP rules (#57): never ×1.5, window ×1.25, momentum ×1.25, c
     // round(round(20 × 3/3) × 1.25) = 25 — NOT the drawn 30, although the
     // card IS the persisted current draw.
     expect(done.xpAwarded).toBe(25);
+    expect(done.goldAwarded).toBe(3);
     expect(done.bonus).toBe("warmup");
 
     const row = db
@@ -217,6 +218,7 @@ describe("warm-up XP rules (#57): never ×1.5, window ×1.25, momentum ×1.25, c
       await request(app).patch(`/api/tasks/${other.id}`).send({ status: "done" }).expect(200)
     ).body;
     expect(done.xpAwarded).toBe(25); // round(20 × 1.25)
+    expect(done.goldAwarded).toBe(3);
     expect(done.bonus).toBe("momentum");
     const row = db
       .prepare("SELECT was_warmup AS wasWarmup FROM completions WHERE task_id = ?")

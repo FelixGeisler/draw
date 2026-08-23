@@ -13,12 +13,17 @@ test.describe.configure({ mode: "serial" });
 const SEED_PREFIX = "Challenge e2e seed";
 
 interface ChallengeState {
+  day: string;
   key: string;
   label: string;
   target: number;
   progress: number;
+  completed: boolean;
   paid: boolean;
   xp: number;
+  gold: number;
+  goldPaid: boolean;
+  goldAwarded: number;
 }
 
 async function getChallenge(request: APIRequestContext): Promise<ChallengeState> {
@@ -102,8 +107,46 @@ test("the chip shows today's objective and pays exactly once when driven to the 
 
   expect(after.paid).toBe(true);
   await page.reload();
-  await expect(chip).toContainText(`+${after.xp} XP`);
+  await expect(chip).toContainText(`+${after.xp} XP · +${after.goldAwarded} Gold`);
   await expect(chip).toContainText("✔");
+});
+
+test("the chip distinguishes unpaid, cumulative, XP-only legacy, and Gold-only anomaly truth", async ({
+  page,
+}) => {
+  const base: ChallengeState = {
+    day: "2026-08-23",
+    key: "complete_3",
+    label: "Complete 3 tasks",
+    target: 3,
+    progress: 2,
+    completed: false,
+    xp: 50,
+    gold: 20,
+    paid: false,
+    goldPaid: false,
+    goldAwarded: 0,
+  };
+  let state = base;
+  await page.route("**/api/challenge", (route) => route.fulfill({ json: state }));
+  await page.goto("/");
+  const chip = page.getByTestId("challenge-chip");
+  await expect(chip).toHaveAttribute("title", /worth \+50 XP · \+20 Gold/);
+  await expect(chip).toContainText("2/3");
+
+  state = { ...base, completed: true, progress: 3, paid: true, goldPaid: true, goldAwarded: 20 };
+  await page.reload();
+  await expect(chip).toContainText("+50 XP · +20 Gold");
+
+  state = { ...base, completed: true, progress: 3, paid: true };
+  await page.reload();
+  await expect(chip).toContainText("+50 XP");
+  await expect(chip).not.toContainText("Gold");
+
+  state = { ...base, completed: true, progress: 3, goldPaid: true, goldAwarded: 20 };
+  await page.reload();
+  await expect(chip).toContainText("⚠");
+  await expect(chip).toContainText("inconsistent payout: +20 Gold without XP");
 });
 
 test.afterAll(async ({ request }) => {

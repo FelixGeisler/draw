@@ -1,10 +1,10 @@
 import { db, getSetting, getSettingString } from "../db.js";
 import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys.js";
-import { claimXpForKey } from "../../../shared/achievementTiers.js";
+import { claimGoldForKey, claimXpForKey } from "../../../shared/achievementTiers.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
 import { addDays, localDate, localDayBounds } from "./localDay.js";
 import { nextOccurrence } from "./recurrence.js";
-import { payChallengeIfDue } from "./challengeService.js";
+import { payChallengeIfDue, type ChallengePayout } from "./challengeService.js";
 import {
   computeStreak,
   FREEZE_BANK_CAP,
@@ -54,12 +54,16 @@ export type CompletionBonus = "warmup" | "momentum" | null;
 
 export interface CompletionResult {
   xpAwarded: number;
+  /** Gold owned by this completion row only (never challenge Gold). */
+  goldAwarded: number;
   bonus: CompletionBonus;
   newAchievements: string[];
   recurring: boolean;
   levelUp: boolean;
   /** True when THIS completion landed the daily challenge payout (#231). */
   challengeCompleted: boolean;
+  /** Internal committed identity for the route's post-commit notification. */
+  challengePayout: ChallengePayout | null;
 }
 
 /**
@@ -108,6 +112,11 @@ function hasMomentum(taskId: number, now: Date): boolean {
       )
       .get(taskId, cutoff),
   );
+}
+
+/** Completion Gold is fixed from the final, post-multiplier XP award (#264). */
+export function completionGoldForXp(finalXpAwarded: number): number {
+  return Math.max(1, Math.round(finalXpAwarded / 10));
 }
 
 export interface CompleteOptions {
@@ -161,11 +170,14 @@ export function completeTask(
   let xp = Math.round(Math.round(effort * (task.impact / 3)) * multiplier);
   if (xp < 1) xp = 1;
 
+  const gold = completionGoldForXp(xp);
   const levelBefore = levelFromXp(totalXp()).level;
 
+  // XP and Gold are one owner fact. Any insert failure aborts the caller's
+  // transaction before task/timer/achievement/challenge state can commit.
   db.prepare(
-    "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, ?, ?, ?)",
-  ).run(task.id, now.toISOString(), wasDrawn ? 1 : 0, warmup ? 1 : 0, xp);
+    "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded, gold_awarded) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(task.id, now.toISOString(), wasDrawn ? 1 : 0, warmup ? 1 : 0, xp, gold);
 
   // Completing ends the work session: close this task's own running timer at
   // completion time. A different task's running timer stays untouched. This
@@ -223,16 +235,18 @@ export function completeTask(
   // objective — pay it inside the same transaction. The level comparison sits
   // AFTER the payout so a challenge bonus that crosses a level threshold
   // reports levelUp honestly.
-  const challengeCompleted = payChallengeIfDue(now);
+  const challengePayout = payChallengeIfDue(now);
   const levelAfter = levelFromXp(totalXp()).level;
 
   return {
     xpAwarded: xp,
+    goldAwarded: gold,
     bonus,
     newAchievements,
     recurring,
     levelUp: levelAfter > levelBefore,
-    challengeCompleted,
+    challengeCompleted: challengePayout != null,
+    challengePayout,
   };
 }
 
@@ -703,7 +717,7 @@ export function gamificationState() {
     .prepare(
       `SELECT co.id, co.completed_at AS completedAt,
               (co.was_drawn AND NOT co.was_warmup) AS wasDrawn, co.xp_awarded AS xpAwarded,
-              t.id AS taskId, t.title, t.category_id AS categoryId, t.goal_id AS goalId, t.impact
+              co.gold_awarded AS goldAwarded, t.id AS taskId, t.title, t.category_id AS categoryId, t.goal_id AS goalId, t.impact
        FROM completions co JOIN tasks t ON t.id = co.task_id
        WHERE co.completed_at >= ? AND co.completed_at < ?
        ORDER BY co.completed_at ASC`,
@@ -712,9 +726,16 @@ export function gamificationState() {
 
   const unlocked = db
     .prepare(
-      "SELECT key, unlocked_at AS unlockedAt, claimed_at AS claimedAt, claim_xp AS claimXp FROM achievements",
+      `SELECT key, unlocked_at AS unlockedAt, claimed_at AS claimedAt,
+              claim_xp AS claimXp, claim_gold AS claimGold FROM achievements`,
     )
-    .all() as { key: string; unlockedAt: string; claimedAt: string | null; claimXp: number | null }[];
+    .all() as {
+      key: string;
+      unlockedAt: string;
+      claimedAt: string | null;
+      claimXp: number | null;
+      claimGold: number | null;
+    }[];
   const unlockedMap = new Map(unlocked.map((u) => [u.key, u]));
 
   // Display-only overrides (#177, ADR-44): title/description COALESCE onto the
@@ -730,6 +751,7 @@ export function gamificationState() {
 
   return {
     xp,
+    totalGold: totalGold(),
     level,
     levelProgress: { intoLevel, needed },
     // streak stays a plain number for compatibility; the sibling fields let
@@ -764,6 +786,7 @@ export function gamificationState() {
         unlockedAt: row?.unlockedAt ?? null,
         claimedAt: row?.claimedAt ?? null,
         claimXp: row?.claimXp ?? null,
+        claimGold: row?.claimGold ?? null,
         progress: chainProgress(a.key, metrics),
       };
     }),
@@ -842,7 +865,13 @@ export function customizeAchievement(key: string, patch: AchievementPatch): Cust
 // Claim-for-XP (#156, ADR-42)
 
 export type ClaimResult =
-  | { status: "ok"; xpAwarded: number; levelUp: boolean; newAchievements: string[] }
+  | {
+      status: "ok";
+      xpAwarded: number;
+      goldAwarded: number;
+      levelUp: boolean;
+      newAchievements: string[];
+    }
   | { status: "unknown" } // not a real achievement key → 400
   | { status: "locked" } // real key, but not unlocked yet → 400
   | { status: "claimed" }; // already claimed → 409
@@ -873,13 +902,25 @@ export function claimAchievement(key: string): ClaimResult {
     if (row.claimedAt != null) return { status: "claimed" };
 
     const xpAwarded = claimXpForKey(key);
+    const goldAwarded = claimGoldForKey(key);
     const levelBefore = levelFromXp(totalXp()).level;
-    db.prepare(
-      "UPDATE achievements SET claimed_at = ?, claim_xp = ? WHERE key = ? AND claimed_at IS NULL",
-    ).run(new Date().toISOString(), xpAwarded, key);
+    const update = db.prepare(
+      `UPDATE achievements SET claimed_at = ?, claim_xp = ?, claim_gold = ?
+       WHERE key = ? AND claimed_at IS NULL`,
+    ).run(new Date().toISOString(), xpAwarded, goldAwarded, key);
+    // The pre-read and guarded write are in one transaction. A forced failure
+    // throws before any XP/Gold/level/achievement fact can commit; a lost
+    // guard is likewise never reported as a successful claim.
+    if (update.changes !== 1) throw new Error("achievement claim guard failed");
     const levelAfter = levelFromXp(totalXp()).level;
     const newAchievements = checkAchievements({});
-    return { status: "ok", xpAwarded, levelUp: levelAfter > levelBefore, newAchievements };
+    return {
+      status: "ok",
+      xpAwarded,
+      goldAwarded,
+      levelUp: levelAfter > levelBefore,
+      newAchievements,
+    };
   })();
 }
 

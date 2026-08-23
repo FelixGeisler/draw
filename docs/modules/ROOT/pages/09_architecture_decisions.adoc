@@ -73,6 +73,15 @@ completion XP + claimed-achievement XP + only `xp_ledger` rows whose reason is
 log-over-counter rule, derived unclamped from `completions.gold_awarded`,
 `achievements.claim_gold`, and `gold_ledger.amount`. No mutable balance exists.
 
+*Amendment (#264):* Every new completion stamps final XP and
+`gold_awarded = max(1, Math.round(final XP / 10))` in one insert. Reopen,
+parent-reopen, deletion, and recompletion keep using the completion row's
+existing ownership lifecycle; no backfill occurs and removing owners may make
+the unclamped total negative. Completion responses (including recurring,
+symbolic, and nested parent results), gamification trophies, and activity cards
+carry completion-owned Gold only. XP/bonus/recurrence/level/achievement/timer
+behavior is unchanged.
+
 == ADR-6: Recurring tasks stay open, due date advances
 
 *Context:* Weekly chores must reappear without recreating tasks.
@@ -1892,6 +1901,16 @@ Motion stays gated behind `prefers-reduced-motion: no-preference`, so the
 frame and sheen paint but never move under reduced motion. `trophyRarity`
 (task trophies) keeps its own separate 3-tier vocabulary — untouched.
 
+*Amendment (#264): claim-for-XP also owns claim Gold.* The same shared tier
+module defines Gold 5/10/25/50/100 for common/rare/super-rare/ultra-rare/
+secret-rare. One guarded transaction stamps `claimed_at`, unchanged tier XP,
+and tier Gold; the response is exactly `{xpAwarded, goldAwarded, levelUp,
+newAchievements}`. Unknown/locked/repeated claims retain 400/400/409 and write
+nothing. A pre-v18 claimed row remains `claim_gold = NULL`, receives no
+backfill, and keeps XP-only presentation; an older unlock first claimed now
+receives both current payouts. Claim success invalidates independently fetched
+gamification and shop truth; there is no optimistic balance.
+
 *Rationale:* Progress and claims are exactly the anti-procrastination loop
 the product wants (a visible next rung, a small reward for reaching one),
 and both are expressible as logs, so they stay within ADR-2/ADR-5's
@@ -3371,6 +3390,13 @@ and direct-freeze controls are removed. The existing card-back settings and
 equip/Draw behavior remain authoritative. Empty append-only `gold_ledger` and
 immutable `pack_openings` establish the next contract without a producer.
 
+*Amendment (#264):* Gold now has exactly three active producers: completion
+owners, achievement claim owners, and `gold_ledger(reason='challenge')`.
+`totalGold()` still sums all owners without a clamp or mutable balance. The
+shop remains an independent read snapshot and every purchase POST remains the
+same unavailable 400; #266 alone owns openings/payment. Report summaries and
+MCP tool/resource/catalog schemas remain unchanged.
+
 == ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
 
 *Context:* The deck deals work but never sets a stake (#231). A small daily
@@ -3406,6 +3432,17 @@ pack rewards (the payout stays plain XP; what it buys is the shop's business).
 `totalXp()`. The existing +50 XP producer is unchanged. `challenge` is reserved
 as a future Gold-ledger reason, but v18 adds no Gold producer and does not copy
 challenge payouts into Gold.
+
+*Amendment (#264):* A new payout atomically inserts same-local-day,
+same-`ref` `+50` XP and `+20` Gold rows with the triggering completion or timer
+close; `challengeCompleted` and the exact `✅ <label> — +50 XP · +20 Gold`
+notification exist only after the pair commits. `paid` still means the XP row
+exists. XP absent/Gold absent pays both when complete; XP present/Gold absent is
+an immutable legacy paid day; both present is already paid; XP absent/Gold
+present throws through normal server-error handling on a payout attempt,
+rolling back the trigger and repairing nothing. GET is read-only and reports
+`gold: 20`, actual `goldPaid`, and actual `goldAwarded` so the chip can show
+cumulative, XP-only, or inconsistent truth.
 
 == ADR-64: The estimation hint becomes tap-to-apply and reaches the triage strip — and applying dismisses it
 

@@ -75,7 +75,7 @@ test("warm-up deals the smallest card with its badge; completing pays the bonus 
   const trophy = page.locator(".trophy-card", { hasText: SMALL_TASK });
   await expect(trophy).toBeVisible();
   await expect(trophy).not.toHaveClass(/rarity-/);
-  await expect(trophy).toHaveAttribute("aria-label", /XP$/);
+  await expect(trophy).toHaveAttribute("aria-label", /Gold$/);
 
   // …and the allowance is spent: disabled button plus the countdown hint.
   await expect(warmupButton).toBeDisabled();
