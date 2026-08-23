@@ -3397,6 +3397,33 @@ shop remains an independent read snapshot and every purchase POST remains the
 same unavailable 400; #266 alone owns openings/payment. Report summaries and
 MCP tool/resource/catalog schemas remain unchanged.
 
+*Amendment (#265):* One stable registry now contains, in exact order: `classic`
+(Classic weave); common `ember` (Ember lattice), `tide` (Tide glass),
+`midnight` (Midnight stars), `parchment` (Aged parchment), `graphite`
+(Graphite weave); rare `meadow` (Meadow braid), `royal` (Royal filigree),
+`sakura` (Sakura glass), `circuit` (Neon circuit), `frost` (Frost lattice);
+ultra-rare `aurum` (Aurum crest), `aurora` (Aurora silk), `obsidian` (Obsidian
+gold); and secret-rare `prism` (Prism foil). The original seven records keep
+their keys/names/rarities and settings ownership/equipment behavior. Classic
+remains always owned and the unknown-key fallback, but is excluded from the
+5/5/3/1 pullable pools and every refund.
+
+An adjacent pure service fixes the contract consumed later by #266. For
+oldest-to-newest outcomes, the next Secret chance is
+`min(500 + 50 * trailingNonSecretCount, 1500)` basis points; duplicate status
+does not change it and any Secret resets it. Rarity consumes one explicit
+finite `[0,1)` sample: Secret occupies its chance and the remainder is split
+45:32:18 common/rare/ultra-rare. A separate sample selects uniformly within
+the chosen tier in registry order. Duplicate Gold is 10/20/40/100 by tier.
+The effective bonus is Freeze/Pouch/Ticket/none over 5/5/2/88 percent, with a
+would-be Freeze becoming Pouch when 2 Freezes are banked. Half-open intervals
+make exact thresholds enter the following result. Every chance, sample,
+history rarity and bank value is validated; invalid inputs throw without
+clamping or coercion. The module has no RNG default/source, request or clock
+input, persistence, effect or mutation. `POST /api/shop/buy` remains the same
+unavailable 400. Production randomness, opening order, payment, atomic writes,
+refund/bonus effects and reveal start only in #266; CSS designs remain #267.
+
 == ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
 
 *Context:* The deck deals work but never sets a stake (#231). A small daily

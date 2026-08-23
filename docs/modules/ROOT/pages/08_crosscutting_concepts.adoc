@@ -98,6 +98,29 @@ invalidate both `['gamification']` and the independent `['shop']` snapshot
 (with `['challenge']` where already required); no client computes or copies a
 Gold total between caches.
 
+=== Pure pack calculations (#265)
+
+The stable registry is, in order: `classic`; common `ember`, `tide`,
+`midnight`, `parchment`, `graphite`; rare `meadow`, `royal`, `sakura`,
+`circuit`, `frost`; ultra-rare `aurum`, `aurora`, `obsidian`; secret-rare
+`prism`. Their names are respectively Classic weave, Ember lattice, Tide
+glass, Midnight stars, Aged parchment, Graphite weave, Meadow braid, Royal
+filigree, Sakura glass, Neon circuit, Frost lattice, Aurum crest, Aurora silk,
+Obsidian gold and Prism foil. Classic remains the always-owned common fallback,
+not one of the 5/5/3/1 pullable entries.
+
+Pack math is derived state over explicit arguments. Ordered outcomes are
+consumed oldest-to-newest and produce
+`min(500 + 50 * trailingNonSecretCount, 1500)` basis points; a Secret resets
+the trailing count even when duplicate. One finite `[0,1)` sample selects the
+Secret interval and then the non-Secret 45:32:18 ratio; a second sample selects
+`floor(sample * tierSize)` in registry order. Duplicate Gold by tier is
+10/20/40/100. Bonus intervals are `[0,.05)` Freeze, `[.05,.10)` Pouch,
+`[.10,.12)` Ticket and `[.12,1)` none, except bank 2 resolves the first interval
+directly to Pouch. Inputs are never clamped, coerced or implicitly generated:
+invalid values throw, and the pure module reads no request, database or clock.
+#266 alone introduces production randomness, payment, persistence and effects.
+
 == 8.2 The weight formula
 
 ....
