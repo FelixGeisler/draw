@@ -91,9 +91,9 @@ export function taskMutationCanChangeCompletion(
     case "update":
       return variables != null && ("status" in variables || "parentId" in variables);
     case "delete":
-    case "split":
     case "subtasks":
       return true;
+    case "split":
     case "reorder":
       return false;
   }

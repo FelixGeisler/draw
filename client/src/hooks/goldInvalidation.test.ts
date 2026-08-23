@@ -30,7 +30,7 @@ describe("Gold producer cache invalidation", () => {
     expect(taskMutationCanChangeCompletion("update", { id: 1, status: "done" })).toBe(true);
     expect(taskMutationCanChangeCompletion("update", { id: 1, parentId: 7 })).toBe(true);
     expect(taskMutationCanChangeCompletion("delete")).toBe(true);
-    expect(taskMutationCanChangeCompletion("split")).toBe(true);
+    expect(taskMutationCanChangeCompletion("split")).toBe(false);
     expect(taskMutationCanChangeCompletion("subtasks")).toBe(true);
     expect(taskMutationCanChangeCompletion("reorder")).toBe(false);
   });
