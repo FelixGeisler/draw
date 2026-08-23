@@ -153,6 +153,28 @@ unknown string entries and never changes equipment. No effect changes XP.
 SQLite's immediate lock makes concurrent payment validation, order allocation,
 and predecessor-based chance one serialized operation.
 
+=== Client pack reconciliation and rendering (#267)
+
+The Stats shop renders the #266 snapshot verbatim: unclamped Gold, Tickets,
+Freeze bank/cap, server price, basis-point chance formatting, ordered ownership
+and equipment. A click first stores one versioned `sessionStorage` intent with a
+`crypto.randomUUID()` ref, bound payment and automatic-retry marker. Only the
+initial fetch rejection may retry once, after persisting the consumed marker;
+HTTP responses are definitive, while exhausted transport and successful-body
+parse/shape failures keep the intent unresolved. Reload never POSTs: it offers a
+one-request same-ref/same-payment resume. Malformed/old records are removed and
+a storage write failure sends nothing. There is no abandon, payment switch or
+new-ref retry.
+
+A successful response replaces `['shop']` exactly with `response.shop` and
+invalidates `['gamification']`; errors never write either cache. The inline
+polite status reports the returned name/tier/new-or-duplicate/refund/effective
+bonus without a reveal stage. The fixed catalog uses one shared
+`.draw-face.front[data-back]` selector per known non-Classic key for both shop
+swatches and Draw; all are CSS-only. Classic carries no attribute, and an
+unknown attribute matches no variant and therefore receives the Classic
+fallback. #268 alone owns staged reveal presentation.
+
 == 8.2 The weight formula
 
 ....

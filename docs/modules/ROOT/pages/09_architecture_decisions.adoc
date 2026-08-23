@@ -3462,6 +3462,19 @@ ownership preserves unknown string entries and never auto-equips. Direct Freeze
 sale, Secret guarantee, caller RNG, schema/backup changes and reveal UI remain
 out of scope.
 
+*Amendment (#267):* the client now exposes the two explicit server-priced pack
+payments and renders all #266 snapshot fields without a second economy model.
+One versioned tab-scoped `sessionStorage` intent binds `crypto.randomUUID()` to
+its selected payment. It is written before the first POST; only an initial
+fetch rejection can consume one automatic retry, and that consumed marker is
+written before retry. HTTP responses clear the intent as definitive; exhausted
+transport and successful-response parse/shape failures retain it for one-click
+same-ref/same-payment retry. Reload offers manual resume and never POSTs on
+mount; malformed/old records are deleted. Success replaces `['shop']` exactly
+with the returned snapshot and invalidates `['gamification']`; no error or
+optimistic client calculation changes economy, collection, XP or level. The
+result is an inline polite summary only; #268 still owns staged reveal.
+
 == ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
 
 *Context:* The deck deals work but never sets a stake (#231). A small daily
@@ -3875,6 +3888,14 @@ table was tuned to match. The Wrapped share card keeps its inlined charcoal
 palette by its own #234 decision (deliberately frozen against theme drift).
 The favicon, by contrast, IS chrome — the browser-tab card mark followed the
 retune (brass frame and glow, felt weave) rather than staying blue-era.
+
+*Amendment (#267):* the shop and Draw share the exact
+`.draw-face.front[data-back]` rules. The six shipped variants remain unchanged;
+`midnight`, `parchment`, `graphite`, `sakura`, `circuit`, `frost`, `aurora` and
+`obsidian` add distinct CSS-gradient motifs with no asset request. Classic
+still has no `data-back`, and unknown keys match no variant and therefore paint
+as Classic. The immediate purchase summary adds no stage, flip, animation or
+confetti, preserving the casino constraint and #268 boundary.
 
 *Out of scope:* a light theme, per-surface accent theming, the command
 palette adopting the accent (its selection stays `--bg-hover` on purpose —

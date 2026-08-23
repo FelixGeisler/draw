@@ -205,7 +205,8 @@ client/src/
 ├── api/client.ts + types.ts   typed fetch wrapper, shared DTOs
 ├── hooks/                     TanStack Query wrappers (useTasks, useDraw,
 │                              useTimer, useGamification, useGoals, useAi,
-│                              useActivity, useEstimationBias)
+│                              useActivity, useEstimationBias, useShop) plus the
+│                              tab-scoped pack purchase-intent/retry helper (#267)
 ├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip),
 │                              Tasks (capture-first: quick capture + triage strip +
 │                              category tree, ADR-40), Goals, Stats (summary tiles,
@@ -222,11 +223,16 @@ client/src/
                                FocusOverlay (fullscreen focus mode, ADR-29),
                                EmptyPoolReason (one voice for an empty pool),
                                GamificationHeader, TrophyDeck, HistoryCalendar,
-                               AchievementToast, MaterialsSection, AiSuggestionPanel
+                               AchievementToast, ShopPanel (authoritative Gold/Ticket
+                               controls, immediate result and shared back swatches),
+                               MaterialsSection, AiSuggestionPanel
                                (breakdown, plan, generate-tasks panels)
 ....
 
-All server state flows through TanStack Query; task mutations invalidate the
+All server state flows through TanStack Query. The independent `['shop']`
+snapshot is replaced only by a successful pack response or refetched after an
+authoritative producer/equip invalidation; the pack client never derives or
+optimistically changes economy/collection state. Task mutations invalidate the
 `tasks`/`gamification`/`stats`/`activity`/`goals` query keys (goal cards derive
 their task counts from tasks; timer start/stop also touches `activity` — a
 started task lights up today's cell in the History calendar), plus `draw.current`,
