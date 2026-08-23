@@ -214,6 +214,18 @@ can replace and reopen it. Any sample or persistence failure rolls every fact
 back. GET `/api/shop` is the same derived snapshot without transaction, RNG or
 write.
 
+A validated current first/retry/resume response replaces `['shop']` and separately
+snapshots `opening` into a mount-local modal session keyed by `ref` and
+`openingOrder`. Normal motion advances only on explicit background reveal, then an
+effective bonus reveal when present; Skip completes without celebration and Close
+or Escape discards only that session. The final explicit card reveal celebrates
+once through the shared reduced-motion-aware gateway. The dialog is portalled
+outside the inert app root, traps focus, announces only facts already exposed, and
+restores the initiating control or the stable Shop heading. Reduced motion starts
+at the same complete one-card/optional-second-card content with no reveal controls,
+animation, timer or confetti. Failures and ordinary reloads never create a reveal,
+and reveal progress is not stored or reconstructed from the later shop snapshot.
+
 == 6.3 AI backward planning (with materials)
 
 [plantuml,runtime-plan-goal,svg]

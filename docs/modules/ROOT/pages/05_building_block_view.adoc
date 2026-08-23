@@ -224,7 +224,9 @@ client/src/
                                EmptyPoolReason (one voice for an empty pool),
                                GamificationHeader, TrophyDeck, HistoryCalendar,
                                AchievementToast, ShopPanel (authoritative Gold/Ticket
-                               controls, immediate result and shared back swatches),
+                               controls and shared back swatches), PackRevealModal
+                               (current-response portal, focus/inert and ordered cards)
+                               with a pure identity-guarded reveal state helper,
                                MaterialsSection, AiSuggestionPanel
                                (breakdown, plan, generate-tasks panels)
 ....
@@ -232,7 +234,10 @@ client/src/
 All server state flows through TanStack Query. The independent `['shop']`
 snapshot is replaced only by a successful pack response or refetched after an
 authoritative producer/equip invalidation; the pack client never derives or
-optimistically changes economy/collection state. Task mutations invalidate the
+optimistically changes economy/collection state. A validated purchase response is
+also snapshotted into one mount-local reveal session keyed by its opening ref/order;
+that presentation never rereads mutable query data or persists reveal progress.
+Task mutations invalidate the
 `tasks`/`gamification`/`stats`/`activity`/`goals` query keys (goal cards derive
 their task counts from tasks; timer start/stop also touches `activity` — a
 started task lights up today's cell in the History calendar), plus `draw.current`,

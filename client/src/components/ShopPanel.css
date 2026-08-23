@@ -24,22 +24,12 @@
   font-size: 13px;
 }
 
-.shop-error,
-.shop-result {
+.shop-error {
   margin: 12px 0 0;
   padding: 10px 12px;
   border-radius: 8px;
-}
-
-.shop-error {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 10%, transparent);
-}
-
-.shop-result {
-  color: var(--text);
-  background: var(--accent-wash-mid);
-  border: 1px solid var(--accent);
 }
 
 .shop-backs {

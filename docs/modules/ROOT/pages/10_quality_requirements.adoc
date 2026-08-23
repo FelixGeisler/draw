@@ -66,9 +66,13 @@ AI degradation > data integrity > cost transparency > responsiveness.
 |Q14
 |A pack POST loses its response or the tab reloads with an unresolved purchase
 |One tab-scoped payment-bound ref blocks new purchases; only the initial transport failure retries once, reload waits for explicit same-ref resume, and a definitive replay/error clears the intent without optimistic economy changes
+
+|Q15
+|A keyboard or screen-reader user opens a pack, or the user requests reduced motion
+|One named modal exposes the returned background before its optional effective bonus, keeps hidden facts out of accessibility output, traps/restores focus, and offers explicit Reveal/Skip/Close/Escape; reduced motion opens the identical complete facts with no reveal motion or confetti
 |===
 
-Q1, Q3 (guardrail), Q6–Q10 and Q13–Q14 are covered by the automated test suites (unit /
+Q1, Q3 (guardrail), Q6–Q10 and Q13–Q15 are covered by the automated test suites (unit /
 integration / E2E — see xref:08_crosscutting_concepts.adoc[8.7]) and run in CI on every
 PR. Q2 and Q4 need a live API key and are verified manually; Q5 is covered by the
 E2E timer journey; Q11/Q12 are properties of SQLite WAL and prebuilt binaries.

@@ -3482,6 +3482,18 @@ publishes its stale snapshot. No error or optimistic client calculation changes
 economy, collection, XP or level. The
 result is an inline polite summary only; #268 still owns staged reveal.
 
+*Amendment (#268):* the inline summary is superseded by one client-only reveal
+session snapshot from the exact validated response. Identity is the returned
+`ref` plus `openingOrder`; current-mount progress is neither persisted nor derived
+from the subsequently mutable `['shop']` cache. A portal using the shared
+`useModalFocus` contract reveals the background first and the effective bonus only
+when one exists. Reveal, Skip, explicit Close and Escape are user-driven; only an
+explicit final-card reveal celebrates once through `celebrate`. Stale-identity
+events are no-ops. Reduced motion opens at identical complete semantics without
+flip, entrance, timer, Reveal/Skip or confetti. HTTP/transport/shape failures and
+ordinary reloads create no session. This changes no server, API, RNG, payment,
+replay, economy, ownership or equip authority.
+
 == ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
 
 *Context:* The deck deals work but never sets a stake (#231). A small daily
@@ -3903,6 +3915,13 @@ retune (brass frame and glow, felt weave) rather than staying blue-era.
 still has no `data-back`, and unknown keys match no variant and therefore paint
 as Classic. The immediate purchase summary adds no stage, flip, animation or
 confetti, preserving the casino constraint and #268 boundary.
+
+*Amendment (#268):* the later reveal modal supersedes that immediate summary. It
+reuses the shared CSS-only background paint and adds dedicated CSS-only
+Freeze/Pouch/Ticket cards, with no asset request. Its single reveal flip is opt-in
+under `prefers-reduced-motion: no-preference`, never timed or looping; reduced
+motion receives complete content immediately and the existing celebration gateway
+suppresses confetti. Serif remains limited to card titles within this card surface.
 
 *Out of scope:* a light theme, per-surface accent theming, the command
 palette adopting the accent (its selection stays `--bg-hover` on purpose —
