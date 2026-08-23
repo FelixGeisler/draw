@@ -3772,8 +3772,8 @@ self-hosted app that never phones home about updates rots silently; the
 counterweight is scope and a real off-switch — the request carries nothing
 but the `Accept` header (no token, no telemetry), and both the
 `update_check_enabled` setting and `UPDATE_CHECK_INTERVAL_HOURS=0` mean
-zero outbound calls and zero timers, the #235 rule, gating even the user's
-own "Check now". Unlike `BACKUP_INTERVAL_HOURS`, garbage in the env knob
+zero outbound calls and zero timers, the #235 rule, gating even the retained
+forced-check API. Unlike `BACKUP_INTERVAL_HOURS`, garbage in the env knob
 falls back to the default rather than to disabled: a typo silently turning
 a default-on feature off would be a setting that lies (the
 `warmup_every_hours` lesson). Comparison is a pure semver module — numeric
@@ -3787,28 +3787,34 @@ only exact lower-case `stable`, `edge`, or `local` (otherwise `local`), and
 hex SHA, normalized to lower case (otherwise `null`). `buildIdentity` is
 `<channel>:<sha>` when valid and `<channel>:version-<server package version>`
 otherwise. These fields do not change release checking: authenticated Settings
-keeps `Draw <package version>` as the running version and separately displays
-`<channel> · <full SHA>`, or `<channel> · package <version> (SHA unavailable)`
-when no SHA was shipped. No other client surface consumes the identity. First
+always shows **Current Version** as `Draw <package version>` and appends
+` · Edge <first-12-sha>` or ` · Local <first-12-sha>` only for SHA-bearing
+edge/local builds. Stable and SHA-less builds add no identity fallback, and
+there is no separate build row. **Latest Version** is conditional on a non-null
+server value and preserves that value unchanged; **Update** is conditional only
+on `updateAvailable`. No other client surface consumes the identity. First
 sighting of a new version pays ONE notification through the #235 door, deduped
 in a settings row so restarts
 never re-send. Forced checks are throttled server-side (one outbound GET
-per 30s window, cache served inside it) so a hammered button cannot burn
+per 30s window, cache served inside it) so a hammered API client cannot burn
 GitHub's unauthenticated rate budget, and a failed re-check retains the
-last successful sighting — a blip must not un-light the banner for a day.
+last successful sighting — a blip must not discard a known latest version.
 * *The version sits behind the password gate.* `/api/health` stays exactly
 `{ok, time}`: version and update state ride the authed `GET /api/update`.
 Liveness is public infrastructure; "which exact build is this" is
 reconnaissance, and the post-restart readiness probe needs only health.
 * *Applying is a trigger, not the socket.* Draw never mounts `docker.sock`
-— a compromise of the app must not be root on the host. "Update now" is
-one POST to a user-configured trigger URL (Watchtower `http-api-update`,
+— a compromise of the app must not be root on the host. The **Update** action
+causes one POST to a user-configured trigger URL (Watchtower `http-api-update`,
 label-scoped, polling off — deployment view 7.5), `Bearer` token attached
 only there and never on the check request, managed write-only like
 `notify_url` (presence flag on read, excluded from `GET /api/settings`).
-No trigger configured -> `409` plus guidance, not a broken button. No
-auto-apply: the check may run daily, but a human taps the button. After
-apply the client polls `GET /api/update` (3s, 5-minute budget) and reloads
+No trigger configured -> the existing `409`, presented as the same concise
+apply error; **Update** remains available whenever status reports an update.
+No auto-apply: the check may run daily, but a human taps the button. Trigger
+configuration remains available through the authenticated deployment/API path,
+not Settings fields. After apply the client polls `GET /api/update` (3s,
+5-minute budget) and reloads
 once the canonical `buildIdentity` differs from the identity at apply time,
 including when the package version is unchanged. A versioned, exact-key
 sessionStorage union records either the changed channel/full SHA or the
@@ -3817,9 +3823,13 @@ on its single read and displays a valid, successfully consumed notice once.
 Malformed, legacy, or inaccessible storage is silent, and a failed poll tick
 during the container swap is never a reason to reload. A trigger that ANSWERS
 non-2xx is remembered as
-`lastApplyError` and stops the poll with an error line; a dropped or
-aborted socket stays warn-only, because that is exactly what a successful
-swap of the very container looks like.
+`lastApplyError` and stops the poll with `Update failed: <server error>`; a
+dropped or aborted socket stays retry-only, because that is exactly what a
+successful swap of the very container looks like. Settings otherwise shows
+only Current Version, conditional Latest Version, and conditional Update. The
+active action is disabled, indeterminate **Updating…** with no percentage,
+ETA, elapsed counter, or persistent waiting/reconnecting prose; the five-minute
+stop retains concise **Resume checking** without another trigger POST.
 
 Mutable-edge promotion is independent of this semver/GitHub-Release discovery
 and trigger contract: moving `edge` neither opts a deployment in, applies an
@@ -3854,8 +3864,8 @@ fail-closed activation and exact-digest human production-acceptance gates.
 *Out of scope:* auto-apply on a schedule outside the explicit Pi-only exception,
 build-identity consumption outside authenticated Settings, edge image
 publication/promotion behavior, rollback automation (pin the previous tag +
-restore a backup, 7.5), and bare-npm self-restart — there the check and banner
-work, the button stays hidden.
+restore a backup, 7.5), and bare-npm self-restart — there release discovery and
+status still work, while an unconfigured apply receives the existing `409`.
 
 == ADR-71: Card-table identity — felt ground, brass accent, serif on the card face only
 

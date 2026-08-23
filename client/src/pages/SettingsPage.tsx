@@ -11,12 +11,8 @@ import {
   serializeUpdateNotice,
   type BuildChannel,
 } from "../lib/updateNotice";
-import {
-  UpdateVerifier,
-  buildChannelLabel,
-  formatElapsedWait,
-  type UpdateVerificationPhase,
-} from "../lib/updateVerification";
+import { UpdateVerifier, type UpdateVerificationPhase } from "../lib/updateVerification";
+import { currentVersionLabel } from "../lib/updatePresentation";
 import type { Category } from "../api/types";
 
 function SettingInput({
@@ -470,18 +466,11 @@ async function pollUpdateStatus(signal: AbortSignal): Promise<UpdateStatus> {
 }
 
 /**
- * Updates over the air (#247, ADR-70): the running version, the default-on
- * daily release check, and a write-only apply trigger — one POST to a
- * user-configured Watchtower-style endpoint; Draw never touches Docker
- * itself. The trigger URL/token are managed exactly like the ntfy URL
- * (#235): saved write-only, presence flag on read. After "Update now" the
- * section polls GET /api/update every 3s (up to 5 minutes) and reloads once
- * the server reports a changed canonical build identity. A structured
- * sessionStorage value pays one exact update line after that reload and is
- * consumed.
+ * Updates over the air (#247, ADR-70): a minimal view over the existing
+ * status/apply APIs. Applying still verifies replacement every 3s for up to
+ * five minutes and reloads once the canonical build identity changes.
  */
 function UpdateSection() {
-  const qc = useQueryClient();
   const status = useQuery({
     queryKey: ["update"],
     queryFn: () => api.get<UpdateStatus>("/api/update"),
@@ -489,15 +478,11 @@ function UpdateSection() {
     retry: false,
     refetchOnWindowFocus: false,
   });
-  const [checkResult, setCheckResult] = useState<string | null>(null);
   const [applyPhase, setApplyPhase] = useState<
     "idle" | UpdateVerificationPhase | "timeout" | "failed"
   >("idle");
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [updatedTo, setUpdatedTo] = useState<string | null>(null);
-  const [urlDraft, setUrlDraft] = useState("");
-  const [tokenDraft, setTokenDraft] = useState("");
   const originalIdentity = useRef<string | null>(null);
   const applyRequested = useRef(false);
   const mounted = useRef(true);
@@ -508,7 +493,7 @@ function UpdateSection() {
     verifier.current = new UpdateVerifier<UpdateStatus>({
       poll: pollUpdateStatus,
       onPhase: setApplyPhase,
-      onElapsed: setElapsedSeconds,
+      onElapsed: () => {},
       onTriggerFailure: (message) => {
         applyRequested.current = false;
         setApplyError(message);
@@ -567,55 +552,6 @@ function UpdateSection() {
     };
   }, []);
 
-  const toggle = useMutation({
-    mutationFn: (enabled: boolean) =>
-      api.patch("/api/settings", { update_check_enabled: enabled ? "1" : "0" }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["update"] });
-      qc.invalidateQueries({ queryKey: ["settings"] });
-    },
-  });
-
-  const checkNow = useMutation({
-    mutationFn: () => api.post<UpdateStatus>("/api/update/check", {}),
-    onSuccess: (s) => {
-      qc.setQueryData(["update"], s);
-      setCheckResult(
-        !s.checkEnabled
-          ? "Automatic checks are off — turn the toggle on to check."
-          : s.latest === null
-            ? "Could not reach the release feed right now — it will quietly retry on the next scheduled check."
-            : s.updateAvailable
-              ? `A newer release is out: ${s.latest}.`
-              : `You are on the latest release (${s.current}).`,
-      );
-    },
-    // The server answers 200 even for a failed check; an error here is the
-    // request itself failing — keep the same calm line, no error spam.
-    onError: () =>
-      setCheckResult(
-        "Could not reach the release feed right now — it will quietly retry on the next scheduled check.",
-      ),
-  });
-
-  const saveTrigger = useMutation({
-    mutationFn: () =>
-      api.put<{ configured: boolean }>("/api/update/trigger", {
-        url: urlDraft.trim(),
-        ...(tokenDraft.trim() ? { token: tokenDraft.trim() } : {}),
-      }),
-    onSuccess: () => {
-      // Sent once, never read back — both fields clear on success (#235 shape).
-      setUrlDraft("");
-      setTokenDraft("");
-      qc.invalidateQueries({ queryKey: ["update"] });
-    },
-  });
-  const removeTrigger = useMutation({
-    mutationFn: () => api.delete<{ configured: boolean }>("/api/update/trigger"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["update"] }),
-  });
-
   const apply = useMutation({
     mutationFn: (_startedBuildIdentity: string) =>
       api.post<{ ok: boolean }>("/api/update/apply", {}),
@@ -627,8 +563,10 @@ function UpdateSection() {
       setApplyError(null);
       verifier.current?.start(startedBuildIdentity);
     },
-    onError: () => {
+    onError: (error) => {
       applyRequested.current = false;
+      setApplyError(error.message);
+      setApplyPhase("failed");
     },
   });
 
@@ -642,6 +580,8 @@ function UpdateSection() {
     // status/cache update. Every resume window keeps this exact baseline.
     originalIdentity.current = startedBuildIdentity;
     applyRequested.current = true;
+    setApplyError(null);
+    setApplyPhase("idle");
     apply.mutate(startedBuildIdentity);
   }
 
@@ -652,141 +592,57 @@ function UpdateSection() {
   }
 
   const s = status.data;
-  const configured = s?.applyConfigured ?? false;
+  const updating =
+    apply.isPending || applyPhase === "waiting" || applyPhase === "reconnecting";
+
+  useEffect(() => {
+    if (!s?.updateAvailable) {
+      setApplyError(null);
+      return;
+    }
+    if (s.lastApplyError) setApplyError(s.lastApplyError);
+  }, [s?.lastApplyError, s?.updateAvailable]);
+
   return (
     <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
       <h3 style={{ margin: 0 }}>Updates</h3>
       <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ width: 280 }}>Running version</span>
+        <span style={{ width: 280 }}>Current Version</span>
         <span data-testid="update-current-version" style={{ fontWeight: 700 }}>
-          {s ? `Draw ${s.current}` : "…"}
+          {s ? currentVersionLabel(s) : "…"}
         </span>
       </div>
-      <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ width: 280 }}>Build</span>
-        <span data-testid="update-build-identity" style={{ fontWeight: 700 }}>
-          {s
-            ? s.buildSha !== null
-              ? `${buildChannelLabel(s.buildChannel)} · ${s.buildSha}`
-              : `${buildChannelLabel(s.buildChannel)} · package ${s.current} (SHA unavailable)`
-            : "…"}
-        </span>
-      </div>
+      {s?.latest !== null && s?.latest !== undefined && (
+        <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ width: 280 }}>Latest Version</span>
+          <span data-testid="update-latest-version" style={{ fontWeight: 700 }}>
+            {s.latest}
+          </span>
+        </div>
+      )}
       {updatedTo && (
         <p style={{ margin: 0, color: "var(--ok)" }} data-testid="update-updated-notice">
           {updatedTo}
         </p>
       )}
-      <label className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ width: 280 }}>Check for updates daily</span>
-        <input
-          type="checkbox"
-          data-testid="update-check-toggle"
-          checked={s?.checkEnabled ?? true}
-          disabled={!s || toggle.isPending}
-          onChange={(e) => toggle.mutate(e.target.checked)}
-        />
-        <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
-          one request per day to the GitHub release feed — off means no requests at all
-        </span>
-      </label>
-      <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button
-          data-testid="update-check-now"
-          disabled={checkNow.isPending}
-          onClick={() => checkNow.mutate()}
-        >
-          Check now
-        </button>
-        {checkResult && (
-          <span data-testid="update-check-result" style={{ fontSize: 13 }}>
-            {checkResult}
-          </span>
-        )}
-      </div>
       {s?.updateAvailable && (
         <div
-          data-testid="update-banner"
-          style={{
-            border: "1px solid var(--accent)",
-            borderRadius: "var(--radius-md)",
-            padding: 12,
-            display: "grid",
-            gap: 8,
-          }}
+          className="setting-row"
+          data-testid="update-action"
+          style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
         >
-          <strong>Update available: {s.latest}</strong>
-          {s.releaseUrl && (
-            <a
-              href={s.releaseUrl}
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: "var(--accent)" }}
-            >
-              Release notes
-            </a>
-          )}
-        </div>
-      )}
-      {configured ? (
-        <p style={{ margin: 0, color: "var(--ok)" }} data-testid="update-trigger-status">
-          ✓ Update trigger configured — “Update now” asks it to update the tag already selected
-          by the operator; your container platform performs the replacement.
-        </p>
-      ) : (
-        <p style={{ margin: 0, color: "var(--text-dim)" }} data-testid="update-trigger-status">
-          No update trigger configured — updating stays a manual pull-and-restart. Point this
-          at a Watchtower <code>http-api-update</code> endpoint to update the operator-selected
-          tag from here.
-        </p>
-      )}
-      <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
-        Draw does not change deployment channels. See the deployment guide to{" "}
-        <a
-          data-testid="update-edge-guide"
-          href="https://felixgeisler.github.io/draw/docs/07_deployment_view.html#edge-deployment-opt-in"
-          target="_blank"
-          rel="noreferrer"
-          style={{ color: "var(--accent)" }}
-        >
-          enable or disable Edge
-        </a>
-        .
-      </p>
-      {configured && (
-        <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button
             data-testid="update-apply"
-            disabled={
-              apply.isPending ||
-              applyPhase === "waiting" ||
-              applyPhase === "reconnecting" ||
-              applyPhase === "timeout"
-            }
+            aria-busy={updating}
+            aria-live="polite"
+            disabled={updating || applyPhase === "timeout"}
             onClick={requestApply}
           >
-            Update now
+            {updating ? "Updating…" : "Update"}
           </button>
-          {(applyPhase === "waiting" || applyPhase === "reconnecting") && (
-            <div
-              role="status"
-              aria-live="polite"
-              aria-label="Update verification status"
-              data-testid="update-verification-status"
-              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
-            >
-              <progress
-                aria-label="Update verification in progress"
-                data-testid="update-progress"
-              />
-              <strong>{applyPhase === "waiting" ? "Waiting" : "Reconnecting"}</strong>
-              <span>Elapsed wait: {formatElapsedWait(elapsedSeconds)}</span>
-            </div>
-          )}
-          {applyPhase === "failed" && (
+          {applyError && (
             <span data-testid="update-apply-error" style={{ color: "var(--danger)", fontSize: 13 }}>
-              The update trigger refused the request ({applyError}) — check the trigger URL and
-              token, then try again.
+              Update failed: {applyError}
             </span>
           )}
           {applyPhase === "timeout" && (
@@ -801,54 +657,6 @@ function UpdateSection() {
               </button>
             </div>
           )}
-        </div>
-      )}
-      <div className="setting-row" style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input
-          type="url"
-          aria-label="Update trigger URL"
-          data-testid="update-trigger-url-input"
-          placeholder={
-            configured ? "Replace trigger URL (http://…)" : "http://watchtower:8080/v1/update"
-          }
-          value={urlDraft}
-          onChange={(e) => setUrlDraft(e.target.value)}
-          style={{ flex: 1, maxWidth: 380 }}
-        />
-        <input
-          type="password"
-          aria-label="Update trigger token"
-          data-testid="update-trigger-token-input"
-          placeholder="Bearer token (optional)"
-          value={tokenDraft}
-          onChange={(e) => setTokenDraft(e.target.value)}
-          style={{ width: 180 }}
-        />
-        <button
-          data-testid="update-trigger-save"
-          disabled={!urlDraft.trim() || saveTrigger.isPending}
-          onClick={() => saveTrigger.mutate()}
-        >
-          Save trigger
-        </button>
-        {configured && (
-          <button
-            data-testid="update-trigger-remove"
-            title="Remove the stored trigger URL and token — updating goes back to manual"
-            disabled={removeTrigger.isPending}
-            onClick={() => removeTrigger.mutate()}
-          >
-            Remove
-          </button>
-        )}
-      </div>
-      <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
-        Trigger URL and token are stored privately and never shown again after saving. Draw
-        itself never touches Docker — updating is one POST to your trigger.
-      </p>
-      {(saveTrigger.error || removeTrigger.error || apply.error || toggle.error) && (
-        <div style={{ color: "var(--danger)", fontSize: 13 }}>
-          {(saveTrigger.error ?? removeTrigger.error ?? apply.error ?? toggle.error)?.message}
         </div>
       )}
     </section>
