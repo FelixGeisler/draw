@@ -75,8 +75,10 @@ afterEach(() => {
 
 describe("one-at-a-time pack HTTP attempt", () => {
   it.each(["gold", "ticket"] as const)("sends the exact %s request body", async (payment) => {
+    const matchingResponse = response();
+    matchingResponse.opening.payment = payment;
     const fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(response()), {
+      new Response(JSON.stringify(matchingResponse), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),
@@ -118,6 +120,21 @@ describe("one-at-a-time pack HTTP attempt", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply));
     await expect(
       requestPackPurchase({ item: "pack", payment: "gold", ref: "r" }),
+    ).rejects.toBeInstanceOf(PackResponseError);
+  });
+
+  it("rejects a valid response whose opening identity does not match the request", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(response()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    await expect(
+      requestPackPurchase({ item: "pack", payment: "ticket", ref: "different-ref" }),
     ).rejects.toBeInstanceOf(PackResponseError);
   });
 });

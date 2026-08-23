@@ -154,6 +154,9 @@ export async function requestPackPurchase(body: PackPurchaseRequest): Promise<Pa
     throw new PackResponseError("The server returned an unreadable purchase response.", { cause });
   }
   if (!isPackPurchaseResult(result)) throw new PackResponseError();
+  if (result.opening.ref !== body.ref || result.opening.payment !== body.payment) {
+    throw new PackResponseError("The purchase response did not match the requested purchase.");
+  }
   return result;
 }
 
@@ -182,10 +185,8 @@ export function applyPackPurchaseSnapshot(
 }
 
 export function useBuyPack() {
-  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ payment, ref }: { payment: PackPayment; ref: string }) =>
       requestPackPurchase({ item: "pack", payment, ref }),
-    onSuccess: (response) => applyPackPurchaseSnapshot(queryClient, response),
   });
 }

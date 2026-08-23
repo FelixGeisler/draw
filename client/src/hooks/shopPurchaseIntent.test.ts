@@ -1,6 +1,12 @@
+import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
-import { PackResponseError, PackTransportError, type PackPurchaseResult } from "./useShop";
+import {
+  applyPackPurchaseSnapshot,
+  PackResponseError,
+  PackTransportError,
+  type PackPurchaseResult,
+} from "./useShop";
 import {
   loadPackPurchaseIntent,
   PackPurchaseStorageError,
@@ -13,7 +19,20 @@ import {
 } from "./shopPurchaseIntent";
 
 const REF = "123e4567-e89b-42d3-a456-426614174000";
-const RESPONSE = { opening: {}, shop: {}, replayed: false } as PackPurchaseResult;
+const REF_B = "223e4567-e89b-42d3-a456-426614174000";
+
+function response(
+  pending: Pick<PackPurchaseIntent, "ref" | "payment"> = intent(),
+  gold = 0,
+): PackPurchaseResult {
+  return {
+    opening: { ref: pending.ref, payment: pending.payment },
+    shop: { gold },
+    replayed: false,
+  } as PackPurchaseResult;
+}
+
+const RESPONSE = response();
 
 class MemoryStorage implements SessionStorageLike {
   values = new Map<string, string>();
@@ -105,7 +124,7 @@ describe("pack purchase retry state machine", () => {
       .fn(async (pending: PackPurchaseIntent) => {
         seen.push({ ...pending });
         if (seen.length === 1) throw new PackTransportError();
-        return RESPONSE;
+        return response(pending);
       });
 
     await expect(startPackPurchase(storage, "ticket", REF, request)).resolves.toMatchObject({
@@ -166,5 +185,78 @@ describe("pack purchase retry state machine", () => {
     expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith(pending);
     expect(loadPackPurchaseIntent(storage)).toEqual(pending);
+  });
+
+  it("does not clear a newer intent when an older request returns a late HTTP error", async () => {
+    const storage = new MemoryStorage();
+    let rejectA!: (error: Error) => void;
+    const requestA = new Promise<PackPurchaseResult>((_resolve, reject) => {
+      rejectA = reject;
+    });
+    const purchaseA = startPackPurchase(storage, "gold", REF, () => requestA);
+    const pendingB = intent({ ref: REF_B, payment: "ticket" });
+    savePackPurchaseIntent(storage, pendingB);
+
+    rejectA(new ApiError(400, "old failure"));
+    await expect(purchaseA).resolves.toEqual({ kind: "stale" });
+    expect(loadPackPurchaseIntent(storage)).toEqual(pendingB);
+  });
+
+  it("ignores late A after remount settlement and preserves newer B intent/cache", async () => {
+    const storage = new MemoryStorage();
+    const queryClient = new QueryClient();
+    const publish = (purchase: PackPurchaseResult) =>
+      applyPackPurchaseSnapshot(queryClient, purchase);
+    let settleOriginalA!: (purchase: PackPurchaseResult) => void;
+    const originalAResponse = new Promise<PackPurchaseResult>((resolve) => {
+      settleOriginalA = resolve;
+    });
+
+    // Component A starts a request, then unmounts while that request remains pending.
+    const originalA = startPackPurchase(
+      storage,
+      "gold",
+      REF,
+      () => originalAResponse,
+      publish,
+    );
+    const pendingA = loadPackPurchaseIntent(storage)!;
+
+    // A remounted panel reconciles the same identity before starting purchase B.
+    const resumedAResponse = response(pendingA, 80);
+    await expect(
+      retryPackPurchase(storage, pendingA, async () => resumedAResponse, publish),
+    ).resolves.toMatchObject({ kind: "success" });
+    expect(queryClient.getQueryData(["shop"])).toBe(resumedAResponse.shop);
+
+    let rejectFirstB!: (error: Error) => void;
+    const firstBResponse = new Promise<PackPurchaseResult>((_resolve, reject) => {
+      rejectFirstB = reject;
+    });
+    const pendingB = intent({ ref: REF_B, payment: "ticket" });
+    const requestB = vi
+      .fn()
+      .mockImplementationOnce(() => firstBResponse)
+      .mockRejectedValueOnce(new PackTransportError());
+    const purchaseB = startPackPurchase(storage, pendingB.payment, pendingB.ref, requestB, publish);
+    expect(loadPackPurchaseIntent(storage)).toEqual(pendingB);
+
+    // The original component's late response is stale: it cannot clear B or overwrite the cache.
+    settleOriginalA(response(pendingA, 999));
+    await expect(originalA).resolves.toEqual({ kind: "stale" });
+    expect(loadPackPurchaseIntent(storage)).toEqual(pendingB);
+    expect(queryClient.getQueryData(["shop"])).toBe(resumedAResponse.shop);
+
+    // B still owns recovery and retains the existing one-automatic-retry contract.
+    rejectFirstB(new PackTransportError());
+    await expect(purchaseB).resolves.toMatchObject({
+      kind: "unresolved",
+      intent: { ...pendingB, automaticRetryConsumed: true },
+    });
+    expect(requestB).toHaveBeenCalledTimes(2);
+    expect(loadPackPurchaseIntent(storage)).toEqual({
+      ...pendingB,
+      automaticRetryConsumed: true,
+    });
   });
 });

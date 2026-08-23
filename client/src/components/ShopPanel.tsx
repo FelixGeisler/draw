@@ -1,5 +1,7 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import {
+  applyPackPurchaseSnapshot,
   PACK_BONUS_LABELS,
   PackResponseError,
   PackTransportError,
@@ -47,6 +49,7 @@ export function ShopPanel() {
   const shop = useShop();
   const equip = useEquipBack();
   const buy = useBuyPack();
+  const queryClient = useQueryClient();
   const [recovery] = useState(initialIntent);
   const [intent, setIntent] = useState<PackPurchaseIntent | null>(recovery.intent);
   const [pendingAction, setPendingAction] = useState<PendingAction>(
@@ -62,8 +65,11 @@ export function ShopPanel() {
 
   const request = (pending: PackPurchaseIntent) =>
     buy.mutateAsync({ payment: pending.payment, ref: pending.ref });
+  const publish = (response: PackPurchaseResult) =>
+    applyPackPurchaseSnapshot(queryClient, response);
 
   function applyAttempt(attempt: PackPurchaseAttempt) {
+    if (attempt.kind === "stale") return;
     if (attempt.kind === "success") {
       setIntent(null);
       setPendingAction(null);
@@ -94,6 +100,7 @@ export function ShopPanel() {
           payment,
           window.crypto.randomUUID(),
           request,
+          publish,
         ),
       );
     } catch (error) {
@@ -122,7 +129,7 @@ export function ShopPanel() {
     setPurchaseBusy(true);
     setPurchaseError(null);
     try {
-      applyAttempt(await retryPackPurchase(window.sessionStorage, intent, request));
+      applyAttempt(await retryPackPurchase(window.sessionStorage, intent, request, publish));
     } catch (error) {
       setPurchaseError(
         error instanceof Error ? error.message : "The saved purchase could not be reconciled.",
