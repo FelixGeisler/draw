@@ -180,7 +180,7 @@ button.pack-reveal-card {
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .pack-reveal-dialog:not(.reduced-motion) .pack-reveal-card-face {
+  .pack-reveal-dialog.sequential-reveal:not(.reduced-motion) .pack-reveal-card-face {
     animation: pack-reveal-flip var(--dur-slow) var(--ease-standard) both;
   }
 

@@ -118,12 +118,16 @@ export function PackRevealModal({
 
   const backgroundVisible = session.stage !== "background-ready";
   const bonusVisible = session.stage === "complete" && session.result.opening.bonus !== "none";
+  const sequentialReveal =
+    session.stage === "bonus-ready" || session.completion === "reveal";
 
   return createPortal(
     <div className="pack-reveal-backdrop">
       <div
         ref={dialogRef}
-        className={`pack-reveal-dialog ${session.reducedMotion ? "reduced-motion" : ""}`}
+        className={`pack-reveal-dialog${
+          sequentialReveal ? " sequential-reveal" : ""
+        }${session.reducedMotion ? " reduced-motion" : ""}`}
         role="dialog"
         aria-modal="true"
         aria-label="Pack opening"

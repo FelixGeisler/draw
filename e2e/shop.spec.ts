@@ -176,7 +176,7 @@ test("Gold and Ticket responses reveal background then effective bonus from exac
 test("every effective bonus and duplicate tier has exact ordered card semantics", async ({ page }) => {
   const state = await mockShop(page);
   const cases = [
-    { bonus: "none", rarity: "common", duplicate: false, refund: 0, label: null },
+    { bonus: "none", rarity: "common", duplicate: true, refund: 10, label: null },
     { bonus: "freeze", rarity: "rare", duplicate: true, refund: 20, label: "Freeze +1" },
     { bonus: "pouch", rarity: "ultra-rare", duplicate: true, refund: 40, label: "Gold Pouch +50 Gold" },
     { bonus: "ticket", rarity: "secret-rare", duplicate: true, refund: 100, label: "Golden Ticket +1" },
@@ -203,7 +203,14 @@ test("every effective bonus and duplicate tier has exact ordered card semantics"
     await dialog.getByRole("button", { name: "Skip reveal" }).click();
     await expect(dialog.getByRole("status")).toContainText("All cards revealed");
     await expect(page.locator("body > canvas")).toHaveCount(0);
-    await expect(dialog.locator(".pack-reveal-card")).toHaveCount(example.label ? 2 : 1);
+    const cardCount = example.label ? 2 : 1;
+    await expect(dialog.locator(".pack-reveal-card")).toHaveCount(cardCount);
+    const revealedFaces = dialog.locator(".pack-reveal-card-face");
+    await expect(revealedFaces).toHaveCount(cardCount);
+    await expect(revealedFaces.first()).toBeVisible();
+    await expect(revealedFaces.last()).toBeVisible();
+    await expect(revealedFaces.first()).toHaveCSS("animation-name", "none");
+    await expect(revealedFaces.last()).toHaveCSS("animation-name", "none");
     await expect(dialog).toContainText(example.rarity);
     await expect(dialog).toContainText(example.duplicate ? "Duplicate" : "New background");
     await expect(dialog).toContainText(`Duplicate refund: ${example.refund} Gold`);
@@ -214,6 +221,40 @@ test("every effective bonus and duplicate tier has exact ordered card semantics"
     }
     await dialog.getByRole("button", { name: "Close pack reveal" }).click();
   }
+});
+
+test("a full Freeze bank presents the effective Pouch and common duplicate refund", async ({ page }) => {
+  const state = await mockShop(page, { freezesBanked: 2, freezeBankCap: 2 });
+  await page.route("**/api/shop/buy", async (route) => {
+    const body = route.request().postDataJSON();
+    const reply = purchaseResult(state, body, "pouch");
+    reply.opening.back = { key: "ember", name: "Ember lattice", rarity: "common" };
+    reply.opening.duplicate = true;
+    reply.opening.duplicateRefundGold = 10;
+    reply.shop = { ...state, gold: 460 };
+    await route.fulfill({ json: reply });
+  });
+
+  await page.goto("/stats");
+  const shop = page.getByTestId("shop");
+  await expect(shop).toContainText("Freeze bank 2/2");
+  await shop.getByRole("button", { name: "Open pack — 100 Gold" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Pack opening" });
+  await dialog.getByRole("button", { name: "Reveal background" }).click();
+  await expect(dialog).toContainText("Ember lattice");
+  await expect(dialog).toContainText("common");
+  await expect(dialog).toContainText("Duplicate refund: 10 Gold");
+  await expect(dialog).not.toContainText(/Gold Pouch|Freeze \+1/);
+
+  await dialog.getByRole("button", { name: "Reveal bonus" }).click();
+  await expect(dialog.locator(".pack-reveal-card")).toHaveCount(2);
+  await expect(dialog.locator(".pack-reveal-bonus.bonus-pouch")).toHaveCount(1);
+  await expect(dialog.locator(".pack-reveal-bonus.bonus-freeze")).toHaveCount(0);
+  await expect(dialog).toContainText("Gold Pouch +50 Gold");
+  await expect(dialog).not.toContainText(/Freeze \+1|XP|level|selected Freeze/i);
+  await expect(shop).toContainText("460 Gold");
+  await dialog.getByRole("button", { name: "Close pack reveal" }).click();
 });
 
 test("modal traps focus, ignores backdrop dismissal, and Escape hides unrevealed facts", async ({ page }) => {
