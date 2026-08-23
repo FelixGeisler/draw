@@ -9,9 +9,14 @@ import {
   UPDATE_NOTICE_KEY,
   consumeUpdateNotice,
   serializeUpdateNotice,
-  shouldReloadAfterApply,
   type BuildChannel,
 } from "../lib/updateNotice";
+import {
+  UpdateVerifier,
+  buildChannelLabel,
+  formatElapsedWait,
+  type UpdateVerificationPhase,
+} from "../lib/updateVerification";
 import type { Category } from "../api/types";
 
 function SettingInput({
@@ -479,13 +484,58 @@ function UpdateSection() {
     refetchOnWindowFocus: false,
   });
   const [checkResult, setCheckResult] = useState<string | null>(null);
-  const [applyPhase, setApplyPhase] = useState<"idle" | "waiting" | "timeout" | "failed">("idle");
+  const [applyPhase, setApplyPhase] = useState<
+    "idle" | UpdateVerificationPhase | "timeout" | "failed"
+  >("idle");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [applyError, setApplyError] = useState<string | null>(null);
   const [updatedTo, setUpdatedTo] = useState<string | null>(null);
   const [urlDraft, setUrlDraft] = useState("");
   const [tokenDraft, setTokenDraft] = useState("");
-  const pollTimer = useRef<number | null>(null);
+  const originalIdentity = useRef<string | null>(null);
+  const applyRequested = useRef(false);
+  const mounted = useRef(true);
   const noticeRead = useRef(false);
+  const verifier = useRef<UpdateVerifier<UpdateStatus> | null>(null);
+
+  if (verifier.current === null) {
+    verifier.current = new UpdateVerifier<UpdateStatus>({
+      poll: () => api.get<UpdateStatus>("/api/update"),
+      onPhase: setApplyPhase,
+      onElapsed: setElapsedSeconds,
+      onTriggerFailure: (message) => {
+        applyRequested.current = false;
+        setApplyError(message);
+        setApplyPhase("failed");
+      },
+      onTimeout: () => setApplyPhase("timeout"),
+      onComplete: (polledStatus) => {
+        try {
+          sessionStorage.setItem(
+            UPDATE_NOTICE_KEY,
+            serializeUpdateNotice(
+              polledStatus.buildSha !== null
+                ? {
+                    v: 1,
+                    kind: "sha",
+                    buildChannel: polledStatus.buildChannel,
+                    buildSha: polledStatus.buildSha,
+                  }
+                : {
+                    v: 1,
+                    kind: "package",
+                    buildChannel: polledStatus.buildChannel,
+                    current: polledStatus.current,
+                  },
+            ),
+          );
+        } catch {
+          // The notice is optional; the verified replacement is not.
+        }
+        location.reload();
+      },
+    });
+  }
 
   // Read once and remove every present post-reload value. Only an exact,
   // valid notice whose removal succeeded is shown; malformed/legacy data and
@@ -498,13 +548,18 @@ function UpdateSection() {
     if (notice !== null) setUpdatedTo(notice);
   }, []);
 
-  // The apply poll must not outlive the section.
-  useEffect(
-    () => () => {
-      if (pollTimer.current !== null) clearInterval(pollTimer.current);
-    },
-    [],
-  );
+  // Verification must not outlive the section. Cancelling also invalidates
+  // any in-flight response, so an unmounted section cannot reload the page.
+  useEffect(() => {
+    // StrictMode replays effects in development, so assert the live mount in
+    // the setup as well as clearing it during cleanup.
+    mounted.current = true;
+    const activeVerifier = verifier.current;
+    return () => {
+      mounted.current = false;
+      activeVerifier?.cancel();
+    };
+  }, []);
 
   const toggle = useMutation({
     mutationFn: (enabled: boolean) =>
@@ -555,90 +610,35 @@ function UpdateSection() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["update"] }),
   });
 
-  function startPoll(startedBuildIdentity: string) {
-    const POLL_MS = 3_000;
-    const BUDGET_MS = 5 * 60 * 1000;
-    const startedAt = Date.now();
-    if (pollTimer.current !== null) clearInterval(pollTimer.current);
-    // A GET outliving the 3s cadence (container mid-swap) must not stack
-    // ticks — two overlapping ticks could both decide to reload.
-    let inFlight = false;
-    const stopPoll = () => {
-      if (pollTimer.current !== null) clearInterval(pollTimer.current);
-      pollTimer.current = null;
-    };
-    pollTimer.current = window.setInterval(async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        let polledStatus: UpdateStatus | null = null;
-        try {
-          polledStatus = await api.get<UpdateStatus>("/api/update");
-        } catch {
-          polledStatus = null; // container mid-restart — keep calm and keep polling
-        }
-        if (polledStatus?.lastApplyError) {
-          // The trigger answered and refused (bad token/URL) — waiting out
-          // the five-minute budget would tell the user nothing more.
-          stopPoll();
-          setApplyError(polledStatus.lastApplyError);
-          setApplyPhase("failed");
-          return;
-        }
-        if (
-          polledStatus !== null &&
-          shouldReloadAfterApply(startedBuildIdentity, polledStatus.buildIdentity)
-        ) {
-          stopPoll();
-          try {
-            sessionStorage.setItem(
-              UPDATE_NOTICE_KEY,
-              serializeUpdateNotice(
-                polledStatus.buildSha !== null
-                  ? {
-                      v: 1,
-                      kind: "sha",
-                      buildChannel: polledStatus.buildChannel,
-                      buildSha: polledStatus.buildSha,
-                    }
-                  : {
-                      v: 1,
-                      kind: "package",
-                      buildChannel: polledStatus.buildChannel,
-                      current: polledStatus.current,
-                    },
-              ),
-            );
-          } catch {
-            // the notice is lost, the update is not
-          }
-          // The #193 service worker serves the new bundle on this reload.
-          location.reload();
-          return;
-        }
-        if (Date.now() - startedAt >= BUDGET_MS) {
-          stopPoll();
-          setApplyPhase("timeout");
-        }
-      } finally {
-        inFlight = false;
-      }
-    }, POLL_MS);
-  }
-
   const apply = useMutation({
     mutationFn: () => api.post<{ ok: boolean }>("/api/update/apply", {}),
     onSuccess: () => {
-      // The button only renders once status.data is loaded (applyConfigured
-      // gates it) — the early return localizes that invariant instead of
-      // polling against an empty identity that would reload on the first tick.
+      // A slow apply response must not resurrect verification after Settings
+      // unmounts. The button only renders once status.data is loaded.
+      if (!mounted.current) return;
+      // Keep this original identity across every resume window.
       const startedBuildIdentity = status.data?.buildIdentity;
       if (!startedBuildIdentity) return;
+      originalIdentity.current = startedBuildIdentity;
       setApplyError(null);
-      setApplyPhase("waiting");
-      startPoll(startedBuildIdentity);
+      verifier.current?.start(startedBuildIdentity);
+    },
+    onError: () => {
+      applyRequested.current = false;
     },
   });
+
+  function requestApply() {
+    if (applyRequested.current) return;
+    applyRequested.current = true;
+    apply.mutate();
+  }
+
+  function resumeChecking() {
+    if (originalIdentity.current === null) return;
+    setApplyError(null);
+    verifier.current?.start(originalIdentity.current);
+  }
 
   const s = status.data;
   const configured = s?.applyConfigured ?? false;
@@ -656,8 +656,8 @@ function UpdateSection() {
         <span data-testid="update-build-identity" style={{ fontWeight: 700 }}>
           {s
             ? s.buildSha !== null
-              ? `${s.buildChannel} · ${s.buildSha}`
-              : `${s.buildChannel} · package ${s.current} (SHA unavailable)`
+              ? `${buildChannelLabel(s.buildChannel)} · ${s.buildSha}`
+              : `${buildChannelLabel(s.buildChannel)} · package ${s.current} (SHA unavailable)`
             : "…"}
         </span>
       </div>
@@ -719,29 +719,58 @@ function UpdateSection() {
       )}
       {configured ? (
         <p style={{ margin: 0, color: "var(--ok)" }} data-testid="update-trigger-status">
-          ✓ Update trigger configured — “Update now” posts to it and your container platform
-          swaps the image.
+          ✓ Update trigger configured — “Update now” asks it to update the tag already selected
+          by the operator; your container platform performs the replacement.
         </p>
       ) : (
         <p style={{ margin: 0, color: "var(--text-dim)" }} data-testid="update-trigger-status">
           No update trigger configured — updating stays a manual pull-and-restart. Point this
-          at a Watchtower <code>http-api-update</code> endpoint (see the deployment guide,
-          section 7.5) to update from right here.
+          at a Watchtower <code>http-api-update</code> endpoint to update the operator-selected
+          tag from here.
         </p>
       )}
+      <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
+        Draw does not change deployment channels. See the deployment guide to{" "}
+        <a
+          data-testid="update-edge-guide"
+          href="https://felixgeisler.github.io/draw/docs/07_deployment_view.html#edge-deployment-opt-in"
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: "var(--accent)" }}
+        >
+          enable or disable Edge
+        </a>
+        .
+      </p>
       {configured && (
         <div className="setting-row" style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button
             data-testid="update-apply"
-            disabled={apply.isPending || applyPhase === "waiting"}
-            onClick={() => apply.mutate()}
+            disabled={
+              apply.isPending ||
+              applyPhase === "waiting" ||
+              applyPhase === "reconnecting" ||
+              applyPhase === "timeout"
+            }
+            onClick={requestApply}
           >
             Update now
           </button>
-          {applyPhase === "waiting" && (
-            <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
-              Update requested — waiting for the replacement build…
-            </span>
+          {(applyPhase === "waiting" || applyPhase === "reconnecting") && (
+            <div
+              role="status"
+              aria-live="polite"
+              aria-label="Update verification status"
+              data-testid="update-verification-status"
+              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
+            >
+              <progress
+                aria-label="Update verification in progress"
+                data-testid="update-progress"
+              />
+              <strong>{applyPhase === "waiting" ? "Waiting" : "Reconnecting"}</strong>
+              <span>Elapsed wait: {formatElapsedWait(elapsedSeconds)}</span>
+            </div>
           )}
           {applyPhase === "failed" && (
             <span data-testid="update-apply-error" style={{ color: "var(--danger)", fontSize: 13 }}>
@@ -750,19 +779,16 @@ function UpdateSection() {
             </span>
           )}
           {applyPhase === "timeout" && (
-            <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
-              Still waiting — the update may take a while longer.{" "}
-              {s?.releaseUrl && (
-                <a
-                  href={s.releaseUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: "var(--accent)" }}
-                >
-                  Release notes
-                </a>
-              )}
-            </span>
+            <div
+              role="status"
+              data-testid="update-verification-stopped"
+              style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}
+            >
+              <strong>No replacement detected; checking stopped</strong>
+              <button data-testid="update-resume" onClick={resumeChecking}>
+                Resume checking
+              </button>
+            </div>
           )}
         </div>
       )}

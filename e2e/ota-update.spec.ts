@@ -10,6 +10,11 @@ test.describe.configure({ mode: "serial" });
 
 const OLD_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const NEW_SHA = "0123456789abcdef0123456789abcdef01234567";
+const CHANNEL_LABELS = {
+  stable: "Release",
+  edge: "Edge (deployment opt-in)",
+  local: "Local build",
+} as const;
 
 type UpdateStatusFixture = {
   current: string;
@@ -77,8 +82,8 @@ test("Settings shows the exact running version and server build identity", async
   await expect(page.getByTestId("update-current-version")).toHaveText(`Draw ${status.current}`);
   await expect(page.getByTestId("update-build-identity")).toHaveText(
     status.buildSha
-      ? `${status.buildChannel} · ${status.buildSha}`
-      : `${status.buildChannel} · package ${status.current} (SHA unavailable)`,
+      ? `${CHANNEL_LABELS[status.buildChannel as keyof typeof CHANNEL_LABELS]} · ${status.buildSha}`
+      : `${CHANNEL_LABELS[status.buildChannel as keyof typeof CHANNEL_LABELS]} · package ${status.current} (SHA unavailable)`,
   );
 
   await expect(page.getByTestId("update-check-toggle")).toBeChecked();
@@ -96,7 +101,9 @@ test("Build row renders full SHA and exact package fallback fixture values", asy
 
   await page.goto("/settings");
   await expect(page.getByTestId("update-current-version")).toHaveText("Draw 1.1.0");
-  await expect(page.getByTestId("update-build-identity")).toHaveText(`edge · ${OLD_SHA}`);
+  await expect(page.getByTestId("update-build-identity")).toHaveText(
+    `Edge (deployment opt-in) · ${OLD_SHA}`,
+  );
 
   fixture = updateStatus({
     current: "2.3.4-rc.1",
@@ -107,12 +114,23 @@ test("Build row renders full SHA and exact package fallback fixture values", asy
   await page.reload();
   await expect(page.getByTestId("update-current-version")).toHaveText("Draw 2.3.4-rc.1");
   await expect(page.getByTestId("update-build-identity")).toHaveText(
-    "local · package 2.3.4-rc.1 (SHA unavailable)",
+    "Local build · package 2.3.4-rc.1 (SHA unavailable)",
   );
+
+  fixture = updateStatus({ buildChannel: "stable", buildIdentity: `stable:${OLD_SHA}` });
+  await page.reload();
+  await expect(page.getByTestId("update-build-identity")).toHaveText(`Release · ${OLD_SHA}`);
+
+  await expect(page.getByTestId("update-edge-guide")).toHaveAttribute(
+    "href",
+    "https://felixgeisler.github.io/draw/docs/07_deployment_view.html#edge-deployment-opt-in",
+  );
+  await expect(page.getByText("Draw does not change deployment channels.")).toBeVisible();
 });
 
 test("changed buildIdentity reloads once at the same package version", async ({ page }) => {
   let applied = false;
+  let applyPosts = 0;
   let updateGets = 0;
   const original = updateStatus({ applyConfigured: true });
   const replacement = updateStatus({
@@ -123,6 +141,7 @@ test("changed buildIdentity reloads once at the same package version", async ({ 
 
   await routeUpdateApi(page, async (route, pathname) => {
     if (pathname === "/api/update/apply") {
+      applyPosts += 1;
       applied = true;
       await route.fulfill({ json: { ok: true } });
       return;
@@ -144,8 +163,11 @@ test("changed buildIdentity reloads once at the same package version", async ({ 
     { timeout: 10_000 },
   );
   await expect(page.getByTestId("update-current-version")).toHaveText("Draw 1.1.0");
-  await expect(page.getByTestId("update-build-identity")).toHaveText(`edge · ${NEW_SHA}`);
+  await expect(page.getByTestId("update-build-identity")).toHaveText(
+    `Edge (deployment opt-in) · ${NEW_SHA}`,
+  );
   expect(documentLoads).toBe(loadsBeforeApply + 1);
+  expect(applyPosts).toBe(1);
   expect(updateGets).toBe(3); // initial status, changed poll, post-reload status
 
   await page.waitForTimeout(3_500);
@@ -159,7 +181,9 @@ test("changed buildIdentity reloads once at the same package version", async ({ 
   expect(documentLoads).toBe(loadsBeforeApply + 2);
 });
 
-test("unchanged, null, and failed poll results never reload", async ({ page }) => {
+test("the accessible indeterminate status moves Waiting → Reconnecting → Waiting", async ({
+  page,
+}) => {
   let applied = false;
   let poll = 0;
   const original = updateStatus({ applyConfigured: true });
@@ -175,13 +199,11 @@ test("unchanged, null, and failed poll results never reload", async ({ page }) =
       return;
     }
     poll += 1;
-    if (poll === 1) {
-      await route.fulfill({ json: original }); // unchanged identity
-    } else if (poll === 2) {
-      await route.fulfill({ json: { ...original, buildIdentity: null } });
-    } else {
+    if (poll === 2) {
       await route.abort("failed");
+      return;
     }
+    await route.fulfill({ json: original });
   });
 
   let documentLoads = 0;
@@ -191,12 +213,54 @@ test("unchanged, null, and failed poll results never reload", async ({ page }) =
   await page.goto("/settings");
   const loadsBeforeApply = documentLoads;
   await page.getByTestId("update-apply").click();
-  await page.waitForTimeout(9_500);
 
+  const verification = page.getByTestId("update-verification-status");
+  await expect(verification).toHaveAttribute("role", "status");
+  await expect(verification).toHaveAttribute("aria-label", "Update verification status");
+  await expect(verification).toContainText("Waiting");
+  await expect(verification).toContainText(/Elapsed wait: \d+(?:m \d+)?s/);
+  const progress = page.getByTestId("update-progress");
+  await expect(progress).toHaveAttribute("aria-label", "Update verification in progress");
+  await expect(progress).not.toHaveAttribute("value");
+  await expect(verification).not.toContainText(/%|remaining|complete by/i);
+
+  await expect(verification).toContainText("Reconnecting", { timeout: 8_000 });
+  await expect(verification).toContainText("Waiting", { timeout: 5_000 });
   expect(poll).toBeGreaterThanOrEqual(3);
   expect(documentLoads).toBe(loadsBeforeApply);
   await expect(page.getByTestId("update-updated-notice")).toHaveCount(0);
   expect(await page.evaluate(() => sessionStorage.getItem("draw.updateNotice"))).toBeNull();
+});
+
+test("an answered trigger failure stops checking and stays actionable", async ({ page }) => {
+  let applied = false;
+  let poll = 0;
+  const original = updateStatus({ applyConfigured: true });
+
+  await routeUpdateApi(page, async (route, pathname) => {
+    if (pathname === "/api/update/apply") {
+      applied = true;
+      await route.fulfill({ json: { ok: true } });
+      return;
+    }
+    if (!applied) {
+      await route.fulfill({ json: original });
+      return;
+    }
+    poll += 1;
+    await route.fulfill({ json: { ...original, lastApplyError: "HTTP 401" } });
+  });
+
+  await page.goto("/settings");
+  await page.getByTestId("update-apply").click();
+  await expect(page.getByTestId("update-apply-error")).toContainText(
+    "check the trigger URL and token, then try again",
+    { timeout: 5_000 },
+  );
+  expect(poll).toBe(1);
+  await page.waitForTimeout(3_500);
+  expect(poll).toBe(1);
+  await expect(page.getByTestId("update-apply")).toBeEnabled();
 });
 
 test("valid SHA and package notices show exact messages and are consumed once", async ({ page }) => {

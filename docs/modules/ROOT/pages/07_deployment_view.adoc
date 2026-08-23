@@ -335,6 +335,7 @@ contract leaves the live deployment untouched. *Bare-npm path:* `git pull`, `npm
 `npm run build`, restart `npm start` — the check and the banner work the
 same; only the trigger button is container-specific.
 
+[#edge-deployment-opt-in]
 === 7.5.1 Pi-only `edge` polling runbook (#286)
 
 This is the one explicit opt-in exception recorded by ADR-70, not a general
