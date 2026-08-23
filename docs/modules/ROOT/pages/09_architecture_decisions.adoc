@@ -3467,12 +3467,19 @@ payments and renders all #266 snapshot fields without a second economy model.
 One versioned tab-scoped `sessionStorage` intent binds `crypto.randomUUID()` to
 its selected payment. It is written before the first POST; only an initial
 fetch rejection can consume one automatic retry, and that consumed marker is
-written before retry. HTTP responses clear the intent as definitive; exhausted
-transport and successful-response parse/shape failures retain it for one-click
-same-ref/same-payment retry. Reload offers manual resume and never POSTs on
-mount; malformed/old records are deleted. Success replaces `['shop']` exactly
-with the returned snapshot and invalidates `['gamification']`; no error or
-optimistic client calculation changes economy, collection, XP or level. The
+written before retry. HTTP responses are definitive only when the settling
+request still owns the exact stored generation (version, ref, payment and
+automatic-retry marker). Success additionally requires the returned opening ref
+and payment to match the
+bound intent. Exhausted transport and successful-response parse/shape or
+identity failures retain the owning intent for one-click same-ref/same-payment
+retry. Reload offers manual resume and never POSTs on mount; malformed/old
+records are deleted. Only that exact current generation may clear its intent,
+replace `['shop']` with the returned snapshot and invalidate
+`['gamification']`. Any settlement that no longer owns that exact generation is
+a no-op: stale success or error neither clears newer current intent nor
+publishes its stale snapshot. No error or optimistic client calculation changes
+economy, collection, XP or level. The
 result is an inline polite summary only; #268 still owns staged reveal.
 
 == ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
