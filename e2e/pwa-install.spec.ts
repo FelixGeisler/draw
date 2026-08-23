@@ -119,6 +119,83 @@ test.describe("PWA delivery", () => {
     expect(cacheState.entries.filter((p) => p.startsWith("/assets/"))).toEqual([]);
   });
 
+  test("network failure returns cached shell hits or explicit 503 misses", async ({ page }) => {
+    await page.goto(`${PROD}/`);
+    expect((await page.evaluate(waitForActiveWorker)).hasActive).toBe(true);
+    await page.reload();
+    expect(await page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+
+    await page.context().setOffline(true);
+    try {
+      const result = await page.evaluate(async () => {
+        const hit = await fetch("/");
+        const miss = await fetch("/not-cached-shell-probe");
+        const bypassed = async (url: string) => {
+          try {
+            const response = await fetch(url);
+            return { kind: "response", status: response.status };
+          } catch {
+            return { kind: "network-error", status: null };
+          }
+        };
+        return {
+          hit: { status: hit.status, type: hit.headers.get("content-type"), text: await hit.text() },
+          miss: {
+            status: miss.status,
+            type: miss.headers.get("content-type"),
+            text: await miss.text(),
+          },
+          api: await bypassed("/API/tasks"),
+          crossOrigin: await bypassed("https://example.com/draw-pwa-probe"),
+        };
+      });
+
+      expect(result.hit.status).toBe(200);
+      expect(result.hit.type).toContain("text/html");
+      expect(result.hit.text.toLowerCase()).toContain("<!doctype html>");
+      expect(result.miss.status).toBe(503);
+      expect(result.miss.type).toContain("text/plain");
+      expect(result.miss.text).toContain("temporarily unavailable");
+      expect(result.api).toEqual({ kind: "network-error", status: null });
+      expect(result.crossOrigin).toEqual({ kind: "network-error", status: null });
+    } finally {
+      await page.context().setOffline(false);
+    }
+
+    const cacheEntries = await page.evaluate(async () => {
+      const entries: string[] = [];
+      for (const key of await caches.keys()) {
+        const cache = await caches.open(key);
+        entries.push(...(await cache.keys()).map((request) => new URL(request.url).pathname));
+      }
+      return entries;
+    });
+    expect(cacheEntries).not.toContain("/not-cached-shell-probe");
+    expect(cacheEntries.filter((path) => path.toLowerCase().startsWith("/api"))).toEqual([]);
+    expect(cacheEntries.filter((path) => path.startsWith("/assets/"))).toEqual([]);
+  });
+
+  test("an offline navigation cache miss receives a human-readable 503 Response", async ({
+    page,
+  }) => {
+    await page.goto(`${PROD}/`);
+    expect((await page.evaluate(waitForActiveWorker)).hasActive).toBe(true);
+    await page.reload();
+
+    await page.evaluate(async () => {
+      for (const key of await caches.keys()) await (await caches.open(key)).delete("/");
+    });
+    await page.context().setOffline(true);
+    try {
+      const response = await page.goto(`${PROD}/offline-navigation-probe`);
+      expect(response).not.toBeNull();
+      expect(response!.status()).toBe(503);
+      expect(await page.locator("body").innerText()).toContain("temporarily unavailable");
+    } finally {
+      await page.context().setOffline(false);
+    }
+  });
+
   test("a non-HTML navigation cannot replace the offline shell", async ({ page }) => {
     await page.goto(`${PROD}/`);
     expect((await page.evaluate(waitForActiveWorker)).hasActive).toBe(true);

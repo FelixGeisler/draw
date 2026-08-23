@@ -31,6 +31,21 @@
 const CACHE = "draw-shell-v3";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
+function temporaryUnavailable() {
+  return new Response("Draw is temporarily unavailable. Please try again shortly.", {
+    status: 503,
+    statusText: "Service Unavailable",
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+async function cachedOrUnavailable(request) {
+  return (await caches.match(request)) || temporaryUnavailable();
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
@@ -82,12 +97,12 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() => caches.match("/")),
+        .catch(() => cachedOrUnavailable("/")),
     );
     return;
   }
 
   // Everything else: network, with the precache as fallback — only the shell
   // files above can ever match, nothing is cached at runtime here.
-  event.respondWith(fetch(request).catch(() => caches.match(request)));
+  event.respondWith(fetch(request).catch(() => cachedOrUnavailable(request)));
 });
