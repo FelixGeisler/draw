@@ -1,9 +1,10 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import type express from "express";
 import type Database from "better-sqlite3";
 import { freshApp, testDb } from "../helpers.js";
 import {
+  CHALLENGE_GOLD,
   CHALLENGE_POOL,
   CHALLENGE_XP,
   challengeForDay,
@@ -11,6 +12,7 @@ import {
   payChallengeIfDue,
 } from "../../src/services/challengeService.js";
 import { localDate } from "../../src/services/localDay.js";
+import { setFetchForTests } from "../../src/services/notifyService.js";
 
 // The dealer's daily challenge (#231, ADR-63): deterministic per local day,
 // progress derived from today's rows, payout an exactly-once ledger row.
@@ -33,9 +35,17 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  // Roll each case back as a whole: gold_ledger is append-only, and the test
+  // contract must not bypass that trigger merely to isolate cases.
+  db.exec("BEGIN");
   db.prepare("DELETE FROM xp_ledger").run();
   db.prepare("DELETE FROM completions").run();
   db.prepare("DELETE FROM time_entries").run();
+});
+
+afterEach(() => {
+  setFetchForTests(null);
+  db.exec("ROLLBACK");
 });
 
 function completeAtNoon(count: number, opts: { drawn?: boolean } = {}) {
@@ -48,6 +58,31 @@ function completeAtNoon(count: number, opts: { drawn?: boolean } = {}) {
     "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, ?, 0, 1)",
   );
   for (let i = 0; i < count; i++) insert.run(taskId, noon.toISOString(), opts.drawn ? 1 : 0);
+}
+
+/** Satisfy every pool objective, independent of which one today hashes to. */
+function satisfyEveryChallenge() {
+  completeAtNoon(3, { drawn: true });
+  const morning = new Date();
+  morning.setHours(9, 0, 0, 0);
+  db.prepare("INSERT INTO time_entries (task_id, started_at, ended_at) VALUES (?, ?, ?)").run(
+    taskId,
+    morning.toISOString(),
+    new Date(morning.getTime() + 40 * 60_000).toISOString(),
+  );
+  const stepId = Number(
+    db
+      .prepare(
+        "INSERT INTO tasks (title, category_id, parent_id, impact, created_at) VALUES ('matrix step', 1, ?, 3, ?)",
+      )
+      .run(taskId, new Date().toISOString()).lastInsertRowid,
+  );
+  for (let i = 0; i < 2; i++) {
+    db.prepare(
+      "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, 0, 0, 1)",
+    ).run(stepId, morning.toISOString());
+  }
+  expect(challengeState().completed).toBe(true);
 }
 
 describe("challengeForDay", () => {
@@ -78,7 +113,10 @@ describe("GET /api/challenge", () => {
     expect(res.body).toMatchObject({
       day: localDate(new Date()),
       xp: CHALLENGE_XP,
+      gold: CHALLENGE_GOLD,
       paid: false,
+      goldPaid: false,
+      goldAwarded: 0,
     });
     expect(res.body.progress).toBeLessThanOrEqual(res.body.target);
     expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
@@ -121,16 +159,58 @@ describe("payChallengeIfDue", () => {
     expect(challengeState().completed).toBe(true);
     expect(payChallengeIfDue()).toBe(true); // this call lands the payout
     expect(payChallengeIfDue()).toBe(false); // idempotent forever after
-    const rows = db
+    const xpRows = db
       .prepare("SELECT amount, ref FROM xp_ledger WHERE reason = 'challenge'")
       .all() as { amount: number; ref: string }[];
-    expect(rows).toEqual([{ amount: CHALLENGE_XP, ref: localDate(new Date()) }]);
-    expect(challengeState().paid).toBe(true);
+    const goldRows = db
+      .prepare("SELECT amount, ref FROM gold_ledger WHERE reason = 'challenge'")
+      .all() as { amount: number; ref: string }[];
+    const ref = localDate(new Date());
+    expect(xpRows).toEqual([{ amount: CHALLENGE_XP, ref }]);
+    expect(goldRows).toEqual([{ amount: CHALLENGE_GOLD, ref }]);
+    expect(challengeState()).toMatchObject({
+      paid: true,
+      goldPaid: true,
+      goldAwarded: CHALLENGE_GOLD,
+    });
   });
 
   it("pays nothing while the objective is unmet", () => {
     expect(payChallengeIfDue()).toBe(false);
     expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM gold_ledger").get()).toEqual({ n: 0 });
+  });
+
+  it("preserves the four legacy/anomaly states without repair", () => {
+    const day = localDate(new Date());
+    satisfyEveryChallenge();
+
+    // XP-only is an immutable legacy paid day: no Gold backfill.
+    db.prepare(
+      "INSERT INTO xp_ledger (amount, reason, ref, created_at) VALUES (50, 'challenge', ?, ?)",
+    ).run(day, new Date().toISOString());
+    expect(payChallengeIfDue()).toBe(false);
+    expect(challengeState()).toMatchObject({ paid: true, goldPaid: false, goldAwarded: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM gold_ledger").get()).toEqual({ n: 0 });
+
+    // Both present is already paid and remains untouched, including actual Gold.
+    db.prepare(
+      "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (17, 'challenge', ?, ?)",
+    ).run(day, new Date().toISOString());
+    expect(payChallengeIfDue()).toBe(false);
+    expect(challengeState()).toMatchObject({ paid: true, goldPaid: true, goldAwarded: 17 });
+  });
+
+  it("fails a Gold-only payout attempt and repairs nothing", () => {
+    const day = localDate(new Date());
+    satisfyEveryChallenge();
+    db.prepare(
+      "INSERT INTO gold_ledger (amount, reason, ref, created_at) VALUES (20, 'challenge', ?, ?)",
+    ).run(day, new Date().toISOString());
+
+    expect(() => payChallengeIfDue()).toThrow(/Gold exists without XP/);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
+    expect(challengeState()).toMatchObject({ paid: false, goldPaid: true, goldAwarded: 20 });
   });
 });
 
@@ -177,6 +257,70 @@ describe("the payout rides the completion transaction", () => {
 
     const res = await request(app).patch(`/api/tasks/${fresh}`).send({ status: "done" });
     expect(res.status).toBe(200);
-    expect(challengeState().paid).toBe(true);
+    expect(challengeState()).toMatchObject({ paid: true, goldPaid: true, goldAwarded: 20 });
+  });
+
+  for (const owner of ["xp", "gold"] as const) {
+    it(`rolls back the completion and both payouts when the ${owner} challenge row fails`, async () => {
+      satisfyEveryChallenge();
+      const fresh = Number(
+        db
+          .prepare(
+            "INSERT INTO tasks (title, category_id, impact, created_at) VALUES (?, 1, 3, ?)",
+          )
+          .run(`${owner} failure completion`, new Date().toISOString()).lastInsertRowid,
+      );
+      db.exec(`CREATE TRIGGER test_${owner}_challenge_failure
+        BEFORE INSERT ON ${owner}_ledger WHEN NEW.reason = 'challenge' BEGIN
+          SELECT RAISE(ABORT, 'forced ${owner} challenge failure');
+        END`);
+      const send = vi.fn().mockResolvedValue({ ok: true });
+      setFetchForTests(send);
+      await request(app).put("/api/notify/url").send({ url: "https://ntfy.sh/challenge-test" });
+
+      await request(app).patch(`/api/tasks/${fresh}`).send({ status: "done" }).expect(500);
+      expect(db.prepare("SELECT status FROM tasks WHERE id = ?").get(fresh)).toEqual({
+        status: "open",
+      });
+      expect(
+        db.prepare("SELECT COUNT(*) AS n FROM completions WHERE task_id = ?").get(fresh),
+      ).toEqual({ n: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
+      expect(db.prepare("SELECT COUNT(*) AS n FROM gold_ledger").get()).toEqual({ n: 0 });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(send).not.toHaveBeenCalled();
+    });
+  }
+});
+
+describe("the payout rides the timer-stop transaction", () => {
+  it("closes the timer and commits both same-ref rows together", async () => {
+    satisfyEveryChallenge();
+    const started = new Date(Date.now() - 40 * 60_000).toISOString();
+    db.prepare("INSERT INTO time_entries (task_id, started_at) VALUES (?, ?)").run(taskId, started);
+
+    const res = await request(app).post("/api/timer/stop").expect(200);
+    expect(res.body.challengeCompleted).toBe(true);
+    expect(challengeState()).toMatchObject({ paid: true, goldPaid: true, goldAwarded: 20 });
+    expect(db.prepare("SELECT ended_at AS endedAt FROM time_entries WHERE started_at = ?").get(started)).toEqual({
+      endedAt: expect.any(String),
+    });
+  });
+
+  it("leaves the timer running when the challenge Gold owner fails", async () => {
+    satisfyEveryChallenge();
+    const started = new Date(Date.now() - 40 * 60_000).toISOString();
+    db.prepare("INSERT INTO time_entries (task_id, started_at) VALUES (?, ?)").run(taskId, started);
+    db.exec(`CREATE TRIGGER test_timer_gold_failure
+      BEFORE INSERT ON gold_ledger WHEN NEW.reason = 'challenge' BEGIN
+        SELECT RAISE(ABORT, 'forced timer Gold failure');
+      END`);
+
+    await request(app).post("/api/timer/stop").expect(500);
+    expect(db.prepare("SELECT ended_at AS endedAt FROM time_entries WHERE started_at = ?").get(started)).toEqual({
+      endedAt: null,
+    });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM xp_ledger").get()).toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM gold_ledger").get()).toEqual({ n: 0 });
   });
 });

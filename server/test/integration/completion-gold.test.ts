@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import type express from "express";
 import type Database from "better-sqlite3";
@@ -8,6 +8,7 @@ import {
   totalGold,
 } from "../../src/services/gamificationService.js";
 import { localDate } from "../../src/services/localDay.js";
+import { setFetchForTests } from "../../src/services/notifyService.js";
 
 let app: express.Express;
 let db: Database.Database;
@@ -26,6 +27,8 @@ beforeEach(() => {
   // it inherited instead of adding a test-only repair/delete path.
   baselineGold = totalGold();
 });
+
+afterEach(() => setFetchForTests(null));
 
 async function createTask(
   title: string,
@@ -136,6 +139,9 @@ describe("completion Gold formula and owner", () => {
       BEFORE INSERT ON completions BEGIN
         SELECT RAISE(ABORT, 'forced completion owner failure');
       END`);
+    const send = vi.fn().mockResolvedValue({ ok: true });
+    setFetchForTests(send);
+    await request(app).put("/api/notify/url").send({ url: "https://ntfy.sh/owner-test" });
 
     await request(app).patch(`/api/tasks/${task.id}`).send({ status: "done" }).expect(500);
     const row = db
@@ -145,5 +151,7 @@ describe("completion Gold formula and owner", () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM completions WHERE task_id = ?").get(task.id)).toEqual({ n: 0 });
     expect(db.prepare("SELECT COUNT(*) AS n FROM time_entries WHERE task_id = ? AND ended_at IS NULL").get(task.id)).toEqual({ n: 1 });
     expect(totalGold()).toBe(baselineGold);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(send).not.toHaveBeenCalled();
   });
 });

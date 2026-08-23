@@ -578,22 +578,28 @@ describe("complete_task invariants", () => {
     expect(res.text).toContain("create_subtasks");
   });
 
-  it("awards the same XP as the REST path (parity twins)", async () => {
+  it("passes through the same additive XP/Gold result as REST without an MCP contract change", async () => {
     const twinA = (await callTool("create_task", { title: "Twin A", categoryId: 1, effortMinutes: 15 })).json<TaskJson>();
     const twinB = (await callTool("create_task", { title: "Twin B", categoryId: 1, effortMinutes: 15 })).json<TaskJson>();
 
     const viaMcp = (await callTool("complete_task", { id: twinA.id })).json<{
       xpAwarded: number;
+      goldAwarded: number;
       newAchievements: string[];
       recurring: boolean;
       levelUp: boolean;
     }>();
     const viaRest = (await restJson("PATCH", `/api/tasks/${twinB.id}`, { status: "done" })) as {
       xpAwarded: number;
+      goldAwarded: number;
     };
 
     expect(viaMcp.xpAwarded).toBe(15); // round(15 * 3/3), no drawn bonus
-    expect(viaMcp.xpAwarded).toBe(viaRest.xpAwarded);
+    expect(viaMcp.goldAwarded).toBe(2);
+    expect(viaMcp).toMatchObject({
+      xpAwarded: viaRest.xpAwarded,
+      goldAwarded: viaRest.goldAwarded,
+    });
     expect(viaMcp.recurring).toBe(false);
     // The very first completion in this DB happened through MCP — the
     // gamification path ran identically.

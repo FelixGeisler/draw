@@ -79,18 +79,22 @@ export interface ClaimResponse {
  * query is invalidated so the header XP/level and the card's claimed state
  * refresh from the server — the client never computes the new total itself.
  */
-export function useClaimAchievement() {
-  const queryClient = useQueryClient();
-  return useMutation({
+export function claimAchievementMutation(queryClient: QueryClient) {
+  return {
     mutationFn: (key: string) => api.post<ClaimResponse>(`/api/achievements/${key}/claim`, {}),
-    onSuccess: (data) => {
+    onSuccess: (data: ClaimResponse) => {
       queryClient.invalidateQueries({ queryKey: ["gamification"] });
       queryClient.invalidateQueries({ queryKey: ["shop"] });
       // A claim can tip the level bar and unlock the level_N card — announce
       // it so the toast fires just as it would for a draw/completion unlock.
       announceAchievements(data.newAchievements);
     },
-  });
+  };
+}
+
+export function useClaimAchievement() {
+  const queryClient = useQueryClient();
+  return useMutation(claimAchievementMutation(queryClient));
 }
 
 /** A display override (#177): the fields PATCH /api/achievements/:key accepts.

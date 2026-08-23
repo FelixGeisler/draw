@@ -33,13 +33,17 @@ async function xp(): Promise<number> {
 }
 
 describe("POST /api/achievements/:key/claim", () => {
-  it("400s an unknown key", async () => {
+  it("400s an unknown key without a write", async () => {
+    const before = db.prepare("SELECT COUNT(*) AS n FROM achievements").get();
     await request(app).post("/api/achievements/not_a_real_key/claim").expect(400);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM achievements").get()).toEqual(before);
   });
 
-  it("400s a real key that is not unlocked yet", async () => {
+  it("400s a real key that is not unlocked yet without a write", async () => {
     // draw_10 is a genuine achievement, but nothing has unlocked it here.
+    const before = db.prepare("SELECT COUNT(*) AS n FROM achievements").get();
     await request(app).post("/api/achievements/draw_10/claim").expect(400);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM achievements").get()).toEqual(before);
   });
 
   it("pays super-rare XP (100), folds it into totalXp, and levels up from zero", async () => {
@@ -69,8 +73,10 @@ describe("POST /api/achievements/:key/claim", () => {
 
   it("is idempotent: a second claim 409s and the payout does not double", async () => {
     const before = await xp();
+    const goldBefore = (await request(app).get("/api/gamification")).body.totalGold;
     await request(app).post("/api/achievements/first_goal/claim").expect(409);
     expect(await xp()).toBe(before); // still 100 — no second helping
+    expect((await request(app).get("/api/gamification")).body.totalGold).toBe(goldBefore);
 
     // Exactly one stamped payout for the key.
     const row = db

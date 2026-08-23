@@ -2,7 +2,11 @@ import express from "express";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { freshApp } from "../helpers.js";
-import { setFetchForTests, type NotifyEvent } from "../../src/services/notifyService.js";
+import {
+  notifyChallengeCompleted,
+  setFetchForTests,
+  type NotifyEvent,
+} from "../../src/services/notifyService.js";
 
 /**
  * Outbound notifications (#235, ADR-67). Every test runs against the
@@ -106,6 +110,14 @@ describe("event delivery", () => {
     const ping = sent.find((e) => e.title === "Goal achieved");
     expect(ping).toBeDefined();
     expect(ping!.body).toContain("Ship the thing");
+  });
+
+  it("uses the exact cumulative XP and Gold challenge notification", async () => {
+    await request(app).put("/api/notify/url").send({ url: "https://ntfy.sh/t" });
+    notifyChallengeCompleted();
+    const ping = sent.find((e) => e.title === "Daily challenge complete");
+    expect(ping).toBeDefined();
+    expect(ping!.body).toMatch(/^✅ .+ — \+50 XP · \+20 Gold$/);
   });
 
   it("a dead endpoint is swallowed — the request path is unaffected", async () => {

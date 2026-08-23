@@ -89,5 +89,9 @@ export function notifyGoalAchieved(title: string): void {
 export function notifyChallengeCompleted(now: Date = new Date()): void {
   // Read-only label lookup; the payout row was already committed.
   const label = challengeState(now).label;
-  notify({ title: "Daily challenge complete", body: `✅ ${label} — +50 XP`, tags: "dart" });
+  notify({
+    title: "Daily challenge complete",
+    body: `✅ ${label} — +50 XP · +20 Gold`,
+    tags: "dart",
+  });
 }

@@ -1,4 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Task } from "../api/types";
 
@@ -30,9 +35,8 @@ export function useStartTimer() {
   });
 }
 
-export function useStopTimer() {
-  const qc = useQueryClient();
-  return useMutation({
+export function stopTimerMutation(qc: QueryClient) {
+  return {
     mutationFn: () => api.post<unknown>("/api/timer/stop"),
     // onSettled, not onSuccess (PR #105 review): a Stop that races a second
     // tab hits an already-closed timer and 404s — the refetch must still
@@ -47,6 +51,7 @@ export function useStopTimer() {
       // chip and the XP header together.
       qc.invalidateQueries({ queryKey: ["challenge"] });
       qc.invalidateQueries({ queryKey: ["gamification"] });
+      qc.invalidateQueries({ queryKey: ["shop"] });
       // The TimerBar is global: stopping while the Goals page is mounted must
       // refresh the feasibility chip's trackedMinutes14d pace (#60).
       qc.invalidateQueries({ queryKey: ["goals"] });
@@ -56,5 +61,10 @@ export function useStopTimer() {
       // DEF stat died with the TCG frame (#123).
       qc.invalidateQueries({ queryKey: ["draw", "current"] });
     },
-  });
+  };
+}
+
+export function useStopTimer() {
+  const qc = useQueryClient();
+  return useMutation(stopTimerMutation(qc));
 }

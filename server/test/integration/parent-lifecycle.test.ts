@@ -104,6 +104,7 @@ describe("the full lifecycle (the heart)", () => {
     expect(last.parentCompletion.task.id).toBe(parent.id);
     expect(last.parentCompletion.task.status).toBe("done");
     expect(last.parentCompletion.xpAwarded).toBe(1); // pinned: floor lifts round(0×impact/3) to 1
+    expect(last.parentCompletion.goldAwarded).toBe(1);
     expect(last.parentCompletion.bonus).toBeNull();
     expect(last.parentCompletion.recurring).toBe(false);
 
@@ -361,6 +362,7 @@ describe("recurring parents are excluded from auto-complete (ADR-6 untouched)", 
     const manual = await patchTask(parent.id, { status: "done" });
     expect(manual.recurring).toBe(true);
     expect(manual.xpAwarded).toBe(1);
+    expect(manual.goldAwarded).toBe(1);
     expect(manual.task.status).toBe("open");
     // Local components, never toISOString() (#219): the schedule counts on
     // the user's calendar (#205), and the UTC day is one behind for the two
@@ -404,6 +406,7 @@ describe("manual completion parity (zero-effort XP)", () => {
     );
     const manual = await patchTask(parent.id, { status: "done" });
     expect(manual.xpAwarded).toBe(1);
+    expect(manual.goldAwarded).toBe(1);
     expect(completionsOf(parent.id)).toEqual([{ wasDrawn: 0, wasWarmup: 0, xp: 1 }]);
   });
 

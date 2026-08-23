@@ -47,15 +47,25 @@ timerRouter.get("/current", (_req, res) => {
 timerRouter.post("/stop", (_req, res) => {
   const entry = currentEntry();
   if (!entry) return res.status(404).json({ error: "no running timer" });
-  db.prepare("UPDATE time_entries SET ended_at = ? WHERE id = ?").run(
-    new Date().toISOString(),
-    entry.id,
+  const now = new Date();
+  const outcome = db.transaction(() => {
+    db.prepare("UPDATE time_entries SET ended_at = ? WHERE id = ?").run(
+      now.toISOString(),
+      entry.id,
+    );
+    // Timer close and both challenge owners are one transaction. Any XP/Gold
+    // failure (including a Gold-only anomaly) leaves the entry running.
+    const challengeCompleted = payChallengeIfDue(now);
+    const stopped = db.prepare(`${ENTRY_SELECT} WHERE id = ?`).get(entry.id) as Record<
+      string,
+      unknown
+    >;
+    return { challengeCompleted, stopped };
+  })();
+  if (outcome.challengeCompleted) notifyChallengeCompleted(now); // post-commit (#235)
+  res.json(
+    outcome.challengeCompleted
+      ? { ...outcome.stopped, challengeCompleted: true }
+      : outcome.stopped,
   );
-  // The track challenge's satisfying event is a STOP, not a completion —
-  // this is the second (and last) caller of payChallengeIfDue (#231); the
-  // exactly-once ledger constraint makes the double coverage harmless.
-  const challengeCompleted = payChallengeIfDue();
-  const stopped = db.prepare(`${ENTRY_SELECT} WHERE id = ?`).get(entry.id) as Record<string, unknown>;
-  if (challengeCompleted) notifyChallengeCompleted(); // post-commit (#235)
-  res.json(challengeCompleted ? { ...stopped, challengeCompleted } : stopped);
 });

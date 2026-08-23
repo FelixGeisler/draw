@@ -57,10 +57,11 @@ ADR-38/ADR-43/ADR-44, not derivables, so they stay within this principle;
 derive each level's progress from these logs — draws (non-warmup only, ADR-30),
 completions, streak, level, achieved goals, tracked hours — against one shared
 threshold table that also drives the unlock, so a full progress bar is always a
-real unlock. Claiming an unlocked achievement pays rarity-scaled XP once
-(idempotent by the achievements primary key); the 5-tier rarity ladder
-(common → secret-rare) lives in `shared/achievementTiers.ts`, imported by the
-server (claim price) and the client (styling) so the two cannot drift.
+real unlock. Claiming an unlocked achievement pays rarity-scaled XP and Gold
+once (idempotent by one guarded owner update); the 5-tier rarity ladder and
+both payout maps (Gold 5/10/25/50/100 from common through secret-rare) live in
+`shared/achievementTiers.ts`, imported by the server and client so they cannot
+drift.
 Achievement DISPLAY metadata is user-customizable (#177, ADR-44): the
 `achievement_customizations` side table (keyed by achievement key, so it covers
 LOCKED keys too) holds an optional renamed title, a rewritten description, and a
@@ -72,6 +73,30 @@ unlock, claim, XP, rarity or the shared key set: a hidden achievement still
 unlocks and is still claimable (in the Stats "Hidden" section). The unlock toast
 and every other reader pick up the custom copy for free, reading the same
 `/api/gamification` fields.
+
+=== Gold producer consistency (#264)
+
+A completion stamps `gold_awarded = max(1, Math.round(final xp_awarded / 10))`
+beside final XP in the same `completions` insert; reopen/delete remove that
+owner through the existing lifecycle, and legacy rows remain zero. An
+achievement claim stamps `claimed_at`, tier XP, and tier Gold together; a
+pre-v18 claimed row keeps `claim_gold = NULL` and its XP-only wording. A daily
+challenge stamps same-day, same-ref `+50` XP and `+20` Gold ledger rows in the
+triggering completion or timer-stop transaction. XP-only days are immutable
+legacy paid days; both rows mean paid; Gold-only is an invariant failure on a
+payout attempt and is displayed as inconsistent, never repaired. The derived
+Gold total is never clamped, so owner removal may expose a negative value.
+
+Producer responses carry owner-local Gold only: completion results (including
+nested parent completions) carry completion Gold, claims carry claim Gold, and
+the challenge read model reports advertised versus actual Gold separately.
+The header, trophy pile, History cards, achievement cards, and challenge chip
+render server truth. Weekly/Wrapped summaries, MCP schemas/catalog, and shop
+purchase availability do not change; HTTP passthroughs naturally carry the
+additive fields. Completion-capable task writes, claims, and timer stop
+invalidate both `['gamification']` and the independent `['shop']` snapshot
+(with `['challenge']` where already required); no client computes or copies a
+Gold total between caches.
 
 == 8.2 The weight formula
 

@@ -60,7 +60,7 @@ test("a drawn impact-5 completion renders the holo sheen", async ({ page }) => {
   const holo = pileCard(page, HOLO_TITLE);
   await expect(holo).toHaveClass(/rarity-holo/);
   // The tier is announced, not visual-only: appended after the (drawn) XP part.
-  await expect(holo).toHaveAttribute("aria-label", /XP \(drawn\), holo$/);
+  await expect(holo).toHaveAttribute("aria-label", /XP · \+\d+ Gold \(drawn\), holo$/);
   // The sheen is a real painted overlay on the inner card face.
   const bg = await holo.evaluate((el) =>
     getComputedStyle(el.querySelector(".trophy-card-inner")!, "::after").backgroundImage,
@@ -74,7 +74,7 @@ test("a drawn impact-4 completion renders the silver sheen", async ({ page }) =>
 
   const silver = pileCard(page, SILVER_TITLE);
   await expect(silver).toHaveClass(/rarity-silver/);
-  await expect(silver).toHaveAttribute("aria-label", /XP \(drawn\), silver$/);
+  await expect(silver).toHaveAttribute("aria-label", /XP · \+\d+ Gold \(drawn\), silver$/);
 });
 
 test("a not-drawn five-star completion stays a plain card", async ({ page }) => {
@@ -95,7 +95,7 @@ test("a not-drawn five-star completion stays a plain card", async ({ page }) => 
   const plain = pileCard(page, PLAIN_TITLE);
   await expect(plain).toBeVisible();
   await expect(plain).not.toHaveClass(/rarity-/);
-  await expect(plain).toHaveAttribute("aria-label", /XP$/); // no (drawn), no tier
+  await expect(plain).toHaveAttribute("aria-label", /Gold$/); // no (drawn), no tier
   const bg = await plain.evaluate((el) =>
     getComputedStyle(el.querySelector(".trophy-card-inner")!, "::after").backgroundImage,
   );

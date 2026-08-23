@@ -100,7 +100,7 @@ test("today's tile reveals its tasks — completed with XP, unfinished labelled 
   await expect(detail(page)).toHaveAttribute("role", "status");
   await expect(detail(page)).toContainText(DONE_TITLE);
   await expect(detail(page)).toContainText(categoryName);
-  await expect(detail(page)).toContainText("+10 XP"); // 10 min × impact 3/3, not drawn
+  await expect(detail(page)).toContainText("+10 XP · +1 Gold"); // completion owner truth
   // The worked-but-unfinished card is named and marked, without XP on its line.
   await expect(detail(page)).toContainText(OPEN_TITLE);
   const openLine = detail(page).locator(".cal-detail-card", { hasText: OPEN_TITLE });
