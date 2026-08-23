@@ -331,22 +331,29 @@ function restWeekdays(): Set<number> {
   return new Set();
 }
 
-/** Milestone days of earned tokens, chronological (the fold replays by day). */
+/** All Freeze earn facts, converted through the one local-day rule. */
 function earnedFreezeDays(): string[] {
-  const rows = db
+  const milestones = db
     .prepare("SELECT milestone_day AS day FROM streak_freezes ORDER BY milestone_day")
     .all() as { day: string }[];
-  // Shop-bought tokens (#230, ADR-62): the buy:freeze ledger row IS the
-  // token, banked on its purchase's local day. Kept out of streak_freezes on
-  // purpose — its UNIQUE(milestone_day) holds one row per day, and a shop row
-  // there would make shouldEarnFreeze swallow an organic milestone landing on
-  // the same day. The fold already counts multiple earns per day.
+  // Historical direct shop purchases remain earn facts (#230/ADR-62).
   const bought = (
     db
       .prepare("SELECT created_at AS createdAt FROM xp_ledger WHERE reason = 'buy:freeze'")
       .all() as { createdAt: string }[]
-  ).map((r) => localDate(new Date(r.createdAt)));
-  return [...rows.map((r) => r.day), ...bought].sort();
+  ).map((row) => localDate(new Date(row.createdAt)));
+  // Pack earns replay by immutable opening order, never opened_at order. The
+  // pure streak fold then groups the resulting local days with every other
+  // earn source and retains its unchanged cap/consumption/expiry behavior.
+  const pack = (
+    db
+      .prepare(
+        `SELECT opened_at AS openedAt FROM pack_openings
+         WHERE effective_bonus = 'freeze' ORDER BY opening_order`,
+      )
+      .all() as { openedAt: string }[]
+  ).map((row) => localDate(new Date(row.openedAt)));
+  return [...milestones.map((row) => row.day), ...bought, ...pack].sort();
 }
 
 export function streakState(): StreakState {

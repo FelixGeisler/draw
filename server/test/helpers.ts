@@ -1,4 +1,5 @@
 import type express from "express";
+import type { AppDependencies } from "../src/app.js";
 
 /**
  * The temp DATA_DIR is set by test/setup.ts before any import touches
@@ -12,9 +13,9 @@ import type express from "express";
  * against UNIQUE(reason, ref)), not a behavior fork; a suite that WANTS the
  * payout (daily-challenge.test.ts) deletes its ledger rows and takes over.
  */
-export async function freshApp(): Promise<express.Express> {
+export async function freshApp(dependencies: AppDependencies = {}): Promise<express.Express> {
   const { createApp } = await import("../src/app.js");
-  const app = createApp();
+  const app = createApp({}, dependencies);
   const { db } = await import("../src/db.js");
   const { localDate } = await import("../src/services/localDay.js");
   db.prepare(

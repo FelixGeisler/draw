@@ -908,6 +908,15 @@ all six immutable trigger definitions and behavior, and
 data remains untouched. Reopen after swap sees an already migrated, validated
 file. Non-empty opening rows and `sqlite_sequence` survive round trips.
 
+*Amendment (#266):* the existing archive is already the complete pack backup;
+there is no new format. Opening order/ref/payment/outcome/bonus/timestamp,
+Gold effects, settings ownership/equipment, legacy XP facts and the sequence
+all ride the whole database. After import the same ref maps the same immutable
+opening with a fresh equivalent shop snapshot, while the next fresh API
+opening allocates above the restored maximum. Pack transactions are constructed
+per request against the current ESM live `db` binding; no prepared statement or
+transaction survives the handle swap.
+
 *Accepted limitation (#103):* `adm-zip` inflates each entry fully in memory,
 so peak RSS during export/import scales with the largest entry — the DB
 snapshot, plus one material at a time. Accepted, not fixed: this is a local
@@ -1030,6 +1039,14 @@ no reconciliation job.
 calendar-day function and merged with milestone days. No other XP-ledger reason
 and no `pack_openings.effective_bonus` participates before #266; the ordered
 cap-2 fold, consumption, rest-day and expiry semantics are unchanged.
+
+*Amendment (#266):* effective pack Freeze openings now join those two earn
+sources. They are read in immutable `opening_order` (never timestamp order),
+then `opened_at` is converted by the same `localDate` function. The unchanged
+forward fold still groups earns by local day, caps the bank at 2, consumes only
+on later missed required days, and expires the bank on an uncovered break. A
+would-be Freeze selected while the derived bank is 2 is persisted as Pouch, so
+it never enters this fold.
 
 == ADR-29: Focus mode is a derived view — timer plus current draw decide, nothing is persisted
 
@@ -3424,6 +3441,27 @@ input, persistence, effect or mutation. `POST /api/shop/buy` remains the same
 unavailable 400. Production randomness, opening order, payment, atomic writes,
 refund/bonus effects and reveal start only in #266; CSS designs remain #267.
 
+*Amendment (#266):* the server activates one-background packs at 100 Gold or
+one explicitly selected Golden Ticket. `createApp` composes `Math.random` into
+a per-app shop router through an internal test seam; request/query/env data can
+never control it. Validation and same-ref replay/conflict precede funding and
+RNG. A funded fresh opening consumes exactly three finite samples in
+rarity/back/bonus order inside one per-request `BEGIN IMMEDIATE` transaction
+against the current live DB handle. The transaction serializes derived payment
+checks, predecessor-based Secret chance, AUTOINCREMENT order, immutable opening,
+settings grant, `buy:pack=-100`, tier duplicate refund and Pouch +50. Any
+failure rolls all facts back.
+
+Canonical identity is trimmed, case-sensitive `ref`. Same payment replays the
+persisted opening without reroll, reapplication, repair or current-resource
+check and pairs it with a fresh derived shop snapshot; changed payment is 409.
+Golden Tickets are Ticket-bonus openings minus Ticket-paid openings. Refund and
+bonus amounts are mapped from immutable opening facts plus the stable catalog;
+no XP changes and no mutable Gold/Ticket/Freeze/chance counter exists. New
+ownership preserves unknown string entries and never auto-equips. Direct Freeze
+sale, Secret guarantee, caller RNG, schema/backup changes and reveal UI remain
+out of scope.
+
 == ADR-63: The dealer's daily challenge — hash of the local day, derived progress, a ledger row as the payout
 
 *Context:* The deck deals work but never sets a stake (#231). A small daily
@@ -3470,6 +3508,11 @@ present throws through normal server-error handling on a payout attempt,
 rolling back the trigger and repairing nothing. GET is read-only and reports
 `gold: 20`, actual `goldPaid`, and actual `goldAwarded` so the chip can show
 cumulative, XP-only, or inconsistent truth.
+
+*Amendment (#266):* challenge production is unchanged. Its durable Gold is one
+of the owner facts included in the pack transaction's derived funding check;
+a Gold-paid opening can spend it only inside the serialized immediate
+transaction, while a Ticket-paid opening leaves it untouched.
 
 == ADR-64: The estimation hint becomes tap-to-apply and reaches the triage strip — and applying dismisses it
 

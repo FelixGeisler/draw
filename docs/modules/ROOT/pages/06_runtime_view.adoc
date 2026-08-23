@@ -166,6 +166,54 @@ XP, levels, streaks and the trophy deck are never stored counters — they are
 derived from the `completions` log on every read (ADR-2, ADR-5), which is why
 reopening a task simply deletes its latest completion row.
 
+=== Atomic pack opening and replay (#266)
+
+[plantuml,runtime-pack-opening,svg]
+....
+@startuml
+skinparam shadowing false
+skinparam maxMessageSize 130
+skinparam sequenceMessageAlign left
+autonumber
+
+actor Client
+participant "routes/shop.ts" as Route
+participant "shopService.ts" as Shop
+participant "packCatalog.ts" as Catalog
+database "SQLite" as DB
+
+Client -> Route : POST /api/shop/buy {item, payment, ref}
+Route -> Route : exact shape/field validation; canonical ref := trim(ref)
+Route -> Shop : buyPack(payment, canonical ref, app-composed Math.random)
+Shop -> DB : BEGIN IMMEDIATE; lookup ref
+alt same ref and same payment
+  Shop -> DB : derive fresh Gold/Tickets/Secret/Freeze/ownership snapshot
+  Shop --> Client : 200 persisted opening + fresh shop + replayed:true\n(no RNG, write, repair or current-funds check)
+else same ref, different payment
+  Shop --> Client : 409 exact error; ROLLBACK, no RNG/write
+else fresh but insufficient selected payment
+  Shop --> Client : 400 exact Gold/Ticket error; ROLLBACK, no RNG/write
+else fresh and funded
+  Shop -> DB : read derived Gold/Tickets, ordered rarity history, Freeze bank
+  Shop -> Catalog : sample 1 rarity; sample 2 back; sample 3 effective bonus
+  Shop -> DB : INSERT immutable opening (AUTOINCREMENT order)
+  Shop -> DB : settings grant if new; -100 Gold if Gold payment;
+  Shop -> DB : duplicate refund and/or +50 Pouch where applicable
+  Shop -> DB : derive post-opening shop snapshot
+  Shop -> DB : COMMIT
+  Shop --> Client : 200 persisted opening + shop + replayed:false
+end
+@enduml
+....
+
+The immediate writer lock serializes distinct refs, so concurrent requests
+cannot overspend the same 100 Gold or one Ticket and later orders use the
+predecessor's Secret result. The transaction object and prepared statements
+are created against the current live handle per request because ADR-26 import
+can replace and reopen it. Any sample or persistence failure rolls every fact
+back. GET `/api/shop` is the same derived snapshot without transaction, RNG or
+write.
+
 == 6.3 AI backward planning (with materials)
 
 [plantuml,runtime-plan-goal,svg]

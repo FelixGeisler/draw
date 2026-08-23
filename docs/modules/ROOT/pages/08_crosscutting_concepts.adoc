@@ -17,9 +17,11 @@ exists), Gold/XP/level/streak (v18 derives unclamped Gold from completion and
 achievement owner columns plus `gold_ledger`; permanent XP is exactly
 `SUM(completions.xp_awarded) + SUM(achievements.claim_xp) +
 SUM(xp_ledger.amount WHERE reason='challenge')`, so retained legacy shop rows
-are inert — ADR-5/ADR-42/ADR-62; the streak's rest
-days and freeze consumption are re-derived on every read from the rest-weekday
-setting and the append-only `streak_freezes` earn log — ADR-28), and the
+are inert — ADR-5/ADR-42/ADR-62; Golden Tickets are pack Ticket earns minus
+Ticket-paid openings, and Secret chance is the ordered opening-rarity suffix;
+the streak's rest days and freeze consumption are re-derived on every read
+from the rest-weekday setting, milestone earns, historical `buy:freeze` facts,
+and effective pack Freeze openings read in `opening_order` — ADR-28), and the
 displayed effort of a broken-down
 task (`remainingEffortMinutes` — SUM over its OPEN subtasks' estimates at query
 time, and NULL while any non-archived subtask exists but none are open: with
@@ -119,7 +121,37 @@ Secret interval and then the non-Secret 45:32:18 ratio; a second sample selects
 `[.10,.12)` Ticket and `[.12,1)` none, except bank 2 resolves the first interval
 directly to Pouch. Inputs are never clamped, coerced or implicitly generated:
 invalid values throw, and the pure module reads no request, database or clock.
-#266 alone introduces production randomness, payment, persistence and effects.
+#266 introduces production randomness, payment, persistence and effects without
+changing those pure rules.
+
+=== Atomic Gold pack facts and derivation (#266)
+
+`GET /api/shop` derives exactly Gold, Golden Tickets, the 100-Gold pack cost,
+next Secret chance, the cap-2 Freeze bank, fixed-order ownership flags, and
+equipment. Gold is still the unclamped sum of its three owner classes. Tickets
+are `count(effective_bonus='ticket') - count(payment='ticket')`; chance consumes
+rarities in ascending immutable `opening_order`; and pack Freeze timestamps are
+converted through `localDate` after reading those rows in that same order.
+There are no mutable balance, chance, Ticket, or Freeze counters.
+
+A buy validates the plain three-key JSON body before any replay lookup. Its
+canonical, case-sensitive identity is `trim(ref)`. A new request creates one
+`db.transaction(fn).immediate()` against the current live handle. Replay or
+conflict lookup precedes current-resource checks; a matching payment maps the
+persisted row and returns a fresh snapshot without RNG, write, or repair, while
+a changed payment is 409. Fresh Gold/Ticket insufficiency is a no-RNG 400.
+Only a funded fresh opening consumes three app-composed finite `[0,1)` samples
+in rarity/back/bonus order. Opening, optional settings grant, Gold charge,
+duplicate refund, and Pouch effect then commit together or all roll back.
+
+`pack_openings` is the immutable opening fact. Refund and `bonusGold` amounts
+are reconstructed from its duplicate/rarity/effective-bonus values and the
+stable catalog. Gold payments add exactly `-100, reason='buy:pack'`; Ticket
+payments add no Gold row. Duplicate and Pouch effects add their own same-ref
+rows under `refund:duplicate` and `bonus:pouch`. New ownership preserves
+unknown string entries and never changes equipment. No effect changes XP.
+SQLite's immediate lock makes concurrent payment validation, order allocation,
+and predecessor-based chance one serialized operation.
 
 == 8.2 The weight formula
 
@@ -302,8 +334,12 @@ Gold/opening definitions and CHECK/unique/AUTOINCREMENT rules, all six
 immutable triggers (definition and rollback-only behavior), and the
 XP-ledger reason index. Only that validated file reaches the atomic swap. A
 round trip therefore preserves append-only rows, opening order and
-`sqlite_sequence`, not merely table names. The Settings page gates restore
-behind an explicit warning plus typing `REPLACE`.
+`sqlite_sequence`, not merely table names. #266 relies on that unchanged
+whole-database format: refs/payments/rarities/bonuses/timestamps, applicable
+Gold effects, ownership and equipment reproduce the exact derived shop and
+same-ref replay after restore, and the next API opening receives an order above
+the restored maximum. The Settings page gates restore behind an explicit
+warning plus typing `REPLACE`.
 
 A restored `app.db` carries each material's `anthropic_file_id` (section 8.4),
 which is Anthropic-side state that does not travel with the archive — on another
