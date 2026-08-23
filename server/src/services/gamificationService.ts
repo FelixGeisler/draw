@@ -1,6 +1,6 @@
 import { db, getSetting, getSettingString } from "../db.js";
 import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys.js";
-import { claimXpForKey } from "../../../shared/achievementTiers.js";
+import { claimGoldForKey, claimXpForKey } from "../../../shared/achievementTiers.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
 import { addDays, localDate, localDayBounds } from "./localDay.js";
 import { nextOccurrence } from "./recurrence.js";
@@ -723,9 +723,16 @@ export function gamificationState() {
 
   const unlocked = db
     .prepare(
-      "SELECT key, unlocked_at AS unlockedAt, claimed_at AS claimedAt, claim_xp AS claimXp FROM achievements",
+      `SELECT key, unlocked_at AS unlockedAt, claimed_at AS claimedAt,
+              claim_xp AS claimXp, claim_gold AS claimGold FROM achievements`,
     )
-    .all() as { key: string; unlockedAt: string; claimedAt: string | null; claimXp: number | null }[];
+    .all() as {
+      key: string;
+      unlockedAt: string;
+      claimedAt: string | null;
+      claimXp: number | null;
+      claimGold: number | null;
+    }[];
   const unlockedMap = new Map(unlocked.map((u) => [u.key, u]));
 
   // Display-only overrides (#177, ADR-44): title/description COALESCE onto the
@@ -776,6 +783,7 @@ export function gamificationState() {
         unlockedAt: row?.unlockedAt ?? null,
         claimedAt: row?.claimedAt ?? null,
         claimXp: row?.claimXp ?? null,
+        claimGold: row?.claimGold ?? null,
         progress: chainProgress(a.key, metrics),
       };
     }),
@@ -854,7 +862,13 @@ export function customizeAchievement(key: string, patch: AchievementPatch): Cust
 // Claim-for-XP (#156, ADR-42)
 
 export type ClaimResult =
-  | { status: "ok"; xpAwarded: number; levelUp: boolean; newAchievements: string[] }
+  | {
+      status: "ok";
+      xpAwarded: number;
+      goldAwarded: number;
+      levelUp: boolean;
+      newAchievements: string[];
+    }
   | { status: "unknown" } // not a real achievement key → 400
   | { status: "locked" } // real key, but not unlocked yet → 400
   | { status: "claimed" }; // already claimed → 409
@@ -885,13 +899,25 @@ export function claimAchievement(key: string): ClaimResult {
     if (row.claimedAt != null) return { status: "claimed" };
 
     const xpAwarded = claimXpForKey(key);
+    const goldAwarded = claimGoldForKey(key);
     const levelBefore = levelFromXp(totalXp()).level;
-    db.prepare(
-      "UPDATE achievements SET claimed_at = ?, claim_xp = ? WHERE key = ? AND claimed_at IS NULL",
-    ).run(new Date().toISOString(), xpAwarded, key);
+    const update = db.prepare(
+      `UPDATE achievements SET claimed_at = ?, claim_xp = ?, claim_gold = ?
+       WHERE key = ? AND claimed_at IS NULL`,
+    ).run(new Date().toISOString(), xpAwarded, goldAwarded, key);
+    // The pre-read and guarded write are in one transaction. A forced failure
+    // throws before any XP/Gold/level/achievement fact can commit; a lost
+    // guard is likewise never reported as a successful claim.
+    if (update.changes !== 1) throw new Error("achievement claim guard failed");
     const levelAfter = levelFromXp(totalXp()).level;
     const newAchievements = checkAchievements({});
-    return { status: "ok", xpAwarded, levelUp: levelAfter > levelBefore, newAchievements };
+    return {
+      status: "ok",
+      xpAwarded,
+      goldAwarded,
+      levelUp: levelAfter > levelBefore,
+      newAchievements,
+    };
   })();
 }
 

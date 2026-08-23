@@ -51,6 +51,8 @@ export interface GamificationState {
     claimedAt: string | null;
     /** The XP stamped at claim time, or null until claimed. */
     claimXp: number | null;
+    /** Gold stamped at claim time; null for unclaimed and pre-v18 claims. */
+    claimGold: number | null;
     /** Chain progress toward the next threshold, or null for a one-off. */
     progress: { current: number; target: number } | null;
   }[];
@@ -65,6 +67,7 @@ export function useGamification() {
 
 export interface ClaimResponse {
   xpAwarded: number;
+  goldAwarded: number;
   levelUp: boolean;
   /** Achievements the claim's XP unlocked in the same transaction (a level
    *  crossing, #156) — toasted like any other unlock. */
@@ -82,6 +85,7 @@ export function useClaimAchievement() {
     mutationFn: (key: string) => api.post<ClaimResponse>(`/api/achievements/${key}/claim`, {}),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["gamification"] });
+      queryClient.invalidateQueries({ queryKey: ["shop"] });
       // A claim can tip the level bar and unlock the level_N card — announce
       // it so the toast fires just as it would for a draw/completion unlock.
       announceAchievements(data.newAchievements);

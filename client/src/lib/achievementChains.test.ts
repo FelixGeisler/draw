@@ -23,6 +23,7 @@ function card(
     unlockedAt: state.unlocked || state.claimed ? "2026-01-01T00:00:00.000Z" : null,
     claimedAt: state.claimed ? "2026-01-02T00:00:00.000Z" : null,
     claimXp: state.claimed ? 25 : null,
+    claimGold: state.claimed ? 5 : null,
     progress: null,
   };
 }

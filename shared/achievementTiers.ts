@@ -46,6 +46,15 @@ export const TIER_CLAIM_XP: Record<AchievementTier, number> = {
   "secret-rare": 500,
 };
 
+/** Gold stamped beside claim XP from the same shared rarity tier (#264). */
+export const TIER_CLAIM_GOLD: Record<AchievementTier, number> = {
+  common: 5,
+  rare: 10,
+  "super-rare": 25,
+  "ultra-rare": 50,
+  "secret-rare": 100,
+};
+
 /**
  * The tier per achievement key. Difficulty is a design judgement per level, not
  * a function of the name — so it is spelled out, exhaustively over
@@ -119,4 +128,9 @@ export function tierForKey(key: string): AchievementTier {
 /** Claim XP for a key, via its tier. Unknown key → the common payout. */
 export function claimXpForKey(key: string): number {
   return TIER_CLAIM_XP[tierForKey(key)];
+}
+
+/** Claim Gold for a key, via the same tier. Callers reject unknown keys first. */
+export function claimGoldForKey(key: string): number {
+  return TIER_CLAIM_GOLD[tierForKey(key)];
 }

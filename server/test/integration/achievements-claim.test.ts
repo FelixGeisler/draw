@@ -49,7 +49,12 @@ describe("POST /api/achievements/:key/claim", () => {
     const res = await request(app).post("/api/achievements/first_goal/claim").expect(200);
     // 0 → 100 XP crosses level 1→2, but level 2 unlocks no chain card (the
     // lowest level achievement is level_5), so nothing rides back.
-    expect(res.body).toEqual({ xpAwarded: 100, levelUp: true, newAchievements: [] });
+    expect(res.body).toEqual({
+      xpAwarded: 100,
+      goldAwarded: 25,
+      levelUp: true,
+      newAchievements: [],
+    });
 
     // The XP is now in the total, and the payload marks the card claimed.
     expect(await xp()).toBe(100);
@@ -58,6 +63,8 @@ describe("POST /api/achievements/:key/claim", () => {
     const card = g.achievements.find((a: { key: string }) => a.key === "first_goal");
     expect(card.claimedAt).not.toBeNull();
     expect(card.claimXp).toBe(100);
+    expect(card.claimGold).toBe(25);
+    expect(g.totalGold).toBe(25);
   });
 
   it("is idempotent: a second claim 409s and the payout does not double", async () => {
@@ -67,16 +74,23 @@ describe("POST /api/achievements/:key/claim", () => {
 
     // Exactly one stamped payout for the key.
     const row = db
-      .prepare("SELECT claim_xp AS claimXp FROM achievements WHERE key = 'first_goal'")
-      .get() as { claimXp: number };
-    expect(row.claimXp).toBe(100);
+      .prepare(
+        "SELECT claim_xp AS claimXp, claim_gold AS claimGold FROM achievements WHERE key = 'first_goal'",
+      )
+      .get() as { claimXp: number; claimGold: number };
+    expect(row).toEqual({ claimXp: 100, claimGold: 25 });
   });
 
   it("stamps the XP from the server tier table by rarity (common pays 25, no level-up)", async () => {
     seedUnlocked("first_draw"); // common
     const res = await request(app).post("/api/achievements/first_draw/claim").expect(200);
     // 100 → 125 XP stays inside level 2 (level 2 needs ~283 XP).
-    expect(res.body).toEqual({ xpAwarded: 25, levelUp: false, newAchievements: [] });
+    expect(res.body).toEqual({
+      xpAwarded: 25,
+      goldAwarded: 5,
+      levelUp: false,
+      newAchievements: [],
+    });
     expect(await xp()).toBe(125);
   });
 
@@ -98,6 +112,7 @@ describe("POST /api/achievements/:key/claim", () => {
     seedUnlocked("draw_10000");
     const res = await request(app).post("/api/achievements/draw_10000/claim").expect(200);
     expect(res.body.xpAwarded).toBe(500);
+    expect(res.body.goldAwarded).toBe(100);
     expect(res.body.levelUp).toBe(true);
     expect(res.body.newAchievements).toContain("level_5");
 
@@ -106,5 +121,46 @@ describe("POST /api/achievements/:key/claim", () => {
     expect(g.level).toBe(5);
     const levelCard = g.achievements.find((a: { key: string }) => a.key === "level_5");
     expect(levelCard.unlockedAt).not.toBeNull();
+  });
+
+  it("leaves a pre-v18 claimed row XP-only and never backfills it", async () => {
+    db.prepare(
+      `INSERT INTO achievements (key, unlocked_at, claimed_at, claim_xp, claim_gold)
+       VALUES ('draw_10', ?, ?, 50, NULL)`,
+    ).run(new Date().toISOString(), new Date().toISOString());
+
+    await request(app).post("/api/achievements/draw_10/claim").expect(409);
+    const card = (await request(app).get("/api/gamification").expect(200)).body.achievements.find(
+      (a: { key: string }) => a.key === "draw_10",
+    );
+    expect(card).toMatchObject({ claimXp: 50, claimGold: null });
+    expect(
+      db.prepare("SELECT claim_gold AS claimGold FROM achievements WHERE key = 'draw_10'").get(),
+    ).toEqual({ claimGold: null });
+  });
+
+  it("rolls back claim XP, Gold, level and new unlocks when the guarded update fails", async () => {
+    seedUnlocked("hours_10");
+    const before = (await request(app).get("/api/gamification").expect(200)).body;
+    db.exec(`CREATE TRIGGER test_claim_failure
+      BEFORE UPDATE OF claimed_at, claim_xp, claim_gold ON achievements
+      WHEN NEW.key = 'hours_10' BEGIN
+        SELECT RAISE(ABORT, 'forced claim update failure');
+      END`);
+    await request(app).post("/api/achievements/hours_10/claim").expect(500);
+    db.prepare("DROP TRIGGER test_claim_failure").run();
+
+    const after = (await request(app).get("/api/gamification").expect(200)).body;
+    expect(after.xp).toBe(before.xp);
+    expect(after.totalGold).toBe(before.totalGold);
+    expect(after.level).toBe(before.level);
+    expect(after.achievements.filter((a: { unlockedAt: string | null }) => a.unlockedAt)).toHaveLength(
+      before.achievements.filter((a: { unlockedAt: string | null }) => a.unlockedAt).length,
+    );
+    expect(
+      db.prepare(
+        "SELECT claimed_at AS claimedAt, claim_xp AS claimXp, claim_gold AS claimGold FROM achievements WHERE key = 'hours_10'",
+      ).get(),
+    ).toEqual({ claimedAt: null, claimXp: null, claimGold: null });
   });
 });

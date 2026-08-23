@@ -60,6 +60,7 @@ achievementsRouter.post("/:key/claim", (req, res) => {
       notifyUnlocks(result.newAchievements); // post-commit (#235)
       return res.json({
         xpAwarded: result.xpAwarded,
+        goldAwarded: result.goldAwarded,
         levelUp: result.levelUp,
         // A claim that crosses a level threshold unlocks the level_N card in
         // the same transaction (#156 review) — relay it like any unlock.
