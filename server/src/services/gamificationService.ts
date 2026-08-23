@@ -54,6 +54,8 @@ export type CompletionBonus = "warmup" | "momentum" | null;
 
 export interface CompletionResult {
   xpAwarded: number;
+  /** Gold owned by this completion row only (never challenge Gold). */
+  goldAwarded: number;
   bonus: CompletionBonus;
   newAchievements: string[];
   recurring: boolean;
@@ -110,6 +112,11 @@ function hasMomentum(taskId: number, now: Date): boolean {
   );
 }
 
+/** Completion Gold is fixed from the final, post-multiplier XP award (#264). */
+export function completionGoldForXp(finalXpAwarded: number): number {
+  return Math.max(1, Math.round(finalXpAwarded / 10));
+}
+
 export interface CompleteOptions {
   /**
    * Explicit effort override (#111, ADR-32): a parent with >= 1 non-archived
@@ -161,11 +168,14 @@ export function completeTask(
   let xp = Math.round(Math.round(effort * (task.impact / 3)) * multiplier);
   if (xp < 1) xp = 1;
 
+  const gold = completionGoldForXp(xp);
   const levelBefore = levelFromXp(totalXp()).level;
 
+  // XP and Gold are one owner fact. Any insert failure aborts the caller's
+  // transaction before task/timer/achievement/challenge state can commit.
   db.prepare(
-    "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded) VALUES (?, ?, ?, ?, ?)",
-  ).run(task.id, now.toISOString(), wasDrawn ? 1 : 0, warmup ? 1 : 0, xp);
+    "INSERT INTO completions (task_id, completed_at, was_drawn, was_warmup, xp_awarded, gold_awarded) VALUES (?, ?, ?, ?, ?, ?)",
+  ).run(task.id, now.toISOString(), wasDrawn ? 1 : 0, warmup ? 1 : 0, xp, gold);
 
   // Completing ends the work session: close this task's own running timer at
   // completion time. A different task's running timer stays untouched. This
@@ -228,6 +238,7 @@ export function completeTask(
 
   return {
     xpAwarded: xp,
+    goldAwarded: gold,
     bonus,
     newAchievements,
     recurring,
@@ -703,7 +714,7 @@ export function gamificationState() {
     .prepare(
       `SELECT co.id, co.completed_at AS completedAt,
               (co.was_drawn AND NOT co.was_warmup) AS wasDrawn, co.xp_awarded AS xpAwarded,
-              t.id AS taskId, t.title, t.category_id AS categoryId, t.goal_id AS goalId, t.impact
+              co.gold_awarded AS goldAwarded, t.id AS taskId, t.title, t.category_id AS categoryId, t.goal_id AS goalId, t.impact
        FROM completions co JOIN tasks t ON t.id = co.task_id
        WHERE co.completed_at >= ? AND co.completed_at < ?
        ORDER BY co.completed_at ASC`,
@@ -730,6 +741,7 @@ export function gamificationState() {
 
   return {
     xp,
+    totalGold: totalGold(),
     level,
     levelProgress: { intoLevel, needed },
     // streak stays a plain number for compatibility; the sibling fields let

@@ -13,6 +13,7 @@ export interface ActivityCard {
   /** Upright (completed on this local day) vs face-down (worked, not done). */
   completed: boolean;
   xpAwarded: number;
+  goldAwarded: number;
   wasDrawn: boolean;
 }
 

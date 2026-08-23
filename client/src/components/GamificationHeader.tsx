@@ -45,7 +45,9 @@ export function GamificationHeader() {
           }}
         />
       </div>
-      <span style={{ color: "var(--text-dim)" }}>{data.xp} XP</span>
+      <span style={{ color: "var(--text-dim)" }}>
+        {data.xp} XP · {data.totalGold} Gold
+      </span>
       <span style={{ flex: 1 }} />
       <span data-flame={flame} title={flameTitle} style={{ fontSize: 16 }}>
         {flame === "rest" && <span style={{ marginRight: 2 }}>🌙</span>}

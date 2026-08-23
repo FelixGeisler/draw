@@ -40,7 +40,8 @@ export function TrophyDeck() {
     <div className="trophy-deck">
       <h3>
         Today's pile — {completions.length} done ·{" "}
-        {completions.reduce((a, c) => a + c.xpAwarded, 0)} XP
+        {completions.reduce((a, c) => a + c.xpAwarded, 0)} XP ·{" "}
+        {completions.reduce((a, c) => a + c.goldAwarded, 0)} Gold
       </h3>
       <div className="trophy-pile">
         {completions.map((c, i) => {
@@ -65,7 +66,7 @@ export function TrophyDeck() {
                 c.title,
                 category?.name,
                 `completed ${time}`,
-                `+${c.xpAwarded} XP${c.wasDrawn ? " (drawn)" : ""}`,
+                `+${c.xpAwarded} XP · +${c.goldAwarded} Gold${c.wasDrawn ? " (drawn)" : ""}`,
                 rarity !== "none" ? rarity : null,
               ]
                 .filter(Boolean)
@@ -120,7 +121,9 @@ export function TrophyDeck() {
                     pile too (#114) — not lift-gated like the details. */}
                 <div className="trophy-footer">
                   <span className="trophy-time">{time}</span>
-                  <span className="trophy-card-xp">+{c.xpAwarded}</span>
+                  <span className="trophy-card-xp">
+                    +{c.xpAwarded} XP · +{c.goldAwarded} Gold
+                  </span>
                 </div>
               </div>
             </div>

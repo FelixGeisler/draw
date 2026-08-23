@@ -42,6 +42,7 @@ const completion = (over: Partial<ActivityCompletionRow>): ActivityCompletionRow
   taskId: 1,
   completedAt: "2026-07-14T18:00:00.000Z",
   xpAwarded: 30,
+  goldAwarded: 3,
   wasDrawn: 0,
   ...over,
 });
@@ -77,8 +78,20 @@ describe("buildActivityDays", () => {
     );
     expect(days).toHaveLength(1);
     const [worked, done] = days[0].cards;
-    expect(worked).toMatchObject({ taskId: 1, completed: false, trackedMinutes: 25, xpAwarded: 0 });
-    expect(done).toMatchObject({ taskId: 2, completed: true, xpAwarded: 12, wasDrawn: true });
+    expect(worked).toMatchObject({
+      taskId: 1,
+      completed: false,
+      trackedMinutes: 25,
+      xpAwarded: 0,
+      goldAwarded: 0,
+    });
+    expect(done).toMatchObject({
+      taskId: 2,
+      completed: true,
+      xpAwarded: 12,
+      goldAwarded: 3,
+      wasDrawn: true,
+    });
     // Rarity facts (#62): impact passes through from the live task meta, so
     // the client can derive holo/silver on upright cards without new state.
     expect(worked.impact).toBe(5);
@@ -184,12 +197,24 @@ describe("buildActivityDays", () => {
     expect(days[2].cards).toHaveLength(1);
   });
 
-  it("sums XP and ORs wasDrawn when a recurring task completes twice a day", () => {
+  it("sums completion XP/Gold and ORs wasDrawn when a recurring task completes twice a day", () => {
     const days = buildActivityDays(
       [],
       [
-        completion({ taskId: 2, completedAt: "2026-07-14T08:00:00.000Z", xpAwarded: 10, wasDrawn: 0 }),
-        completion({ taskId: 2, completedAt: "2026-07-14T19:00:00.000Z", xpAwarded: 15, wasDrawn: 1 }),
+        completion({
+          taskId: 2,
+          completedAt: "2026-07-14T08:00:00.000Z",
+          xpAwarded: 10,
+          goldAwarded: 1,
+          wasDrawn: 0,
+        }),
+        completion({
+          taskId: 2,
+          completedAt: "2026-07-14T19:00:00.000Z",
+          xpAwarded: 15,
+          goldAwarded: 2,
+          wasDrawn: 1,
+        }),
       ],
       META,
       "2026-07-14",
@@ -197,7 +222,13 @@ describe("buildActivityDays", () => {
       0,
     );
     expect(days[0].cards).toEqual([
-      expect.objectContaining({ taskId: 2, completed: true, xpAwarded: 25, wasDrawn: true }),
+      expect.objectContaining({
+        taskId: 2,
+        completed: true,
+        xpAwarded: 25,
+        goldAwarded: 3,
+        wasDrawn: true,
+      }),
     ]);
     expect(days[0].totals).toEqual({ started: 1, completed: 1, minutes: 0, xp: 25 });
   });

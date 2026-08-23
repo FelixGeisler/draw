@@ -108,6 +108,8 @@ export interface Task {
 export interface CompletionResponse {
   task: Task;
   xpAwarded?: number;
+  /** Required on completion results; absent on non-completion PATCH responses. */
+  goldAwarded?: number;
   /**
    * Why the XP is higher than plain (#57): "warmup" — the dealt warm-up card
    * finished inside its bonus window (×1.25); "momentum" — a non-drawn task

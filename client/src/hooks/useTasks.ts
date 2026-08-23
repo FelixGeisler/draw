@@ -58,12 +58,15 @@ export function useTasks(
   });
 }
 
-function useInvalidateTasks() {
+function useInvalidateTasks(completionCapable = false) {
   const qc = useQueryClient();
   return () => {
     qc.invalidateQueries({ queryKey: ["tasks"] });
     qc.invalidateQueries({ queryKey: ["gamification"] });
     qc.invalidateQueries({ queryKey: ["challenge"] });
+    // Only mutations that can create/remove a completion owner refresh the
+    // independent shop snapshot. Never copy or optimistically derive Gold.
+    if (completionCapable) qc.invalidateQueries({ queryKey: ["shop"] });
     qc.invalidateQueries({ queryKey: ["stats"] });
     // Completions/reopens/deletes change the History calendar's day cards (Stats page).
     qc.invalidateQueries({ queryKey: ["activity"] });
@@ -79,7 +82,8 @@ function useInvalidateTasks() {
 }
 
 export function useCreateTask() {
-  const invalidate = useInvalidateTasks();
+  // A task may be created under a done parent, reopening its completion.
+  const invalidate = useInvalidateTasks(true);
   return useMutation({
     mutationFn: (task: NewTask) => api.post<Task>("/api/tasks", task),
     onSuccess: invalidate,
@@ -87,7 +91,7 @@ export function useCreateTask() {
 }
 
 export function useUpdateTask() {
-  const invalidate = useInvalidateTasks();
+  const invalidate = useInvalidateTasks(true);
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...patch }: { id: number } & Record<string, unknown>) =>
@@ -108,7 +112,7 @@ export function useUpdateTask() {
 }
 
 export function useDeleteTask() {
-  const invalidate = useInvalidateTasks();
+  const invalidate = useInvalidateTasks(true);
   return useMutation({
     mutationFn: (id: number) => api.delete<{ ok: boolean }>(`/api/tasks/${id}`),
     onSuccess: invalidate,
@@ -116,7 +120,8 @@ export function useDeleteTask() {
 }
 
 export function useSplitTask() {
-  const invalidate = useInvalidateTasks();
+  // Splitting can reopen the owning parent completion.
+  const invalidate = useInvalidateTasks(true);
   const qc = useQueryClient();
   return useMutation({
     // Split-in-place (#108, widened past too-big in #209): replaces a
@@ -157,7 +162,8 @@ export function useReorderSubtask() {
 }
 
 export function useCreateSubtasks() {
-  const invalidate = useInvalidateTasks();
+  // Adding an open child to a done parent removes its completion owner.
+  const invalidate = useInvalidateTasks(true);
   return useMutation({
     // orderMode (#23) persists "do in order" on the parent in the same
     // transaction as the batch; omitted = leave the parent's mode untouched.

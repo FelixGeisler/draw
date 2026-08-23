@@ -24,6 +24,7 @@ function card(over: Partial<ActivityCard> = {}): ActivityCard {
     trackedMinutes: 10,
     completed: true,
     xpAwarded: 10,
+    goldAwarded: 1,
     wasDrawn: false,
     ...over,
   };

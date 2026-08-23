@@ -3,6 +3,8 @@ import { api } from "../api/client";
 
 export interface GamificationState {
   xp: number;
+  /** Unclamped server-derived total from all three Gold owners. */
+  totalGold: number;
   level: number;
   levelProgress: { intoLevel: number; needed: number };
   /** Real completion days in the unbroken run — rest/frozen days never count. */
@@ -21,6 +23,7 @@ export interface GamificationState {
     completedAt: string;
     wasDrawn: number;
     xpAwarded: number;
+    goldAwarded: number;
     taskId: number;
     title: string;
     categoryId: number;

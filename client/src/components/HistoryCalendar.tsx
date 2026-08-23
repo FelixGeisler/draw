@@ -39,7 +39,7 @@ function cardSuffix(c: ActivityCard): { text: string; rarity: string } {
   if (!c.completed) return { text: "not completed", rarity: "none" };
   const drawn = c.wasDrawn ? " 🃏" : "";
   const tier = rarity !== "none" ? ` · ${rarity}` : "";
-  return { text: `+${c.xpAwarded} XP${drawn}${tier}`, rarity };
+  return { text: `+${c.xpAwarded} XP · +${c.goldAwarded} Gold${drawn}${tier}`, rarity };
 }
 
 const Cell = memo(function Cell({
