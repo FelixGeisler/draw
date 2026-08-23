@@ -153,6 +153,35 @@ unknown string entries and never changes equipment. No effect changes XP.
 SQLite's immediate lock makes concurrent payment validation, order allocation,
 and predecessor-based chance one serialized operation.
 
+=== Client pack reconciliation and rendering (#267)
+
+The Stats shop renders the #266 snapshot verbatim: unclamped Gold, Tickets,
+Freeze bank/cap, server price, basis-point chance formatting, ordered ownership
+and equipment. A click first stores one versioned `sessionStorage` intent with a
+`crypto.randomUUID()` ref, bound payment and automatic-retry marker. Only the
+initial fetch rejection may retry once, after persisting the consumed marker;
+HTTP responses are definitive only while their request still owns the exact
+stored intent generation: version, ref, payment and automatic-retry marker must
+all match. Success also requires the response opening's ref and payment to match
+the bound intent. Exhausted transport and successful-body parse/shape or
+identity failures keep the owning intent unresolved. Reload never POSTs: it
+offers a one-request same-ref/same-payment resume. Malformed/old records are
+removed and a storage write failure sends nothing. There is no abandon, payment
+switch or new-ref retry.
+
+Only a matching response for that exact current generation may clear the intent,
+replace `['shop']` with `response.shop`, and invalidate `['gamification']`.
+Any settlement that no longer owns that exact generation is a no-op, whether it
+carries success, HTTP error, transport error or a malformed response: it neither
+clears newer current intent nor publishes its stale snapshot. Errors never write
+either cache. The inline
+polite status reports the returned name/tier/new-or-duplicate/refund/effective
+bonus without a reveal stage. The fixed catalog uses one shared
+`.draw-face.front[data-back]` selector per known non-Classic key for both shop
+swatches and Draw; all are CSS-only. Classic carries no attribute, and an
+unknown attribute matches no variant and therefore receives the Classic
+fallback. #268 alone owns staged reveal presentation.
+
 == 8.2 The weight formula
 
 ....

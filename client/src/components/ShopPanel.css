@@ -1,17 +1,45 @@
-/* The XP shop (#230, ADR-62). Swatches ARE the Draw page weaves: the same
-   .draw-face.front[data-back] rules paint them, so what you equip is exactly
-   what you saw. The pack opening rides the #224 stage classes. */
+/* Gold pack controls and settings-owned collection (#267, ADR-62). Swatches
+   ARE the Draw page card backs: the same .draw-face.front[data-back] rules
+   paint both surfaces, so equipped rendering cannot drift from the catalog. */
 
-.shop-items {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+.shop-panel {
+  margin-top: 24px;
 }
 
-.shop-item p {
+.shop-state,
+.shop-pack-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.shop-state {
   color: var(--text-dim);
   font-size: 13px;
-  margin: 6px 0 10px;
+  margin: 6px 0 12px;
+}
+
+.shop-pack-controls button {
+  font-size: 13px;
+}
+
+.shop-error,
+.shop-result {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.shop-error {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.shop-result {
+  color: var(--text);
+  background: var(--accent-wash-mid);
+  border: 1px solid var(--accent);
 }
 
 .shop-backs {
@@ -44,23 +72,17 @@
   cursor: default;
 }
 
-/* The swatch borrows .draw-face.front's weave rules at thumbnail size; the
-   element carries both classes, so the data-back variants apply verbatim. */
+/* The thumbnail carries both classes, so every shared data-back variant
+   applies verbatim. Classic deliberately carries no data-back attribute. */
 .shop-back-swatch {
   display: block;
   width: 64px;
   height: 90px;
   border-radius: 8px;
   border: 1px solid var(--border);
-  font-size: 0; /* the front face's 64px 🂠 glyph has no business here */
+  font-size: 0;
   cursor: inherit;
   position: static;
-}
-
-.shop-back-swatch.tall {
-  width: 130px;
-  height: 182px;
-  border-radius: 12px;
 }
 
 .shop-back-name {
@@ -78,48 +100,3 @@
 .tier-rare { color: #d6e0f0; }
 .tier-ultra-rare { color: var(--warn); }
 .tier-secret-rare { color: #be82ff; }
-
-/* ---- Pack opening (rides the .ach-stage scrim) -------------------------- */
-
-.shop-pulls {
-  display: flex;
-  gap: 26px;
-}
-
-.shop-pull {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-}
-
-.shop-pull-flip {
-  position: relative;
-  width: 130px;
-  height: 182px;
-  transform-style: preserve-3d;
-  perspective: 900px;
-}
-
-.shop-pull.revealed .shop-pull-flip {
-  transform: rotateY(180deg);
-}
-
-.shop-pull-caption {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  font-size: 13px;
-}
-
-.shop-pull-dup {
-  font-size: 11.5px;
-  color: var(--warn);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  .shop-pull-flip {
-    transition: transform 0.65s cubic-bezier(0.34, 1.3, 0.5, 1);
-  }
-}
