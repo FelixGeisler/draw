@@ -49,15 +49,29 @@ export function TaskCalendar({
   const categoriesById = new Map(
     categories.map((category) => [category.id, category]),
   );
-  const tasksById = new Map(data.scheduled.map((task) => [task.id, task]));
+  const scheduledById = useMemo(
+    () => new Map(data.scheduled.map((task) => [task.id, task])),
+    [data.scheduled],
+  );
+  // Parent order mode is an edit invariant, not calendar eligibility. Keep the
+  // complete scoped tree available even when an undated parent is absent from
+  // the scheduled set (ADR-23).
+  const scopedTasksById = useMemo(() => {
+    const byId = new Map<number, Task>();
+    for (const root of roots) {
+      byId.set(root.id, root);
+      for (const subtask of root.subtasks ?? []) byId.set(subtask.id, subtask);
+    }
+    return byId;
+  }, [roots]);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const editing = editingId == null ? undefined : tasksById.get(editingId);
+  const editing = editingId == null ? undefined : scheduledById.get(editingId);
 
   // A work-mode change or saved status/date change can remove the active item.
   // Do not leave an editor for work that is no longer on this calendar.
   useEffect(() => {
-    if (editingId != null && !tasksById.has(editingId)) setEditingId(null);
-  }, [editingId, tasksById]);
+    if (editingId != null && !scheduledById.has(editingId)) setEditingId(null);
+  }, [editingId, scheduledById]);
 
   const taskButton = (task: Task, context: string) => {
     const category = categoriesById.get(task.categoryId);
@@ -140,7 +154,7 @@ export function TaskCalendar({
             submitLabel="Save"
             hideRecur={
               editing.parentId != null &&
-              tasksById.get(editing.parentId)?.subtaskOrderMode === "sequential"
+              scopedTasksById.get(editing.parentId)?.subtaskOrderMode === "sequential"
             }
             onSubmit={async (patch) => {
               await onUpdate(editing.id, patch);

@@ -122,7 +122,10 @@ test.beforeAll(async ({ request }) => {
     categoryId: primaryCategory.id,
   });
   const stepsResponse = await request.post(`/api/tasks/${parent.id}/subtasks`, {
-    data: { subtasks: [{ title: STEP, effortMinutes: 5 }] },
+    data: {
+      subtasks: [{ title: STEP, effortMinutes: 5 }],
+      orderMode: "sequential",
+    },
   });
   if (!stepsResponse.ok())
     throw new Error(`create subtask failed (${stepsResponse.status()})`);
@@ -282,6 +285,22 @@ test("desktop calendar toggles, navigates, orders overdue work, edits, and follo
       .locator(".task-month-grid")
       .getByText(OTHER_SCOPE, { exact: true }),
   ).toBeVisible();
+});
+
+test("dated steps under undated sequential parents keep recurrence hidden", async ({
+  page,
+}) => {
+  await page.goto("/tasks");
+  await openCalendar(page);
+
+  const stepButton = calendar(page)
+    .locator(`[data-calendar-date="${TODAY}"]`)
+    .locator(".task-calendar-item", { hasText: STEP });
+  await stepButton.click();
+
+  const editor = calendar(page).getByRole("region", { name: `Edit ${STEP}` });
+  await expect(editor.getByTitle("Repeat every N days (optional)")).toHaveCount(0);
+  await editor.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
 test("phone uses an ordered agenda and never widens the document", async ({
