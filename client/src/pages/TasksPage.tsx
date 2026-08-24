@@ -11,9 +11,11 @@ import {
 import { useGoals } from "../hooks/useGoals";
 import { useDeckScope } from "../DeckScopeContext";
 import { TaskForm } from "../components/TaskForm";
+import { TaskCalendar } from "../components/TaskCalendar";
 import { TaskRow } from "../components/TaskRow";
 import { TaskDndContext, TaskDragOverlay, useTaskDnd } from "../components/TaskDnd";
 import { classifyTask, flattenOpen, groupSiblings, type DrawGroup } from "../lib/drawable";
+import { localToday } from "../lib/localDay";
 import type { Task } from "../api/types";
 
 /**
@@ -42,6 +44,8 @@ export function TasksPage() {
   const goals = useGoals();
   const settings = useSettings();
   const [showDone, setShowDone] = useState(false);
+  const [view, setView] = useState<"list" | "calendar">("list");
+  const [selectedMonth, setSelectedMonth] = useState(() => localToday().slice(0, 7));
   const tasks = useTasks({ status: showDone ? "all" : "open" });
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
@@ -188,12 +192,26 @@ export function TasksPage() {
 
   return (
     <div className={dnd.dragging ? "content dnd-active" : "content"}>
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <h1 style={{ flex: 1 }}>Tasks</h1>
-        <label style={{ color: "var(--text-dim)", display: "flex", gap: 6, alignItems: "center" }}>
-          <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
-          show done
-        </label>
+        <div className="task-view-switch" role="group" aria-label="Tasks view">
+          <button type="button" aria-pressed={view === "list"} onClick={() => setView("list")}>
+            List
+          </button>
+          <button
+            type="button"
+            aria-pressed={view === "calendar"}
+            onClick={() => setView("calendar")}
+          >
+            Calendar
+          </button>
+        </div>
+        {view === "list" && (
+          <label style={{ color: "var(--text-dim)", display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
+            show done
+          </label>
+        )}
       </div>
       {/* Quick capture (#151, formerly the Capture page): pinned on top, so
           the rapid-entry ritual survives the merge — autoFocus, title-only
@@ -213,6 +231,23 @@ export function TasksPage() {
           />
         )}
       </div>
+      {view === "calendar" ? (
+        categories.data && (
+          <TaskCalendar
+            roots={roots}
+            categories={categories.data}
+            goals={goals.data}
+            selectedMonth={selectedMonth}
+            scopeName={
+              scope == null ? undefined : categories.data.find((category) => category.id === scope)?.name
+            }
+            onSelectedMonthChange={setSelectedMonth}
+            onShowList={() => setView("list")}
+            onUpdate={(id, patch) => updateTask.mutateAsync({ id, ...patch })}
+          />
+        )
+      ) : (
+        <>
       {/* Triage rows are full TaskRows OUTSIDE the DnD provider: every action
           is available in place, but the strip is a worklist, not a second
           tree — reorganizing happens on the category groups below. */}
@@ -322,6 +357,8 @@ export function TasksPage() {
         </p>
       )}
       <TaskDragOverlay dnd={dnd} />
+        </>
+      )}
     </div>
   );
 }
