@@ -59,7 +59,8 @@ test("achieving a goal opens the victory overlay; claiming it hangs the trophy",
   await expect(dialog.getByText(WIN_OUTCOME)).toBeVisible();
   await expect(dialog.getByText("✓ 0/0 tasks")).toBeVisible();
   // resolved_at was stamped server-side and rides the response into the stats.
-  await expect(dialog.getByText(/🗓 \d{1,2} \w{3} \d{4}/)).toBeVisible();
+  // Chromium's en-GB short September is “Sept”, while most months use three letters.
+  await expect(dialog.getByText(/🗓 \d{1,2} \p{L}{3,} \d{4}/u)).toBeVisible();
 
   await page.getByRole("button", { name: "Claim victory" }).click();
   await expect(dialog).not.toBeVisible();
@@ -82,7 +83,7 @@ test("achieving a goal opens the victory overlay; claiming it hangs the trophy",
   // the actions are never hover-only.
   await trophy.getByRole("button", { name: "↩ Reactivate" }).focus();
   await expect(reveal).toHaveCSS("opacity", "1");
-  await expect(trophy.getByText(/Achieved \d{1,2} \w{3} \d{4}/)).toBeVisible();
+  await expect(trophy.getByText(/Achieved \d{1,2} \p{L}{3,} \d{4}/u)).toBeVisible();
 
   // Reactivate is the shelf's control (no Undo on the overlay): back to active.
   await trophy.getByRole("button", { name: "↩ Reactivate" }).click();
@@ -136,7 +137,7 @@ test("marking missed is quiet: confirm, live-region line, subdued shelf row", as
   await expect(reveal).toHaveCSS("opacity", "0");
   await row.hover();
   await expect(reveal).toHaveCSS("opacity", "1");
-  await expect(row.getByText(/missed \d{1,2} \w{3} \d{4}/)).toBeVisible();
+  await expect(row.getByText(/missed \d{1,2} \p{L}{3,} \d{4}/u)).toBeVisible();
 
   // Reactivating clears the stale notice along with the row.
   await row.getByRole("button", { name: "↩ Reactivate" }).click();
@@ -217,7 +218,7 @@ test("the case shows a name-only spotlit cup, with missed goals below it", async
   // Hover reveals the quiet `Achieved <date>` caption.
   await trophy.hover();
   await expect(trophy.locator(".goal-cup-reveal")).toHaveCSS("opacity", "1");
-  await expect(trophy.getByText(/Achieved \d{1,2} \w{3} \d{4}/)).toBeVisible();
+  await expect(trophy.getByText(/Achieved \d{1,2} \p{L}{3,} \d{4}/u)).toBeVisible();
 
   // The missed row lives in the section below the case, never inside the cabinet.
   const missedRow = page.locator(".goal-missed-row").filter({ hasText: CAB_MISS });

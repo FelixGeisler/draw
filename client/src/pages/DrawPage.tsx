@@ -56,11 +56,10 @@ export function DrawPage() {
   const timer = useCurrentTimer();
 
   const goals = useGoals();
-  // Work mode (#214): the category chips are now the app-wide, per-device deck
-  // scope rather than page-local state — same control, it just stopped
-  // forgetting. The goal select stays per-session: it is a narrowing you make
-  // for one draw, not a mode you live in.
-  const { scope: categoryId, setScope: setCategoryId } = useDeckScope();
+  // Work mode (#214/#305) is selected once in the shared app-header picker.
+  // The goal select stays here and per-session: it is a narrowing you make for
+  // one draw, not a mode you live in.
+  const { scope: categoryId } = useDeckScope();
   const [goalId, setGoalId] = useState<number | undefined>();
   const [shuffling, setShuffling] = useState(false);
   // A FRESH deal of this session (#255): gates the arrival motion — the deal
@@ -414,22 +413,6 @@ export function DrawPage() {
 
       <ChallengeChip />
       <div className="draw-filters">
-        <span
-          className={`chip ${categoryId === undefined ? "active" : ""}`}
-          onClick={() => setCategoryId(undefined)}
-        >
-          All
-        </span>
-        {categories.data?.map((c) => (
-          <span
-            key={c.id}
-            className={`chip ${categoryId === c.id ? "active" : ""}`}
-            onClick={() => setCategoryId(c.id)}
-          >
-            <span className="dot" style={{ background: c.color }} />
-            {c.name}
-          </span>
-        ))}
         {goals.data && goals.data.length > 0 && (
           <select
             value={goalId ?? ""}

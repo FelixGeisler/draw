@@ -540,15 +540,6 @@
   flex-wrap: wrap;
 }
 
-.draw-filters .chip {
-  cursor: pointer;
-}
-
-.draw-filters .chip.active {
-  border-color: var(--accent);
-  color: var(--text);
-  background: var(--accent-wash-mid);
-}
 
 /* Warm-up draw (#57): secondary escape hatch below the idle deck. */
 .warmup-cta {
