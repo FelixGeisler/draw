@@ -9,6 +9,12 @@ This project follows a strict issue-driven workflow — for humans and AI agents
 3. **Commits** reference the issue: `#<IssueId> Commit Message`, e.g. `#12 Dampen repeat draws within cooldown`.
 4. **Pull requests** close their issue (`Closes #<IssueId>` in the description) and are merged with a merge commit (so issue-referencing commits stay in history).
 
+### Dependabot pull requests
+
+Dependabot pull requests receive the same normal review and CI as other changes;
+they are never auto-merged. Existing workflow action references pinned to full
+commit SHAs must remain pinned to full commit SHAs when updated.
+
 ## Development
 
 ```
