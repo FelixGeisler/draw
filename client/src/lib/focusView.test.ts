@@ -3,7 +3,7 @@ import { resolveDrawView } from "./focusView";
 
 // The focus-restore decision (issue #56, ADR-29): pure function of the two
 // server-persisted facts (current draw, running timer) plus the session-local
-// Escape flag. DrawPage re-derives this every render — these tests pin that
+// view-exit flag. DrawPage re-derives this every render — these tests pin that
 // every combination lands somewhere sensible, never on a dead overlay.
 describe("resolveDrawView", () => {
   it("no drawn card → idle, whatever the timer does", () => {
@@ -19,7 +19,7 @@ describe("resolveDrawView", () => {
   it("timer running on ANOTHER task → revealed, never a dead overlay", () => {
     // e.g. a second tab started a different task; the refetch collapses focus
     expect(resolveDrawView(7, 8, false)).toBe("revealed");
-    // …and having Escaped earlier changes nothing about that
+    // …and having exited focus earlier changes nothing about that
     expect(resolveDrawView(7, 8, true)).toBe("revealed");
   });
 
@@ -27,7 +27,7 @@ describe("resolveDrawView", () => {
     expect(resolveDrawView(7, 7, false)).toBe("focus");
   });
 
-  it("Escape exited the view → revealed even while the timer keeps running", () => {
+  it("a view-only exit → revealed even while the timer keeps running", () => {
     expect(resolveDrawView(7, 7, true)).toBe("revealed");
   });
 });

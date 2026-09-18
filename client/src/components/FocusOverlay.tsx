@@ -11,8 +11,9 @@ import "./FocusOverlay.css";
  * nothing else. Presentation only — DrawPage derives WHEN this renders
  * (lib/focusView.ts, ADR-29), and the in-face actions ARE the DrawPage
  * actions passed in: ✓ Done is the drawn card's complete (PATCH status:done,
- * entry closed server-side per ADR-12), ■ Stop is the plain timer stop. No
- * control here duplicates behavior — and there is deliberately no re-draw:
+ * entry closed server-side per ADR-12), ■ Stop is the plain timer stop, and
+ * Exit focus leaves only this view. No control here duplicates behavior —
+ * and there is deliberately no re-draw:
  * the draw stays a commitment (#88) even when the focus runs over.
  */
 export function FocusOverlay({
@@ -28,7 +29,7 @@ export function FocusOverlay({
   startedAt: string;
   onDone: () => void;
   onStop: () => void;
-  /** Escape: leave the VIEW only — the timer keeps running (TimerBar). */
+  /** Exit focus or Escape: leave the VIEW only — the timer keeps running. */
   onExit: () => void;
 }) {
   const [now, setNow] = useState(Date.now());
@@ -79,8 +80,9 @@ export function FocusOverlay({
           ✓ Done
         </button>
         <button onClick={onStop}>■ Stop</button>
+        <button onClick={onExit}>Exit focus</button>
       </div>
-      <div className="focus-hint">Esc exits the view — the timer keeps running</div>
+      <div className="focus-hint">The timer keeps running.</div>
     </div>,
     // Portal target: outside #root so the root-level `inert` (above) cannot
     // swallow the dialog itself.
