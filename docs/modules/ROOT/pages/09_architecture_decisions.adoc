@@ -3131,7 +3131,7 @@ with a stranger gesture. Unchanged from #122/ADR-32.
 *Out of scope:* three-level nesting (ADR-16 stands), decomposition from the
 Goals page task section, and any change to the split endpoint's validation.
 
-== ADR-57: Work mode is a sticky per-device deck scope — the existing category chips, remembered in localStorage, applied app-wide
+== ADR-57: Work mode is a sticky per-device deck scope — selected in the shared project picker, remembered in localStorage, applied app-wide
 
 *Context:* There was no way to say "I'm at work, show me work". The Draw page's
 category chips were bare page state: they reset on reload, scoped only the next
@@ -3142,20 +3142,25 @@ as undesigned.
 
 *Decision:* Make the existing selection *sticky* and apply it across the app.
 One category, stored in `localStorage` under `draw.deckScope`, resolved through
-a pure module (`lib/deckScope.ts`) and shared by a small React context. The
-Draw page's chips read and write it; the Tasks page narrows its tree, triage
-strip, snoozed section and reparent targets to it, and quick-capture defaults
-into it. No server change — `POST /api/draw` has always taken a category
-filter.
+a pure module (`lib/deckScope.ts`) and shared by a small React context. One
+always-visible project picker in the shared app header reads and writes it;
+"Project" is presentation language for the existing category-backed scope, not
+a second data model. The Tasks page narrows its tree, triage strip, snoozed
+section and reparent targets to it, and quick-capture defaults into it. The Draw
+page keeps only its per-session goal selector and reads the shared scope for
+regular and warm-up deals. No server change — `POST /api/draw` has always taken
+a category filter.
 
 *Rationale:*
 
 * *A persistence layer on an existing control, not a new concept.* The
 alternatives were a `contexts` table (named decks over sets of categories) and
 an `is_work` flag on categories. Both invent a second grouping next to the one
-that already exists and already works; the chips' only defect was amnesia.
-Doing the small version keeps the door open — if one deck per category proves
-too coarse, named contexts can be built on top — while a `contexts` table
+that already exists and already works; the original chips' first defect was
+amnesia. The shared searchable picker later replaced those chips and the
+selected-only strip as a presentation amendment (#305), without changing this
+scope model. Doing the small version keeps the door open — if one deck per
+category proves too coarse, named contexts can be built on top — while a `contexts` table
 built speculatively would have to be migrated away from if it were wrong.
 * *Per device, and this is the interesting call.* The obvious home is the
 `settings` table, next to `max_draw_effort`. That is wrong here: once the app
@@ -3189,10 +3194,11 @@ scope is about what you are asked to do next, never about what you did.
 * *An empty scoped page names its cause.* "Nothing here — capture something
 above" in front of a full task list is the one way this feature can actively
 mislead, and the scope survives reloads, so there is no natural moment where
-the user is reminded they set it. Hence both the always-visible strip (which
-renders nothing at all when unscoped, so the default app gains no chrome) and
-a distinct empty-state message. The strip's ✕ is deliberately reachable from
-every page, not only from the Draw page where the chips live.
+the user is reminded they set it. Hence both a distinct empty-state message and
+an always-visible shared-header picker. The picker names All projects explicitly
+when unscoped, keeps that clear-selection option first, and is reachable from
+every page. Search is a trimmed, case-insensitive client-side substring filter
+over project names; it preserves API order and never hides All projects.
 
 *Out of scope:* named or multiple simultaneous contexts, multi-category
 scopes, scoping by goal (the Draw page's goal select stays per-session), and

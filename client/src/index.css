@@ -625,6 +625,7 @@ textarea:focus {
   }
 
   .gami-header {
+    flex-wrap: wrap;
     gap: 10px;
     padding: 8px 12px;
   }

@@ -256,7 +256,8 @@ test("a 3★ chore never shimmers: chips only, no holo on the card or its trophy
 
   await resolveCurrentDraw(page);
   await page.goto("/");
-  await page.locator(".draw-filters .chip", { hasText: CHORE_CATEGORY }).click();
+  await page.getByTestId("project-picker").getByRole("button").click();
+  await page.getByRole("listbox", { name: "Projects" }).getByRole("option", { name: CHORE_CATEGORY }).click();
   await page.locator(".draw-face.front").click();
   const back = page.locator(".draw-face.back");
   await expect(back.locator("h2")).toHaveText(CHORE_TITLE);

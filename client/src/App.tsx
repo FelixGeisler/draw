@@ -9,7 +9,6 @@ import { TimerBar } from "./components/TimerBar";
 import { GamificationHeader } from "./components/GamificationHeader";
 import { AchievementToast } from "./components/AchievementToast";
 import { CommandPalette } from "./components/CommandPalette";
-import { DeckScopeBar } from "./components/DeckScopeBar";
 import { DeckScopeProvider } from "./DeckScopeContext";
 import { useAiStatus } from "./hooks/useAi";
 import {
@@ -72,11 +71,9 @@ export default function App() {
         ))}
       </nav>
       <div className="main">
+        {/* Gamification and the always-visible project picker share the app
+            header; both remain above route content and the running timer. */}
         <GamificationHeader />
-        {/* Work mode (#214): renders nothing unless a scope is set, so the
-            unscoped app gains no chrome. Above TimerBar — a standing setting
-            reads as context for the running timer, not the other way round. */}
-        <DeckScopeBar />
         <TimerBar />
         <AchievementToast />
         {/* Command palette + global shortcuts (#243, ADR-68): mounted once in

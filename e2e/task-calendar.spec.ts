@@ -268,18 +268,24 @@ test("desktop calendar toggles, navigates, orders overdue work, edits, and follo
       .getByText(RECURRING, { exact: true }),
   ).toHaveCount(1);
 
-  // Apply work mode through the existing category convention, then clear it
-  // from Tasks and watch the same calendar payload widen immediately.
+  // Apply work mode through the shared project picker, then clear it from
+  // Tasks and watch the same calendar payload widen immediately.
   await page.goto("/");
+  await page.getByTestId("project-picker").getByRole("button").click();
   await page
-    .locator(".draw-filters .chip", { hasText: primaryCategory.name })
+    .getByRole("listbox", { name: "Projects" })
+    .getByRole("option", { name: primaryCategory.name })
     .click();
   await page.goto("/tasks");
   await openCalendar(page);
   await expect(
     calendar(page).getByText(OTHER_SCOPE, { exact: true }),
   ).toHaveCount(0);
-  await page.getByTestId("deck-scope-bar").getByRole("button").click();
+  await page.getByTestId("project-picker").getByRole("button").click();
+  await page
+    .getByRole("listbox", { name: "Projects" })
+    .getByRole("option", { name: "All projects" })
+    .click();
   await expect(
     calendar(page)
       .locator(".task-month-grid")

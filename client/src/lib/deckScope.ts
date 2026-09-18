@@ -1,10 +1,9 @@
 /**
  * Deck scope — "work mode" (#214).
  *
- * One category the whole app is narrowed to, remembered PER DEVICE. The Draw
- * page has always had category chips; they simply forgot on reload and scoped
- * only the next draw. This is the persistence layer for that control, not a
- * second grouping concept.
+ * One category the whole app is narrowed to, remembered PER DEVICE. The shared
+ * project picker presents this existing category-backed value; "Project" is
+ * UI language, not a second grouping concept.
  *
  * Per device rather than in the `settings` table on purpose: with the app on a
  * Pi and both a phone and a desktop pointed at it, a server-side "current
@@ -18,7 +17,7 @@
 
 export const DECK_SCOPE_KEY = "draw.deckScope";
 
-/** `undefined` is the whole deck — the same value the chips have always used. */
+/** `undefined` is the whole deck — presented as “All projects” in the picker. */
 export type DeckScope = number | undefined;
 
 /**

@@ -17,7 +17,11 @@ type Point = { x: number; y: number };
 // suite shares ONE database and these rows are DRAWABLE, so a leak changes what
 // the specs running after this file draw. afterEach fires even when a test fails
 // or times out halfway through — a cleanup at the end of the test body does not.
-const created: { tasks: number[]; goals: number[] } = { tasks: [], goals: [] };
+const created: { tasks: number[]; goals: number[]; categories: number[] } = {
+  tasks: [],
+  goals: [],
+  categories: [],
+};
 
 /** POST that fails loudly: an unchecked seed makes every later assertion a lie. */
 async function seed<T>(page: Page, path: string, data: object): Promise<T> {
@@ -38,6 +42,15 @@ async function seedGoal(page: Page, title: string): Promise<{ id: number }> {
   return goal;
 }
 
+async function seedCategory(page: Page, name: string): Promise<{ id: number }> {
+  const category = await seed<{ id: number }>(page, "/api/categories", {
+    name,
+    color: "#8a2be2",
+  });
+  created.categories.push(category.id);
+  return category;
+}
+
 test.afterEach(async ({ page }) => {
   const failed: string[] = [];
   const remove = async (path: string) => {
@@ -47,6 +60,7 @@ test.afterEach(async ({ page }) => {
   };
   for (const id of created.tasks.splice(0)) await remove(`/api/tasks/${id}`);
   for (const id of created.goals.splice(0)) await remove(`/api/goals/${id}`);
+  for (const id of created.categories.splice(0)) await remove(`/api/categories/${id}`);
   expect(failed, "seeded rows must leave the shared database clean").toEqual([]);
 });
 
@@ -128,6 +142,7 @@ test("bottom nav is thumb-reachable, stays pinned when the page scrolls, and no 
   for (const [label, heading] of pages) {
     await nav.getByRole("link", { name: label }).tap();
     await expect(page.getByRole("heading", { name: heading })).toBeVisible();
+    await expect(page.getByTestId("project-picker")).toHaveCount(1);
     await expectNoHorizontalScroll(page);
   }
 
@@ -207,6 +222,52 @@ test("the controls the phone rules target are ≥44px touch targets", async ({ p
     expect(Math.round(box.width), `row action "${label}" width`).toBeGreaterThanOrEqual(44);
     expect(Math.round(box.height), `row action "${label}" height`).toBeGreaterThanOrEqual(44);
   }
+});
+
+test("project picker spans the phone header, truncates long names, and supports keyboard use", async ({
+  page,
+}) => {
+  const longName = "Mobile project with a deliberately extremely long visible name for truncation";
+  await seedCategory(page, longName);
+  await page.goto("/");
+
+  const picker = page.getByTestId("project-picker");
+  const trigger = picker.getByRole("button");
+  const headerBox = (await page.locator(".gami-header").boundingBox())!;
+  const triggerBox = (await trigger.boundingBox())!;
+  expect(triggerBox.width).toBeGreaterThanOrEqual(headerBox.width - 25);
+  expect(triggerBox.height).toBeGreaterThanOrEqual(44);
+
+  await trigger.tap();
+  const search = page.getByRole("searchbox", { name: "Search projects" });
+  const list = page.getByRole("listbox", { name: "Projects" });
+  await expect(search).toBeFocused();
+  await expect(list.getByRole("option").first()).toHaveAccessibleName("All projects");
+  for (const option of await list.getByRole("option").all()) {
+    const box = (await option.boundingBox())!;
+    expect(Math.round(box.height)).toBeGreaterThanOrEqual(44);
+  }
+  await expectNoHorizontalScroll(page);
+
+  await search.fill("DELIBERATELY EXTREMELY");
+  await expect(list.locator(".project-picker-option-name")).toHaveText([
+    "All projects",
+    longName,
+  ]);
+  await search.press("End");
+  await search.press("Enter");
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAccessibleName(`Project: ${longName}`);
+  await expect(trigger).toHaveAttribute("title", `Project: ${longName}`);
+
+  const visibleName = trigger.locator(".project-picker-name");
+  expect(await visibleName.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+  await expectNoHorizontalScroll(page);
+
+  await trigger.tap();
+  await search.press("Escape");
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
 });
 
 test("core loop on a phone: capture, draw, reveal, complete", async ({ page }) => {
