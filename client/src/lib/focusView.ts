@@ -9,8 +9,8 @@ export type DrawView = "idle" | "revealed" | "focus";
  * elsewhere (second tab) degrades gracefully to the plain revealed card
  * instead of a dead overlay counting down for nobody.
  *
- * `focusExited` is the one piece of session-local UI state: Escape peeks out
- * of the view without stopping the timer. It is deliberately not persisted —
+ * `focusExited` is the one piece of session-local UI state: Exit focus or
+ * Escape peeks out without stopping the timer. It is deliberately not persisted —
  * while the timer runs on the drawn card, "working on this card" remains the
  * truthful state a fresh mount derives.
  */

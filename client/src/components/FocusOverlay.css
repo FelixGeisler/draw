@@ -22,7 +22,7 @@
 
 /* The container is focused programmatically on mount (tabindex="-1", modal
    focus management) — no ring on the fullscreen surface itself; the real
-   focus indicators live on the ✓ Done / ■ Stop buttons a Tab away. */
+   focus indicators live on the ✓ Done / ■ Stop / Exit focus buttons a Tab away. */
 .focus-overlay:focus {
   outline: none;
 }
@@ -63,6 +63,7 @@
 }
 
 .focus-actions button {
+  min-height: 44px;
   font-size: 17px;
   padding: 12px 24px;
 }

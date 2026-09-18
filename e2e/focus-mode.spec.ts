@@ -1,11 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { devices, expect, test } from "@playwright/test";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { drawFromGoal } from "./helpers.js";
 
 // Issue #56: fullscreen focus mode on the drawn card. The view is DERIVED
 // from the persisted current draw + the running timer (ADR-29), so this
-// journey exercises exactly the restore/degrade matrix: enter → Escape
-// (timer survives) → reload (focus restores) → ■ Stop (revealed card, draw
+// journey exercises exactly the restore/degrade matrix: enter → view-only
+// exit (timer survives) → reload (focus restores) → ■ Stop (revealed card, draw
 // survives) → ✓ Done in-face (completes with the drawn bonus). Overtime
 // rendering stays unit-level (client/src/lib/time.test.ts) — waiting out a
 // real estimate is not worth the E2E budget.
@@ -16,6 +16,7 @@ test.describe.configure({ mode: "serial" });
 const GOAL_TITLE = "E2E focus goal";
 const TASK_TITLE = "Focus-mode e2e task";
 const OTHER_TITLE = "Focus-mode other running task";
+const { defaultBrowserType: _defaultBrowserType, ...PIXEL_7 } = devices["Pixel 7"];
 
 async function seed(request: APIRequestContext) {
   const goal = await (await request.post("/api/goals", { data: { title: GOAL_TITLE } })).json();
@@ -35,6 +36,52 @@ async function seed(request: APIRequestContext) {
 
 const overlay = (page: Page) => page.getByRole("dialog");
 
+async function expectRunningTimerAndDrawnCard(page: Page) {
+  await expect(page.locator(".draw-card")).toHaveClass(/flipped/);
+  await expect(page.locator(".draw-face.back h2")).toHaveText(TASK_TITLE);
+  await expect(page.locator(".timer-bar .timer-title")).toHaveText(TASK_TITLE);
+  await expect(page.getByText("est. 10 min")).toBeVisible();
+
+  const timer = await (await page.request.get("/api/timer/current")).json();
+  expect(timer.task.title).toBe(TASK_TITLE);
+  expect(timer.entry.endedAt).toBeNull();
+}
+
+async function tapExitOnMobile(page: Page) {
+  await page.goto("/");
+  const dialog = overlay(page);
+  await expect(dialog).toBeVisible();
+  const exit = dialog.getByRole("button", { name: "Exit focus", exact: true });
+  await expect(exit).toBeVisible();
+
+  const exitBox = await exit.boundingBox();
+  expect(exitBox).not.toBeNull();
+  expect(exitBox!.width).toBeGreaterThanOrEqual(44);
+  expect(exitBox!.height).toBeGreaterThanOrEqual(44);
+  const layout = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+    controls: [...document.querySelectorAll<HTMLElement>(".focus-actions button")].map((button) => {
+      const box = button.getBoundingClientRect();
+      return { left: box.left, right: box.right };
+    }),
+  }));
+  expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth);
+  for (const control of layout.controls) {
+    expect(control.left).toBeGreaterThanOrEqual(0);
+    expect(control.right).toBeLessThanOrEqual(layout.viewportWidth);
+  }
+  await test.info().attach(`exit-focus-${layout.viewportWidth}px`, {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  });
+
+  await exit.tap();
+  await expect(dialog).toBeHidden();
+  await expectRunningTimerAndDrawnCard(page);
+}
+
 test("Start now flips the drawn card into fullscreen focus with an effort countdown", async ({
   page,
 }) => {
@@ -49,6 +96,10 @@ test("Start now flips the drawn card into fullscreen focus with an effort countd
   // Countdown initialized from the 10 min estimate — counting DOWN (a plain
   // count-up would read 0:0x here), display only.
   await expect(overlay(page).locator(".focus-clock.countdown")).toHaveText(/^(10:00|9:5\d)$/);
+  for (const name of ["✓ Done", "■ Stop", "Exit focus"]) {
+    await expect(overlay(page).getByRole("button", { name, exact: true })).toBeVisible();
+  }
+  await expect(overlay(page).getByText("The timer keeps running.", { exact: true })).toBeVisible();
 
   // Starting focus closed the other task's entry — exactly one running
   // timer, and it is the drawn card's (existing invariant, no new semantics).
@@ -65,7 +116,7 @@ test("reloading while focused restores straight into the focus view", async ({ p
   await expect(overlay(page).locator(".focus-clock.countdown")).toHaveText(/^9:[0-5]\d$/);
 });
 
-test("the dialog takes focus, Tab never reaches the covered page, Escape hands focus back", async ({
+test("focus stays trapped and both exit paths restore it to the trigger", async ({
   page,
 }) => {
   // Timer still runs on the drawn card, so the overlay derives on load.
@@ -97,9 +148,41 @@ test("the dialog takes focus, Tab never reaches the covered page, Escape hands f
   await trigger.click();
   await expect(overlay(page)).toBeVisible();
   await expect(overlay(page)).toBeFocused();
-  await page.keyboard.press("Escape");
+  for (const name of ["✓ Done", "■ Stop", "Exit focus"]) {
+    await page.keyboard.press("Tab");
+    await expect(overlay(page).getByRole("button", { name, exact: true })).toBeFocused();
+  }
+  await page.keyboard.press("Enter");
   await expect(overlay(page)).toBeHidden();
   await expect(trigger).toBeFocused();
+  await expectRunningTimerAndDrawnCard(page);
+});
+
+test("Exit focus pointer activation reveals the same card and never stops the timer", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(overlay(page)).toBeVisible();
+
+  await overlay(page).getByRole("button", { name: "Exit focus", exact: true }).click();
+  await expect(overlay(page)).toBeHidden();
+  await expectRunningTimerAndDrawnCard(page);
+});
+
+test.describe("Exit focus on Pixel 7", () => {
+  test.use({ ...PIXEL_7 });
+
+  test("is visible, tappable, unclipped and preserves the running card", async ({ page }) => {
+    await tapExitOnMobile(page);
+  });
+});
+
+test.describe("Exit focus at 360px", () => {
+  test.use({ ...PIXEL_7, viewport: { width: 360, height: 780 } });
+
+  test("keeps the touch action and action group inside the viewport", async ({ page }) => {
+    await tapExitOnMobile(page);
+  });
 });
 
 test("Escape exits the view but never the timer", async ({ page }) => {
@@ -111,14 +194,11 @@ test("Escape exits the view but never the timer", async ({ page }) => {
 
   // The TimerBar shows the still-running timer (its estimate hint is unique
   // to it), and the classic drawn-card actions are back.
-  await expect(page.getByText("est. 10 min")).toBeVisible();
+  await expectRunningTimerAndDrawnCard(page);
   const actions = page.locator(".draw-actions");
   for (const name of ["▶ Start now", "✓ Done", "💤 Not now", "✎ Edit", "🗑 Delete"]) {
     await expect(actions.getByRole("button", { name })).toBeVisible();
   }
-  const timer = await (await page.request.get("/api/timer/current")).json();
-  expect(timer.task.title).toBe(TASK_TITLE);
-  expect(timer.entry.endedAt).toBeNull();
 });
 
 test("Stop in-face returns to the revealed card and the draw survives", async ({ page }) => {

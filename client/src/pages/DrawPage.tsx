@@ -98,8 +98,8 @@ export function DrawPage() {
   // surface, not a fact about the card.
   const [breakingDown, setBreakingDown] = useState(false);
   const [breakdownAi, setBreakdownAi] = useState(false);
-  // Escape peeked out of the focus view (issue #56). Session-local on
-  // purpose: the view itself is DERIVED from timer + current draw (ADR-29),
+  // Exit focus or Escape peeked out of the focus view (issues #56, #307).
+  // Session-local on purpose: the view is DERIVED from timer + current draw (ADR-29),
   // so a reload while the timer runs on the drawn card re-enters focus.
   const [focusExited, setFocusExited] = useState(false);
   // Why the last completion paid extra (#57) — shown once the card is gone,
@@ -360,7 +360,7 @@ export function DrawPage() {
 
   // "▶ Start now" (issue #56): one click starts the timer AND drops into the
   // fullscreen focus view. The view itself is derived below, so re-entering
-  // after Escape — the timer already runs on this card — must NOT start
+  // after a view-only exit — the timer already runs on this card — must NOT start
   // again: that would close and reopen the entry, resetting the countdown
   // and splitting the tracked time for no reason.
   function startFocus() {
@@ -678,7 +678,7 @@ export function DrawPage() {
       {/* In-face actions ARE the DrawPage actions (no duplicated controls):
           ✓ Done is completeDrawn (entry closed server-side, ADR-12), ■ Stop
           is the timer stop — the persisted draw is untouched, so the card
-          stays restorable underneath. Escape exits the view only. */}
+          stays restorable underneath. Exit focus and Escape exit the view only. */}
       {view === "focus" && task && timer.data && (
         <FocusOverlay
           task={task}
