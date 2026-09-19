@@ -563,6 +563,38 @@ describe("POST /api/backup/import — rejections (live data untouched)", () => {
     expect(fs.existsSync(path.join(dataDir(), "escape.txt"))).toBe(false);
   });
 
+  it("rejects indexed multipart fields without changing state or retaining the upload", async () => {
+    const { body: archive } = await exportArchive();
+    const original = await apiSnapshot();
+    const originalMaxEffort = Number(original.settings.max_draw_effort);
+    const changedMaxEffort = originalMaxEffort === 46 ? 47 : 46;
+    await request(app)
+      .patch("/api/settings")
+      .send({ max_draw_effort: changedMaxEffort })
+      .expect(200);
+
+    const before = await apiSnapshot();
+    const uploadsDir = path.join(dataDir(), "backup-uploads");
+    const beforeUploads = fs.readdirSync(uploadsDir).sort();
+    try {
+      const res = await request(app)
+        .post("/api/backup/import")
+        .attach("file", archive, "backup.zip")
+        .field("metadata[1]", "blocked")
+        .expect(400);
+
+      expect(res.text).toBe('{"error":"invalid multipart field name"}');
+      expect(await apiSnapshot()).toEqual(before);
+      expect(fs.readdirSync(uploadsDir).sort()).toEqual(beforeUploads);
+      await request(app).get(`/api/materials/${materialId}/download`).expect(200);
+    } finally {
+      await request(app)
+        .patch("/api/settings")
+        .send({ max_draw_effort: originalMaxEffort })
+        .expect(200);
+    }
+  });
+
   it("rejects a missing multipart file field", async () => {
     const res = await request(app).post("/api/backup/import").expect(400);
     expect(res.body.error).toMatch(/backup file is required/);
