@@ -9,12 +9,17 @@ function sendError(res: Response, error: PushApiError): void {
   res.status(error.status).json({ error: error.code });
 }
 
-function noBody(req: Request, res: Response, next: () => void): void {
-  const transfer = req.rawHeaders.some((value, index) => index % 2 === 0 && value.toLowerCase() === "transfer-encoding");
-  const lengths = req.rawHeaders
-    .map((value, index) => index % 2 === 0 && value.toLowerCase() === "content-length" ? req.rawHeaders[index + 1] : undefined)
+export function invalidNoBodyFraming(rawHeaders: readonly string[]): boolean {
+  const transfer = rawHeaders.some((value, index) => index % 2 === 0 && value.toLowerCase() === "transfer-encoding");
+  const lengths = rawHeaders
+    .map((value, index) => index % 2 === 0 && value.toLowerCase() === "content-length" ? rawHeaders[index + 1] : undefined)
     .filter((value): value is string => value !== undefined);
-  if (transfer || lengths.length > 1 || (lengths.length === 1 && (!/^\d+$/.test(lengths[0]) || Number(lengths[0]) !== 0))) {
+  return transfer || lengths.length > 1 ||
+    lengths.length === 1 && (!/^\d+$/.test(lengths[0]) || Number(lengths[0]) !== 0);
+}
+
+function noBody(req: Request, res: Response, next: () => void): void {
+  if (invalidNoBodyFraming(req.rawHeaders)) {
     sendError(res, new PushApiError(400, "invalid-push-request"));
     return;
   }

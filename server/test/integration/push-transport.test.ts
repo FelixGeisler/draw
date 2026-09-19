@@ -17,8 +17,13 @@ async function provider(handler: Parameters<typeof https.createServer>[1]) {
   return (server.address() as AddressInfo).port;
 }
 
-function send(port: number, signal = new AbortController().signal, timedOut = () => false) {
-  return createNodePushTransport({ ca: PUSH_TLS_CERT }).send({
+function send(
+  port: number,
+  signal = new AbortController().signal,
+  timedOut = () => false,
+  ownedEvents: string[] = [],
+) {
+  return createNodePushTransport({ ca: PUSH_TLS_CERT, onOwnedEvent: (event) => ownedEvents.push(event) }).send({
     details: {
       endpoint: `https://draw.example:${port}/push?opaque=1`,
       method: "POST",
@@ -56,44 +61,78 @@ describe("core HTTPS Push transport", () => {
     expect(observed).toEqual({ host: `draw.example:${port}`, servername: "draw.example", body: "encrypted" });
   });
 
-  it("classifies complete status responses, never follows redirects, and enforces the response cap", async () => {
+  it("classifies complete status responses, never follows redirects, and settles only after every local close", async () => {
     for (const [status, expected] of [[201, "success"], [404, "gone"], [410, "gone"], [302, "failed"], [500, "failed"]] as const) {
       let requests = 0;
       const port = await provider((_req, res) => {
         requests += 1;
         res.writeHead(status, status === 302 ? { Location: "https://elsewhere.invalid/" } : {}).end("bounded");
       });
-      expect(await send(port), String(status)).toBe(expected);
+      const events: string[] = [];
+      expect(await send(port, undefined, undefined, events), String(status)).toBe(expected);
       expect(requests).toBe(1);
+      expect(events.sort()).toEqual(["agent-destroy", "request-close", "response-close", "socket-close"]);
     }
-    const oversized = await provider((_req, res) => res.writeHead(200).end(Buffer.alloc(4_097)));
-    expect(await send(oversized)).toBe("failed");
+
+    for (const [kind, handler] of [
+      ["oversized", (_req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) =>
+        res.writeHead(200).end(Buffer.alloc(4_097))],
+      ["premature", (_req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => {
+        res.writeHead(200);
+        res.write("incomplete");
+        res.destroy();
+      }],
+    ] as const) {
+      const port = await provider(handler);
+      const events: string[] = [];
+      expect(await send(port, undefined, undefined, events), kind).toBe("failed");
+      expect(events, kind).toContain("agent-destroy");
+      expect(events, kind).toContain("request-close");
+      expect(events, kind).toContain("socket-close");
+      if (kind === "oversized") expect(events).toContain("response-close");
+    }
   });
 
-  it("waits for abort-driven socket closure and distinguishes total timeout from client abort", async () => {
-    const sockets = new Set<import("node:stream").Duplex>();
-    const port = await provider((_req, _res) => {});
-    servers.at(-1)!.on("connection", (socket) => {
-      sockets.add(socket);
-      socket.once("close", () => sockets.delete(socket));
+  it("destroys its one-use agent when core HTTPS rejects request construction synchronously", async () => {
+    const events: string[] = [];
+    const result = await createNodePushTransport({
+      ca: PUSH_TLS_CERT,
+      onOwnedEvent: (event) => events.push(event),
+    }).send({
+      details: {
+        endpoint: "https://draw.example/push",
+        method: "POST",
+        headers: { "x-invalid": "line-one\nline-two" },
+        body: Buffer.from("encrypted"),
+      },
+      hostname: "draw.example",
+      address: "127.0.0.1",
+      signal: new AbortController().signal,
+      timedOut: () => false,
     });
+    expect(result).toBe("failed");
+    expect(events).toEqual(["agent-destroy"]);
+  });
+
+  it("waits for local request/socket closure and distinguishes total timeout from client abort", async () => {
+    const port = await provider((_req, _res) => {});
 
     let timedOut = false;
     const timeoutAbort = new AbortController();
-    const timeout = send(port, timeoutAbort.signal, () => timedOut);
+    const timeoutEvents: string[] = [];
+    const timeout = send(port, timeoutAbort.signal, () => timedOut, timeoutEvents);
     await new Promise((resolve) => setTimeout(resolve, 10));
     timedOut = true;
     timeoutAbort.abort();
     expect(await timeout).toBe("timeout");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(sockets.size).toBe(0);
+    expect(timeoutEvents.sort()).toEqual(["agent-destroy", "request-close", "socket-close"]);
 
     const clientAbort = new AbortController();
-    const aborted = send(port, clientAbort.signal);
+    const abortEvents: string[] = [];
+    const aborted = send(port, clientAbort.signal, () => false, abortEvents);
     await new Promise((resolve) => setTimeout(resolve, 10));
     clientAbort.abort();
     expect(await aborted).toBe("aborted");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(sockets.size).toBe(0);
+    expect(abortEvents.sort()).toEqual(["agent-destroy", "request-close", "socket-close"]);
   });
 });

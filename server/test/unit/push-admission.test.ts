@@ -41,7 +41,26 @@ describe("Push admission", () => {
     expect(global.tryAcquire("extra")).toEqual({ allowed: false, error: "push-rate-limited", retryAfter: 59 });
   });
 
-  it("enforces test in-flight/device/global limits without changing enrollment buckets", () => {
+  it("shares exactly four physical permits across mixed enrollment and test work", () => {
+    const admission = new PushAdmission(() => 0);
+    const enrollmentA = admission.tryAcquire("client-a");
+    const testA = admission.tryAcquireTest("device-a");
+    const enrollmentB = admission.tryAcquire("client-b");
+    const testB = admission.tryAcquireTest("device-b");
+    expect([enrollmentA, testA, enrollmentB, testB].every((decision) => decision.allowed)).toBe(true);
+    expect(admission.snapshot()).toMatchObject({ active: 4, global: 2, testGlobal: 2, testInFlight: 2 });
+    expect(admission.tryAcquire("client-c")).toEqual({ allowed: false, error: "push-busy" });
+    expect(admission.tryAcquireTest("device-c")).toEqual({ allowed: false, error: "push-busy" });
+    if (testA.allowed) testA.release();
+    const replacement = admission.tryAcquire("client-c");
+    expect(replacement.allowed).toBe(true);
+    for (const decision of [enrollmentA, enrollmentB, testB, replacement]) {
+      if (decision.allowed) decision.release();
+    }
+    expect(admission.snapshot().active).toBe(0);
+  });
+
+  it("enforces test in-flight/device/global limits and uses the longest applicable remainder", () => {
     let now = 0;
     const admission = new PushAdmission(() => now);
     const first = admission.tryAcquireTest("device-a");
@@ -65,6 +84,15 @@ describe("Push admission", () => {
     }
     now = 36_000;
     expect(global.tryAcquireTest("device-extra")).toEqual({ allowed: false, error: "push-rate-limited", retryAfter: 44 });
+
+    now = 50_000;
+    const longest = new PushAdmission(() => now, {
+      testGlobal: Array.from({ length: 16 }, () => 10_000),
+      testDevices: [["device-both", [45_000]]],
+    });
+    expect(longest.tryAcquireTest("device-both")).toEqual({
+      allowed: false, error: "push-rate-limited", retryAfter: 20,
+    });
   });
 
   it("keeps an in-flight marker/permit through committed row cleanup and releases exactly once", () => {

@@ -878,7 +878,10 @@ the default, means zero outbound calls from the notification path) —
 `api.github.com`, one GET per `UPDATE_CHECK_INTERVAL_HOURS` (default daily)
 for the release check (#247/ADR-70; the retained `update_check_enabled`
 setting or `UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls,
-`UPDATE_CHECK_URL` redirects it) — bounded A+AAAA DNS only when an accepted
-Push enrollment validates its submitted HTTPS endpoint (no provider request in
-Stage 1B.1) — and the user-configured update trigger URL, one POST per explicit
-**Update** action, never automatically.
+`UPDATE_CHECK_URL` redirects it) — bounded A+AAAA DNS when an accepted Push
+enrollment validates its submitted HTTPS endpoint and, only when an authorized
+user explicitly invokes the Stage 1B.2 manual test route, one DNS-pinned
+provider HTTPS POST through Node core HTTPS. That manual request has no proxy,
+redirect, retry, queue, or socket reuse; Stage 1C browser UI/service-worker work
+and Stage 2 scheduled deadline delivery remain planned — and the user-configured
+update trigger URL, one POST per explicit **Update** action, never automatically.

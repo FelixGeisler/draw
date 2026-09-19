@@ -20,9 +20,13 @@ export const inertPushTransport: PushTransport = Object.freeze({
   send: async () => "failed" as const,
 });
 
+export type PushTransportOwnedEvent = "agent-destroy" | "request-close" | "response-close" | "socket-close";
+
 export interface NodePushTransportOptions {
   /** Test-only trust seam for an ephemeral certificate; production passes nothing. */
   ca?: string | Buffer | (string | Buffer)[];
+  /** Test-only observation of locally owned terminal events; production passes nothing. */
+  onOwnedEvent?: (event: PushTransportOwnedEvent) => void;
 }
 
 function lookupFor(hostname: string, address: string): NonNullable<https.AgentOptions["lookup"]> {
@@ -54,10 +58,27 @@ export function createNodePushTransport(options: NodePushTransportOptions = {}):
         lookup: lookupFor(input.hostname, input.address),
         ...(options.ca === undefined ? {} : { ca: options.ca }),
       });
-      const sockets = new Set<import("node:net").Socket>();
+      const closePromises = new Set<Promise<void>>();
+      const observeClose = (owned: NodeJS.EventEmitter, event: Exclude<PushTransportOwnedEvent, "agent-destroy">): Promise<void> => {
+        let resolveClose!: () => void;
+        const closed = new Promise<void>((resolve) => { resolveClose = resolve; });
+        owned.once("close", () => {
+          options.onOwnedEvent?.(event);
+          resolveClose();
+        });
+        closePromises.add(closed);
+        return closed;
+      };
       let response: import("node:http").IncomingMessage | undefined;
       let complete = false;
       let settled = false;
+      let agentDestroyed = false;
+      const destroyAgent = () => {
+        if (agentDestroyed) return;
+        agentDestroyed = true;
+        agent.destroy();
+        options.onOwnedEvent?.("agent-destroy");
+      };
       let resolveResult!: (result: PushTransportResult) => void;
       const result = new Promise<PushTransportResult>((resolve) => { resolveResult = resolve; });
       const finish = (value: PushTransportResult) => {
@@ -68,6 +89,7 @@ export function createNodePushTransport(options: NodePushTransportOptions = {}):
       const abortedResult = (): PushTransportResult => input.timedOut() ? "timeout" : "aborted";
 
       let outgoing: import("node:http").ClientRequest;
+      let requestClosed: Promise<void>;
       try {
         outgoing = https.request(input.details.endpoint, {
           method: input.details.method,
@@ -75,6 +97,7 @@ export function createNodePushTransport(options: NodePushTransportOptions = {}):
           agent,
         }, (incoming) => {
           response = incoming;
+          observeClose(incoming, "response-close");
           let bytes = 0;
           incoming.on("data", (chunk: Buffer | string) => {
             bytes += Buffer.byteLength(chunk);
@@ -97,12 +120,13 @@ export function createNodePushTransport(options: NodePushTransportOptions = {}):
             if (!complete) finish(input.signal.aborted ? abortedResult() : "failed");
           });
         });
+        requestClosed = observeClose(outgoing, "request-close");
       } catch {
-        agent.destroy();
+        destroyAgent();
         return Promise.resolve(input.signal.aborted ? abortedResult() : "failed");
       }
 
-      outgoing.on("socket", (socket) => sockets.add(socket));
+      outgoing.on("socket", (socket) => { observeClose(socket, "socket-close"); });
       outgoing.once("error", () => finish(input.signal.aborted ? abortedResult() : "failed"));
       outgoing.once("close", () => {
         if (!settled && !complete) finish(input.signal.aborted ? abortedResult() : "failed");
@@ -110,7 +134,7 @@ export function createNodePushTransport(options: NodePushTransportOptions = {}):
       const onAbort = () => {
         response?.destroy();
         outgoing.destroy();
-        agent.destroy();
+        destroyAgent();
         finish(abortedResult());
       };
       input.signal.addEventListener("abort", onAbort, { once: true });
@@ -127,10 +151,11 @@ export function createNodePushTransport(options: NodePushTransportOptions = {}):
         input.signal.removeEventListener("abort", onAbort);
         response?.destroy();
         outgoing.destroy();
-        agent.destroy();
-        await Promise.all([...sockets].map((socket) => socket.destroyed
-          ? Promise.resolve()
-          : new Promise<void>((resolve) => socket.once("close", () => resolve()))));
+        destroyAgent();
+        // `destroyed` only means destruction was initiated. Admission remains
+        // held until each owned request, response, and socket reports `close`.
+        await requestClosed;
+        await Promise.all([...closePromises]);
       });
     },
   };
