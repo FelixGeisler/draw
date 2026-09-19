@@ -101,7 +101,17 @@ in-process timer that writes a backup archive into `DATA_DIR/backups/` on that
 schedule and prunes to the newest `BACKUP_RETENTION` (default 7). No cron — the
 headless Pi keeps backing itself up with the process it already runs. Restore is
 the existing `POST /api/backup/import` (section 8.9); the archives are ordinary
-Draw backups. Unset/0 (the default) starts nothing.
+credential-free Draw application backups. Unset/0 (the default) starts nothing.
+
+Production alone creates the Stage 1A Web Push lifecycle (ADR-72). Its durable
+state is `DATA_DIR/push-authority.json` plus the normally absent
+`push-authority-reset-pending` / `push-restore-pending` recovery markers. These
+files are never archive inputs. Manual/scheduled Draw archives, imported live
+DBs and `app.db.bak` physically exclude notification device credentials and
+require every device to re-enable after restore. A privileged whole-`DATA_DIR`
+or volume snapshot remains permitted for disaster recovery but contains full
+state, including authority and possibly markers; use the application backup
+when credential-free portability is required.
 
 [plantuml,deployment-prod,svg]
 ....
@@ -120,7 +130,8 @@ node "Host (PC, or the #191 container — see 7.3)" as host {
   }
   artifact "client/dist\n(vite build, gitignored)" as dist
   folder "server/data/" as data {
-    database "app.db" as db
+    database "app.db\nschema v19" as db
+    artifact "push-authority.json\nreset/restore markers\n(production only)" as pushstate
   }
 }
 cloud "api.anthropic.com" as claude
@@ -128,6 +139,7 @@ cloud "api.anthropic.com" as claude
 browser --> express : HTTP :3001
 express --> dist : sendFile / static
 express --> db
+express --> pushstate
 express --> claude : HTTPS — only with\na key, on demand
 @enduml
 ....
@@ -173,7 +185,7 @@ node "Raspberry Pi / linux host" as pi {
     node "draw container (node:22-slim)\nUSER node · tini PID 1" as ctr {
       component "node --import tsx src/prod.ts\nExpress on 0.0.0.0:API_PORT\n/api + static client/dist\nHEALTHCHECK GET /api/health" as express
     }
-    database "named volume: draw-data\n→ /data (DATA_DIR)\napp.db (WAL) + files/" as vol
+    database "named volume: draw-data\n→ /data (DATA_DIR)\napp.db (WAL) + files/\nPush authority + recovery markers" as vol
   }
 }
 cloud "api.anthropic.com" as claude
@@ -196,9 +208,10 @@ the package to *Public* once (or self-hosters `docker login ghcr.io` with a
 (the sample `docker-compose.yml` builds the image and starts it with the volume
 and healthcheck wired). *Upgrade:* pull or rebuild the new image, then recreate
 the container — the `draw-data` volume carries the data across.
-*Backup/restore:* unchanged from
-xref:09_architecture_decisions.adoc[ADR-26] — export the zip from Settings, or
-snapshot the `draw-data` volume.
+*Backup/restore:* export the credential-free application zip from Settings
+(xref:09_architecture_decisions.adoc[ADR-26], ADR-72). A `draw-data` volume
+snapshot is instead a privileged full-state snapshot: it can contain Push
+authority/markers and must not be represented as credential-free.
 
 == 7.4 TLS — Tailscale Serve in front of the container (#207)
 
@@ -338,9 +351,9 @@ if a migration ran in between — restore a backup from before the update
 (xref:09_architecture_decisions.adoc[ADR-26]; the backup importer refuses
 newer-versioned archives, so restoring an older backup into an older image
 is the supported direction). Current images accept backups through schema
-v18: older files migrate and undergo complete v18 schema/immutability
-validation in staging before the live database moves; a missing or weakened
-contract leaves the live deployment untouched. *Bare-npm path:* `git pull`, `npm ci`,
+v19: older files migrate and undergo complete v18 immutability plus v19 Push
+schema validation in staging before the live database moves; a missing or
+weakened contract leaves the live deployment untouched. *Bare-npm path:* `git pull`, `npm ci`,
 `npm run build`, restart `npm start` — release discovery and the minimal status
 work the same; without an operator-configured trigger, **Update** receives the
 existing `409` and bare-npm updating remains manual.
@@ -830,12 +843,14 @@ release endpoint — tests and proxied networks)
 
 |Data
 |Everything under `DATA_DIR` (dev/production default `server/data/`, gitignored;
-container `/data` on the `draw-data` named volume): the SQLite `app.db` (WAL)
-and `files/` goal materials. Backup = copy the folder / snapshot the volume, the
-ADR-26 export zip, or scheduled automatic backups into `DATA_DIR/backups/`
-(`BACKUP_INTERVAL_HOURS`, #194/ADR-52). All modes share the same `DATA_DIR`
-layout — switching
-modes keeps the data
+container `/data` on the `draw-data` named volume): SQLite `app.db` (WAL),
+`files/` goal materials, and in production `push-authority.json` plus normally
+absent reset/restore markers. ADR-26 manual and ADR-52 scheduled application
+archives physically exclude Push credentials and are recommended for
+credential-free portability. Copying the folder or snapshotting the volume is
+a permitted privileged full-state backup containing authority/possibly markers,
+not an equivalent credential-free export. All modes share the same `DATA_DIR`
+layout — switching modes keeps the data
 
 |Docs hosting
 |GitHub Pages serves the Antora-built site, deployed by the `Docs` Actions

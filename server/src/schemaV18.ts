@@ -85,7 +85,7 @@ const expectedObjects = new Map(
   }),
 );
 
-function sqlTokens(sql: string): string[] {
+export function schemaSqlTokens(sql: string): string[] {
   const tokens: string[] = [];
   for (let index = 0; index < sql.length; ) {
     const char = sql[index];
@@ -155,7 +155,7 @@ function sqlTokens(sql: string): string[] {
 }
 
 function tableDefinitions(sql: string): string[][] {
-  const tokens = sqlTokens(sql);
+  const tokens = schemaSqlTokens(sql);
   const opening = tokens.indexOf("(");
   if (opening === -1) return [];
   const definitions: string[][] = [];
@@ -190,7 +190,10 @@ function objectSql(database: Database.Database, name: string): string | undefine
 
 function requireExactObject(database: Database.Database, name: string, expected: string): void {
   const actual = objectSql(database, name);
-  if (!actual || sqlTokens(actual).join("\0") !== sqlTokens(expected).join("\0")) {
+  if (
+    !actual ||
+    schemaSqlTokens(actual).join("\0") !== schemaSqlTokens(expected).join("\0")
+  ) {
     throw new Error(`schema v18 contract mismatch: ${name}`);
   }
 }
@@ -220,7 +223,7 @@ function requireOwnerColumn(
     throw new Error(`schema v18 contract mismatch: ${table}.${column}`);
   }
   const tableSql = objectSql(database, table);
-  const expectedTokens = sqlTokens(expected.definition);
+  const expectedTokens = schemaSqlTokens(expected.definition);
   const definition = tableSql
     ? tableDefinitions(tableSql).find((candidate) => candidate[0] === column)
     : undefined;

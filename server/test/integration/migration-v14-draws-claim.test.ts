@@ -23,6 +23,8 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v13Schema = current
+    .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
+    .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
     .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
     .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
     // v15 (#157): strip the sort_order column and its stamp trigger so this
@@ -63,9 +65,9 @@ beforeAll(async () => {
 });
 
 describe("migration v13 → v14 (#156, ADR-42)", () => {
-  it("runs the chain through the current v18 schema", async () => {
+  it("runs the chain through the current v19 schema", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(18);
+    expect(db.pragma("user_version", { simple: true })).toBe(19);
   });
 
   it("creates the draws log with the append-only shape", async () => {

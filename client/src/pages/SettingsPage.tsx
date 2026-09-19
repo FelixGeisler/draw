@@ -4,7 +4,11 @@ import { api } from "../api/client";
 import { useCategories, useSettings } from "../hooks/useTasks";
 import { useAiStatus, useRemoveApiKey, useSetApiKey } from "../hooks/useAi";
 import { useGamification } from "../hooks/useGamification";
-import { useImportBackup, type ImportSummary } from "../hooks/useBackup";
+import {
+  backupRestoreMessage,
+  useImportBackup,
+  type ImportSummary,
+} from "../hooks/useBackup";
 import {
   UPDATE_NOTICE_KEY,
   consumeUpdateNotice,
@@ -361,7 +365,8 @@ function BackupSection() {
       <h3 style={{ margin: 0 }}>Backup</h3>
       <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
         One zip archive with the complete database and all goal material files. The Claude API
-        key is never included in backups — re-enter it after restoring on a new machine.
+        key and notification device credentials are never included. Every device must re-enable
+        notifications after a restore.
       </p>
       <div>
         <a href="/api/backup/export" style={{ color: "var(--accent)" }}>
@@ -406,7 +411,8 @@ function BackupSection() {
           </strong>
           <p style={{ margin: 0, fontSize: 13 }}>
             Tasks, goals, materials, settings, history and the current draw are replaced with
-            the backup&apos;s contents. Your current database is kept on disk as{" "}
+            the backup&apos;s contents. Notification device credentials are excluded, so every
+            device must re-enable after restore. Your current database is kept on disk as{" "}
             <code>app.db.bak</code> (and the material files as <code>files.bak</code>) in case
             you need to go back.
           </p>
@@ -432,8 +438,9 @@ function BackupSection() {
       )}
       {summary && (
         <p style={{ margin: 0, color: "var(--ok)" }}>
-          ✓ Backup restored — {summary.tasks} tasks, {summary.goals} goals, {summary.materials}{" "}
-          materials.
+          {summary.pushRecoveryPending
+            ? backupRestoreMessage(summary)
+            : `✓ ${backupRestoreMessage(summary)}`}
         </p>
       )}
       {importBackup.error && (

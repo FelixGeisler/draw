@@ -941,6 +941,25 @@ aborts with a 409 before the first destructive step rather than deleting a
 WAL that connection is still writing into and swapping a different file
 underneath it.
 
+*Amendment (#337, schema v19 / ADR-72):* Draw-created manual and scheduled
+archives, imported live databases, and `app.db.bak` are physically free of Web
+Push device credentials. Export takes the ordinary WAL-consistent snapshot,
+deletes `push_subscriptions` (and the future `deadline_reminder_claims`) from
+that copy, then performs a second `VACUUM INTO`; only the rewrite is packaged.
+Import migrates and validates in staging, deletes those rows, and performs the
+same second rewrite before swap. The credential-bearing first copies and every
+`-wal`, `-shm`, or `-journal` sidecar are deleted before publication. Preferences
+remain. Material traversal reads each singly linked regular file through one
+pre/post-verified descriptor, rejects links, identity/containment changes and
+unprovable checks, and never silently skips a suspect entry. Restore now creates
+a durable Push marker immediately before swap: pre-commit failure removes it
+and resumes the old lifecycle; after the `app.db` rename commit point, Push
+finalization never rolls the database back. A finalization failure returns
+committed HTTP 200 with `pushRecoveryPending:true`; marked boot recovery clears
+rows and rotates authority. Whole-`DATA_DIR` or volume snapshots are privileged
+full-state snapshots and can contain Push authority/markers; use a Draw
+application backup for credential-free portability.
+
 == ADR-27: Estimation coaching is read-only advice — hints never mutate, weights stay on stated estimates
 
 *Context:* The estimation block (ADR-15) measures per-category
@@ -2576,6 +2595,12 @@ disk must not take the app down. Off-device targets (S3, rsync) and a Settings
 UI are out of scope (#194): copying `DATA_DIR/backups/` off the box is a
 deployment concern, deliberately left to the operator.
 
+*Amendment (#337 / ADR-72):* because every tick still reuses
+`createBackupArchive`, scheduled archives receive the same second-SQLite-rewrite
+credential exclusion and fail-closed material traversal as manual downloads.
+A traversal or sanitization failure publishes no archive and retention never
+sees a credential-bearing first-phase snapshot.
+
 == ADR-53: Tag releases, bounded OCI inspection, and detached immutable-SHA publication
 
 *Context:* ADR-51 shipped the container image (#191) but explicitly left
@@ -2893,11 +2918,12 @@ app-shell service worker*, registered in production builds only.
 * *PWA over native.* The deployment already serves the app over HTTP on the
 LAN, so installability costs a manifest and a worker — no second build
 pipeline, no signing keys, no store review, no divergent codebase. A native or
-Capacitor shell buys push notifications and a store listing, neither of which a
-single-user planner needs; it is a revisit-if-the-PWA-disappoints option, not a
-1.0.0 requirement. The accepted cost: no push notifications, and iOS
-install-to-home-screen is clunkier than Android's prompt — the owner's device is
-Android.
+Capacitor shell is still unnecessary: standards Web Push is now the approved
+PWA path (ADR-72), including desktop and feature-detected iPhone support. Only
+ADR-72 Stage 1A authority/schema/recovery/backup foundations are implemented;
+subscription APIs, browser enrollment/worker behavior and scheduling remain
+planned. iOS remains progressive enhancement and never gates Android-first
+delivery.
 * *Adaptation, not redesign.* The card face's own language — full-bleed art under
 its legibility scrim, the category pill, the effort chip, the impact stars, the
 holo shimmer on a drawn 5★ (ADR-33, which superseded ADR-31's literal TCG frame;
@@ -2987,8 +3013,9 @@ revalidating rather than immutable, and the activated worker holds a shell entry
 but no `/api` and no `/assets/` entry in any cache — including after a navigation
 to `/API/tasks`, which answers JSON and must not become the shell.
 
-*Out of scope:* offline-first data sync, push notifications, and a
-native/Capacitor app — all explicitly deferred past 1.0.0.
+*Out of scope:* offline-first data sync and a native/Capacitor app. Web Push is
+no longer native-required or out of scope; its implemented and planned stages
+are governed by ADR-72.
 
 == ADR-55: TLS is delegated to Tailscale Serve, not a bundled reverse proxy — loopback-only port plus a one-hop TRUST_PROXY, and a request-derived Secure cookie
 
@@ -3945,3 +3972,170 @@ suppresses confetti. Serif remains limited to card titles within this card surfa
 palette adopting the accent (its selection stays `--bg-hover` on purpose —
 a utility surface, not a stage), and any card geometry change (300x420 and
 the 5/7 achievement ratio stand).
+
+
+== ADR-72: Standards Web Push uses external crash-safe authority, credential-free application backups, and ordered delivery stages
+
+*Context:* #337 approves Android-first standards Web Push for the PWA without a
+native application or a new hosted notification platform. Existing ntfy
+behavior (ADR-67) remains independent. Push device credentials and reusable
+VAPID authority introduce a security and crash-recovery boundary that cannot be
+stored or copied as ordinary portable user data. The existing password policy
+(ADR-50) remains the complete access model: Push adds no password, login,
+Push-only gate, or proxy allowlist. Passwordless reachable clients may manage
+future devices; an effective password keeps ADR-50's blanket gate unchanged.
+
+*Implemented decision — Stage 1A:* schema v19 adds only
+`push_subscriptions(id, endpoint, p256dh, auth, expiration_time, created_at,
+last_seen_at)` and shared `push_hide_details='0'`; no claim, schedule, payload,
+generation or job table is created. Only `prod.ts` constructs the real
+lifecycle; `createApp` defaults to a disabled injected dependency. Production
+stores a closed v1, mode-0600 `push-authority.json` with CSPRNG generation,
+`web-push@3.6.7` VAPID P-256 keys, and either `password.kind=none` or the exact
+scrypt verifier (`N=16384,r=8,p=1,maxmem=67108864`, 16-byte salt, 32-byte
+output) over the already resolved password's UTF-8 bytes. Node crypto validates
+the scalar, point and derived key pair. No raw password, ADR-50 session key or
+password-derived signing key persists.
+
+Missing authority and effective-password add/change/removal prepare a candidate,
+durably mark, invalidate work, transactionally clear every subscription,
+atomically install, then remove the marker. Malformed ordinary authority is
+never overwritten without a valid reset/restore marker. Empty regular
+`push-authority-reset-pending` and `push-restore-pending` files make Push
+unavailable; boot repeats one conservative clear/rotation for either or both,
+and malformed markers remain fail-closed. Same-directory exclusive temps,
+file fsync, atomic rename and best-effort directory fsync are the portable
+durability boundary; Windows also relies on the private `DATA_DIR` ACL.
+
+ADR-26 and ADR-52's amendments define the physical backup/import/`app.db.bak`
+sanitization and descriptor-bound material traversal. Restore prepares and
+marks immediately before swap. Before commit, caught failure preserves old
+state and removes the marker; after the `app.db` rename, finalization failure
+keeps restored data and the marker and returns committed
+`pushRecoveryPending:true`. Normal success remains `{tasks,goals,materials}`.
+No Stage 1B API/provider sender, Stage 1C browser/worker behavior, or Stage 2
+scheduler exists in Stage 1A. This implementation is not field-verified.
+
+*Dependency and supply-chain decision:* runtime `web-push` is pinned exactly to
+3.6.7 and type-only `@types/web-push` to 3.6.4 in the committed lockfile.
+`web-push` is MPL-2.0; the dependency is used only for VAPID generation in
+Stage 1A and later standards request construction. No remote executable,
+provider credential or undeclared transitive import is introduced.
+
+*Cross-links:* ADR-49 owns the production entry, ADR-50 the unchanged access
+and effective-password resolution, ADR-55 secure proxy deployment, ADR-67 ntfy,
+and ADR-26/52 portable backup semantics. Privileged whole-volume snapshots may
+contain authority and markers and are not equivalent to credential-free Draw
+application backups.
+
+=== Normative planned downstream contract (not implemented by Stage 1A)
+
+The following appendix is normative architecture for the ordered successor
+issues. It is recorded verbatim so later implementation does not depend on a
+movable planning artifact. Its Markdown heading notation is retained as text.
+
+....
+This normative planned architecture must be recorded by Stage 1A but does not expand its implementation. Top-level approved access/effective-password/backup/retry/privacy decisions and authority apply without repetition. The merged Stage 1A ADR becomes the anchor for downstream issues. Shared boundaries: Android-first standards Web Push in the PWA, including desktop; iPhone only through the same feature-detected path and never a gate. No native/iOS workaround, hosted platform, email/SMS/inbox/digest/private service, generic event bus, or ntfy change. `prod.ts` alone constructs real authority/resolver/transport/scheduler through `AppDependencies`; defaults/tests use fakes and no real network. Use v19 subscriptions/settings/authority/recovery/sanitization. Return no endpoint, keys, private authority, generation, password state, or provider text. Invalidation committed before final synchronous check prevents provider-request creation; initiated request cannot be recalled.
+
+### Stage 1B — subscription API and bounded synthetic sender
+
+Starts only after 1A merges. Adds API and bounded DNS-pinned one-attempt test sender; no browser UI/worker, deadline producer/domain read, or scheduler.
+
+#### Access, origin, proxy and client identity
+
+All `/api/push/*` remains under unchanged ADR-50: with effective password, valid session cookie or `x-draw-password`; without one, no Push-specific auth. Every mutation requires allowed transport, exact same origin, and `Sec-Fetch-Site` absent/`same-origin`/`none`. JSON mutations require `Content-Type: application/json`, ≤8,192 raw bytes on Push routes, and no unknown keys at any level; no-body routes reject bodies. Other parser limits stay unchanged.
+
+Direct-loopback HTTP mutation requires all: production configured loopback listener; `TRUST_PROXY` off; `req.socket.remoteAddress`, normalized as an IP with IPv4-mapped IPv6 collapsed, is loopback; no `Forwarded`, `X-Forwarded-*`, or `X-Real-IP`; one strict Host with explicit configured port and host exactly `localhost`, canonical IPv4 loopback, or bracketed `::1`; Origin exactly `http://<same normalized host bytes>:<port>`. Strict parsing plus `net.isIP`/bytes rejects other DNS/trailing dot/zone/userinfo/omitted or wrong port/noncanonical IP/multiple or comma Host/HTTPS Origin/cross-site metadata. Never establish loopback via `/^127\./`, `req.ip`, or forwarding. Cover allowed hosts and IPv4-mapped loopback socket; reject attacker hostname rebound to loopback. Host defense applies with/without password.
+
+Secure direct/proxied mutation requires `req.secure` under existing Express direct-TLS/trust-proxy semantics and Origin exactly validated external `https` origin. Strictly parse one authority without userinfo/path/fragment/ambiguity: Host when unforwarded, single `X-Forwarded-Host` when forwarded; forwarded `X-Forwarded-Proto` must be single exact `https`. Reject `Forwarded`, `X-Real-IP`, conflicting Host/forwarded authority, separate `X-Forwarded-Port`, unknown `X-Forwarded-*`, malformed forwarding and cross-site metadata. These are transport/origin, not auth.
+
+Do not change `resolveTrustProxy()`, add Push allowlist, or reject existing values. Supported positives include bare-metal proxy with `TRUST_PROXY=loopback` and loopback peer, and ADR-55 container/Tailscale Serve with `TRUST_PROXY=1` plus `127.0.0.1:3001:3001`. Other configured values keep documented Draw/Express semantics/risks. Failure to become secure fails transport, never demands password.
+
+Admission client = normalized direct socket IP on direct-loopback; normalized `req.ip` after existing trusted-proxy handling on secure path; collapse mapped IPv6. Never key on Host/Origin. Existing broad-proxy-trust risk remains; global bucket/semaphore cannot be bypassed by client-key change.
+
+#### API and finite input
+
+`GET /api/push/status` returns exactly:
+```json
+{"available":true,"reason":null,"mutationAllowed":true,"mutationReason":null,"vapidPublicKey":"...","maxDevices":16,"preferences":{"hideDetails":false},"devices":[{"id":"...","createdAt":"...","lastSeenAt":"..."}]}
+```
+`reason`: `null|not-production|authority-unavailable|recovery-pending`; `mutationReason`: `null|secure-transport-required|proxy-configuration-unsupported` (never `password-required`). Public key null when unavailable; devices ordered `createdAt,id`. Supported passwordless HTTPS can mutate; malformed/insecure topology fails only for topology. Effective-password unauthenticated requests are stopped by ADR-50 first.
+
+- `POST /api/push/subscriptions`: only `{subscription:{endpoint,expirationTime,keys:{p256dh,auth}},replaceDeviceId?}`. Validate/resolve before transaction; then delete handled row if present, endpoint-upsert, enforce cap, return `{device:{id,createdAt,lastSeenAt}}`, 201 new/200 same endpoint. Same endpoint keeps id. Valid replace allows rotation without extra slot; stale/unknown is no-op; transaction failure retains old row; update `lastSeenAt` only on success.
+- `DELETE /api/push/subscriptions/:deviceId`: UUIDv4, idempotent 204, no authority rotation.
+- `DELETE /api/push/subscriptions`: revoke-all prepares validated authority; durably creates `$DATA_DIR/push-revoke-pending`; invalidates work; transactionally deletes all rows; installs authority; removes marker; returns 204 (also empty). Pre-delete failure preserves state. Post-delete failure returns `503 {"error":"push-recovery-pending"}`, restores no rows, and remains unavailable until boot clear/rotate/remove.
+- `POST /api/push/subscriptions/:deviceId/test`: no body; only that device; 204 only provider 2xx. Initial missing/expired 404/410; provider 404/410 deletes and returns 410; timeout 504; other DNS/TLS/network/provider failure 502; bounded allowlisted errors.
+- `PUT /api/push/preferences`: exactly `{hideDetails:boolean}`; atomic `push_hide_details`, increment volatile generation, return `{hideDetails}`. Future deadline sends use it; test remains generic.
+
+A 17th distinct endpoint returns 409 `{"error":"push-device-limit"}`; no dormant/enabled row. Endpoint: ≤2,048 UTF-8 bytes; absolute `https:`; no credentials/fragment/IP literal; explicit port only 443; query allowed; normalized DNS hostname ≤253 ASCII bytes. `p256dh`: canonical unpadded base64url, 87 chars→65-byte uncompressed P-256 beginning `0x04`; `auth`: 22 chars→16 bytes. `expirationTime`: null or nonnegative safe integer ≤`8,640,000,000,000,000`; reject expired enrollment and delete before send if expired. IDs UUIDv4; max 16 rows. Validation 400; redacted resolution 502/504; never log endpoint.
+
+#### Admission and transport
+
+One process semaphore allows at most 4 concurrent enrollment DNS resolutions plus manual tests, no queue; excess `503 {"error":"push-busy"}`. Enrollment: 4 accepted/effective client/rolling 60s and 16 global/60s. Test: one in-flight/device, one accepted/device/10s, 16 global/60s. Check semaphore then atomically all rolling limits. Accepted DNS/test consumes allowance even if later validation/DNS/TLS/timeout/provider/abort fails; shape/auth/origin failures do not. Rate excess: `429 {"error":"push-rate-limited"}`, integer `Retry-After` = ceiling longest applicable remainder, clamped 1–60; no retry.
+
+Use injected monotonic clock/timestamp deques; prune before decision. Delete empty client bucket when last 60s timestamp expires. Maximum 64 nonempty client enrollment buckets; new key at capacity is `503 {"error":"push-busy"}`, never eviction/merge. Device buckets bounded by 16 rows and removed with row or after last 10s timestamp; global buckets fixed. Release semaphore/in-flight flag in `finally` for all failure, timeout, request/response close, and client-abort paths; abort resolver/request where possible, queue nothing, retain timestamps. Initiated provider request remains non-recallable. These are resource guards, not throughput/latency/delivery promises.
+
+Validate/resolve at enrollment and immediately before test, all A/AAAA through injected resolver within 2s. No answer or any non-global member rejects whole set. Select one and pin in one-request `https.Agent({keepAlive:false,lookup})`, preserving hostname for Host/SNI/certificate.
+
+Using `net.isIP` and byte/CIDR checks, reject IPv4 `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`, `224.0.0.0/4`, `240.0.0.0/4`. IPv6 must be in `2000::/3`, excluding `2001::/32`, `2001:db8::/32`, `2002::/16`; explicitly reject `::/96`, `::1/128`, `::ffff:0:0/96`, `64:ff9b::/96`, `64:ff9b:1::/48`, `fe80::/10`, `fc00::/7`, `ff00::/8`. Decode embedded IPv4 and apply IPv4 policy. Test below/inside/above every range and mixed answers.
+
+Use Stage 1A `web-push@3.6.7` `generateRequestDetails()` with `aes128gcm`, TTL 0, normal urgency, fixed subject/key, topic `draw-push-test`. Clear payload exactly `{v:1,kind:"test"}`, ≤3,072 UTF-8 bytes; encrypted body ≤4,096. One POST via core `https.request`; ignore proxy env, pass no proxy, never follow `Location` (all 3xx fail). DNS+request total ≤5s. Drain at most 4,096 response bytes and destroy at either bound. No SQLite transaction spans network. No retry/backoff/`Retry-After` retry/queue. 2xx succeeds; only 404/410 deletes; all else consumes attempt and retains row.
+
+Each test captures generation. After resolution and immediately before request construction/initiation, synchronously recheck generation, authority availability, row/expiry and current settings, with no `await` before creation. Any failure—including Hide-details, revoke, password change, committed import, authority/generation/row/expiry—wins races and returns `409 {"error":"push-test-cancelled"}`, creating no HTTPS request. Initial pre-resolution missing/expired retains 404/410. Logs only opaque device id, status class, bounded reason; never endpoint/path/query, keys, authority/password, payload, provider body, destination-bearing exception, or user data.
+
+Automated Stage 1B evidence covers exact auth/passwordless/topology positives and negatives; status redaction; bodies/input/device semantics; rates/bounds/cleanup/abort; every IP boundary/pinning/SNI/proxy/redirect/timeout/status; final-check races; revoke recovery; current dependency/license/advisory state; and zero real network.
+
+### Stage 1C — browser enrollment, receive/click and durable landings
+
+Starts after 1B. Adds Notifications controls, closed worker receive/click and task/goal landings. Only synthetic test sends; deadline payload acceptance establishes Stage 2 contract, without scheduler/evaluator/claims/automatic send/timing UI/goal write change.
+
+Settings distinguishes insecure context, missing service worker/PushManager/Notification API, denied permission, server unavailable/recovery pending, secure transport required, unsupported proxy. Existing login handles configured-password unauthenticated state. Controls use `mutationAllowed`; supported passwordless HTTPS can manage devices and is never told to set `DRAW_PASSWORD`. Shared Hide details explains future deadline effect; no Stage 1 timing fields.
+
+Only Enable/Re-enable click requests permission; await `navigator.serviceWorker.ready`. Byte-compare active subscription application-server key with status. Never silently subscribe/resubscribe/replace mismatch; show Re-enable. Per-origin localStorage `draw.push.device.v1` stores only opaque server UUID (convenience, not auth); POST current handle as `replaceDeviceId`, save returned id only after success, and on failure best-effort unsubscribe only a newly created orphan. Stale/missing handle cannot be recovered from endpoint. “This device” only on id equality; show created/last-seen and per-row test/revoke. Current-device Disable deletes server first, then best-effort local unsubscribe/clear; pre-delete failure retains both. Revoke-all completes server first, then best-effort local unsubscribe/clear. Disable buttons while pending; server admission controls. On 409 cancellation, refetch status and show exactly `Test send cancelled because notification state changed`; never retry. Present other bounded errors without secrets. Test always synthetic and routes `/settings`; read no item/user content.
+
+Classic production-only `client/public/sw.js` reads ≤3,072 bytes, parses in `try/catch`, accepts only exact closed schemas (unknown keys/types show nothing):
+- `{v:1,kind:"test"}`;
+- generic deadline `{v:1,kind:"deadline",detail:"generic",itemType:"task"|"goal",itemId:<positive safe integer>,eventId:<22-char canonical unpadded base64url>}`;
+- detailed = generic identity with `detail:"detailed"`, exact string `itemTitle`, nullable string `context`, and `deadline:"YYYY-MM-DD"`.
+
+Deadline validation parses `${value}T00:00:00Z`, requires finite and `toISOString().slice(0,10)===value`; impossible/noncanonical dates such as `2026-02-30` fail. Text is never HTML. Exact rendering: test title `Draw`, body `Notifications are enabled`, tag `draw-push-test`, route `/settings`; generic title `Draw`, body `You have an upcoming deadline in Draw`, tag `draw-deadline-<eventId>`; detailed title exact itemTitle, body `Due <YYYY-MM-DD>` if context null else `<context> · Due <YYYY-MM-DD>`, same deadline tag. Deadline route derives only from validated type/id: `/tasks?focus=<id>&showDone=1` or `/goals?focus=<id>`. Accept no payload URL/remote icon/image/action. Click closes, chooses a same-origin window via `clients.matchAll({type:"window",includeUncontrolled:true})`, navigates/focuses it, else `openWindow`. Existing password login reload retains URL.
+
+Keep shell-only cache, case-insensitive `/api` bypass, network-first navigation, `skipWaiting`, `clients.claim`, production-only registration; bump cache version. Never cache push/API data.
+
+Landings parse `focus` only canonical positive safe-integer decimal. Tasks accept `showDone=1` only with valid focus. Consume only owned query keys via history replace, preserving unrelated query/hash and router-state palette behavior. Scroll/flash existing row/card; make done task visible. Deleted/archived/resolved/unrendered target degrades quietly to containing page.
+
+Automated Stage 1C evidence covers all capability/topology states; gesture permission; VAPID mismatch; handle/orphan/disable/revoke behavior; cancellation copy/refetch; hostile/unknown/oversized/impossible/extra-key payloads; exact rendering/routes/click paths; cache/lifecycle regression; login-retained URLs; target degradation and unrelated URL/router state. Fakes only, no real subscription/provider/push/deployment.
+
+### Stage 2 — deterministic deadline attempts
+
+**PLANNED — NOT READY FOR IMPLEMENTATION.** Starts only after 1A/1B/1C merge and an issue cites exact accepted digests/heads, v19 schema/APIs/seams and merged ADR.
+
+Fixed policy (**Requirements Engineer delegated authority**, also approved human privacy/delivery policy):
+- One reminder attempt per enrolled device/item/deadline occurrence. Lead exactly `0,1,2,3,7,14,30` days, default 1. Send time `HH:(00|15|30|45)` from `00:00` through `23:45`, default `09:00`.
+- Quiet defaults off (`null`,`null`); enabling proposes `22:00`–`08:00`; endpoints differ. Half-open wall time: non-crossing `start <= now < end`, crossing `now >= start || now < end`.
+- One valid shared IANA timezone is required for scheduling; first setup proposes browser detection, failed detection requires selection. Enrollment/test is not timezone-gated. Lead/send/timezone/quiet/Hide-details are shared. Timing/timezone affects only unclaimed occurrences; Hide-details affects every uninitiated request.
+- Settings has one exact lead select, 15-minute time control, editable detected IANA zone, quiet toggle/start/end. Save complete timing atomically; invalid changes nothing.
+- For deadline date D/lead L, eligibility starts at local wall time on `D-L`; L=0 is deadline day. Date-only fields are not instants. Spring gap: first real instant with later wall time; fall overlap: first occurrence, claim suppresses second.
+- Quiet/stopped/new-deadline catch-up at first non-quiet tick only while current local date ≤deadline; no provider/offline backlog.
+- Eligible tasks: all `open` with valid `due_date`, including parent/leaf, blocked, snoozed, sequentially held, outside deck availability. Exclude done/archived/deleted/malformed/overdue. Recurrence completion advances date/new occurrence. Eligible goals: only `active` with valid `target_date`; exclude achieved/missed/dropped/deleted/malformed/overdue. Apply existing real-date validator to goal create/update.
+- Edit replaces occurrence; unclaimed replacement may attempt once. A claimed date changed away/back remains claimed until date passes.
+- Detailed content: title, project/category where applicable, deadline only—never descriptions/notes/outcomes/materials/attachments/arbitrary URLs. Hidden uses fixed generic copy. Both open item.
+- TTL 0, one attempt, no retry/`Retry-After`. Offline/provider failure/claim-before-send crash/stopped server may miss; initiated requests cannot be recalled.
+
+Rejected: arbitrary/multiple schedules, fixed offsets, deck eligibility, paused receivers, retries/provider retention, overdue “upcoming” reminders.
+
+Persistence/evaluator/scheduler/transport:
+- Extend strict preference API with `leadDays`, `sendTime`, `timezone`, `quietStart`, `quietEnd`, atomically persisting `push_lead_days`, `push_send_time`, `push_timezone`, `push_quiet_start`, `push_quiet_end`; retain `push_hide_details`.
+- Timezone ≤128 ASCII bytes and accepted by `Intl.DateTimeFormat` as IANA; no timezone package. Use one cached `Intl.DateTimeFormat("en-CA",{timeZone,calendar:"iso8601",numberingSystem:"latn",year,month,day,hour,minute,second,hourCycle:"h23"})`, numeric `formatToParts`, UTC calendar-string arithmetic, lexical zoned `YYYY-MM-DDTHH:mm` comparison to `addDays(deadline,-lead)+"T"+sendTime`.
+- Add `deadline_reminder_claims`, unique `(device_id,item_type,item_id,item_created_at,deadline)`, FK to subscription with device cascade. `INSERT OR IGNORE` in short transaction before network. Retain changed-away claims through date; delete on device/source deletion; prune expired in batches ≤500.
+- `eventId` = canonical unpadded base64url first 16 bytes of `SHA-256(UTF8(JSON.stringify([itemType,itemId,itemCreatedAt,deadline])))` (22 chars), also Web Push Topic.
+- Resolve each claimed candidate, then synchronously re-read authority generation, subscription/expiry, source status/deadline/creation identity and Hide details immediately before initiation; build current payload/initiate without intervening `await`. Pre-init invalidation prevents send; DNS/send failure retains claim/no retry.
+- `prod.ts` only: first tick 60s after boot; recursive unref'd 60s timer scheduled after completion; idempotent `stop()` prevents new work. None in development/default app.
+- Order by computed scheduled local datetime, deadline, item type/id, creation identity, device id. Scan ≤256, initiate ≤32/tick, concurrent ≤4. Share Stage 1B process-wide four-work semaphore; no HTTP rate buckets; excess remains candidate for later best-effort tick. Each attempt ≤5s. Guards are not SLA.
+- Reuse Stage 1B endpoint validation, complete IP policy, pinning, no-proxy/no-redirect transport, response/log redaction, 404/410-only deletion, authority/cancellation. Add no package/transitive import.
+- Clear JSON ≤3,072 bytes; encrypted ≤4,096. If detailed exceeds either, rebuild generic; never truncate text or drop solely for title length. Worker schema/render/routes remain Stage 1C's.
+
+Automated Stage 2 evidence uses synthetic fakes for defaults/atomic validation; timezone; all task/goal/recurrence/deck and goal-date cases; DST gap/overlap, cross-midnight quiet, catch-up, edit/revert/restart claims, deletion/500-pruning; claim-before-I/O and cancellation races around initiation; nonoverlapping timer/stop; 256/32/shared-4/5s bounds; payload fallback/forbidden data; and zero real activity outside production.
+
+Later owner-operated synthetic Android Chrome installed-PWA HTTPS/Tailscale smoke plus desktop is post-implementation field evidence, not merge/deploy/delivery guarantee. Until recorded: **implemented but not field-verified**. Agents may not deploy/enroll/access subscriptions/send real Push without explicit permission.
+....

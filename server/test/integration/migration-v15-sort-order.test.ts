@@ -31,6 +31,8 @@ const currentSchema = fs.readFileSync(schemaPath, "utf-8");
 const v14Schema = currentSchema
   // v18 (#263): owner columns are ALTERed by the forward chain; the remaining
   // v18 objects sit inside the customization strip below.
+  .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
+  .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
   .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
   .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
   .replace(/,\r?\n  -- Stored sibling position[\s\S]*?sort_order REAL NOT NULL DEFAULT 0/, "")
@@ -108,9 +110,9 @@ beforeAll(async () => {
 });
 
 describe("migration v14 → v15 adds tasks.sort_order (#157, ADR-43)", () => {
-  it("runs the forward chain through schema v18", async () => {
+  it("runs the forward chain through schema v19", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(18);
+    expect(db.pragma("user_version", { simple: true })).toBe(19);
   });
 
   it("adds sort_order as REAL NOT NULL DEFAULT 0", async () => {

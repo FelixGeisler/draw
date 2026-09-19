@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { V18_STATEMENTS } from "./schemaV18.js";
+import { V19_STATEMENTS } from "./schemaV19.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
@@ -29,7 +30,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 18;
+export const CURRENT_VERSION = 19;
 
 export function migrateDatabase(database: Database.Database = db) {
   const version = database.pragma("user_version", { simple: true }) as number;
@@ -372,9 +373,18 @@ export function migrateDatabase(database: Database.Database = db) {
     if (version < 18) {
       // Gold/opening compatibility cutover (#263): one transaction means a
       // failed DDL statement leaves a v17 database and every existing fact
-      // untouched. user_version advances only after the full contract lands.
+      // untouched. Keep this step stamped v18 so the following v19 migration
+      // remains independently atomic for genuine v18 files.
       database.transaction(() => {
         for (const statement of V18_STATEMENTS) database.exec(statement);
+        database.pragma("user_version = 18");
+      })();
+    }
+    if (version < 19) {
+      // Web Push persistence (#337, ADR-72). No device is inferred: the new
+      // table starts empty and authority remains outside SQLite.
+      database.transaction(() => {
+        for (const statement of V19_STATEMENTS) database.exec(statement);
         database.pragma(`user_version = ${CURRENT_VERSION}`);
       })();
     }

@@ -608,6 +608,8 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
     const current = fs.readFileSync(schemaPath, "utf-8");
     const v2Schema = current
+      .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
+      .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
       .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
       .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
       // v15 (#157): strip the sort_order column + stamp trigger FIRST, so
@@ -723,6 +725,8 @@ describe("POST /api/backup/import — v17 compatibility cutover", () => {
     const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
     const current = fs.readFileSync(schemaPath, "utf-8");
     const v17 = current
+      .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
+      .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
       .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
       .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
       .replace(/CREATE INDEX idx_xp_ledger_reason ON xp_ledger\(reason\);\r?\n\r?\n/, "")
@@ -770,7 +774,7 @@ describe("POST /api/backup/import — v17 compatibility cutover", () => {
 
     await importArchive(zip.toBuffer()).then((response) => expect(response.status).toBe(200));
     const migrated = await testDb();
-    expect(migrated.pragma("user_version", { simple: true })).toBe(18);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(CURRENT_VERSION);
     expect(
       migrated.prepare("SELECT xp_awarded AS xp, gold_awarded AS gold FROM completions").get(),
     ).toEqual({ xp: 9, gold: 0 });

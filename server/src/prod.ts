@@ -15,6 +15,8 @@ import {
 import { startServer } from "./server.js";
 import { startBackupScheduler } from "./backupScheduler.js";
 import { startUpdateScheduler } from "./updateScheduler.js";
+import { dataDir, db } from "./db.js";
+import { PushLifecycle } from "./push/authority.js";
 
 // Production entry (#189, ADR-49): the same API as dev plus the built client,
 // one port, run via tsx (`npm start`). A separate entry rather than NODE_ENV
@@ -55,15 +57,35 @@ if (exposureWarning) {
   console.error(exposureWarning);
 }
 
+// Production is the sole owner of real Push authority I/O (#337, ADR-72).
+// The resolved password value is passed directly; raw DRAW_PASSWORD is never
+// persisted or handed to the lifecycle. Boot recovery is synchronous before
+// the listener can accept work.
+const push = new PushLifecycle({
+  dataDir,
+  password,
+  deleteSubscriptions: () => {
+    db.transaction(() => db.prepare("DELETE FROM push_subscriptions").run())();
+  },
+});
+const pushState = push.snapshot();
+if (!pushState.available) {
+  console.error(`[push] unavailable (${pushState.reason})`);
+}
+
 // TRUST_PROXY makes req.ip the de-proxied client so the login limiter keys on
 // the real LAN client behind a reverse proxy (ADR-50). Prod-entry only, like
 // HOST — dev never sits behind a proxy.
-startServer(resolveApiPort(), {
-  clientDir,
-  host,
-  password,
-  trustProxy: resolveTrustProxy(),
-});
+startServer(
+  resolveApiPort(),
+  {
+    clientDir,
+    host,
+    password,
+    trustProxy: resolveTrustProxy(),
+  },
+  { push },
+);
 
 // Scheduled automatic backups (#194, ADR-52): a prod-entry concern like HOST
 // and DRAW_PASSWORD — the headless Pi deployment has no cron, so the timer

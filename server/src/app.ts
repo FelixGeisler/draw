@@ -18,11 +18,12 @@ import { notifyRouter } from "./routes/notify.js";
 import { updateRouter } from "./routes/update.js";
 import { goalMaterialsRouter, materialsRouter } from "./routes/materials.js";
 import { aiRouter } from "./routes/ai.js";
-import { backupRouter } from "./routes/backup.js";
+import { createBackupRouter } from "./routes/backup.js";
 import { cardArtRouter } from "./routes/cardArt.js";
 import { sweepBackupTemp } from "./services/backupService.js";
 import { bindAgentToolApi } from "./services/agentService.js";
 import { InProcessApiClient } from "./tools/inProcessApi.js";
+import { disabledPushDependency, type PushDependency } from "./push/authority.js";
 
 export interface AppOptions {
   /**
@@ -50,10 +51,15 @@ export interface AppOptions {
 export interface AppDependencies {
   /** Internal deterministic seam for in-process pack API tests. */
   shopRandom?: () => number;
+  /** Production-only Push authority/recovery lifecycle (#337, ADR-72). */
+  push?: PushDependency;
 }
 
 export function createApp(options: AppOptions = {}, dependencies: AppDependencies = {}) {
   const app = express();
+  // Defaults are deliberately inert: dev, supertest and tools never create
+  // authority files or perform Push work unless production injects it.
+  const push = dependencies.push ?? disabledPushDependency;
   // No framework fingerprint — LAN exposure is a supported configuration
   // since #189.
   app.disable("x-powered-by");
@@ -113,7 +119,7 @@ export function createApp(options: AppOptions = {}, dependencies: AppDependencie
   app.use("/api/goals/:id/materials", goalMaterialsRouter);
   app.use("/api/materials", materialsRouter);
   app.use("/api/ai", aiRouter);
-  app.use("/api/backup", backupRouter);
+  app.use("/api/backup", createBackupRouter(push));
   // Cache-only batch art reads for the trophy pile (#114) — deliberately NOT
   // under /api/tasks/:id: the per-task route generates on miss, this never.
   app.use("/api/card-art", cardArtRouter);

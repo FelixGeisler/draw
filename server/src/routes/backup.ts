@@ -10,8 +10,7 @@ import {
   exportFilename,
   importBackupArchive,
 } from "../services/backupService.js";
-
-export const backupRouter = Router();
+import type { PushDependency } from "../push/authority.js";
 
 // Uploads land inside DATA_DIR (same volume as the swap targets) but outside
 // files/ — that directory is replaced mid-import. Cap far above any real
@@ -43,28 +42,36 @@ function backupUpload(req: Request, res: Response, next: NextFunction): void {
   });
 }
 
-backupRouter.get("/export", (_req, res) => {
-  let zipPath: string;
-  try {
-    zipPath = createBackupArchive();
-  } catch (e) {
-    return res.status(500).json({ error: e instanceof Error ? e.message : "backup export failed" });
-  }
-  res.download(zipPath, exportFilename(new Date()), () => {
-    fs.rmSync(zipPath, { force: true });
-  });
-});
+export function createBackupRouter(push: PushDependency): Router {
+  const backupRouter = Router();
 
-backupRouter.post("/import", backupUpload, (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'backup file is required (multipart field "file")' });
-  }
-  try {
-    res.json(importBackupArchive(req.file.path));
-  } catch (e) {
-    if (e instanceof BackupError) return res.status(e.status).json({ error: e.message });
-    res.status(500).json({ error: e instanceof Error ? e.message : "backup import failed" });
-  } finally {
-    fs.rmSync(req.file.path, { force: true });
-  }
-});
+  backupRouter.get("/export", (_req, res) => {
+    let zipPath: string;
+    try {
+      zipPath = createBackupArchive();
+    } catch (e) {
+      return res
+        .status(500)
+        .json({ error: e instanceof Error ? e.message : "backup export failed" });
+    }
+    res.download(zipPath, exportFilename(new Date()), () => {
+      fs.rmSync(zipPath, { force: true });
+    });
+  });
+
+  backupRouter.post("/import", backupUpload, (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: 'backup file is required (multipart field "file")' });
+    }
+    try {
+      res.json(importBackupArchive(req.file.path, push));
+    } catch (e) {
+      if (e instanceof BackupError) return res.status(e.status).json({ error: e.message });
+      res.status(500).json({ error: e instanceof Error ? e.message : "backup import failed" });
+    } finally {
+      fs.rmSync(req.file.path, { force: true });
+    }
+  });
+
+  return backupRouter;
+}

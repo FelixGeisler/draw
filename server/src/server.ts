@@ -1,5 +1,5 @@
 import type { Server } from "node:http";
-import { createApp, type AppOptions } from "./app.js";
+import { createApp, type AppDependencies, type AppOptions } from "./app.js";
 import { DEFAULT_HOST } from "./config.js";
 
 export interface StartOptions extends AppOptions {
@@ -12,9 +12,13 @@ export interface StartOptions extends AppOptions {
   host?: string;
 }
 
-export function startServer(port: number, options: StartOptions = {}): Server {
+export function startServer(
+  port: number,
+  options: StartOptions = {},
+  dependencies: AppDependencies = {},
+): Server {
   const { host = DEFAULT_HOST, ...appOptions } = options;
-  return createApp(appOptions).listen(port, host, () => {
+  return createApp(appOptions, dependencies).listen(port, host, () => {
     console.log(`[server] listening on http://${host}:${port}`);
   });
 }

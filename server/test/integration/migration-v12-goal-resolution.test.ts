@@ -27,6 +27,8 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v11Schema = current
+    .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
+    .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
     .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
     .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
     // v15 (#157): strip the sort_order column and its stamp trigger so this
@@ -92,7 +94,7 @@ describe("migration v11 → v12 rebuilds goals without firing FK actions (#145, 
     // deletes daily-hand rows this fixture never seeds, v14 (#156) adds the
     // draws log + achievements claim columns, v15 (#157) adds sort_order, and
     // v16 (#177) adds the achievement_customizations table.
-    expect(db.pragma("user_version", { simple: true })).toBe(18);
+    expect(db.pragma("user_version", { simple: true })).toBe(19);
     expect(
       db.prepare("SELECT name FROM sqlite_master WHERE name = 'goals_new'").get(),
     ).toBeUndefined();
