@@ -59,6 +59,20 @@ describe("Push registration service", () => {
     ]) expect(() => validateRegistration(value, now)).toThrow(PushApiError);
   });
 
+  it("enforces the parsed URL's canonical port after every leading ASCII C0/control normalization", () => {
+    const now = 1_000;
+    for (let codePoint = 0; codePoint <= 0x20; codePoint++) {
+      const prefix = String.fromCharCode(codePoint);
+      expect(
+        () => validateRegistration(registration(`${prefix}https://push.example:8443/path`), now),
+        `leading U+${codePoint.toString(16).padStart(4, "0")}`,
+      ).toThrow(PushApiError);
+    }
+    expect(() => validateRegistration(registration("\u0000 \t\nhttps://push.example:8443/path"), now)).toThrow(PushApiError);
+    expect(validateRegistration(registration("https://push.example/path"), now).endpoint).toBe("https://push.example/path");
+    expect(validateRegistration(registration("\t\nhttps://push.example:443/path"), now).endpoint).toBe("https://push.example/path");
+  });
+
   it("upserts the same endpoint, rotates to a new id on replacement, ignores stale replacement, and redacts ordered status", async () => {
     const ids = [
       "11111111-1111-4111-8111-111111111111",

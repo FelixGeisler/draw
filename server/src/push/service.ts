@@ -95,13 +95,10 @@ export function validateRegistration(value: unknown, wallNow: number): ValidSubs
   let endpoint: URL;
   try { endpoint = new URL(subscription.endpoint); } catch { throw new PushApiError(400, "invalid-push-request"); }
   if (
-    endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.hash ||
+    endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.hash || endpoint.port !== "" ||
     endpoint.hostname.startsWith("[") || net.isIP(endpoint.hostname) !== 0 ||
     !validDnsHostname(endpoint.hostname) || endpoint.hostname !== endpoint.hostname.toLowerCase()
   ) throw new PushApiError(400, "invalid-push-request");
-  const authority = subscription.endpoint.slice("https://".length).split(/[/?#]/, 1)[0];
-  const portAt = authority.lastIndexOf(":");
-  if (portAt >= 0 && authority.slice(portAt + 1) !== "443") throw new PushApiError(400, "invalid-push-request");
 
   const expiration = subscription.expirationTime;
   if (
