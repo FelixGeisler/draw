@@ -9,6 +9,7 @@ import {
   PushLifecycle,
   RESET_MARKER,
   RESTORE_MARKER,
+  REVOKE_MARKER,
   validateAuthorityDocument,
   type AuthorityDocument,
 } from "../../src/push/authority.js";
@@ -153,16 +154,18 @@ describe("production Push authority", () => {
     }
   });
 
-  it("combines reset+restore markers into one conservative clear/rotation and rejects malformed markers", () => {
+  it("combines any reset+restore+revoke marker subset into one conservative clear/rotation and rejects malformed markers", () => {
     const dataDir = root();
     const original = lifecycle(dataDir).instance.snapshot().generation;
     fs.writeFileSync(path.join(dataDir, RESET_MARKER), Buffer.alloc(0));
     fs.writeFileSync(path.join(dataDir, RESTORE_MARKER), Buffer.alloc(0));
+    fs.writeFileSync(path.join(dataDir, REVOKE_MARKER), Buffer.alloc(0));
     const recovered = lifecycle(dataDir);
     expect(recovered.deletes()).toBe(1);
     expect(recovered.instance.snapshot().generation).not.toBe(original);
     expect(fs.existsSync(path.join(dataDir, RESET_MARKER))).toBe(false);
     expect(fs.existsSync(path.join(dataDir, RESTORE_MARKER))).toBe(false);
+    expect(fs.existsSync(path.join(dataDir, REVOKE_MARKER))).toBe(false);
 
     fs.mkdirSync(path.join(dataDir, RESET_MARKER));
     const failed = lifecycle(dataDir);
@@ -249,6 +252,46 @@ describe("production Push authority", () => {
       expect(fs.existsSync(path.join(dataDir, RESTORE_MARKER))).toBe(true);
       activePoint = undefined;
       expect(lifecycle(dataDir).instance.snapshot().available).toBe(true);
+    }
+  });
+
+  it("revoke preserves state before delete and fails closed without row restoration after delete", () => {
+    for (const point of ["generation", "revoke-after-marker", "revoke-after-invalidate", "subscriptions-delete"]) {
+      const dataDir = root();
+      let activePoint: string | undefined;
+      let deletes = 0;
+      const running = new PushLifecycle({
+        dataDir,
+        deleteSubscriptions: () => { deletes += 1; },
+        fault: (at) => { if (at === activePoint) throw new Error(`synthetic ${point}`); },
+      });
+      const before = running.snapshot();
+      const beforeDeletes = deletes;
+      activePoint = point;
+      expect(() => running.revokeAll()).toThrow(/synthetic/);
+      expect(running.snapshot()).toEqual(before);
+      expect(deletes).toBe(beforeDeletes);
+      expect(fs.existsSync(path.join(dataDir, REVOKE_MARKER))).toBe(false);
+    }
+
+    for (const point of ["revoke-after-delete", "revoke-install", "revoke-after-install", "marker-remove"]) {
+      const dataDir = root();
+      let activePoint: string | undefined;
+      let deletes = 0;
+      const running = new PushLifecycle({
+        dataDir,
+        deleteSubscriptions: () => { deletes += 1; },
+        fault: (at) => { if (at === activePoint) throw new Error(`synthetic ${point}`); },
+      });
+      const beforeDeletes = deletes;
+      activePoint = point;
+      expect(() => running.revokeAll()).toThrow(/synthetic/);
+      expect(deletes).toBe(beforeDeletes + 1);
+      expect(running.snapshot().reason).toBe("recovery-pending");
+      expect(fs.existsSync(path.join(dataDir, REVOKE_MARKER))).toBe(true);
+      activePoint = undefined;
+      expect(lifecycle(dataDir).instance.snapshot().available).toBe(true);
+      expect(fs.existsSync(path.join(dataDir, REVOKE_MARKER))).toBe(false);
     }
   });
 

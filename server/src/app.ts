@@ -23,7 +23,9 @@ import { cardArtRouter } from "./routes/cardArt.js";
 import { sweepBackupTemp } from "./services/backupService.js";
 import { bindAgentToolApi } from "./services/agentService.js";
 import { InProcessApiClient } from "./tools/inProcessApi.js";
+import { disabledPushService, type PushServiceDependency } from "./push/service.js";
 import { disabledPushDependency, type PushDependency } from "./push/authority.js";
+import { createPushRouter } from "./routes/push.js";
 
 export interface AppOptions {
   /**
@@ -51,15 +53,18 @@ export interface AppOptions {
 export interface AppDependencies {
   /** Internal deterministic seam for in-process pack API tests. */
   shopRandom?: () => number;
-  /** Production-only Push authority/recovery lifecycle (#337, ADR-72). */
-  push?: PushDependency;
+  /** Production-only Push authority, optionally with registration facade (ADR-72). */
+  push?: PushDependency | PushServiceDependency;
 }
 
 export function createApp(options: AppOptions = {}, dependencies: AppDependencies = {}) {
   const app = express();
   // Defaults are deliberately inert: dev, supertest and tools never create
   // authority files or perform Push work unless production injects it.
-  const push = dependencies.push ?? disabledPushDependency;
+  const pushLifecycle = dependencies.push ?? disabledPushDependency;
+  const push = dependencies.push && "topology" in dependencies.push
+    ? dependencies.push
+    : disabledPushService;
   // No framework fingerprint — LAN exposure is a supported configuration
   // since #189.
   app.disable("x-powered-by");
@@ -68,7 +73,14 @@ export function createApp(options: AppOptions = {}, dependencies: AppDependencie
   if (options.trustProxy) {
     app.set("trust proxy", options.trustProxy);
   }
-  app.use(express.json());
+  // Push owns a raw, bounded parser below ADR-50 so malformed framing can
+  // never outrun authentication. Login and every non-Push route retain the
+  // existing general-parser ordering and limits.
+  const generalJson = express.json();
+  app.use((req, res, next) => {
+    if (/^\/api\/push(?:\/|$)/i.test(req.path)) return next();
+    generalJson(req, res, next);
+  });
 
   // Boot hygiene (#103): drop temp artifacts a previous run was killed before
   // it could clean up (see sweepBackupTemp). Here rather than in startServer()
@@ -96,6 +108,7 @@ export function createApp(options: AppOptions = {}, dependencies: AppDependencie
     app.use(gate);
   }
 
+  app.use("/api/push", createPushRouter(push));
   app.use("/api/tasks", tasksRouter);
   app.use("/api/categories", categoriesRouter);
   app.use("/api/settings", settingsRouter);
@@ -119,7 +132,7 @@ export function createApp(options: AppOptions = {}, dependencies: AppDependencie
   app.use("/api/goals/:id/materials", goalMaterialsRouter);
   app.use("/api/materials", materialsRouter);
   app.use("/api/ai", aiRouter);
-  app.use("/api/backup", createBackupRouter(push));
+  app.use("/api/backup", createBackupRouter(pushLifecycle));
   // Cache-only batch art reads for the trophy pile (#114) — deliberately NOT
   // under /api/tasks/:id: the per-task route generates on miss, this never.
   app.use("/api/card-art", cardArtRouter);
