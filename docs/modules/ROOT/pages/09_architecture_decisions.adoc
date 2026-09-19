@@ -2919,11 +2919,12 @@ app-shell service worker*, registered in production builds only.
 LAN, so installability costs a manifest and a worker — no second build
 pipeline, no signing keys, no store review, no divergent codebase. A native or
 Capacitor shell is still unnecessary: standards Web Push is now the approved
-PWA path (ADR-72), including desktop and feature-detected iPhone support. Only
-ADR-72 Stage 1A authority/schema/recovery/backup foundations are implemented;
-subscription APIs, browser enrollment/worker behavior and scheduling remain
-planned. iOS remains progressive enhancement and never gates Android-first
-delivery.
+PWA path (ADR-72), including desktop and feature-detected iPhone support.
+ADR-72 Stage 1A authority/schema/recovery/backup foundations and Stage 1B.1
+status, registration, preferences, deletion, and revoke APIs are implemented.
+The Stage 1B.2 provider sender, browser enrollment/worker behavior, and
+scheduling remain planned. iOS remains progressive enhancement and never gates
+Android-first delivery.
 * *Adaptation, not redesign.* The card face's own language — full-bleed art under
 its legibility scrim, the category pill, the effort chip, the impact stars, the
 holo shimmer on a drawn 5★ (ADR-33, which superseded ADR-31's literal TCG frame;

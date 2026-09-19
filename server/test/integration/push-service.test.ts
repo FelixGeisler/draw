@@ -165,31 +165,77 @@ describe("Push registration service", () => {
       .rejects.toMatchObject({ status: 504, code: "push-timeout" });
   });
 
-  it("holds four logical/eight physical DNS operations and never releases a permit before cancellation settles", async () => {
+  it("holds four logical/eight physical operations through delayed abort and timeout settlement", async () => {
     class Pending implements IsolatedResolver {
       static physical = 0;
-      private rejects: ((reason: unknown) => void)[] = [];
-      resolve4(): Promise<string[]> { Pending.physical += 1; return new Promise((_r, reject) => this.rejects.push(reject)); }
-      resolve6(): Promise<string[]> { Pending.physical += 1; return new Promise((_r, reject) => this.rejects.push(reject)); }
-      cancel() { for (const reject of this.rejects.splice(0)) reject(Object.assign(new Error("cancel"), { code: "ECANCELLED" })); }
+      static maxPhysical = 0;
+      cancelled = false;
+      private operations: Array<{ reject: (reason: unknown) => void; settled: boolean }> = [];
+
+      private resolve(): Promise<string[]> {
+        Pending.physical += 1;
+        Pending.maxPhysical = Math.max(Pending.maxPhysical, Pending.physical);
+        return new Promise<string[]>((_resolve, reject) => this.operations.push({ reject, settled: false }))
+          .finally(() => { Pending.physical -= 1; });
+      }
+      resolve4(): Promise<string[]> { return this.resolve(); }
+      resolve6(): Promise<string[]> { return this.resolve(); }
+      cancel(): void { this.cancelled = true; }
+      settle(index: number): void {
+        const operation = this.operations[index];
+        if (!operation || operation.settled) return;
+        operation.settled = true;
+        operation.reject(Object.assign(new Error("cancel"), { code: "ECANCELLED" }));
+      }
+      settleAll(): void { this.operations.forEach((_operation, index) => this.settle(index)); }
     }
     const admission = new PushAdmission();
     const resolvers: Pending[] = [];
-    const service = make({ admission, resolverFactory: () => { const value = new Pending(); resolvers.push(value); return value; }, dnsDeadlineMs: 60_000 });
+    const service = make({
+      admission,
+      resolverFactory: () => { const value = new Pending(); resolvers.push(value); return value; },
+      dnsDeadlineMs: 10,
+    });
     const aborts = Array.from({ length: 4 }, () => new AbortController());
-    const held = aborts.map((abort, index) => service.register(registration(`https://pending${index}.example/a`), `client-${index}`, abort.signal));
+    const held = aborts.map((abort, index) =>
+      service.register(registration(`https://pending${index}.example/a`), `client-${index}`, abort.signal));
+    const outcomes = held.map((attempt) => attempt.catch((error: unknown) => error));
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(resolvers).toHaveLength(4);
-    expect(Pending.physical).toBe(8);
-    await expect(service.register(registration("https://fifth.example/a"), "fifth")).rejects.toMatchObject({ code: "push-busy" });
     aborts[0].abort();
-    await expect(held[0]).rejects.toMatchObject({ kind: "aborted" });
+    aborts[1].abort();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(resolvers).toHaveLength(4);
+    expect(resolvers.every((resolver) => resolver.cancelled)).toBe(true);
+    expect(Pending.physical).toBe(8);
+    expect(Pending.maxPhysical).toBe(8);
+    await expect(service.register(registration("https://fifth.example/a"), "fifth"))
+      .rejects.toMatchObject({ code: "push-busy" });
+
+    let firstSettled = false;
+    void outcomes[0].then(() => { firstSettled = true; });
+    resolvers[0].settle(0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(firstSettled).toBe(false);
+    expect(Pending.physical).toBe(7);
+    await expect(service.register(registration("https://still-busy.example/a"), "still-busy"))
+      .rejects.toMatchObject({ code: "push-busy" });
+
+    resolvers[0].settle(1);
+    expect(await outcomes[0]).toMatchObject({ kind: "aborted" });
     const sixthAbort = new AbortController();
     const sixth = service.register(registration("https://sixth.example/a"), "sixth", sixthAbort.signal);
+    const sixthOutcome = sixth.catch((error: unknown) => error);
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(resolvers).toHaveLength(5);
+    expect(Pending.physical).toBe(8);
+    expect(Pending.maxPhysical).toBe(8);
+
     sixthAbort.abort();
-    for (const abort of aborts.slice(1)) abort.abort();
-    await Promise.allSettled([...held.slice(1), sixth]);
+    resolvers.slice(1).forEach((resolver) => resolver.settleAll());
+    expect(await outcomes[1]).toMatchObject({ kind: "aborted" });
+    expect(await outcomes[2]).toMatchObject({ status: 504, code: "push-timeout" });
+    expect(await outcomes[3]).toMatchObject({ status: 504, code: "push-timeout" });
+    expect(await sixthOutcome).toMatchObject({ kind: "aborted" });
+    expect(Pending.physical).toBe(0);
   });
 });

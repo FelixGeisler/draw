@@ -23,12 +23,13 @@ function headerOccurrences(req: Request, name: string): string[] {
 
 export function normalizeIp(value: string | undefined): string | null {
   if (!value) return null;
-  let address = value;
-  if (/^::ffff:\d+\.\d+\.\d+\.\d+$/i.test(address)) address = address.slice(7);
-  const family = net.isIP(address);
-  if (family === 4) return [...ipv4Bytes(address)].join(".");
+  const family = net.isIP(value);
+  if (family === 4) return [...ipv4Bytes(value)].join(".");
   if (family !== 6) return null;
-  const bytes = ipv6Bytes(address);
+  const bytes = ipv6Bytes(value);
+  if (bytes.slice(0, 10).every((byte) => byte === 0) && bytes[10] === 0xff && bytes[11] === 0xff) {
+    return [...bytes.slice(12)].join(".");
+  }
   const words = Array.from({ length: 8 }, (_, index) => (bytes[index * 2] << 8) | bytes[index * 2 + 1]);
   let bestStart = -1;
   let bestLength = 0;
@@ -53,6 +54,7 @@ export function normalizeIp(value: string | undefined): string | null {
 interface Authority {
   serializedHost: string;
   effectivePort: number;
+  explicitPort: boolean;
   origin: string;
 }
 
@@ -106,7 +108,7 @@ function parseAuthority(raw: string, scheme: "http" | "https"): Authority | null
     if (port > 65_535) return null;
   }
   const originPort = port === defaultPort ? "" : `:${port}`;
-  return { serializedHost, effectivePort: port, origin: `${scheme}://${serializedHost}${originPort}` };
+  return { serializedHost, effectivePort: port, explicitPort: portText !== undefined, origin: `${scheme}://${serializedHost}${originPort}` };
 }
 
 function isLoopbackIp(value: string | null): boolean {
@@ -157,7 +159,8 @@ export function evaluatePushTopology(
     );
     const loopbackPeer = isLoopbackIp(peer);
     if (
-      !configuredLoopback(options.listenerHost) || !loopbackPeer || !allowedHost ||
+      (options.trustProxy !== false && options.trustProxy !== 0) ||
+      !configuredLoopback(options.listenerHost) || !loopbackPeer || !allowedHost || !authority!.explicitPort ||
       authority!.effectivePort !== configuredPort ||
       (mutation && !validMutationHeaders(req, `http://${authority!.serializedHost}:${configuredPort}`))
     ) {

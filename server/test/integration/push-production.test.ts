@@ -11,7 +11,7 @@ import { startProduction } from "../../src/prod.js";
 import { createApp } from "../../src/app.js";
 import { PushLifecycle } from "../../src/push/authority.js";
 import { PushService } from "../../src/push/service.js";
-import type { IsolatedResolver } from "../../src/push/resolver.js";
+import type { IsolatedResolver, ResolverFactory } from "../../src/push/resolver.js";
 import { testDb } from "../helpers.js";
 import { PUSH_TLS_CERT, PUSH_TLS_KEY } from "../support/push-tls-fixture.js";
 
@@ -49,6 +49,33 @@ function send(port: number, options: http.RequestOptions, chunks: string[] = [])
   });
 }
 
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("timed out waiting for test condition");
+}
+
+class DelayedCancellationResolver implements IsolatedResolver {
+  cancelled = false;
+  operations: Array<{ reject: (reason: unknown) => void; settled: boolean }> = [];
+
+  private resolve(): Promise<string[]> {
+    return new Promise((_resolve, reject) => this.operations.push({ reject, settled: false }));
+  }
+  resolve4(): Promise<string[]> { return this.resolve(); }
+  resolve6(): Promise<string[]> { return this.resolve(); }
+  cancel(): void { this.cancelled = true; }
+  settle(index: number): void {
+    const operation = this.operations[index];
+    if (!operation || operation.settled) return;
+    operation.settled = true;
+    operation.reject(Object.assign(new Error("cancelled"), { code: "ECANCELLED" }));
+  }
+  settleAll(): void { this.operations.forEach((_operation, index) => this.settle(index)); }
+}
+
 describe("real production Push assembly", () => {
   let database: Awaited<ReturnType<typeof testDb>>;
   beforeEach(async () => {
@@ -56,14 +83,18 @@ describe("real production Push assembly", () => {
     database.prepare("DELETE FROM push_subscriptions").run();
   });
 
-  function start(trustProxy: boolean | number | string = false, password?: string) {
+  function start(
+    trustProxy: boolean | number | string = false,
+    password?: string,
+    resolverFactory: ResolverFactory = fakeResolver,
+  ) {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-prod-data-"));
     const clientDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-prod-client-"));
     roots.push(dataDir, clientDir);
     fs.writeFileSync(path.join(clientDir, "index.html"), "<!doctype html><title>test</title>");
     const assembly = startProduction({
       database, dataDir, clientDir, host: "127.0.0.1", port: 0, trustProxy, password,
-      resolverFactory: fakeResolver, startSchedulers: false,
+      resolverFactory, startSchedulers: false,
     });
     servers.push(assembly.server);
     return assembly;
@@ -92,6 +123,15 @@ describe("real production Push assembly", () => {
       headers: { Host: `localhost:${port}`, Origin: `http://localhost:${port}`, "Content-Type": "application/json" },
     }, ["x".repeat(4_096), "x".repeat(4_097)]);
     expect(oversized).toMatchObject({ status: 413, body: { error: "push-body-too-large" } });
+
+    const unknownPost = await send(port, {
+      method: "POST", path: "/api/push/unknown", headers: { Host: `localhost:${port}` },
+    }, ["x"]);
+    expect(unknownPost).toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
+    const unknownPut = await send(port, {
+      method: "PUT", path: "/api/push/unknown", headers: { Host: `localhost:${port}`, "Content-Length": "1" },
+    }, ["x"]);
+    expect(unknownPut).toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
   });
 
   it("keeps chunked malformed bodies behind authentication on the real listener", async () => {
@@ -152,6 +192,14 @@ describe("real production Push assembly", () => {
     const assembly = start(1);
     await new Promise<void>((resolve) => assembly.server.listening ? resolve() : assembly.server.once("listening", resolve));
     const port = (assembly.server.address() as AddressInfo).port;
+    const directStatus = await send(port, { method: "GET", path: "/api/push/status", headers: { Host: `localhost:${port}` } });
+    expect(directStatus.body).toMatchObject({ mutationAllowed: false, mutationReason: "secure-transport-required" });
+    const directMutation = await send(port, {
+      method: "PUT", path: "/api/push/preferences",
+      headers: { Host: `localhost:${port}`, Origin: `http://localhost:${port}`, "Content-Type": "application/json" },
+    }, [JSON.stringify({ hideDetails: false })]);
+    expect(directMutation).toMatchObject({ status: 403, body: { error: "push-mutation-forbidden" } });
+
     const baseHeaders = {
       Host: "draw.example", Origin: "https://draw.example", "Content-Type": "application/json",
       "X-Forwarded-For": "100.100.100.8", "X-Forwarded-Proto": "https", "X-Forwarded-Host": "draw.example",
@@ -162,5 +210,69 @@ describe("real production Push assembly", () => {
       method: "PUT", path: "/api/push/preferences", headers: { ...baseHeaders, "X-Real-IP": "192.0.2.10" },
     }, [JSON.stringify({ hideDetails: true })]);
     expect(nginx.status).toBe(200);
+  });
+
+  it("cancels completed-body disconnects and retains all four permits until both RR operations settle", async () => {
+    const resolvers: DelayedCancellationResolver[] = [];
+    const assembly = start(1, undefined, () => {
+      const resolver = new DelayedCancellationResolver();
+      resolvers.push(resolver);
+      return resolver;
+    });
+    await new Promise<void>((resolve) => assembly.server.listening ? resolve() : assembly.server.once("listening", resolve));
+    const port = (assembly.server.address() as AddressInfo).port;
+    const headers = (client: number) => ({
+      Host: "draw.example", Origin: "https://draw.example", "Content-Type": "application/json",
+      "X-Forwarded-For": `198.51.100.${client}`, "X-Forwarded-Proto": "https",
+    });
+    const begin = (client: number) => {
+      let resolveResponse!: (status: number) => void;
+      const response = new Promise<number>((resolve) => { resolveResponse = resolve; });
+      const request = http.request({
+        host: "127.0.0.1", port, method: "POST", path: "/api/push/subscriptions", headers: headers(client),
+      }, (incoming) => {
+        incoming.resume();
+        resolveResponse(incoming.statusCode ?? 0);
+      });
+      request.on("error", () => {});
+      const finished = new Promise<void>((resolve) => request.once("finish", resolve));
+      request.end(body);
+      return { request, finished, response };
+    };
+
+    const held = [1, 2, 3, 4].map(begin);
+    await Promise.all(held.map((entry) => entry.finished));
+    await waitFor(() => resolvers.length === 4 && resolvers.every((resolver) => resolver.operations.length === 2));
+    held.forEach((entry) => entry.request.destroy());
+    await waitFor(() => resolvers.every((resolver) => resolver.cancelled));
+
+    const busy = await send(port, {
+      method: "POST", path: "/api/push/subscriptions", headers: headers(5),
+    }, [body]);
+    expect(busy).toMatchObject({ status: 503, body: { error: "push-busy" } });
+    expect(resolvers).toHaveLength(4);
+
+    resolvers[0].settle(0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const stillBusy = await send(port, {
+      method: "POST", path: "/api/push/subscriptions", headers: headers(5),
+    }, [body]);
+    expect(stillBusy).toMatchObject({ status: 503, body: { error: "push-busy" } });
+
+    resolvers[0].settle(1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const replacement = begin(5);
+    const acquired = await Promise.race([
+      waitFor(() => resolvers.length === 5).then(() => true),
+      replacement.response.then(() => false),
+    ]);
+    expect(acquired).toBe(true);
+    await replacement.finished;
+    replacement.request.destroy();
+    await waitFor(() => resolvers[4].cancelled);
+
+    resolvers.slice(1).forEach((resolver) => resolver.settleAll());
+    resolvers[4].settleAll();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 });

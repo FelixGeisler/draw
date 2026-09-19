@@ -103,13 +103,19 @@ export function createPushRouter(push: PushServiceDependency): Router {
     if (!topology.allowed) throw new PushApiError(403, "push-mutation-forbidden");
     const body = await readJson(req);
     const abort = new AbortController();
-    const onAbort = () => abort.abort();
-    req.once("aborted", onAbort);
+    const clientDisconnected = () => req.aborted || req.socket.destroyed || res.destroyed;
+    const onDisconnect = () => {
+      if (!res.writableEnded) abort.abort();
+    };
+    req.once("aborted", onDisconnect);
+    res.once("close", onDisconnect);
+    if (clientDisconnected()) abort.abort();
     try {
       const result = await push.register(body, topology.clientKey, abort.signal);
-      if (!res.headersSent && !req.aborted) res.status(result.created ? 201 : 200).json({ device: result.device });
+      if (!res.headersSent && !clientDisconnected()) res.status(result.created ? 201 : 200).json({ device: result.device });
     } finally {
-      req.off("aborted", onAbort);
+      req.off("aborted", onDisconnect);
+      res.off("close", onDisconnect);
     }
   }));
 
@@ -142,10 +148,7 @@ export function createPushRouter(push: PushServiceDependency): Router {
 
   // Future Push routes inherit no-body framing before the API 404. The only
   // current body-bearing routes are the two exact mutations above.
-  router.use((req, res, next) => {
-    if (req.method === "POST" || req.method === "PUT") return next();
-    noBody(req, res, next);
-  });
+  router.use(noBody);
 
   router.use((error: unknown, req: Request, res: Response, next: (error?: unknown) => void) => {
     if (res.headersSent || req.aborted || error instanceof PushResolutionError && error.kind === "aborted") return;

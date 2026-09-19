@@ -8,7 +8,8 @@ import webPush from "web-push";
 import { createApp } from "../../src/app.js";
 import { PushLifecycle } from "../../src/push/authority.js";
 import { PushService } from "../../src/push/service.js";
-import type { IsolatedResolver } from "../../src/push/resolver.js";
+import type { IsolatedResolver, ResolverFactory } from "../../src/push/resolver.js";
+import { normalizeIp } from "../../src/push/topology.js";
 import { testDb } from "../helpers.js";
 
 const roots: string[] = [];
@@ -29,7 +30,11 @@ describe("Push registration HTTP API", () => {
     database.prepare("UPDATE settings SET value='0' WHERE key='push_hide_details'").run();
   });
 
-  function service(trustProxy: boolean | number | string = false) {
+  function service(
+    trustProxy: boolean | number | string = false,
+    listenerPort = 1234,
+    resolverFactory: ResolverFactory = resolver,
+  ) {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-api-"));
     roots.push(dataDir);
     const lifecycle = new PushLifecycle({
@@ -37,8 +42,8 @@ describe("Push registration HTTP API", () => {
       deleteSubscriptions: () => database.transaction(() => database.prepare("DELETE FROM push_subscriptions").run())(),
     });
     return new PushService({
-      database, lifecycle, resolverFactory: resolver,
-      topology: { listenerHost: "127.0.0.1", listenerPort: 1234, trustProxy },
+      database, lifecycle, resolverFactory,
+      topology: { listenerHost: "127.0.0.1", listenerPort, trustProxy },
       wallNow: () => Date.parse("2026-09-19T12:00:00Z"),
     });
   }
@@ -144,6 +149,36 @@ describe("Push registration HTTP API", () => {
         expect(response.body).toEqual({ error: "push-mutation-forbidden" });
       }
     }
+
+    const trusted = createApp({ trustProxy: 1 }, { push: service(1) });
+    const trustedStatus = await request(trusted).get("/api/push/status").set("Host", "localhost:1234");
+    expect(trustedStatus.body).toMatchObject({ mutationAllowed: false, mutationReason: "secure-transport-required" });
+    expect((await request(trusted).put("/api/push/preferences")
+      .set("Host", "localhost:1234").set("Origin", "http://localhost:1234")
+      .send({ hideDetails: false })).status).toBe(403);
+
+    const defaultPort = createApp({}, { push: service(false, 80) });
+    const omittedPort = await request(defaultPort).put("/api/push/preferences")
+      .set("Host", "localhost").set("Origin", "http://localhost:80").send({ hideDetails: false });
+    expect(omittedPort).toMatchObject({ status: 403, body: { error: "push-mutation-forbidden" } });
+  });
+
+  it("normalizes every IPv4-mapped IPv6 spelling to one client admission bucket", async () => {
+    expect(normalizeIp("::ffff:192.0.2.1")).toBe("192.0.2.1");
+    expect(normalizeIp("::ffff:c000:201")).toBe("192.0.2.1");
+    expect(normalizeIp("::ffff:7f00:1")).toBe("127.0.0.1");
+
+    const app = createApp({ trustProxy: 1 }, { push: service(1) });
+    const register = (client: string, index: number) => request(app).post("/api/push/subscriptions")
+      .set("Host", "draw.example").set("Origin", "https://draw.example")
+      .set("X-Forwarded-For", client).set("X-Forwarded-Proto", "https")
+      .send(payload(`https://push${index}.example/sub`));
+    for (let index = 0; index < 4; index++) {
+      const client = index % 2 === 0 ? "::ffff:192.0.2.1" : "::ffff:c000:201";
+      expect((await register(client, index)).status).toBe(201);
+    }
+    const limited = await register("::ffff:c000:201", 4);
+    expect(limited).toMatchObject({ status: 429, body: { error: "push-rate-limited" } });
   });
 
   it("accepts strict Tailscale/Nginx forwarded HTTPS and rejects missing, unknown, conflicting, or malformed forwarding", async () => {
