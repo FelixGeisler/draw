@@ -114,8 +114,11 @@ describe("core HTTPS Push transport", () => {
     expect(events).toEqual(["agent-destroy"]);
   });
 
-  it("waits for local request/socket closure and distinguishes total timeout from client abort", async () => {
-    const port = await provider((_req, _res) => {});
+  it("waits for an incomplete provider response to close on total timeout and client abort", async () => {
+    const port = await provider((_req, res) => {
+      res.writeHead(200);
+      res.write("incomplete");
+    });
 
     let timedOut = false;
     const timeoutAbort = new AbortController();
@@ -125,7 +128,7 @@ describe("core HTTPS Push transport", () => {
     timedOut = true;
     timeoutAbort.abort();
     expect(await timeout).toBe("timeout");
-    expect(timeoutEvents.sort()).toEqual(["agent-destroy", "request-close", "socket-close"]);
+    expect(timeoutEvents.sort()).toEqual(["agent-destroy", "request-close", "response-close", "socket-close"]);
 
     const clientAbort = new AbortController();
     const abortEvents: string[] = [];
@@ -133,6 +136,6 @@ describe("core HTTPS Push transport", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     clientAbort.abort();
     expect(await aborted).toBe("aborted");
-    expect(abortEvents.sort()).toEqual(["agent-destroy", "request-close", "socket-close"]);
+    expect(abortEvents.sort()).toEqual(["agent-destroy", "request-close", "response-close", "socket-close"]);
   });
 });
