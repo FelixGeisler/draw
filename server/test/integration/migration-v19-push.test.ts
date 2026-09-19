@@ -10,6 +10,36 @@ const v18Schema = currentSchema
   .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
   .replace(/,\r?\n  \('push_hide_details', '0'\)/, "");
 
+const ALTERED_TABLE_CASES: [string, (sql: string) => string, RegExp][] = [
+  [
+    "altered endpoint collation",
+    (sql) =>
+      sql.replace(
+        "endpoint TEXT NOT NULL UNIQUE",
+        "endpoint TEXT COLLATE NOCASE NOT NULL UNIQUE",
+      ),
+    /push_subscriptions DDL/,
+  ],
+  [
+    "altered unique conflict policy",
+    (sql) =>
+      sql.replace(
+        "endpoint TEXT NOT NULL UNIQUE",
+        "endpoint TEXT NOT NULL UNIQUE ON CONFLICT REPLACE",
+      ),
+    /push_subscriptions DDL/,
+  ],
+  [
+    "unexpected foreign key",
+    (sql) =>
+      sql.replace(
+        "last_seen_at TEXT NOT NULL\n  )",
+        "last_seen_at TEXT NOT NULL,\n    FOREIGN KEY (expiration_time) REFERENCES tasks(id)\n  )",
+      ),
+    /push_subscriptions DDL/,
+  ],
+];
+
 describe("schema v19 Push persistence", () => {
   it("atomically migrates a real v18 shape without inferring devices", async () => {
     expect(v18Schema).not.toContain("push_subscriptions");
@@ -82,6 +112,41 @@ describe("schema v19 Push persistence", () => {
           VALUES ('crafted_push_leak', OLD.endpoint || OLD.p256dh || OLD.auth);
         END`);
       expect(() => validateV19Contract(handle)).toThrow(/persistent trigger sqlitexfiltrate/);
+    } finally {
+      handle.close();
+    }
+  });
+
+  it.each(ALTERED_TABLE_CASES)(
+    "rejects %s instead of accepting a column-compatible v19 table",
+    async (_name, alter, error) => {
+      const file = path.join(
+        process.env.DATA_DIR!,
+        `v19-altered-${_name.replaceAll(" ", "-")}.db`,
+      );
+      const handle = new Database(file);
+      try {
+        const { migrateDatabase } = await import("../../src/db.js");
+        const { validateV19Contract, V19_STATEMENTS } = await import("../../src/schemaV19.js");
+        migrateDatabase(handle);
+        handle.exec("DROP TABLE push_subscriptions");
+        handle.exec(alter(V19_STATEMENTS[0]));
+        expect(() => validateV19Contract(handle)).toThrow(error);
+      } finally {
+        handle.close();
+      }
+    },
+  );
+
+  it("rejects an extra v19 index outside the canonical constraint inventory", async () => {
+    const file = path.join(process.env.DATA_DIR!, "v19-extra-index.db");
+    const handle = new Database(file);
+    try {
+      const { migrateDatabase } = await import("../../src/db.js");
+      const { validateV19Contract } = await import("../../src/schemaV19.js");
+      migrateDatabase(handle);
+      handle.exec("CREATE INDEX push_subscriptions_last_seen ON push_subscriptions(last_seen_at)");
+      expect(() => validateV19Contract(handle)).toThrow(/push_subscriptions index inventory/);
     } finally {
       handle.close();
     }

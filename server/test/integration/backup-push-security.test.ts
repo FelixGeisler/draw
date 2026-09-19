@@ -11,6 +11,7 @@ import {
   createBackupArchive,
   readMaterialFilesSafely,
 } from "../../src/services/backupService.js";
+import { validateV19Contract, V19_STATEMENTS } from "../../src/schemaV19.js";
 import {
   AUTHORITY_FILE,
   PushLifecycle,
@@ -46,6 +47,26 @@ function expectNoCanaries(bytes: Buffer) {
   for (const canary of [ENDPOINT_CANARY, P256DH_CANARY, AUTH_CANARY]) {
     expect(bytes.includes(Buffer.from(canary))).toBe(false);
   }
+}
+
+function rewriteArchiveDatabase(
+  archiveBytes: Buffer,
+  fixtureName: string,
+  mutate: (database: Database.Database) => void,
+): Buffer {
+  const archive = new AdmZip(archiveBytes);
+  const fixturePath = path.join(dataDir(), `${fixtureName}.db`);
+  fs.writeFileSync(fixturePath, archive.getEntry("app.db")!.getData());
+  const database = new Database(fixturePath);
+  try {
+    mutate(database);
+  } finally {
+    database.close();
+  }
+  archive.deleteFile("app.db");
+  archive.addFile("app.db", fs.readFileSync(fixturePath));
+  fs.rmSync(fixturePath, { force: true });
+  return archive.toBuffer();
 }
 
 let app: express.Express;
@@ -153,6 +174,104 @@ describe("credential-free backup artifacts", () => {
     } finally {
       fs.rmSync(subsequentExport, { force: true });
     }
+  });
+
+  it("rejects every behavior-affecting v19 DDL deviation before scrub or swap", async () => {
+    const database = await testDb();
+    database.prepare("DELETE FROM push_subscriptions").run();
+    const cleanArchivePath = createBackupArchive();
+    const cleanArchiveBytes = fs.readFileSync(cleanArchivePath);
+    fs.rmSync(cleanArchivePath, { force: true });
+    const bakPath = path.join(dataDir(), "app.db.bak");
+    fs.rmSync(bakPath, { force: true });
+
+    const cases: [string, (handle: Database.Database) => void][] = [
+      [
+        "collation",
+        (handle) => {
+          handle.exec("DROP TABLE push_subscriptions");
+          handle.exec(
+            V19_STATEMENTS[0].replace(
+              "endpoint TEXT NOT NULL UNIQUE",
+              "endpoint TEXT COLLATE NOCASE NOT NULL UNIQUE",
+            ),
+          );
+        },
+      ],
+      [
+        "conflict-policy",
+        (handle) => {
+          handle.exec("DROP TABLE push_subscriptions");
+          handle.exec(
+            V19_STATEMENTS[0].replace(
+              "endpoint TEXT NOT NULL UNIQUE",
+              "endpoint TEXT NOT NULL UNIQUE ON CONFLICT REPLACE",
+            ),
+          );
+        },
+      ],
+      [
+        "foreign-key",
+        (handle) => {
+          handle.exec("DROP TABLE push_subscriptions");
+          handle.exec(
+            V19_STATEMENTS[0].replace(
+              "last_seen_at TEXT NOT NULL\n  )",
+              "last_seen_at TEXT NOT NULL,\n    FOREIGN KEY (expiration_time) REFERENCES tasks(id)\n  )",
+            ),
+          );
+        },
+      ],
+      [
+        "extra-index",
+        (handle) => {
+          handle.exec(
+            "CREATE INDEX push_subscriptions_last_seen ON push_subscriptions(last_seen_at)",
+          );
+        },
+      ],
+    ];
+
+    for (const [name, mutate] of cases) {
+      const bytes = rewriteArchiveDatabase(cleanArchiveBytes, `altered-v19-${name}`, (handle) => {
+        mutate(handle);
+        insertPushRow(handle, `-${name}`);
+      });
+      await request(app)
+        .post("/api/backup/import")
+        .attach("file", bytes, `altered-v19-${name}.zip`)
+        .expect(400);
+
+      const live = await testDb();
+      expect(live.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
+      expect(fs.existsSync(bakPath)).toBe(false);
+    }
+  });
+
+  it("continues to import canonical fresh-v19 and real-v18-migrated schemas", async () => {
+    const freshArchivePath = createBackupArchive();
+    const freshBytes = fs.readFileSync(freshArchivePath);
+    fs.rmSync(freshArchivePath, { force: true });
+
+    await request(app)
+      .post("/api/backup/import")
+      .attach("file", freshBytes, "canonical-fresh-v19.zip")
+      .expect(200);
+    const fresh = await testDb();
+    expect(() => validateV19Contract(fresh)).not.toThrow();
+
+    const v18Bytes = rewriteArchiveDatabase(freshBytes, "canonical-v18", (handle) => {
+      handle.exec("DROP TABLE push_subscriptions");
+      handle.prepare("DELETE FROM settings WHERE key = 'push_hide_details'").run();
+      handle.pragma("user_version = 18");
+    });
+    await request(app)
+      .post("/api/backup/import")
+      .attach("file", v18Bytes, "canonical-v18.zip")
+      .expect(200);
+    const migrated = await testDb();
+    expect(migrated.pragma("user_version", { simple: true })).toBe(19);
+    expect(() => validateV19Contract(migrated)).not.toThrow();
   });
 
   it("sanitizes crafted imports and the app.db.bak safety copy physically", async () => {
