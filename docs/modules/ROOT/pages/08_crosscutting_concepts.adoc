@@ -345,7 +345,9 @@ same migrations against its staged copy before any live swap, then validates
 the complete v18 and v19 runtime contracts. For v19 this includes the exact
 Push table/default and every persistent trigger or view before any credential
 row is deleted; unapproved executable schema code is rejected rather than run
-during sanitization.
+during sanitization. Stage 1B.1 reuses those exact tables and setting without a
+schema change: registration upserts at most 16 rows transactionally and the
+shared Hide-details preference remains the closed `0|1` value.
 
 == 8.9 Backup and restore
 
@@ -397,6 +399,11 @@ re-uploads the PDF (which the archive does carry) transparently.
 
 Immediately before the existing swap, restore prepares fresh Push authority,
 invalidates volatile Push work, and durably creates `push-restore-pending`.
+Stage 1B.1 revoke-all uses the same recovery shape with
+`push-revoke-pending`: candidate and marker precede the transactional row
+clear; post-clear failure restores no credential and remains unavailable until
+boot recovery. Hide-details commits before advancing the volatile generation
+and does not rotate VAPID.
 A caught pre-commit failure preserves the old database and authority, removes
 the marker when that can be proven, resumes the old lifecycle, and returns the
 existing non-2xx error. The `app.db` rename remains the commit point. After it,
@@ -404,7 +411,9 @@ Push-finalization failure never rolls back restored data or reconstructs
 credentials: HTTP 200 adds only `pushRecoveryPending:true`, Push remains
 unavailable, and marked boot recovery clears rows and rotates authority before
 removing the marker. Normal success retains the generic
-`{tasks,goals,materials}` response (ADR-26/72).
+`{tasks,goals,materials}` response (ADR-26/72). Any valid reset, restore, or
+revoke marker subset causes one boot clear/rotation and marker removal;
+malformed marker objects remain fail-closed.
 
 *Scheduled backups* (#194, xref:09_architecture_decisions.adoc[ADR-52]) reuse
 that same credential-free export. When `BACKUP_INTERVAL_HOURS` is set

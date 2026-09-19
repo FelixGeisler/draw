@@ -103,15 +103,23 @@ headless Pi keeps backing itself up with the process it already runs. Restore is
 the existing `POST /api/backup/import` (section 8.9); the archives are ordinary
 credential-free Draw application backups. Unset/0 (the default) starts nothing.
 
-Production alone creates the Stage 1A Web Push lifecycle (ADR-72). Its durable
-state is `DATA_DIR/push-authority.json` plus the normally absent
-`push-authority-reset-pending` / `push-restore-pending` recovery markers. These
-files are never archive inputs. Manual/scheduled Draw archives, imported live
-DBs and `app.db.bak` physically exclude notification device credentials and
-require every device to re-enable after restore. A privileged whole-`DATA_DIR`
-or volume snapshot remains permitted for disaster recovery but contains full
-state, including authority and possibly markers; use the application backup
-when credential-free portability is required.
+Production alone creates the Stage 1B.1 Web Push lifecycle, registration
+service, process-wide admission guard, and isolated Node DNS resolver (ADR-72).
+`prod.ts` resolves host, port, password, and proxy trust once and reuses those
+values for both the listener and Push topology checks; default/dev app
+construction remains disabled and network-inert. Durable state is
+`DATA_DIR/push-authority.json` plus normally absent
+`push-authority-reset-pending`, `push-restore-pending`, and
+`push-revoke-pending` recovery markers. The registration/status/preferences/
+device-delete/revoke API is implemented but not field-verified. It performs no
+provider HTTPS request: the manual synthetic sender remains Stage 1B.2.
+
+These files are never archive inputs. Manual/scheduled Draw archives, imported
+live DBs and `app.db.bak` physically exclude notification device credentials
+and require every device to re-enable after restore. A privileged
+whole-`DATA_DIR` or volume snapshot remains permitted for disaster recovery
+but contains full state, including authority and possibly markers; use the
+application backup when credential-free portability is required.
 
 [plantuml,deployment-prod,svg]
 ....
@@ -131,7 +139,7 @@ node "Host (PC, or the #191 container — see 7.3)" as host {
   artifact "client/dist\n(vite build, gitignored)" as dist
   folder "server/data/" as data {
     database "app.db\nschema v19" as db
-    artifact "push-authority.json\nreset/restore markers\n(production only)" as pushstate
+    artifact "push-authority.json\nreset/restore/revoke markers\n(production only)" as pushstate
   }
 }
 cloud "api.anthropic.com" as claude
@@ -845,7 +853,7 @@ release endpoint — tests and proxied networks)
 |Everything under `DATA_DIR` (dev/production default `server/data/`, gitignored;
 container `/data` on the `draw-data` named volume): SQLite `app.db` (WAL),
 `files/` goal materials, and in production `push-authority.json` plus normally
-absent reset/restore markers. ADR-26 manual and ADR-52 scheduled application
+absent reset/restore/revoke markers. ADR-26 manual and ADR-52 scheduled application
 archives physically exclude Push credentials and are recommended for
 credential-free portability. Copying the folder or snapshotting the volume is
 a permitted privileged full-state backup containing authority/possibly markers,
@@ -866,5 +874,7 @@ the default, means zero outbound calls from the notification path) —
 `api.github.com`, one GET per `UPDATE_CHECK_INTERVAL_HOURS` (default daily)
 for the release check (#247/ADR-70; the retained `update_check_enabled`
 setting or `UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls,
-`UPDATE_CHECK_URL` redirects it) — and the user-configured update trigger URL,
-one POST per explicit **Update** action, never automatically.
+`UPDATE_CHECK_URL` redirects it) — bounded A+AAAA DNS only when an accepted
+Push enrollment validates its submitted HTTPS endpoint (no provider request in
+Stage 1B.1) — and the user-configured update trigger URL, one POST per explicit
+**Update** action, never automatically.

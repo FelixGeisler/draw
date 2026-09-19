@@ -2919,11 +2919,12 @@ app-shell service worker*, registered in production builds only.
 LAN, so installability costs a manifest and a worker — no second build
 pipeline, no signing keys, no store review, no divergent codebase. A native or
 Capacitor shell is still unnecessary: standards Web Push is now the approved
-PWA path (ADR-72), including desktop and feature-detected iPhone support. Only
-ADR-72 Stage 1A authority/schema/recovery/backup foundations are implemented;
-subscription APIs, browser enrollment/worker behavior and scheduling remain
-planned. iOS remains progressive enhancement and never gates Android-first
-delivery.
+PWA path (ADR-72), including desktop and feature-detected iPhone support.
+ADR-72 Stage 1A authority/schema/recovery/backup foundations and Stage 1B.1
+status, registration, preferences, deletion, and revoke APIs are implemented.
+The Stage 1B.2 provider sender, browser enrollment/worker behavior, and
+scheduling remain planned. iOS remains progressive enhancement and never gates
+Android-first delivery.
 * *Adaptation, not redesign.* The card face's own language — full-bleed art under
 its legibility scrim, the category pill, the effort chip, the impact stars, the
 holo shimmer on a drawn 5★ (ADR-33, which superseded ADR-31's literal TCG frame;
@@ -4013,8 +4014,10 @@ marks immediately before swap. Before commit, caught failure preserves old
 state and removes the marker; after the `app.db` rename, finalization failure
 keeps restored data and the marker and returns committed
 `pushRecoveryPending:true`. Normal success remains `{tasks,goals,materials}`.
-No Stage 1B API/provider sender, Stage 1C browser/worker behavior, or Stage 2
-scheduler exists in Stage 1A. This implementation is not field-verified.
+Stage 1A introduced no API/provider sender, browser/worker behavior, or
+scheduler. Stage 1B.1 now implements the registration half described below;
+the provider sender, Stage 1C, and Stage 2 remain planned. The implemented
+capability is not field-verified.
 
 *Dependency and supply-chain decision:* runtime `web-push` is pinned exactly to
 3.6.7 and type-only `@types/web-push` to 3.6.4 in the committed lockfile.
@@ -4022,13 +4025,51 @@ scheduler exists in Stage 1A. This implementation is not field-verified.
 Stage 1A and later standards request construction. No remote executable,
 provider credential or undeclared transitive import is introduced.
 
+*Implemented amendment — Stage 1B.1 (#339):* the complete `/api/push`
+namespace bypasses the general JSON parser and remains below ADR-50's unchanged
+gate. Its own identity-only JSON parser caps raw bodies at 8,192 bytes and
+normalizes framing/media/JSON failures to closed Push errors. Production
+provides exact status, enrollment, device deletion, revoke-all, and shared
+Hide-details APIs. Status redacts endpoint, keys, private authority, work
+generation, password state, and provider data. Registration preserves a
+same-endpoint identity, supports transactional replacement, caps devices at
+16, and validates finite endpoint/key/expiry input.
+
+Mutations require direct configured loopback HTTP or strict direct/trusted-
+proxy HTTPS topology, exact Origin, and allowed `Sec-Fetch-Site`. Forwarded
+HTTPS requires one valid For chain and exact lowercase Proto; Forwarded Host is
+optional but must equal Host when present, while one valid Real-IP is optional
+and never trusted or admission-relevant. Unknown, duplicate, ambiguous, or
+untrusted forwarding fails closed. Passwordless reachable HTTPS remains an
+owner-accepted configuration and is not converted into `password-required`.
+
+Enrollment uses a process-wide no-queue four-permit semaphore, rolling
+4/client and 16/global 60-second deques, and the internal 64-client bucket
+invariant. Every accepted attempt owns one Node core Resolver, starts at most
+A+AAAA, cancels only that resolver at the two-second deadline/client abort, and
+awaits both settlements before releasing its permit. Whole answer sets are
+validated before selecting the first resolver-order address; no selected IP is
+stored. The IPv6 exclusions add `2001:2::/48`, `2001:10::/28`,
+`2001:20::/28`, and `3fff::/20` to the fixed matrix below. Runtime never fetches
+the registry.
+
+Revoke-all adds empty regular `push-revoke-pending`, advances volatile work,
+transactionally clears rows, installs prepared authority, and removes the
+marker. Any valid reset/restore/revoke marker subset performs one boot clear
+and rotation; malformed markers fail closed. Hide-details advances volatile
+work after its DB commit without rotating VAPID. `prod.ts` alone assembles the
+real service/resolver from one resolved host/port/password/trust set; defaults
+and tests remain network-inert. Manual provider HTTPS/test API is Stage 1B.2,
+not this amendment; browser UI/worker, deadline sender, and scheduler remain
+planned. The registration capability is implemented but not field-verified.
+
 *Cross-links:* ADR-49 owns the production entry, ADR-50 the unchanged access
 and effective-password resolution, ADR-55 secure proxy deployment, ADR-67 ntfy,
 and ADR-26/52 portable backup semantics. Privileged whole-volume snapshots may
 contain authority and markers and are not equivalent to credential-free Draw
 application backups.
 
-=== Normative planned downstream contract (not implemented by Stage 1A)
+=== Ordered Push delivery contract
 
 The following appendix is normative architecture for the ordered successor
 issues. It is recorded verbatim so later implementation does not depend on a
@@ -4037,17 +4078,20 @@ movable planning artifact. Its Markdown heading notation is retained as text.
 ....
 This normative planned architecture must be recorded by Stage 1A but does not expand its implementation. Top-level approved access/effective-password/backup/retry/privacy decisions and authority apply without repetition. The merged Stage 1A ADR becomes the anchor for downstream issues. Shared boundaries: Android-first standards Web Push in the PWA, including desktop; iPhone only through the same feature-detected path and never a gate. No native/iOS workaround, hosted platform, email/SMS/inbox/digest/private service, generic event bus, or ntfy change. `prod.ts` alone constructs real authority/resolver/transport/scheduler through `AppDependencies`; defaults/tests use fakes and no real network. Use v19 subscriptions/settings/authority/recovery/sanitization. Return no endpoint, keys, private authority, generation, password state, or provider text. Invalidation committed before final synchronous check prevents provider-request creation; initiated request cannot be recalled.
 
-### Stage 1B — subscription API and bounded synthetic sender
+### Stage 1B — registration (1B.1 implemented) and bounded synthetic sender (1B.2 planned)
 
-Starts only after 1A merges. Adds API and bounded DNS-pinned one-attempt test sender; no browser UI/worker, deadline producer/domain read, or scheduler.
+Stage 1B.1 implements status, registration, preferences, deletion, revoke,
+topology, enrollment admission, and bounded DNS. Stage 1B.2 will add the manual
+DNS-pinned one-attempt test sender. Neither unit adds browser UI/worker,
+deadline producer/domain read, or scheduler.
 
 #### Access, origin, proxy and client identity
 
-All `/api/push/*` remains under unchanged ADR-50: with effective password, valid session cookie or `x-draw-password`; without one, no Push-specific auth. Every mutation requires allowed transport, exact same origin, and `Sec-Fetch-Site` absent/`same-origin`/`none`. JSON mutations require `Content-Type: application/json`, ≤8,192 raw bytes on Push routes, and no unknown keys at any level; no-body routes reject bodies. Other parser limits stay unchanged.
+All `/api/push/*` remains under unchanged ADR-50: with effective password, valid session cookie or `x-draw-password`; without one, no Push-specific auth. Every mutation requires allowed transport, exact same origin, and `Sec-Fetch-Site` absent/`same-origin`/`none`. JSON mutations require `Content-Type: application/json`, ≤8,192 raw identity bytes on Push routes, and no unknown keys at any level; no-body routes reject bodies. The whole namespace bypasses general parsing until after ADR-50 authentication; Push rejects non-identity encoding without inflation and emits closed JSON errors. Other parser limits and login/non-Push ordering stay unchanged.
 
 Direct-loopback HTTP mutation requires all: production configured loopback listener; `TRUST_PROXY` off; `req.socket.remoteAddress`, normalized as an IP with IPv4-mapped IPv6 collapsed, is loopback; no `Forwarded`, `X-Forwarded-*`, or `X-Real-IP`; one strict Host with explicit configured port and host exactly `localhost`, canonical IPv4 loopback, or bracketed `::1`; Origin exactly `http://<same normalized host bytes>:<port>`. Strict parsing plus `net.isIP`/bytes rejects other DNS/trailing dot/zone/userinfo/omitted or wrong port/noncanonical IP/multiple or comma Host/HTTPS Origin/cross-site metadata. Never establish loopback via `/^127\./`, `req.ip`, or forwarding. Cover allowed hosts and IPv4-mapped loopback socket; reject attacker hostname rebound to loopback. Host defense applies with/without password.
 
-Secure direct/proxied mutation requires `req.secure` under existing Express direct-TLS/trust-proxy semantics and Origin exactly validated external `https` origin. Strictly parse one authority without userinfo/path/fragment/ambiguity: Host when unforwarded, single `X-Forwarded-Host` when forwarded; forwarded `X-Forwarded-Proto` must be single exact `https`. Reject `Forwarded`, `X-Real-IP`, conflicting Host/forwarded authority, separate `X-Forwarded-Port`, unknown `X-Forwarded-*`, malformed forwarding and cross-site metadata. These are transport/origin, not auth.
+Secure direct/proxied mutation requires `req.secure` under existing Express direct-TLS/trust-proxy semantics and Origin exactly validated external `https` origin. Strictly parse one authority without userinfo/path/fragment/ambiguity. Host is authoritative; a forwarded `X-Forwarded-Host` is optional and must normalize exactly to Host/effective port. Forwarded `X-Forwarded-Proto` must be single exact `https`; one valid `X-Real-IP` is optional but ignored. Reject `Forwarded`, conflicting authority, separate `X-Forwarded-Port`, unknown `X-Forwarded-*`, malformed forwarding and cross-site metadata. These are transport/origin, not auth.
 
 Do not change `resolveTrustProxy()`, add Push allowlist, or reject existing values. Supported positives include bare-metal proxy with `TRUST_PROXY=loopback` and loopback peer, and ADR-55 container/Tailscale Serve with `TRUST_PROXY=1` plus `127.0.0.1:3001:3001`. Other configured values keep documented Draw/Express semantics/risks. Failure to become secure fails transport, never demands password.
 
@@ -4064,26 +4108,31 @@ Admission client = normalized direct socket IP on direct-loopback; normalized `r
 - `POST /api/push/subscriptions`: only `{subscription:{endpoint,expirationTime,keys:{p256dh,auth}},replaceDeviceId?}`. Validate/resolve before transaction; then delete handled row if present, endpoint-upsert, enforce cap, return `{device:{id,createdAt,lastSeenAt}}`, 201 new/200 same endpoint. Same endpoint keeps id. Valid replace allows rotation without extra slot; stale/unknown is no-op; transaction failure retains old row; update `lastSeenAt` only on success.
 - `DELETE /api/push/subscriptions/:deviceId`: UUIDv4, idempotent 204, no authority rotation.
 - `DELETE /api/push/subscriptions`: revoke-all prepares validated authority; durably creates `$DATA_DIR/push-revoke-pending`; invalidates work; transactionally deletes all rows; installs authority; removes marker; returns 204 (also empty). Pre-delete failure preserves state. Post-delete failure returns `503 {"error":"push-recovery-pending"}`, restores no rows, and remains unavailable until boot clear/rotate/remove.
-- `POST /api/push/subscriptions/:deviceId/test`: no body; only that device; 204 only provider 2xx. Initial missing/expired 404/410; provider 404/410 deletes and returns 410; timeout 504; other DNS/TLS/network/provider failure 502; bounded allowlisted errors.
+- **Planned Stage 1B.2:** `POST /api/push/subscriptions/:deviceId/test`: no body; only that device; 204 only provider 2xx. Initial missing/expired 404/410; provider 404/410 deletes and returns 410; timeout 504; other DNS/TLS/network/provider failure 502; bounded allowlisted errors.
 - `PUT /api/push/preferences`: exactly `{hideDetails:boolean}`; atomic `push_hide_details`, increment volatile generation, return `{hideDetails}`. Future deadline sends use it; test remains generic.
 
 A 17th distinct endpoint returns 409 `{"error":"push-device-limit"}`; no dormant/enabled row. Endpoint: ≤2,048 UTF-8 bytes; absolute `https:`; no credentials/fragment/IP literal; explicit port only 443; query allowed; normalized DNS hostname ≤253 ASCII bytes. `p256dh`: canonical unpadded base64url, 87 chars→65-byte uncompressed P-256 beginning `0x04`; `auth`: 22 chars→16 bytes. `expirationTime`: null or nonnegative safe integer ≤`8,640,000,000,000,000`; reject expired enrollment and delete before send if expired. IDs UUIDv4; max 16 rows. Validation 400; redacted resolution 502/504; never log endpoint.
 
 #### Admission and transport
 
-One process semaphore allows at most 4 concurrent enrollment DNS resolutions plus manual tests, no queue; excess `503 {"error":"push-busy"}`. Enrollment: 4 accepted/effective client/rolling 60s and 16 global/60s. Test: one in-flight/device, one accepted/device/10s, 16 global/60s. Check semaphore then atomically all rolling limits. Accepted DNS/test consumes allowance even if later validation/DNS/TLS/timeout/provider/abort fails; shape/auth/origin failures do not. Rate excess: `429 {"error":"push-rate-limited"}`, integer `Retry-After` = ceiling longest applicable remainder, clamped 1–60; no retry.
+One process semaphore allows at most 4 concurrent enrollment DNS resolutions and later Stage 1B.2 manual tests, no queue; excess `503 {"error":"push-busy"}`. Enrollment: 4 accepted/effective client/rolling 60s and 16 global/60s. Planned Stage 1B.2 test admission: one in-flight/device, one accepted/device/10s, 16 global/60s. Check semaphore then atomically all rolling limits. Accepted DNS/test consumes allowance even if later validation/DNS/TLS/timeout/provider/abort fails; shape/auth/origin failures do not. Rate excess: `429 {"error":"push-rate-limited"}`, integer `Retry-After` = ceiling longest applicable remainder, clamped 1–60; no retry.
 
 Use injected monotonic clock/timestamp deques; prune before decision. Delete empty client bucket when last 60s timestamp expires. Maximum 64 nonempty client enrollment buckets; new key at capacity is `503 {"error":"push-busy"}`, never eviction/merge. Device buckets bounded by 16 rows and removed with row or after last 10s timestamp; global buckets fixed. Release semaphore/in-flight flag in `finally` for all failure, timeout, request/response close, and client-abort paths; abort resolver/request where possible, queue nothing, retain timestamps. Initiated provider request remains non-recallable. These are resource guards, not throughput/latency/delivery promises.
 
 Validate/resolve at enrollment and immediately before test, all A/AAAA through injected resolver within 2s. No answer or any non-global member rejects whole set. Select one and pin in one-request `https.Agent({keepAlive:false,lookup})`, preserving hostname for Host/SNI/certificate.
 
-Using `net.isIP` and byte/CIDR checks, reject IPv4 `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`, `224.0.0.0/4`, `240.0.0.0/4`. IPv6 must be in `2000::/3`, excluding `2001::/32`, `2001:db8::/32`, `2002::/16`; explicitly reject `::/96`, `::1/128`, `::ffff:0:0/96`, `64:ff9b::/96`, `64:ff9b:1::/48`, `fe80::/10`, `fc00::/7`, `ff00::/8`. Decode embedded IPv4 and apply IPv4 policy. Test below/inside/above every range and mixed answers.
+Using `net.isIP` and byte/CIDR checks, reject IPv4 `0.0.0.0/8`, `10.0.0.0/8`, `100.64.0.0/10`, `127.0.0.0/8`, `169.254.0.0/16`, `172.16.0.0/12`, `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`, `192.168.0.0/16`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`, `224.0.0.0/4`, `240.0.0.0/4`. IPv6 must be in `2000::/3`, excluding `2001::/32`, `2001:2::/48`, `2001:10::/28`, `2001:20::/28`, `2001:db8::/32`, `2002::/16`, `3fff::/20`; explicitly reject `::/96`, `::1/128`, `::ffff:0:0/96`, `64:ff9b::/96`, `64:ff9b:1::/48`, `fe80::/10`, `fc00::/7`, `ff00::/8`. Decode embedded IPv4 and apply IPv4 policy. Test below/inside/above every range and mixed answers.
 
-Use Stage 1A `web-push@3.6.7` `generateRequestDetails()` with `aes128gcm`, TTL 0, normal urgency, fixed subject/key, topic `draw-push-test`. Clear payload exactly `{v:1,kind:"test"}`, ≤3,072 UTF-8 bytes; encrypted body ≤4,096. One POST via core `https.request`; ignore proxy env, pass no proxy, never follow `Location` (all 3xx fail). DNS+request total ≤5s. Drain at most 4,096 response bytes and destroy at either bound. No SQLite transaction spans network. No retry/backoff/`Retry-After` retry/queue. 2xx succeeds; only 404/410 deletes; all else consumes attempt and retains row.
+**Planned Stage 1B.2:** use Stage 1A `web-push@3.6.7` `generateRequestDetails()` with `aes128gcm`, TTL 0, normal urgency, fixed subject/key, topic `draw-push-test`. Clear payload exactly `{v:1,kind:"test"}`, ≤3,072 UTF-8 bytes; encrypted body ≤4,096. One POST via core `https.request`; ignore proxy env, pass no proxy, never follow `Location` (all 3xx fail). DNS+request total ≤5s. Drain at most 4,096 response bytes and destroy at either bound. No SQLite transaction spans network. No retry/backoff/`Retry-After` retry/queue. 2xx succeeds; only 404/410 deletes; all else consumes attempt and retains row.
 
-Each test captures generation. After resolution and immediately before request construction/initiation, synchronously recheck generation, authority availability, row/expiry and current settings, with no `await` before creation. Any failure—including Hide-details, revoke, password change, committed import, authority/generation/row/expiry—wins races and returns `409 {"error":"push-test-cancelled"}`, creating no HTTPS request. Initial pre-resolution missing/expired retains 404/410. Logs only opaque device id, status class, bounded reason; never endpoint/path/query, keys, authority/password, payload, provider body, destination-bearing exception, or user data.
+**Planned Stage 1B.2:** each test captures generation. After resolution and immediately before request construction/initiation, synchronously recheck generation, authority availability, row/expiry and current settings, with no `await` before creation. Any failure—including Hide-details, revoke, password change, committed import, authority/generation/row/expiry—wins races and returns `409 {"error":"push-test-cancelled"}`, creating no HTTPS request. Initial pre-resolution missing/expired retains 404/410. Logs only opaque device id, status class, bounded reason; never endpoint/path/query, keys, authority/password, payload, provider body, destination-bearing exception, or user data.
 
-Automated Stage 1B evidence covers exact auth/passwordless/topology positives and negatives; status redaction; bodies/input/device semantics; rates/bounds/cleanup/abort; every IP boundary/pinning/SNI/proxy/redirect/timeout/status; final-check races; revoke recovery; current dependency/license/advisory state; and zero real network.
+Automated Stage 1B.1 evidence covers exact auth/passwordless/topology positives
+and negatives, status redaction, body/input/device semantics,
+rates/bounds/cancellation settlement, every enrollment IP boundary, revoke
+recovery, real owned listeners with fake DNS, and zero real DNS/provider work.
+Stage 1B.2 must add pinning/SNI/proxy/redirect/provider/timeout/status and final-
+check race evidence before the sender can be called implemented.
 
 ### Stage 1C — browser enrollment, receive/click and durable landings
 

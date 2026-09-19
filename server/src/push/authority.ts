@@ -8,6 +8,7 @@ export const VAPID_SUBJECT = "https://github.com/FelixGeisler/draw";
 export const AUTHORITY_FILE = "push-authority.json";
 export const RESET_MARKER = "push-authority-reset-pending";
 export const RESTORE_MARKER = "push-restore-pending";
+export const REVOKE_MARKER = "push-revoke-pending";
 const MAX_AUTHORITY_BYTES = 8_192;
 const SCRYPT_PARAMS = { N: 16_384, r: 8, p: 1, maxmem: 67_108_864 } as const;
 
@@ -309,6 +310,8 @@ export class PushLifecycle implements PushDependency {
   private readonly authorityPath: string;
   private readonly resetMarkerPath: string;
   private readonly restoreMarkerPath: string;
+  private readonly revokeMarkerPath: string;
+  private workVersion = 0;
   private state: PushSnapshot = {
     available: false,
     reason: "authority-unavailable",
@@ -323,6 +326,7 @@ export class PushLifecycle implements PushDependency {
     this.authorityPath = path.join(options.dataDir, AUTHORITY_FILE);
     this.resetMarkerPath = path.join(options.dataDir, RESET_MARKER);
     this.restoreMarkerPath = path.join(options.dataDir, RESTORE_MARKER);
+    this.revokeMarkerPath = path.join(options.dataDir, REVOKE_MARKER);
     this.boot();
   }
 
@@ -336,6 +340,14 @@ export class PushLifecycle implements PushDependency {
 
   invalidate(): void {
     this.state = { available: false, reason: "recovery-pending", publicVapidKey: null, generation: null };
+  }
+
+  currentWorkGeneration(): number {
+    return this.workVersion;
+  }
+
+  advanceWorkGeneration(): void {
+    this.workVersion += 1;
   }
 
   private candidate(): AuthorityDocument {
@@ -373,6 +385,7 @@ export class PushLifecycle implements PushDependency {
 
   private recover(markers: string[]): void {
     const candidate = this.candidate();
+    this.advanceWorkGeneration();
     this.invalidate();
     this.options.fault?.("recovery-after-invalidate");
     this.clearSubscriptions();
@@ -386,13 +399,15 @@ export class PushLifecycle implements PushDependency {
   private boot(): void {
     const reset = markerState(this.resetMarkerPath);
     const restore = markerState(this.restoreMarkerPath);
-    if (reset === "invalid" || restore === "invalid") {
+    const revoke = markerState(this.revokeMarkerPath);
+    if (reset === "invalid" || restore === "invalid" || revoke === "invalid") {
       this.state = { available: false, reason: "recovery-pending", publicVapidKey: null, generation: null };
       return;
     }
     const markers = [
       ...(reset === "valid" ? [this.resetMarkerPath] : []),
       ...(restore === "valid" ? [this.restoreMarkerPath] : []),
+      ...(revoke === "valid" ? [this.revokeMarkerPath] : []),
     ];
     if (markers.length > 0) {
       try {
@@ -441,6 +456,7 @@ export class PushLifecycle implements PushDependency {
 
   reset(): void {
     const candidate = this.candidate();
+    this.advanceWorkGeneration();
     try {
       createMarker(this.resetMarkerPath, this.options.fault);
       this.options.fault?.("reset-after-marker");
@@ -458,13 +474,51 @@ export class PushLifecycle implements PushDependency {
     }
   }
 
+  revokeAll(): void {
+    const candidate = this.candidate();
+    const previous = this.snapshot();
+    let deleted = false;
+    createMarker(this.revokeMarkerPath, this.options.fault);
+    try {
+      this.options.fault?.("revoke-after-marker");
+      this.advanceWorkGeneration();
+      this.invalidate();
+      this.options.fault?.("revoke-after-invalidate");
+      this.clearSubscriptions();
+      deleted = true;
+      this.options.fault?.("revoke-after-delete");
+      this.options.fault?.("revoke-install");
+      this.install(candidate);
+      this.options.fault?.("revoke-after-install");
+      removeMarker(this.revokeMarkerPath, this.options.fault);
+      this.makeAvailable(candidate);
+    } catch (error) {
+      if (!deleted) {
+        try {
+          removeMarker(this.revokeMarkerPath, this.options.fault);
+          this.state = previous;
+        } catch {
+          this.invalidate();
+        }
+      } else {
+        this.invalidate();
+      }
+      throw error;
+    }
+  }
+
   beginRestore(): void {
-    if (markerState(this.resetMarkerPath) !== "absent" || markerState(this.restoreMarkerPath) !== "absent") {
+    if (
+      markerState(this.resetMarkerPath) !== "absent" ||
+      markerState(this.restoreMarkerPath) !== "absent" ||
+      markerState(this.revokeMarkerPath) !== "absent"
+    ) {
       throw new Error("Push recovery is already pending");
     }
     this.pendingCandidate = this.candidate();
     this.preRestoreState = this.snapshot();
     try {
+      this.advanceWorkGeneration();
       this.invalidate();
       this.options.fault?.("restore-after-invalidate");
       createMarker(this.restoreMarkerPath, this.options.fault);
