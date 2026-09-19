@@ -79,6 +79,30 @@ function validDnsHostname(value: string): boolean {
   );
 }
 
+function hasCredentialOrFragmentDelimiter(value: string): boolean {
+  // Match the preprocessing performed by the WHATWG basic URL parser before
+  // locating syntax: trim leading/trailing C0 controls and space, and remove
+  // ASCII tab/newline characters anywhere in the input.
+  const input = value
+    .replace(/^[\u0000-\u0020]+|[\u0000-\u0020]+$/g, "")
+    .replace(/[\u0009\u000a\u000d]/g, "");
+  if (input.includes("#")) return true;
+
+  const schemeEnd = input.indexOf(":");
+  if (schemeEnd < 0) return false;
+  let authorityStart = schemeEnd + 1;
+  // Special-scheme parsing accepts missing, repeated, and backslash authority
+  // separators. Skip the same variants rather than assuming "https://".
+  while (input[authorityStart] === "/" || input[authorityStart] === "\\") authorityStart++;
+  let authorityEnd = authorityStart;
+  while (
+    authorityEnd < input.length &&
+    input[authorityEnd] !== "/" && input[authorityEnd] !== "\\" &&
+    input[authorityEnd] !== "?" && input[authorityEnd] !== "#"
+  ) authorityEnd++;
+  return input.slice(authorityStart, authorityEnd).includes("@");
+}
+
 export function validateRegistration(value: unknown, wallNow: number): ValidSubscription {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new PushApiError(400, "invalid-push-request");
   const root = value as Record<string, unknown>;
@@ -95,6 +119,7 @@ export function validateRegistration(value: unknown, wallNow: number): ValidSubs
   let endpoint: URL;
   try { endpoint = new URL(subscription.endpoint); } catch { throw new PushApiError(400, "invalid-push-request"); }
   if (
+    hasCredentialOrFragmentDelimiter(subscription.endpoint) ||
     endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.hash || endpoint.port !== "" ||
     endpoint.hostname.startsWith("[") || net.isIP(endpoint.hostname) !== 0 ||
     !validDnsHostname(endpoint.hostname) || endpoint.hostname !== endpoint.hostname.toLowerCase()

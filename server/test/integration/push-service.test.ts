@@ -59,7 +59,7 @@ describe("Push registration service", () => {
     ]) expect(() => validateRegistration(value, now)).toThrow(PushApiError);
   });
 
-  it("enforces the parsed URL's canonical port after every leading ASCII C0/control normalization", () => {
+  it("rejects canonical port, credential, and fragment syntax after WHATWG preprocessing", () => {
     const now = 1_000;
     for (let codePoint = 0; codePoint <= 0x20; codePoint++) {
       const prefix = String.fromCharCode(codePoint);
@@ -68,9 +68,40 @@ describe("Push registration service", () => {
         `leading U+${codePoint.toString(16).padStart(4, "0")}`,
       ).toThrow(PushApiError);
     }
-    expect(() => validateRegistration(registration("\u0000 \t\nhttps://push.example:8443/path"), now)).toThrow(PushApiError);
-    expect(validateRegistration(registration("https://push.example/path"), now).endpoint).toBe("https://push.example/path");
-    expect(validateRegistration(registration("\t\nhttps://push.example:443/path"), now).endpoint).toBe("https://push.example/path");
+
+    const prefixes = ["", "\u0000 ", "\t\r\n"];
+    const schemes = ["https:", "hTtPs:", "h\tt\r\nPs:"];
+    const authoritySeparators = ["//", "/", "", "\\", "/\\", "////", "/\t/\r\n"];
+    for (const prefix of prefixes) {
+      for (const scheme of schemes) {
+        for (const separator of authoritySeparators) {
+          const portEndpoint = `${prefix}${scheme}${separator}push.example:8443/path`;
+          expect(() => new URL(portEndpoint), JSON.stringify(portEndpoint)).not.toThrow();
+          expect(() => validateRegistration(registration(portEndpoint), now), JSON.stringify(portEndpoint)).toThrow(PushApiError);
+
+          for (const userinfo of ["@", ":@", "user@", ":secret@", "user:secret@"]) {
+            const credentialEndpoint = `${prefix}${scheme}${separator}${userinfo}push.example/path`;
+            expect(() => new URL(credentialEndpoint), JSON.stringify(credentialEndpoint)).not.toThrow();
+            expect(() => validateRegistration(registration(credentialEndpoint), now), JSON.stringify(credentialEndpoint)).toThrow(PushApiError);
+          }
+
+          for (const fragment of ["#", "#topic"]) {
+            const fragmentEndpoint = `${prefix}${scheme}${separator}push.example/path${fragment}`;
+            expect(() => new URL(fragmentEndpoint), JSON.stringify(fragmentEndpoint)).not.toThrow();
+            expect(() => validateRegistration(registration(fragmentEndpoint), now), JSON.stringify(fragmentEndpoint)).toThrow(PushApiError);
+          }
+        }
+      }
+    }
+
+    for (const [input, normalized] of [
+      ["https://push.example/path", "https://push.example/path"],
+      ["\t\nhttps://push.example:443/path", "https://push.example/path"],
+      ["https://push.example/device%40id?topic=%23alerts", "https://push.example/device%40id?topic=%23alerts"],
+      ["https://push.example/path?contact=user%40example.test&marker=%23safe", "https://push.example/path?contact=user%40example.test&marker=%23safe"],
+    ]) {
+      expect(validateRegistration(registration(input), now).endpoint).toBe(normalized);
+    }
   });
 
   it("upserts the same endpoint, rotates to a new id on replacement, ignores stale replacement, and redacts ordered status", async () => {
