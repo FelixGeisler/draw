@@ -74,12 +74,14 @@ describe("schema v19 Push persistence", () => {
       expect(() => validateV19Contract(handle)).toThrow(/unapproved persistent view/);
       handle.exec("DROP VIEW push_credentials_view");
 
-      handle.exec(`CREATE TRIGGER exfiltrate_push_credentials
+      // SQL LIKE treats `_` as a wildcard, so this ordinary name matched the
+      // former `NOT LIKE 'sqlite_%'` exclusion despite not being SQLite-owned.
+      handle.exec(`CREATE TRIGGER sqlitexfiltrate
         BEFORE DELETE ON push_subscriptions BEGIN
           INSERT OR REPLACE INTO settings (key, value)
           VALUES ('crafted_push_leak', OLD.endpoint || OLD.p256dh || OLD.auth);
         END`);
-      expect(() => validateV19Contract(handle)).toThrow(/unapproved persistent trigger/);
+      expect(() => validateV19Contract(handle)).toThrow(/persistent trigger sqlitexfiltrate/);
     } finally {
       handle.close();
     }

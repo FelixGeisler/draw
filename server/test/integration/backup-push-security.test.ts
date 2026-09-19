@@ -120,7 +120,9 @@ describe("credential-free backup artifacts", () => {
     const crafted = new Database(craftedPath);
     try {
       insertPushRow(crafted, "-trigger");
-      crafted.exec(`CREATE TRIGGER exfiltrate_push_credentials
+      // This ordinary trigger name matched the former SQL
+      // `NOT LIKE 'sqlite_%'` filter because `_` is a wildcard.
+      crafted.exec(`CREATE TRIGGER sqlitexfiltrate
         BEFORE DELETE ON push_subscriptions
         BEGIN
           INSERT OR REPLACE INTO settings (key, value)
@@ -246,23 +248,111 @@ describe("descriptor-bound material traversal", () => {
     }
   });
 
-  it("rejects a nested directory swap to an empty replacement instead of silently omitting it", () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "draw-material-directory-race-"));
-    const nested = path.join(root, "nested");
-    const held = path.join(root, "held");
-    fs.mkdirSync(nested);
-    fs.writeFileSync(path.join(nested, "authority-canary.txt"), "NESTED-AUTHORITY-CANARY");
+  it("rejects a transient root replacement used by the real opendir and publishes no archive", () => {
+    const root = filesDir();
+    const held = path.join(dataDir(), "files-root-held");
+    const canary = "ROOT-TRANSIENT-AUTHORITY-CANARY";
+    const canaryPath = path.join(root, "root-transient-canary.txt");
+    const archivesBefore = new Set(fs.readdirSync(dataDir()).filter((name) => name.endsWith(".zip")));
+    let openedReplacement = false;
+    fs.writeFileSync(canaryPath, canary);
     try {
       expect(() =>
-        readMaterialFilesSafely(root, {
-          beforeDirectoryRead: (directory) => {
+        createBackupArchive({
+          beforeDirectoryOpen: (directory) => {
+            if (directory !== root) return;
+            fs.renameSync(root, held);
+            fs.mkdirSync(root);
+          },
+          afterDirectoryOpen: (directory) => {
+            if (directory !== root) return;
+            openedReplacement = fs.readdirSync(root).length === 0;
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.renameSync(held, root);
+          },
+        }),
+      ).toThrow(/directory (?:changed|entries changed)/);
+      expect(openedReplacement).toBe(true);
+      expect(new Set(fs.readdirSync(dataDir()).filter((name) => name.endsWith(".zip")))).toEqual(
+        archivesBefore,
+      );
+    } finally {
+      if (fs.existsSync(held)) {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.renameSync(held, root);
+      }
+      fs.rmSync(canaryPath, { force: true });
+    }
+  });
+
+  it("rejects a transient nested replacement used by the real opendir and publishes no archive", () => {
+    const root = filesDir();
+    const nested = path.join(root, "transient-nested");
+    const held = path.join(root, "transient-nested-held");
+    const canary = "NESTED-TRANSIENT-AUTHORITY-CANARY";
+    fs.mkdirSync(nested);
+    fs.writeFileSync(path.join(nested, "authority-canary.txt"), canary);
+    const archivesBefore = new Set(fs.readdirSync(dataDir()).filter((name) => name.endsWith(".zip")));
+    let openedReplacement = false;
+    try {
+      expect(() =>
+        createBackupArchive({
+          beforeDirectoryOpen: (directory) => {
             if (directory !== nested) return;
             fs.renameSync(nested, held);
             fs.mkdirSync(nested);
           },
+          afterDirectoryOpen: (directory) => {
+            if (directory !== nested) return;
+            openedReplacement = fs.readdirSync(nested).length === 0;
+            fs.rmSync(nested, { recursive: true, force: true });
+            fs.renameSync(held, nested);
+          },
         }),
-      ).toThrow(/directory changed before traversal/);
+      ).toThrow(/directory (?:changed|entries changed)/);
+      expect(openedReplacement).toBe(true);
+      expect(new Set(fs.readdirSync(dataDir()).filter((name) => name.endsWith(".zip")))).toEqual(
+        archivesBefore,
+      );
     } finally {
+      if (fs.existsSync(held)) {
+        fs.rmSync(nested, { recursive: true, force: true });
+        fs.renameSync(held, nested);
+      }
+      fs.rmSync(nested, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a transient same-name replacement by child identity, not only names", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "draw-material-directory-race-"));
+    const held = `${root}-held`;
+    const name = "authority-canary.txt";
+    fs.writeFileSync(path.join(root, name), "ORIGINAL-AUTHORITY-CANARY");
+    let replacementIdentity: bigint | undefined;
+    try {
+      expect(() =>
+        readMaterialFilesSafely(root, {
+          beforeDirectoryOpen: (directory) => {
+            if (directory !== root) return;
+            fs.renameSync(root, held);
+            fs.mkdirSync(root);
+            fs.writeFileSync(path.join(root, name), "REPLACEMENT-AUTHORITY-CANARY");
+            replacementIdentity = fs.lstatSync(path.join(root, name), { bigint: true }).ino;
+          },
+          afterDirectoryOpen: (directory) => {
+            if (directory !== root) return;
+            fs.rmSync(root, { recursive: true, force: true });
+            fs.renameSync(held, root);
+          },
+        }),
+      ).toThrow(/directory (?:changed|entries changed)/);
+      expect(replacementIdentity).toBeDefined();
+      expect(fs.lstatSync(path.join(root, name), { bigint: true }).ino).not.toBe(replacementIdentity);
+    } finally {
+      if (fs.existsSync(held)) {
+        fs.rmSync(root, { recursive: true, force: true });
+        fs.renameSync(held, root);
+      }
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

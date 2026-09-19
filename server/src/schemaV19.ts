@@ -55,21 +55,21 @@ function validatePersistentSchemaCode(database: Database.Database): void {
   const objects = database
     .prepare(
       `SELECT type, name, sql FROM sqlite_schema
-       WHERE type IN ('trigger', 'view') AND name NOT LIKE 'sqlite_%'
+       WHERE type IN ('trigger', 'view')
        ORDER BY type, name`,
     )
     .all() as { type: "trigger" | "view"; name: string; sql: string | null }[];
   if (objects.some((object) => object.type === "view")) {
     throw new Error("schema v19 contract mismatch: unapproved persistent view");
   }
-  if (objects.length !== EXPECTED_PERSISTENT_SCHEMA_CODE.size) {
-    throw new Error("schema v19 contract mismatch: unapproved persistent trigger");
-  }
   for (const object of objects) {
     const expected = EXPECTED_PERSISTENT_SCHEMA_CODE.get(object.name);
     if (!expected || !object.sql || normalizedSchemaSql(object.sql) !== normalizedSchemaSql(expected)) {
       throw new Error(`schema v19 contract mismatch: persistent trigger ${object.name}`);
     }
+  }
+  if (objects.length !== EXPECTED_PERSISTENT_SCHEMA_CODE.size) {
+    throw new Error("schema v19 contract mismatch: missing persistent trigger");
   }
 }
 

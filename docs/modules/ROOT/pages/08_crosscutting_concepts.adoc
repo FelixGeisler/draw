@@ -334,41 +334,59 @@ AI degraded mode).
 == 8.8 Database migrations
 
 `PRAGMA user_version` switch in `db.ts`: fresh databases execute `schema.sql`
-(always the current schema); existing databases run incremental `ALTER TABLE`
+(always the current schema); existing databases run incremental migration
 steps. No migration framework. Version 18 adds the two Gold owner columns, the
 append-only `gold_ledger`, immutable `pack_openings`, and the XP-ledger reason
-index in one transaction; `user_version=18` is the last statement, so any DDL
-failure leaves a v17 database unchanged. Backup import (section 8.9) runs this
-same migration against its staged copy before any live swap.
+index. Version 19 adds only `push_subscriptions` and the
+`push_hide_details='0'` setting (xref:09_architecture_decisions.adoc[ADR-72]).
+Each version advances in one transaction with `user_version` last, so failed
+DDL leaves the previous version intact. Backup import (section 8.9) runs these
+same migrations against its staged copy before any live swap, then validates
+the complete v18 and v19 runtime contracts. For v19 this includes the exact
+Push table/default and every persistent trigger or view before any credential
+row is deleted; unapproved executable schema code is rejected rather than run
+during sanitization.
 
 == 8.9 Backup and restore
 
 `GET /api/backup/export` streams one zip: an `app.db` snapshot taken with
 `VACUUM INTO` (safe under WAL — the live file is never copied raw), all
-material files, and a manifest (ADR-26). The Claude API key is stripped from
-the snapshot only — backups never contain it; the live DB keeps it.
+material files, and a manifest (ADR-26). The Claude API key and Web Push device
+credential rows are stripped from the snapshot only; preferences remain and
+the live DB keeps its rows. Push removal is physical: after deleting rows,
+Draw performs a second `VACUUM INTO`, deletes the credential-bearing first
+copy and its sidecars, and packages only the rewrite. Push authority and
+recovery markers are outside the export inputs. Material traversal opens each
+singly linked regular file once, reads only that verified descriptor, and
+fails the whole export on a link, unsupported identity proof, containment or
+pre/post-read change, or unstable directory enumeration; it never follows or
+silently skips the suspect entry (xref:09_architecture_decisions.adoc[ADR-72]).
 
-`POST /api/backup/import` **replaces everything** — tasks, goals, materials,
-settings, gamification history, the current draw. There is no merge and no
-partial restore. Safety nets, both inside `DATA_DIR`:
+`POST /api/backup/import` **replaces everything represented by the portable
+backup** — tasks, goals, materials, settings, gamification history, and the
+current draw. There is no merge and no partial restore. Push device credentials
+are deliberately excluded and every device must re-enable after restore.
+Safety nets, both inside `DATA_DIR`:
 
-- the previous database is kept as `app.db.bak` (overwritten on the next import),
+- the previous database is kept as physically sanitized `app.db.bak`
+  (overwritten on the next import),
 - the previous material files as `files.bak`.
 
-Every rejected import (foreign zip, corrupt or newer-than-v18 database,
-unsafe paths) is a `400` with the live data untouched. Versions through v18
-are accepted; v17-or-older snapshots migrate in staging. The staged database
-must then match the complete runtime v18 contract: both owner columns, exact
+Every rejected import (foreign zip, corrupt or newer-than-v19 database,
+unsafe paths) is a `400` with the live data untouched. Versions through v19
+are accepted; older snapshots migrate in staging. The staged database must
+then match the complete runtime v18 contract: both owner columns, exact
 Gold/opening definitions and CHECK/unique/AUTOINCREMENT rules, all six
 immutable triggers (definition and rollback-only behavior), and the
-XP-ledger reason index. Only that validated file reaches the atomic swap. A
-round trip therefore preserves append-only rows, opening order and
-`sqlite_sequence`, not merely table names. #266 relies on that unchanged
-whole-database format: refs/payments/rarities/bonuses/timestamps, applicable
-Gold effects, ownership and equipment reproduce the exact derived shop and
-same-ref replay after restore, and the next API opening receives an order above
-the restored maximum. The Settings page gates restore behind an explicit
-warning plus typing `REPLACE`.
+XP-ledger reason index; it must also match v19's exact Push shape and persistent
+schema-code allowlist. Only that validated, row-scrubbed, physically rewritten
+file reaches the atomic swap. A round trip therefore preserves append-only
+rows, opening order and `sqlite_sequence`, not merely table names. #266 relies
+on that unchanged whole-database format: refs/payments/rarities/bonuses/
+timestamps, applicable Gold effects, ownership and equipment reproduce the
+exact derived shop and same-ref replay after restore, and the next fresh API
+opening receives an order above the restored maximum. The Settings page gates
+restore behind an explicit warning plus typing `REPLACE`.
 
 A restored `app.db` carries each material's `anthropic_file_id` (section 8.4),
 which is Anthropic-side state that does not travel with the archive — on another
@@ -377,15 +395,31 @@ is treated as a cache everywhere (xref:09_architecture_decisions.adoc[ADR-35]),
 so the first AI call after a cross-account restore is rejected, drops the id and
 re-uploads the PDF (which the archive does carry) transparently.
 
+Immediately before the existing swap, restore prepares fresh Push authority,
+invalidates volatile Push work, and durably creates `push-restore-pending`.
+A caught pre-commit failure preserves the old database and authority, removes
+the marker when that can be proven, resumes the old lifecycle, and returns the
+existing non-2xx error. The `app.db` rename remains the commit point. After it,
+Push-finalization failure never rolls back restored data or reconstructs
+credentials: HTTP 200 adds only `pushRecoveryPending:true`, Push remains
+unavailable, and marked boot recovery clears rows and rotates authority before
+removing the marker. Normal success retains the generic
+`{tasks,goals,materials}` response (ADR-26/72).
+
 *Scheduled backups* (#194, xref:09_architecture_decisions.adoc[ADR-52]) reuse
-that same export. When `BACKUP_INTERVAL_HOURS` is set (production entry only, off
-by default), an in-process timer writes one archive per tick into
-`DATA_DIR/backups/` and prunes to the newest `BACKUP_RETENTION` (default 7). The
-archives are ordinary exports, so *restoring a scheduled backup is just an
-import* — no separate restore path. The destination is a sibling of `files/`, not
-under it, which is the entire recursion guard: the export globs `files/` and the
-DB only, so an archive can never contain `backups/` (no archive-inside-archive
-growth). A failed scheduled run is logged and swallowed — it never crashes the
-server. The timer is started next to `startServer`, never inside `createApp()`
-(which runs per integration test), and is `unref`'d and stoppable so no test or
-shutdown leaks it.
+that same credential-free export. When `BACKUP_INTERVAL_HOURS` is set
+(production entry only, off by default), an in-process timer writes one archive
+per tick into `DATA_DIR/backups/` and prunes to the newest `BACKUP_RETENTION`
+(default 7). The archives are ordinary exports, so *restoring a scheduled
+backup is just an import* — no separate restore path. The destination is a
+sibling of `files/`, not under it, which is the entire recursion guard: the
+export reads `files/` and the DB only, so an archive can never contain
+`backups/` (no archive-inside-archive growth). A failed scheduled run is logged
+and swallowed — it never crashes the server. The timer is started next to
+`startServer`, never inside `createApp()` (which runs per integration test),
+and is `unref`'d and stoppable so no test or shutdown leaks it.
+
+A whole-`DATA_DIR` or volume copy is instead a privileged full-state snapshot:
+it may contain reusable Push authority, recovery markers, or credentials and
+is not equivalent to a Draw-created application backup. Use the application
+backup when credential-free portability is required (ADR-72).

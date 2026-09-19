@@ -210,8 +210,20 @@ interface MaterialIdentity {
   size: bigint;
 }
 
+interface DirectoryIdentity extends MaterialIdentity {
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+}
+
+interface DirectorySnapshot {
+  target: DirectoryIdentity;
+  parent: DirectoryIdentity;
+}
+
 export interface MaterialReadHooks {
   beforeDirectoryRead?: (directoryPath: string) => void;
+  beforeDirectoryOpen?: (directoryPath: string) => void;
+  afterDirectoryOpen?: (directoryPath: string) => void;
   afterDirectoryRead?: (directoryPath: string) => void;
   beforeOpen?: (filePath: string) => void;
   afterOpen?: (filePath: string, fd: number) => void;
@@ -232,6 +244,25 @@ function sameIdentity(left: MaterialIdentity, right: MaterialIdentity): boolean 
   );
 }
 
+function directoryIdentity(stat: fs.BigIntStats): DirectoryIdentity {
+  return { ...identity(stat), mtimeNs: stat.mtimeNs, ctimeNs: stat.ctimeNs };
+}
+
+function sameDirectoryIdentity(left: DirectoryIdentity, right: DirectoryIdentity): boolean {
+  return (
+    sameIdentity(left, right) &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function sameDirectorySnapshot(left: DirectorySnapshot, right: DirectorySnapshot): boolean {
+  return (
+    sameDirectoryIdentity(left.target, right.target) &&
+    sameDirectoryIdentity(left.parent, right.parent)
+  );
+}
+
 function requireProvableIdentity(stat: fs.BigIntStats, label: string): MaterialIdentity {
   if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) {
     throw new Error(`backup material is not a singly-linked regular file: ${label}`);
@@ -242,14 +273,82 @@ function requireProvableIdentity(stat: fs.BigIntStats, label: string): MaterialI
   return identity(stat);
 }
 
-function requireProvableDirectoryIdentity(stat: fs.BigIntStats, label: string): MaterialIdentity {
+function requireProvableDirectoryIdentity(stat: fs.BigIntStats, label: string): DirectoryIdentity {
   if (!stat.isDirectory() || stat.isSymbolicLink()) {
     throw new Error(`unsafe backup material directory: ${label}`);
   }
   if (stat.dev === 0n || stat.ino === 0n) {
     throw new Error(`backup material directory identity cannot be proven: ${label}`);
   }
-  return identity(stat);
+  return directoryIdentity(stat);
+}
+
+function snapshotDirectory(directory: string, label: string): DirectorySnapshot {
+  return {
+    target: requireProvableDirectoryIdentity(
+      fs.lstatSync(directory, { bigint: true }),
+      label,
+    ),
+    parent: requireProvableDirectoryIdentity(
+      fs.lstatSync(path.dirname(directory), { bigint: true }),
+      `${label} parent`,
+    ),
+  };
+}
+
+function requireUnchangedDirectory(
+  directory: string,
+  label: string,
+  expected: DirectorySnapshot,
+  phase: string,
+): void {
+  if (!sameDirectorySnapshot(expected, snapshotDirectory(directory, label))) {
+    throw new Error(`backup material directory changed ${phase}: ${label}`);
+  }
+}
+
+function observedIdentity(stat: fs.BigIntStats, label: string): DirectoryIdentity {
+  if (stat.isDirectory()) return requireProvableDirectoryIdentity(stat, label);
+  if (stat.isSymbolicLink()) throw new Error(`unsafe backup material link: ${label}`);
+  requireProvableIdentity(stat, label);
+  return directoryIdentity(stat);
+}
+
+/**
+ * Enumerate through a real directory handle, then identify every accepted name
+ * through no-follow path stats. Dirent type is deliberately ignored. A second
+ * complete observation plus target/parent version guards binds the name set to
+ * the accepted directory despite Node's public Dir API exposing no descriptor.
+ */
+function observeDirectory(directory: string, label: string): Map<string, DirectoryIdentity> {
+  const names: string[] = [];
+  const opened = fs.opendirSync(directory);
+  try {
+    for (let entry = opened.readSync(); entry !== null; entry = opened.readSync()) {
+      names.push(entry.name);
+    }
+  } finally {
+    opened.closeSync();
+  }
+  names.sort();
+  const result = new Map<string, DirectoryIdentity>();
+  for (const name of names) {
+    const full = path.join(directory, name);
+    result.set(name, observedIdentity(fs.lstatSync(full, { bigint: true }), `${label}/${name}`));
+  }
+  return result;
+}
+
+function sameObservation(
+  left: Map<string, DirectoryIdentity>,
+  right: Map<string, DirectoryIdentity>,
+): boolean {
+  return (
+    left.size === right.size &&
+    [...left].every(
+      ([name, before]) => right.has(name) && sameDirectoryIdentity(before, right.get(name)!),
+    )
+  );
 }
 
 function componentSnapshot(root: string, filePath: string): Map<string, MaterialIdentity> {
@@ -287,55 +386,36 @@ export function readMaterialFilesSafely(
   );
   const results: { archivePath: string; data: Buffer }[] = [];
 
-  const walk = (directory: string, expectedIdentity: MaterialIdentity) => {
+  const walk = (directory: string, expectedIdentity: DirectoryIdentity) => {
     const label = path.relative(resolvedRoot, directory) || "files root";
-    const directoryBefore = requireProvableDirectoryIdentity(
-      fs.lstatSync(directory, { bigint: true }),
-      label,
-    );
-    if (!sameIdentity(directoryBefore, expectedIdentity)) {
+    const directoryBefore = snapshotDirectory(directory, label);
+    if (!sameDirectoryIdentity(directoryBefore.target, expectedIdentity)) {
       throw new Error(`backup material directory changed before traversal: ${label}`);
     }
     hooks.beforeDirectoryRead?.(directory);
-    const directoryAtOpen = requireProvableDirectoryIdentity(
-      fs.lstatSync(directory, { bigint: true }),
-      label,
-    );
-    if (!sameIdentity(directoryBefore, directoryAtOpen)) {
-      throw new Error(`backup material directory changed before traversal: ${label}`);
+    requireUnchangedDirectory(directory, label, directoryBefore, "before traversal");
+
+    hooks.beforeDirectoryOpen?.(directory);
+    const firstObservation = observeDirectory(directory, label);
+    hooks.afterDirectoryOpen?.(directory);
+    requireUnchangedDirectory(directory, label, directoryBefore, "during enumeration");
+    const secondObservation = observeDirectory(directory, label);
+    requireUnchangedDirectory(directory, label, directoryBefore, "during enumeration");
+    if (!sameObservation(firstObservation, secondObservation)) {
+      throw new Error(`backup material directory entries changed during enumeration: ${label}`);
     }
 
-    // opendir keeps enumeration bound to one opened directory. Path identity
-    // is checked before and after every recursive traversal so a nested
-    // directory cannot be swapped to a link, replacement, or empty directory
-    // and thereby be followed or silently omitted.
-    const opened = fs.opendirSync(directory);
-    try {
-      const directoryAfterOpen = requireProvableDirectoryIdentity(
-        fs.lstatSync(directory, { bigint: true }),
-        label,
-      );
-      if (!sameIdentity(directoryBefore, directoryAfterOpen)) {
-        throw new Error(`backup material directory changed before traversal: ${label}`);
+    for (const [name, observed] of secondObservation) {
+      requireUnchangedDirectory(directory, label, directoryBefore, "during traversal");
+      const full = path.join(directory, name);
+      const stat = fs.lstatSync(full, { bigint: true });
+      const current = observedIdentity(stat, `${label}/${name}`);
+      if (!sameDirectoryIdentity(observed, current)) {
+        throw new Error(`backup material entry changed before traversal: ${name}`);
       }
-
-      for (let entry = opened.readSync(); entry !== null; entry = opened.readSync()) {
-        const currentDirectory = requireProvableDirectoryIdentity(
-          fs.lstatSync(directory, { bigint: true }),
-          label,
-        );
-        if (!sameIdentity(directoryBefore, currentDirectory)) {
-          throw new Error(`backup material directory changed during traversal: ${label}`);
-        }
-        const full = path.join(directory, entry.name);
-        const stat = fs.lstatSync(full, { bigint: true });
-        if (stat.isSymbolicLink()) throw new Error(`unsafe backup material link: ${entry.name}`);
-        if (stat.isDirectory()) {
-          walk(full, requireProvableDirectoryIdentity(stat, path.relative(resolvedRoot, full)));
-          continue;
-        }
-        if (!stat.isFile()) throw new Error(`unsafe backup material entry: ${entry.name}`);
-
+      if (stat.isDirectory()) {
+        walk(full, requireProvableDirectoryIdentity(stat, path.relative(resolvedRoot, full)));
+      } else {
         const componentsBefore = componentSnapshot(resolvedRoot, full);
         const pathBefore = requireProvableIdentity(stat, full);
         hooks.beforeOpen?.(full);
@@ -349,7 +429,7 @@ export function readMaterialFilesSafely(
             !sameIdentity(pathBefore, descriptorBefore) ||
             !sameIdentity(pathAtOpen, descriptorBefore)
           ) {
-            throw new Error(`backup material changed before read: ${entry.name}`);
+            throw new Error(`backup material changed before read: ${name}`);
           }
           hooks.afterOpen?.(full, fd);
           const data = fs.readFileSync(fd);
@@ -360,7 +440,7 @@ export function readMaterialFilesSafely(
             !sameIdentity(descriptorBefore, descriptorAfter) ||
             !sameIdentity(descriptorAfter, pathAfter)
           ) {
-            throw new Error(`backup material changed during read: ${entry.name}`);
+            throw new Error(`backup material changed during read: ${name}`);
           }
           const componentsAfter = componentSnapshot(resolvedRoot, full);
           if (
@@ -370,7 +450,7 @@ export function readMaterialFilesSafely(
                 !componentsAfter.has(component) || !sameIdentity(before, componentsAfter.get(component)!),
             )
           ) {
-            throw new Error(`backup material containment changed: ${entry.name}`);
+            throw new Error(`backup material containment changed: ${name}`);
           }
           results.push({
             archivePath: `${FILES_PREFIX}${path.relative(resolvedRoot, full).split(path.sep).join("/")}`,
@@ -380,18 +460,11 @@ export function readMaterialFilesSafely(
           if (fd !== undefined) fs.closeSync(fd);
         }
       }
-    } finally {
-      opened.closeSync();
+      requireUnchangedDirectory(directory, label, directoryBefore, "during traversal");
     }
 
     hooks.afterDirectoryRead?.(directory);
-    const directoryAfter = requireProvableDirectoryIdentity(
-      fs.lstatSync(directory, { bigint: true }),
-      label,
-    );
-    if (!sameIdentity(directoryBefore, directoryAfter)) {
-      throw new Error(`backup material directory changed during traversal: ${label}`);
-    }
+    requireUnchangedDirectory(directory, label, directoryBefore, "during traversal");
   };
   walk(resolvedRoot, rootIdentity);
   return results;
@@ -403,7 +476,7 @@ export function readMaterialFilesSafely(
  * only safe way to copy a live WAL database — recent commits live in
  * `app.db-wal`, so copying `app.db` itself would silently drop them.
  */
-export function createBackupArchive(): string {
+export function createBackupArchive(materialReadHooks: MaterialReadHooks = {}): string {
   const stem = tempStem();
   const firstSnapshotPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}-source.db`);
   const rewrittenPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}-sanitized.db`);
@@ -429,7 +502,7 @@ export function createBackupArchive(): string {
 
     // Validate and descriptor-read every material before a publishable zip is
     // written. Any link/race/identity failure aborts the whole export.
-    const materials = readMaterialFilesSafely(filesDir);
+    const materials = readMaterialFilesSafely(filesDir, materialReadHooks);
     const zip = new AdmZip();
     zip.addFile(DB_ENTRY, fs.readFileSync(rewrittenPath));
     zip.addFile(MANIFEST_ENTRY, Buffer.from(JSON.stringify(manifest, null, 2)));
