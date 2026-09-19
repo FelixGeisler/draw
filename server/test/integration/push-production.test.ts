@@ -212,6 +212,39 @@ describe("real production Push assembly", () => {
     expect(nginx.status).toBe(200);
   });
 
+  it("settles an inbound-aborted manual test without emitting a response", async () => {
+    const resolvers: DelayedCancellationResolver[] = [];
+    const assembly = start(false, undefined, () => {
+      const resolver = new DelayedCancellationResolver();
+      resolvers.push(resolver);
+      return resolver;
+    });
+    await new Promise<void>((resolve) => assembly.server.listening ? resolve() : assembly.server.once("listening", resolve));
+    const port = (assembly.server.address() as AddressInfo).port;
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(deviceId, "https://push.example/test", keys.publicKey, crypto.randomBytes(16).toString("base64url"), "a", "b");
+
+    let responseSeen = false;
+    const outgoing = http.request({
+      host: "127.0.0.1", port, method: "POST", path: `/api/push/subscriptions/${deviceId}/test`,
+      headers: { Host: `localhost:${port}`, Origin: `http://localhost:${port}`, "Sec-Fetch-Site": "same-origin" },
+    }, (incoming) => {
+      responseSeen = true;
+      incoming.resume();
+    });
+    outgoing.on("error", () => {});
+    outgoing.end();
+    await waitFor(() => resolvers.length === 1 && resolvers[0].operations.length === 2);
+    outgoing.destroy();
+    await waitFor(() => resolvers[0].cancelled);
+    resolvers[0].settleAll();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(responseSeen).toBe(false);
+  });
+
   it("cancels completed-body disconnects and retains all four permits until both RR operations settle", async () => {
     const resolvers: DelayedCancellationResolver[] = [];
     const assembly = start(1, undefined, () => {

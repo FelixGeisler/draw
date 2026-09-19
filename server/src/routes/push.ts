@@ -119,6 +119,28 @@ export function createPushRouter(push: PushServiceDependency): Router {
     }
   }));
 
+  router.post("/subscriptions/:deviceId/test", asyncRoute(async (req, res) => {
+    const topology = push.topology(req, true);
+    if (!topology.allowed) throw new PushApiError(403, "push-mutation-forbidden");
+    const deviceId = req.params.deviceId;
+    if (typeof deviceId !== "string") throw new PushApiError(400, "invalid-push-request");
+    const abort = new AbortController();
+    const clientDisconnected = () => req.aborted || req.socket.destroyed || res.destroyed;
+    const onDisconnect = () => {
+      if (!res.writableEnded) abort.abort();
+    };
+    req.once("aborted", onDisconnect);
+    res.once("close", onDisconnect);
+    if (clientDisconnected()) abort.abort();
+    try {
+      await push.testDevice(deviceId, abort.signal);
+      if (!res.headersSent && !clientDisconnected()) res.status(204).end();
+    } finally {
+      req.off("aborted", onDisconnect);
+      res.off("close", onDisconnect);
+    }
+  }));
+
   router.put("/preferences", asyncRoute(async (req, res) => {
     const topology = push.topology(req, true);
     if (!topology.allowed) throw new PushApiError(403, "push-mutation-forbidden");

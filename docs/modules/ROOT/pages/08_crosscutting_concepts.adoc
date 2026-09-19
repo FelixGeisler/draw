@@ -345,9 +345,12 @@ same migrations against its staged copy before any live swap, then validates
 the complete v18 and v19 runtime contracts. For v19 this includes the exact
 Push table/default and every persistent trigger or view before any credential
 row is deleted; unapproved executable schema code is rejected rather than run
-during sanitization. Stage 1B.1 reuses those exact tables and setting without a
-schema change: registration upserts at most 16 rows transactionally and the
-shared Hide-details preference remains the closed `0|1` value.
+during sanitization. Stage 1B reuses those exact tables and setting without a
+schema change: registration upserts at most 16 rows transactionally, the shared
+Hide-details preference remains the closed `0|1` value, and the synthetic
+sender reads one exact seven-column row fingerprint without adding delivery or
+schedule state. Provider 404/410 removes only that unchanged fingerprint, so a
+late old-registration result cannot remove newly committed credentials.
 
 == 8.9 Backup and restore
 
@@ -399,11 +402,14 @@ re-uploads the PDF (which the archive does carry) transparently.
 
 Immediately before the existing swap, restore prepares fresh Push authority,
 invalidates volatile Push work, and durably creates `push-restore-pending`.
-Stage 1B.1 revoke-all uses the same recovery shape with
+Stage 1B revoke-all uses the same recovery shape with
 `push-revoke-pending`: candidate and marker precede the transactional row
 clear; post-clear failure restores no credential and remains unavailable until
 boot recovery. Hide-details commits before advancing the volatile generation
-and does not rotate VAPID.
+and does not rotate VAPID. Both operations synchronously invalidate admitted
+synthetic work before its final request-initiation check; committed row clears
+also discard only removable per-device rate buckets while held work retains its
+permit and in-flight marker until DNS/request/response/socket ownership settles.
 A caught pre-commit failure preserves the old database and authority, removes
 the marker when that can be proven, resumes the old lifecycle, and returns the
 existing non-2xx error. The `app.db` rename remains the commit point. After it,

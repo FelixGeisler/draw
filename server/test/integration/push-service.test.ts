@@ -185,6 +185,133 @@ describe("Push registration service", () => {
     }
   });
 
+  it("constructs the exact one-attempt test request and retains accepted test timestamps", async () => {
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const endpoint = "https://push.example/test";
+    database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(deviceId, endpoint, keys.publicKey, auth, "2026-09-19T11:00:00.000Z", "2026-09-19T11:00:00.000Z");
+    const generated: Array<{ subscription: unknown; payload: Buffer; options: Record<string, unknown> }> = [];
+    const sent: unknown[] = [];
+    const service = make({
+      generateRequestDetails: (subscription, clear, options) => {
+        generated.push({ subscription, payload: Buffer.from(clear), options: options as unknown as Record<string, unknown> });
+        return { endpoint, method: "POST", headers: { authorization: "redacted" }, body: Buffer.alloc(4_096) };
+      },
+      transport: { send: async (request) => { sent.push(request); return "success"; } },
+    });
+    await expect(service.testDevice(deviceId)).resolves.toBeUndefined();
+    expect(generated).toHaveLength(1);
+    expect(generated[0].payload.toString("utf8")).toBe('{"v":1,"kind":"test"}');
+    expect(generated[0].options).toMatchObject({
+      contentEncoding: "aes128gcm", TTL: 0, urgency: "normal", topic: "draw-push-test",
+      vapidDetails: { subject: "https://github.com/FelixGeisler/draw" },
+    });
+    expect(sent).toHaveLength(1);
+    await expect(service.testDevice(deviceId)).rejects.toMatchObject({ status: 429, code: "push-rate-limited", retryAfter: 10 });
+  });
+
+  it("closes initial missing, expired and corrupt test states before transport", async () => {
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    let sends = 0;
+    const service = make({ transport: { send: async () => { sends += 1; return "success"; } } });
+    await expect(service.testDevice(deviceId)).rejects.toMatchObject({ status: 404, code: "push-device-not-found" });
+    database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(deviceId, "https://push.example/test", keys.publicKey, auth, Date.parse("2026-09-19T11:59:59Z"), "a", "b");
+    await expect(service.testDevice(deviceId)).rejects.toMatchObject({ status: 410, code: "push-subscription-gone" });
+    expect(database.prepare("SELECT id FROM push_subscriptions WHERE id=?").get(deviceId)).toBeUndefined();
+
+    database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(deviceId, "http://private.invalid/test", "secret-key", "secret-auth", "a", "b");
+    await expect(service.testDevice(deviceId)).rejects.toMatchObject({ status: 502, code: "push-delivery-failed" });
+    expect(sends).toBe(0);
+  });
+
+  it("cancels every pre-init generation/row/settings race with zero HTTPS creation", async () => {
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const insert = () => database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(deviceId, "https://push.example/test", keys.publicKey, auth, "a", "b");
+    let sends = 0;
+    for (const mutate of [
+      () => lifecycle.advanceWorkGeneration(),
+      () => database.prepare("UPDATE settings SET value='1' WHERE key='push_hide_details'").run(),
+      () => database.prepare("UPDATE push_subscriptions SET last_seen_at='changed' WHERE id=?").run(deviceId),
+      () => database.prepare("DELETE FROM push_subscriptions WHERE id=?").run(deviceId),
+    ]) {
+      database.prepare("DELETE FROM push_subscriptions").run();
+      database.prepare("UPDATE settings SET value='0' WHERE key='push_hide_details'").run();
+      insert();
+      let mutated = false;
+      const racing = make({
+        resolverFactory: () => ({
+          resolve4: async () => ["8.8.8.8"],
+          resolve6: async () => {
+            if (!mutated) { mutated = true; mutate(); }
+            throw Object.assign(new Error("none"), { code: "ENODATA" });
+          },
+          cancel() {},
+        }),
+        transport: { send: async () => { sends += 1; return "success"; } },
+      });
+      await expect(racing.testDevice(deviceId)).rejects.toMatchObject({ status: 409, code: "push-test-cancelled" });
+    }
+    expect(sends).toBe(0);
+  });
+
+  it("maps the bounded provider matrix and total deadline to closed delivery errors", async () => {
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const endpoint = "https://push.example/test";
+    const insert = () => database.prepare(
+      `INSERT OR REPLACE INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(deviceId, endpoint, keys.publicKey, auth, "a", "b");
+    for (const [outcome, expected] of [["failed", 502], ["timeout", 504], ["gone", 410]] as const) {
+      insert();
+      const service = make({
+        generateRequestDetails: () => ({ endpoint, method: "POST", headers: {}, body: Buffer.from("encrypted") }),
+        transport: { send: async () => outcome },
+      });
+      await expect(service.testDevice(deviceId)).rejects.toMatchObject({ status: expected });
+    }
+
+    insert();
+    const rejects: Array<(reason: unknown) => void> = [];
+    const pending: IsolatedResolver = {
+      resolve4: () => new Promise((_resolve, reject) => rejects.push(reject)),
+      resolve6: () => new Promise((_resolve, reject) => rejects.push(reject)),
+      cancel: () => rejects.splice(0).forEach((reject) => reject(Object.assign(new Error("cancelled"), { code: "ECANCELLED" }))),
+    };
+    const total = make({ resolverFactory: () => pending, dnsDeadlineMs: 100, totalAttemptMs: 2 });
+    await expect(total.testDevice(deviceId)).rejects.toMatchObject({ status: 504, code: "push-timeout" });
+  });
+
+  it("returns gone for a late stale provider result without deleting the changed row or rate state", async () => {
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(deviceId, "https://push.example/test", keys.publicKey, auth, "a", "b");
+    const admission = new PushAdmission(() => 0);
+    const changedAuth = crypto.randomBytes(16).toString("base64url");
+    const service = make({
+      admission,
+      transport: { send: async () => {
+        database.prepare("UPDATE push_subscriptions SET auth=?, last_seen_at='new' WHERE id=?").run(changedAuth, deviceId);
+        return "gone";
+      } },
+    });
+    await expect(service.testDevice(deviceId)).rejects.toMatchObject({ status: 410, code: "push-subscription-gone" });
+    expect(database.prepare("SELECT auth FROM push_subscriptions WHERE id=?").get(deviceId)).toEqual({ auth: changedAuth });
+    expect(admission.snapshot()).toMatchObject({ testDevices: 1, testGlobal: 1 });
+  });
+
   it("retains accepted rate timestamps across DNS failure and maps unavailable/deadline errors exactly", async () => {
     const unavailable = make({ resolverFactory: () => ({
       resolve4: async () => { throw Object.assign(new Error("hidden"), { code: "ESERVFAIL" }); },

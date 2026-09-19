@@ -34,6 +34,7 @@ describe("Push registration HTTP API", () => {
     trustProxy: boolean | number | string = false,
     listenerPort = 1234,
     resolverFactory: ResolverFactory = resolver,
+    overrides: Partial<ConstructorParameters<typeof PushService>[0]> = {},
   ) {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-api-"));
     roots.push(dataDir);
@@ -45,6 +46,7 @@ describe("Push registration HTTP API", () => {
       database, lifecycle, resolverFactory,
       topology: { listenerHost: "127.0.0.1", listenerPort, trustProxy },
       wallNow: () => Date.parse("2026-09-19T12:00:00Z"),
+      ...overrides,
     });
   }
 
@@ -75,6 +77,38 @@ describe("Push registration HTTP API", () => {
     expect(preference.body).toEqual({ hideDetails: true });
     expect((await direct(request(app).delete(`/api/push/subscriptions/${created.body.device.id}`))).status).toBe(204);
     expect((await direct(request(app).delete("/api/push/subscriptions"))).status).toBe(204);
+  });
+
+  it("serves exact manual-test outcomes and precedence without leaking provider detail", async () => {
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const endpoint = "https://push.example/test";
+    const push = service(false, 1234, resolver, {
+      generateRequestDetails: () => ({ endpoint, method: "POST", headers: {}, body: Buffer.from("encrypted") }),
+      transport: { send: async () => "success" },
+    });
+    database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(deviceId, endpoint, keys.publicKey, crypto.randomBytes(16).toString("base64url"), "a", "b");
+    const app = createApp({}, { push });
+    const success = await direct(request(app).post(`/api/push/subscriptions/${deviceId}/test`));
+    expect(success.status).toBe(204);
+    expect(success.text).toBe("");
+
+    const limited = await direct(request(app).post(`/api/push/subscriptions/${deviceId}/test`));
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ error: "push-rate-limited" });
+    expect(limited.headers["retry-after"]).toBe("10");
+    expect(Object.keys(limited.body)).toEqual(["error"]);
+
+    expect(await direct(request(app).post("/api/push/subscriptions/not-a-uuid/test")))
+      .toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
+    expect(await request(app).post("/api/push/subscriptions/not-a-uuid/test")
+      .set("Host", "evil.example").set("Origin", "http://evil.example"))
+      .toMatchObject({ status: 403, body: { error: "push-mutation-forbidden" } });
+    expect(await direct(request(app).post(`/api/push/subscriptions/${deviceId}/test`).set("Content-Length", "1").send("x")))
+      .toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
+    expect(JSON.stringify(limited.body)).not.toContain("push.example");
   });
 
   it("keeps the whole namespace auth-first, while login/non-Push retain general parser behavior", async () => {
