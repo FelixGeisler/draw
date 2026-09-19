@@ -49,6 +49,8 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v2Schema = current
+    .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
+    .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
     .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
     .replace(/,\r?\n  claim_gold INTEGER CHECK \(claim_gold IS NULL OR claim_gold >= 0\)/, "")
     // v15 (#157): strip the sort_order column (its comment block, the column,
@@ -298,10 +300,10 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v18 (including Gold/opening infrastructure and permanent XP)", () => {
-  it("bumps user_version to 18", async () => {
+describe("migration v2 → v19 (including Push persistence and prior infrastructure)", () => {
+  it("bumps user_version to 19", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(18);
+    expect(db.pragma("user_version", { simple: true })).toBe(19);
   });
 
   it("creates the xp_ledger table, empty (#230, ADR-62)", async () => {

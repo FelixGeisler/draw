@@ -289,6 +289,18 @@ CREATE TABLE achievement_customizations (
   hidden INTEGER NOT NULL DEFAULT 0
 );
 
+-- Stage 1A Web Push device credentials (#337, ADR-72). Row presence means
+-- future per-device enablement; authority/generation remains outside SQLite.
+CREATE TABLE push_subscriptions (
+  id TEXT PRIMARY KEY,
+  endpoint TEXT NOT NULL UNIQUE,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  expiration_time INTEGER NULL,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL
+);
+
 CREATE TABLE settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -303,4 +315,5 @@ INSERT INTO settings (key, value) VALUES
   ('max_draw_effort', '30'),
   ('draw_cooldown_minutes', '60'),
   ('daily_goal_completions', '1'),
-  ('warmup_every_hours', '8');
+  ('warmup_every_hours', '8'),
+  ('push_hide_details', '0');

@@ -4,6 +4,15 @@ export interface ImportSummary {
   tasks: number;
   goals: number;
   materials: number;
+  pushRecoveryPending?: true;
+}
+
+export const PUSH_RECOVERY_PENDING_MESSAGE =
+  "Backup restored; notifications remain unavailable until Draw restarts and completes Push recovery. Do not retry the restore.";
+
+export function backupRestoreMessage(summary: ImportSummary): string {
+  if (summary.pushRecoveryPending) return PUSH_RECOVERY_PENDING_MESSAGE;
+  return `Backup restored — ${summary.tasks} tasks, ${summary.goals} goals, ${summary.materials} materials.`;
 }
 
 /**
@@ -31,6 +40,8 @@ export function useImportBackup() {
       }
       return res.json() as Promise<ImportSummary>;
     },
+    // Either 200 shape means the database commit succeeded. A pending Push
+    // finalization is recovered on boot and must not leave stale client data.
     onSuccess: () => qc.invalidateQueries(),
   });
 }

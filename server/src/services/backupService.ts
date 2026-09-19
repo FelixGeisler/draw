@@ -13,6 +13,8 @@ import {
   reopenDatabase,
 } from "../db.js";
 import { validateV18Contract } from "../schemaV18.js";
+import { validateV19Contract } from "../schemaV19.js";
+import { disabledPushDependency, type PushDependency } from "../push/authority.js";
 
 // Backup archive layout (#61, ADR-26): one zip holding a `VACUUM INTO`
 // snapshot of the database, every material file, and a manifest that lets
@@ -33,6 +35,7 @@ export interface ImportSummary {
   tasks: number;
   goals: number;
   materials: number;
+  pushRecoveryPending?: true;
 }
 
 /** Thrown for every rejected import — the live data is untouched when it fires. */
@@ -151,6 +154,193 @@ function countRows(handle: Database.Database): ImportSummary {
   return { tasks: count("tasks"), goals: count("goals"), materials: count("materials") };
 }
 
+function removeDatabaseAndSidecars(databasePath: string): void {
+  for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+    fs.rmSync(`${databasePath}${suffix}`, { force: true });
+  }
+}
+
+function tableExists(handle: Database.Database, table: string): boolean {
+  return Boolean(
+    handle.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table),
+  );
+}
+
+function scrubCredentialRows(handle: Database.Database, removeApiKey: boolean): void {
+  handle.transaction(() => {
+    if (removeApiKey) handle.prepare("DELETE FROM settings WHERE key = ?").run(API_KEY_SETTING);
+    if (tableExists(handle, "push_subscriptions")) {
+      handle.prepare("DELETE FROM push_subscriptions").run();
+    }
+    // The table is a fixed Stage-2 contract, not a Stage-1A schema object.
+    // Recognizing it here keeps future backups credential-free without
+    // creating it early.
+    if (tableExists(handle, "deadline_reminder_claims")) {
+      handle.prepare("DELETE FROM deadline_reminder_claims").run();
+    }
+  })();
+}
+
+/**
+ * Physically rewrite a logical scrub into a distinct SQLite file. Merely
+ * deleting rows leaves endpoint/key bytes in free pages, so every portable
+ * export/import/safety copy pays this second VACUUM boundary (#337, ADR-72).
+ */
+function sanitizeDatabaseFile(
+  sourcePath: string,
+  rewrittenPath: string,
+  removeApiKey: boolean,
+): void {
+  removeDatabaseAndSidecars(rewrittenPath);
+  const source = new Database(sourcePath, { fileMustExist: true });
+  try {
+    source.pragma("journal_mode = DELETE");
+    scrubCredentialRows(source, removeApiKey);
+    source.prepare("VACUUM INTO ?").run(rewrittenPath);
+  } finally {
+    source.close();
+  }
+}
+
+interface MaterialIdentity {
+  dev: bigint;
+  ino: bigint;
+  mode: bigint;
+  nlink: bigint;
+  size: bigint;
+}
+
+export interface MaterialReadHooks {
+  beforeOpen?: (filePath: string) => void;
+  afterOpen?: (filePath: string, fd: number) => void;
+  beforePostcheck?: (filePath: string, fd: number) => void;
+}
+
+function identity(stat: fs.BigIntStats): MaterialIdentity {
+  return { dev: stat.dev, ino: stat.ino, mode: stat.mode, nlink: stat.nlink, size: stat.size };
+}
+
+function sameIdentity(left: MaterialIdentity, right: MaterialIdentity): boolean {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.mode === right.mode &&
+    left.nlink === right.nlink &&
+    left.size === right.size
+  );
+}
+
+function requireProvableIdentity(stat: fs.BigIntStats, label: string): MaterialIdentity {
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) {
+    throw new Error(`backup material is not a singly-linked regular file: ${label}`);
+  }
+  if (stat.dev === 0n || stat.ino === 0n) {
+    throw new Error(`backup material identity cannot be proven: ${label}`);
+  }
+  return identity(stat);
+}
+
+function componentSnapshot(root: string, filePath: string): Map<string, MaterialIdentity> {
+  const resolvedRoot = path.resolve(root);
+  const resolvedFile = path.resolve(filePath);
+  if (!resolvedFile.startsWith(`${resolvedRoot}${path.sep}`)) {
+    throw new Error("backup material escaped files root");
+  }
+  const relative = path.relative(resolvedRoot, resolvedFile);
+  const segments = relative.split(path.sep);
+  const result = new Map<string, MaterialIdentity>();
+  const rootStat = fs.lstatSync(resolvedRoot, { bigint: true });
+  if (
+    !rootStat.isDirectory() ||
+    rootStat.isSymbolicLink() ||
+    rootStat.dev === 0n ||
+    rootStat.ino === 0n
+  ) {
+    throw new Error("backup files root identity cannot be proven");
+  }
+  result.set(resolvedRoot, identity(rootStat));
+  let current = resolvedRoot;
+  for (let index = 0; index < segments.length - 1; index += 1) {
+    current = path.join(current, segments[index]);
+    const stat = fs.lstatSync(current, { bigint: true });
+    if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev === 0n || stat.ino === 0n) {
+      throw new Error(`unsafe backup material directory: ${path.relative(resolvedRoot, current)}`);
+    }
+    result.set(current, identity(stat));
+  }
+  return result;
+}
+
+/** Read material bytes only through the one verified descriptor. */
+export function readMaterialFilesSafely(
+  root: string,
+  hooks: MaterialReadHooks = {},
+): { archivePath: string; data: Buffer }[] {
+  const resolvedRoot = path.resolve(root);
+  const rootStat = fs.lstatSync(resolvedRoot, { bigint: true });
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("files root is unsafe");
+  const results: { archivePath: string; data: Buffer }[] = [];
+
+  const walk = (directory: string) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const full = path.join(directory, entry.name);
+      const stat = fs.lstatSync(full, { bigint: true });
+      if (stat.isSymbolicLink()) throw new Error(`unsafe backup material link: ${entry.name}`);
+      if (stat.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (!stat.isFile()) throw new Error(`unsafe backup material entry: ${entry.name}`);
+
+      const componentsBefore = componentSnapshot(resolvedRoot, full);
+      const pathBefore = requireProvableIdentity(stat, full);
+      hooks.beforeOpen?.(full);
+      const noFollow = (fs.constants as unknown as Record<string, number>).O_NOFOLLOW ?? 0;
+      let fd: number | undefined;
+      try {
+        fd = fs.openSync(full, fs.constants.O_RDONLY | noFollow);
+        const descriptorBefore = requireProvableIdentity(fs.fstatSync(fd, { bigint: true }), full);
+        const pathAtOpen = requireProvableIdentity(fs.lstatSync(full, { bigint: true }), full);
+        if (
+          !sameIdentity(pathBefore, descriptorBefore) ||
+          !sameIdentity(pathAtOpen, descriptorBefore)
+        ) {
+          throw new Error(`backup material changed before read: ${entry.name}`);
+        }
+        hooks.afterOpen?.(full, fd);
+        const data = fs.readFileSync(fd);
+        hooks.beforePostcheck?.(full, fd);
+        const descriptorAfter = requireProvableIdentity(fs.fstatSync(fd, { bigint: true }), full);
+        const pathAfter = requireProvableIdentity(fs.lstatSync(full, { bigint: true }), full);
+        if (
+          !sameIdentity(descriptorBefore, descriptorAfter) ||
+          !sameIdentity(descriptorAfter, pathAfter)
+        ) {
+          throw new Error(`backup material changed during read: ${entry.name}`);
+        }
+        const componentsAfter = componentSnapshot(resolvedRoot, full);
+        if (
+          componentsAfter.size !== componentsBefore.size ||
+          [...componentsBefore].some(
+            ([component, before]) =>
+              !componentsAfter.has(component) || !sameIdentity(before, componentsAfter.get(component)!),
+          )
+        ) {
+          throw new Error(`backup material containment changed: ${entry.name}`);
+        }
+        results.push({
+          archivePath: `${FILES_PREFIX}${path.relative(resolvedRoot, full).split(path.sep).join("/")}`,
+          data,
+        });
+      } finally {
+        if (fd !== undefined) fs.closeSync(fd);
+      }
+    }
+  };
+  walk(resolvedRoot);
+  return results;
+}
+
 /**
  * Build the backup zip and return its path (inside DATA_DIR — the caller
  * streams and deletes it). The DB snapshot is taken with `VACUUM INTO`: the
@@ -159,36 +349,43 @@ function countRows(handle: Database.Database): ImportSummary {
  */
 export function createBackupArchive(): string {
   const stem = tempStem();
-  const snapshotPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}.db`);
+  const firstSnapshotPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}-source.db`);
+  const rewrittenPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}-sanitized.db`);
   const zipPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}.zip`);
-  db.prepare("VACUUM INTO ?").run(snapshotPath);
+  db.prepare("VACUUM INTO ?").run(firstSnapshotPath);
   try {
-    // Privacy (ADR-11): backups get copied around, so the plaintext API key
-    // is deleted from the SNAPSHOT only — the live database keeps it.
-    const snapshot = new Database(snapshotPath);
+    sanitizeDatabaseFile(firstSnapshotPath, rewrittenPath, true);
+    // Delete the credential-bearing first phase and every possible sidecar
+    // before archive construction can observe the rewrite.
+    removeDatabaseAndSidecars(firstSnapshotPath);
+
     let manifest: BackupManifest;
+    const sanitized = new Database(rewrittenPath, { readonly: true, fileMustExist: true });
     try {
-      snapshot.prepare("DELETE FROM settings WHERE key = ?").run(API_KEY_SETTING);
       manifest = buildManifest(
-        snapshot.pragma("user_version", { simple: true }) as number,
-        countRows(snapshot),
+        sanitized.pragma("user_version", { simple: true }) as number,
+        countRows(sanitized),
         new Date().toISOString(),
       );
     } finally {
-      snapshot.close();
+      sanitized.close();
     }
 
+    // Validate and descriptor-read every material before a publishable zip is
+    // written. Any link/race/identity failure aborts the whole export.
+    const materials = readMaterialFilesSafely(filesDir);
     const zip = new AdmZip();
-    zip.addLocalFile(snapshotPath, "", DB_ENTRY);
+    zip.addFile(DB_ENTRY, fs.readFileSync(rewrittenPath));
     zip.addFile(MANIFEST_ENTRY, Buffer.from(JSON.stringify(manifest, null, 2)));
-    for (const name of fs.readdirSync(filesDir)) {
-      const full = path.join(filesDir, name);
-      if (fs.statSync(full).isFile()) zip.addLocalFile(full, FILES_PREFIX.slice(0, -1));
-    }
+    for (const material of materials) zip.addFile(material.archivePath, material.data);
     zip.writeZip(zipPath);
     return zipPath;
+  } catch (error) {
+    fs.rmSync(zipPath, { force: true });
+    throw error;
   } finally {
-    fs.rmSync(snapshotPath, { force: true });
+    removeDatabaseAndSidecars(firstSnapshotPath);
+    removeDatabaseAndSidecars(rewrittenPath);
   }
 }
 
@@ -299,16 +496,42 @@ export function runScheduledBackup(retention: number, now: Date = new Date()): S
  *  2. Swap — restart-safe ordering (see swapIn) with the `app.db` rename as
  *     the atomic commit point, then reopen and migrate forward.
  */
-export function importBackupArchive(zipPath: string): ImportSummary {
+export function importBackupArchive(
+  zipPath: string,
+  push: PushDependency = disabledPushDependency,
+): ImportSummary {
   const stem = tempStem();
   const stagedDbPath = path.join(dataDir, `${IMPORT_PREFIX}${stem}.db`);
   const stagedFilesDir = path.join(dataDir, `${IMPORT_PREFIX}files-${stem}`);
+  let committed = false;
   try {
     stageAndValidate(zipPath, stagedDbPath, stagedFilesDir);
-    swapIn(stagedDbPath, stagedFilesDir);
-    return countRows(db);
+    // This boundary is intentionally after all archive/migration/sanitization
+    // validation and immediately before the existing swap.
+    push.beginRestore();
+    try {
+      swapIn(stagedDbPath, stagedFilesDir, () => {
+        committed = true;
+      });
+    } catch (error) {
+      if (!committed) {
+        push.abortRestore();
+        throw error;
+      }
+      // A committed database is never rolled back to reconstruct credentials.
+      return { ...countRows(db), pushRecoveryPending: true };
+    }
+
+    try {
+      push.completeRestore();
+      return countRows(db);
+    } catch {
+      // The restored data committed successfully. The durable marker leaves
+      // Push unavailable until conservative boot recovery finishes.
+      return { ...countRows(db), pushRecoveryPending: true };
+    }
   } finally {
-    fs.rmSync(stagedDbPath, { force: true });
+    removeDatabaseAndSidecars(stagedDbPath);
     fs.rmSync(stagedFilesDir, { recursive: true, force: true });
   }
 }
@@ -367,7 +590,7 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
     // A forged user_version on an arbitrary SQLite file would pass the checks
     // above. Require the v1 core before running any migration, then migrate
     // this staging file (never the live DB) and validate the complete v18
-    // runtime contract before the swap commit point (ADR-26).
+    // v18/v19 runtime contracts before the swap commit point (ADR-26/72).
     const REQUIRED_TABLES = [
       "categories",
       "goals",
@@ -391,19 +614,33 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
     try {
       migrateDatabase(staged);
       validateV18Contract(staged);
+      validateV19Contract(staged);
+      scrubCredentialRows(staged, false);
       if (staged.pragma("integrity_check", { simple: true }) !== "ok") {
         throw new Error("integrity_check failed after migration");
       }
     } catch (error) {
       throw new BackupError(
         400,
-        `the backup database does not satisfy the schema v18 contract: ${
+        `the backup database does not satisfy the schema v18 contract or schema v19 contract: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
     }
   } finally {
     staged.close();
+  }
+
+  // A logical delete is insufficient: rewrite into a distinct file, then
+  // delete the crafted/original archive database and all sidecars before the
+  // swap can consume it.
+  const rewrittenPath = `${stagedDbPath}.sanitized`;
+  try {
+    sanitizeDatabaseFile(stagedDbPath, rewrittenPath, false);
+    removeDatabaseAndSidecars(stagedDbPath);
+    fs.renameSync(rewrittenPath, stagedDbPath);
+  } finally {
+    removeDatabaseAndSidecars(rewrittenPath);
   }
 
   stageFileEntries(entries, stagedFilesDir);
@@ -448,16 +685,42 @@ export function stageFileEntries(entries: AdmZip.IZipEntry[], stagedFilesDir: st
  *    other connection would keep writing into a WAL we are about to delete
  *    and then find a completely different file under it. Checked BEFORE the
  *    first destructive step, so the abort costs nothing but the reopen.
- *  - `app.db` is COPIED to `app.db.bak` (not renamed): the live path never
- *    disappears, so a crash before the final rename still boots the complete
- *    old database instead of auto-creating a fresh empty one.
+ *  - a consistent old-live snapshot is scrubbed and physically rewritten to
+ *    `app.db.bak`; the live path never disappears, so a crash before the final
+ *    rename still boots the complete old database instead of auto-creating a
+ *    fresh empty one.
  *  - files/ swaps first, the `app.db` rename goes LAST: it replaces the file
  *    in a single same-volume rename — the atomic commit point. Before it: old
  *    state (files recoverable from files.bak). After it: new state.
  */
-function swapIn(stagedDbPath: string, stagedFilesDir: string) {
+function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => void) {
   const bakPath = `${dbPath}.bak`;
   const filesBakDir = path.join(dataDir, "files.bak");
+
+  // Build app.db.bak from a consistent live-WAL snapshot, scrub it, and
+  // physically rewrite it before replacement. It can never retain Push rows
+  // or their free-page bytes.
+  const bakStem = tempStem();
+  const bakSource = path.join(dataDir, `${IMPORT_PREFIX}bak-${bakStem}-source.db`);
+  const bakRewrite = path.join(dataDir, `${IMPORT_PREFIX}bak-${bakStem}-sanitized.db`);
+  db.prepare("VACUUM INTO ?").run(bakSource);
+  try {
+    sanitizeDatabaseFile(bakSource, bakRewrite, false);
+    removeDatabaseAndSidecars(bakSource);
+    try {
+      const existing = fs.lstatSync(bakPath);
+      if (!existing.isFile() || existing.isSymbolicLink()) {
+        throw new BackupError(409, "app.db.bak is not a regular file");
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    fs.renameSync(bakRewrite, bakPath);
+  } finally {
+    removeDatabaseAndSidecars(bakSource);
+    removeDatabaseAndSidecars(bakRewrite);
+  }
+
   db.pragma("wal_checkpoint(TRUNCATE)");
   db.close();
   try {
@@ -471,17 +734,20 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string) {
     }
     fs.rmSync(`${dbPath}-wal`, { force: true });
     fs.rmSync(`${dbPath}-shm`, { force: true });
-    fs.copyFileSync(dbPath, bakPath);
 
     fs.rmSync(filesBakDir, { recursive: true, force: true });
     if (fs.existsSync(filesDir)) fs.renameSync(filesDir, filesBakDir);
     try {
       fs.renameSync(stagedFilesDir, filesDir);
       fs.renameSync(stagedDbPath, dbPath); // commit point
+      onCommit();
     } catch (e) {
-      // Roll the files swap back so the old state stays complete.
-      fs.rmSync(filesDir, { recursive: true, force: true });
-      if (fs.existsSync(filesBakDir)) fs.renameSync(filesBakDir, filesDir);
+      // Roll files back only while app.db has not committed. A post-commit
+      // failure must retain the restored data for marker recovery.
+      if (fs.existsSync(stagedDbPath)) {
+        fs.rmSync(filesDir, { recursive: true, force: true });
+        if (fs.existsSync(filesBakDir)) fs.renameSync(filesBakDir, filesDir);
+      }
       throw e;
     }
   } finally {
