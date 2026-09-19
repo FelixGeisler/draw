@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
+import fs from "node:fs";
+import path from "node:path";
 import type express from "express";
-import { freshApp } from "../helpers.js";
+import { freshApp, testDb } from "../helpers.js";
 
 let app: express.Express;
 beforeAll(async () => {
@@ -52,7 +54,7 @@ describe("materials", () => {
 
     await request(app)
       .post(`/api/goals/${goal.id}/materials`)
-      .send({ noteText: "chapters 3-5 matter" })
+      .field("noteText", "chapters 3-5 matter")
       .expect(201);
 
     const file = (
@@ -83,6 +85,29 @@ describe("materials", () => {
       .post(`/api/goals/${goal.id}/materials`)
       .attach("file", Buffer.from("MZ..."), { filename: "evil.exe", contentType: "application/octet-stream" })
       .expect(400);
+  });
+
+  it("rejects indexed multipart fields without retaining a row or uploaded file", async () => {
+    const goal = (
+      await request(app).post("/api/goals").send({ title: "Indexed field rejection" }).expect(201)
+    ).body;
+    const db = await testDb();
+    const beforeRows = db.prepare("SELECT COUNT(*) AS count FROM materials").get();
+    const directory = path.join(process.env.DATA_DIR!, "files");
+    const beforeFiles = fs.readdirSync(directory).sort();
+
+    const response = await request(app)
+      .post(`/api/goals/${goal.id}/materials`)
+      .attach("file", Buffer.from("must be removed"), {
+        filename: "rejected.txt",
+        contentType: "text/plain",
+      })
+      .field("metadata[1]", "blocked")
+      .expect(400);
+
+    expect(response.text).toBe('{"error":"invalid multipart field name"}');
+    expect(db.prepare("SELECT COUNT(*) AS count FROM materials").get()).toEqual(beforeRows);
+    expect(fs.readdirSync(directory).sort()).toEqual(beforeFiles);
   });
 });
 

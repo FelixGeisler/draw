@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -11,6 +12,16 @@ export const materialsRouter = Router();
 const ALLOWED_MIME = new Set(["application/pdf", "text/plain", "text/markdown"]);
 const ALLOWED_EXT = new Set([".pdf", ".txt", ".md"]);
 const MAX_FILE_MB = 50;
+const INVALID_MULTIPART_FIELD_NAME = "invalid multipart field name";
+
+// Multer 2.3.0 supports this limit, but @types/multer 2.2.0 does not yet
+// declare it. Keep the compatibility addition local to this one limits object.
+const uploadLimits: NonNullable<multer.Options["limits"]> & {
+  fieldArrayIndexLimit: number;
+} = {
+  fileSize: MAX_FILE_MB * 1024 * 1024,
+  fieldArrayIndexLimit: 0,
+};
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -23,7 +34,7 @@ const upload = multer({
       cb(null, `${Date.now()}-${crypto.randomBytes(4).toString("hex")}-${safeBase}`);
     },
   }),
-  limits: { fileSize: MAX_FILE_MB * 1024 * 1024 },
+  limits: uploadLimits,
   // Browsers send the multipart filename as raw UTF-8 bytes, but busboy's
   // default decodes those header bytes as latin1 — "Prüfung.pdf" arrives as
   // "PrÃ¼fung.pdf" and rides mojibake'd into the DB, the UI and the AI
@@ -31,6 +42,19 @@ const upload = multer({
   // actually send.
   defParamCharset: "utf8",
 });
+
+function materialUpload(req: Request, res: Response, next: NextFunction): void {
+  upload.single("file")(req, res, (error: unknown) => {
+    if (
+      error instanceof multer.MulterError &&
+      String(error.code) === "LIMIT_FIELD_ARRAY_INDEX"
+    ) {
+      res.status(400).json({ error: INVALID_MULTIPART_FIELD_NAME });
+      return;
+    }
+    next(error);
+  });
+}
 
 const MATERIAL_SELECT = `
   SELECT id, goal_id AS goalId, kind, filename, mime_type AS mimeType,
@@ -42,7 +66,7 @@ goalMaterialsRouter.get("/", (req, res) => {
   res.json(db.prepare(`${MATERIAL_SELECT} WHERE goal_id = ? ORDER BY created_at ASC`).all(goalId));
 });
 
-goalMaterialsRouter.post("/", upload.single("file"), (req, res) => {
+goalMaterialsRouter.post("/", materialUpload, (req, res) => {
   const goalId = Number((req.params as { id: string }).id);
   const goal = db.prepare("SELECT id FROM goals WHERE id = ?").get(goalId);
   if (!goal) {
