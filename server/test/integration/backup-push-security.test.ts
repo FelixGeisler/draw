@@ -108,6 +108,51 @@ describe("credential-free backup artifacts", () => {
     }
   });
 
+  it("rejects crafted persistent schema code before it can leak credential rows", async () => {
+    const database = await testDb();
+    database.prepare("DELETE FROM push_subscriptions").run();
+    database.prepare("DELETE FROM settings WHERE key = 'crafted_push_leak'").run();
+    const cleanArchivePath = createBackupArchive();
+    const zip = new AdmZip(cleanArchivePath);
+    fs.rmSync(cleanArchivePath, { force: true });
+    const craftedPath = path.join(dataDir(), "crafted-trigger-import.db");
+    fs.writeFileSync(craftedPath, zip.getEntry("app.db")!.getData());
+    const crafted = new Database(craftedPath);
+    try {
+      insertPushRow(crafted, "-trigger");
+      crafted.exec(`CREATE TRIGGER exfiltrate_push_credentials
+        BEFORE DELETE ON push_subscriptions
+        BEGIN
+          INSERT OR REPLACE INTO settings (key, value)
+          VALUES ('crafted_push_leak', OLD.endpoint || '|' || OLD.p256dh || '|' || OLD.auth);
+        END`);
+    } finally {
+      crafted.close();
+    }
+    zip.deleteFile("app.db");
+    zip.addFile("app.db", fs.readFileSync(craftedPath));
+    fs.rmSync(craftedPath, { force: true });
+    const bakPath = path.join(dataDir(), "app.db.bak");
+    fs.rmSync(bakPath, { force: true });
+
+    await request(app)
+      .post("/api/backup/import")
+      .attach("file", zip.toBuffer(), "crafted-trigger.zip")
+      .expect(400);
+
+    const live = await testDb();
+    expect(live.prepare("SELECT value FROM settings WHERE key = 'crafted_push_leak'").get()).toBeUndefined();
+    expectNoCanaries(fs.readFileSync(path.join(dataDir(), "app.db")));
+    expect(fs.existsSync(bakPath)).toBe(false);
+
+    const subsequentExport = createBackupArchive();
+    try {
+      expectNoCanaries(fs.readFileSync(subsequentExport));
+    } finally {
+      fs.rmSync(subsequentExport, { force: true });
+    }
+  });
+
   it("sanitizes crafted imports and the app.db.bak safety copy physically", async () => {
     const database = await testDb();
     insertPushRow(database, "-old-live");
@@ -164,6 +209,59 @@ describe("descriptor-bound material traversal", () => {
         throw error;
       }
       expect(() => readMaterialFilesSafely(root)).toThrow(/unsafe backup material link/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a nested directory swap to a symlink before traversal", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "draw-material-directory-race-"));
+    const nested = path.join(root, "nested");
+    const held = path.join(root, "held");
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "draw-material-directory-canary-"));
+    fs.mkdirSync(nested);
+    fs.writeFileSync(path.join(nested, "ordinary.txt"), "ordinary");
+    fs.writeFileSync(path.join(outside, "authority-canary.txt"), "NESTED-AUTHORITY-CANARY");
+    const probe = path.join(root, "symlink-probe");
+    try {
+      try {
+        fs.symlinkSync(outside, probe, "dir");
+        fs.rmSync(probe, { force: true });
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EPERM") return;
+        throw error;
+      }
+      expect(() =>
+        readMaterialFilesSafely(root, {
+          beforeDirectoryRead: (directory) => {
+            if (directory !== nested) return;
+            fs.renameSync(nested, held);
+            fs.symlinkSync(outside, nested, "dir");
+          },
+        }),
+      ).toThrow(/directory changed before traversal|unsafe backup material directory/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a nested directory swap to an empty replacement instead of silently omitting it", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "draw-material-directory-race-"));
+    const nested = path.join(root, "nested");
+    const held = path.join(root, "held");
+    fs.mkdirSync(nested);
+    fs.writeFileSync(path.join(nested, "authority-canary.txt"), "NESTED-AUTHORITY-CANARY");
+    try {
+      expect(() =>
+        readMaterialFilesSafely(root, {
+          beforeDirectoryRead: (directory) => {
+            if (directory !== nested) return;
+            fs.renameSync(nested, held);
+            fs.mkdirSync(nested);
+          },
+        }),
+      ).toThrow(/directory changed before traversal/);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

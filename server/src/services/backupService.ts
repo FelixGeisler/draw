@@ -211,6 +211,8 @@ interface MaterialIdentity {
 }
 
 export interface MaterialReadHooks {
+  beforeDirectoryRead?: (directoryPath: string) => void;
+  afterDirectoryRead?: (directoryPath: string) => void;
   beforeOpen?: (filePath: string) => void;
   afterOpen?: (filePath: string, fd: number) => void;
   beforePostcheck?: (filePath: string, fd: number) => void;
@@ -240,6 +242,16 @@ function requireProvableIdentity(stat: fs.BigIntStats, label: string): MaterialI
   return identity(stat);
 }
 
+function requireProvableDirectoryIdentity(stat: fs.BigIntStats, label: string): MaterialIdentity {
+  if (!stat.isDirectory() || stat.isSymbolicLink()) {
+    throw new Error(`unsafe backup material directory: ${label}`);
+  }
+  if (stat.dev === 0n || stat.ino === 0n) {
+    throw new Error(`backup material directory identity cannot be proven: ${label}`);
+  }
+  return identity(stat);
+}
+
 function componentSnapshot(root: string, filePath: string): Map<string, MaterialIdentity> {
   const resolvedRoot = path.resolve(root);
   const resolvedFile = path.resolve(filePath);
@@ -250,23 +262,15 @@ function componentSnapshot(root: string, filePath: string): Map<string, Material
   const segments = relative.split(path.sep);
   const result = new Map<string, MaterialIdentity>();
   const rootStat = fs.lstatSync(resolvedRoot, { bigint: true });
-  if (
-    !rootStat.isDirectory() ||
-    rootStat.isSymbolicLink() ||
-    rootStat.dev === 0n ||
-    rootStat.ino === 0n
-  ) {
-    throw new Error("backup files root identity cannot be proven");
-  }
-  result.set(resolvedRoot, identity(rootStat));
+  result.set(resolvedRoot, requireProvableDirectoryIdentity(rootStat, "files root"));
   let current = resolvedRoot;
   for (let index = 0; index < segments.length - 1; index += 1) {
     current = path.join(current, segments[index]);
     const stat = fs.lstatSync(current, { bigint: true });
-    if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev === 0n || stat.ino === 0n) {
-      throw new Error(`unsafe backup material directory: ${path.relative(resolvedRoot, current)}`);
-    }
-    result.set(current, identity(stat));
+    result.set(
+      current,
+      requireProvableDirectoryIdentity(stat, path.relative(resolvedRoot, current)),
+    );
   }
   return result;
 }
@@ -277,67 +281,119 @@ export function readMaterialFilesSafely(
   hooks: MaterialReadHooks = {},
 ): { archivePath: string; data: Buffer }[] {
   const resolvedRoot = path.resolve(root);
-  const rootStat = fs.lstatSync(resolvedRoot, { bigint: true });
-  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("files root is unsafe");
+  const rootIdentity = requireProvableDirectoryIdentity(
+    fs.lstatSync(resolvedRoot, { bigint: true }),
+    "files root",
+  );
   const results: { archivePath: string; data: Buffer }[] = [];
 
-  const walk = (directory: string) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const full = path.join(directory, entry.name);
-      const stat = fs.lstatSync(full, { bigint: true });
-      if (stat.isSymbolicLink()) throw new Error(`unsafe backup material link: ${entry.name}`);
-      if (stat.isDirectory()) {
-        walk(full);
-        continue;
-      }
-      if (!stat.isFile()) throw new Error(`unsafe backup material entry: ${entry.name}`);
+  const walk = (directory: string, expectedIdentity: MaterialIdentity) => {
+    const label = path.relative(resolvedRoot, directory) || "files root";
+    const directoryBefore = requireProvableDirectoryIdentity(
+      fs.lstatSync(directory, { bigint: true }),
+      label,
+    );
+    if (!sameIdentity(directoryBefore, expectedIdentity)) {
+      throw new Error(`backup material directory changed before traversal: ${label}`);
+    }
+    hooks.beforeDirectoryRead?.(directory);
+    const directoryAtOpen = requireProvableDirectoryIdentity(
+      fs.lstatSync(directory, { bigint: true }),
+      label,
+    );
+    if (!sameIdentity(directoryBefore, directoryAtOpen)) {
+      throw new Error(`backup material directory changed before traversal: ${label}`);
+    }
 
-      const componentsBefore = componentSnapshot(resolvedRoot, full);
-      const pathBefore = requireProvableIdentity(stat, full);
-      hooks.beforeOpen?.(full);
-      const noFollow = (fs.constants as unknown as Record<string, number>).O_NOFOLLOW ?? 0;
-      let fd: number | undefined;
-      try {
-        fd = fs.openSync(full, fs.constants.O_RDONLY | noFollow);
-        const descriptorBefore = requireProvableIdentity(fs.fstatSync(fd, { bigint: true }), full);
-        const pathAtOpen = requireProvableIdentity(fs.lstatSync(full, { bigint: true }), full);
-        if (
-          !sameIdentity(pathBefore, descriptorBefore) ||
-          !sameIdentity(pathAtOpen, descriptorBefore)
-        ) {
-          throw new Error(`backup material changed before read: ${entry.name}`);
-        }
-        hooks.afterOpen?.(full, fd);
-        const data = fs.readFileSync(fd);
-        hooks.beforePostcheck?.(full, fd);
-        const descriptorAfter = requireProvableIdentity(fs.fstatSync(fd, { bigint: true }), full);
-        const pathAfter = requireProvableIdentity(fs.lstatSync(full, { bigint: true }), full);
-        if (
-          !sameIdentity(descriptorBefore, descriptorAfter) ||
-          !sameIdentity(descriptorAfter, pathAfter)
-        ) {
-          throw new Error(`backup material changed during read: ${entry.name}`);
-        }
-        const componentsAfter = componentSnapshot(resolvedRoot, full);
-        if (
-          componentsAfter.size !== componentsBefore.size ||
-          [...componentsBefore].some(
-            ([component, before]) =>
-              !componentsAfter.has(component) || !sameIdentity(before, componentsAfter.get(component)!),
-          )
-        ) {
-          throw new Error(`backup material containment changed: ${entry.name}`);
-        }
-        results.push({
-          archivePath: `${FILES_PREFIX}${path.relative(resolvedRoot, full).split(path.sep).join("/")}`,
-          data,
-        });
-      } finally {
-        if (fd !== undefined) fs.closeSync(fd);
+    // opendir keeps enumeration bound to one opened directory. Path identity
+    // is checked before and after every recursive traversal so a nested
+    // directory cannot be swapped to a link, replacement, or empty directory
+    // and thereby be followed or silently omitted.
+    const opened = fs.opendirSync(directory);
+    try {
+      const directoryAfterOpen = requireProvableDirectoryIdentity(
+        fs.lstatSync(directory, { bigint: true }),
+        label,
+      );
+      if (!sameIdentity(directoryBefore, directoryAfterOpen)) {
+        throw new Error(`backup material directory changed before traversal: ${label}`);
       }
+
+      for (let entry = opened.readSync(); entry !== null; entry = opened.readSync()) {
+        const currentDirectory = requireProvableDirectoryIdentity(
+          fs.lstatSync(directory, { bigint: true }),
+          label,
+        );
+        if (!sameIdentity(directoryBefore, currentDirectory)) {
+          throw new Error(`backup material directory changed during traversal: ${label}`);
+        }
+        const full = path.join(directory, entry.name);
+        const stat = fs.lstatSync(full, { bigint: true });
+        if (stat.isSymbolicLink()) throw new Error(`unsafe backup material link: ${entry.name}`);
+        if (stat.isDirectory()) {
+          walk(full, requireProvableDirectoryIdentity(stat, path.relative(resolvedRoot, full)));
+          continue;
+        }
+        if (!stat.isFile()) throw new Error(`unsafe backup material entry: ${entry.name}`);
+
+        const componentsBefore = componentSnapshot(resolvedRoot, full);
+        const pathBefore = requireProvableIdentity(stat, full);
+        hooks.beforeOpen?.(full);
+        const noFollow = (fs.constants as unknown as Record<string, number>).O_NOFOLLOW ?? 0;
+        let fd: number | undefined;
+        try {
+          fd = fs.openSync(full, fs.constants.O_RDONLY | noFollow);
+          const descriptorBefore = requireProvableIdentity(fs.fstatSync(fd, { bigint: true }), full);
+          const pathAtOpen = requireProvableIdentity(fs.lstatSync(full, { bigint: true }), full);
+          if (
+            !sameIdentity(pathBefore, descriptorBefore) ||
+            !sameIdentity(pathAtOpen, descriptorBefore)
+          ) {
+            throw new Error(`backup material changed before read: ${entry.name}`);
+          }
+          hooks.afterOpen?.(full, fd);
+          const data = fs.readFileSync(fd);
+          hooks.beforePostcheck?.(full, fd);
+          const descriptorAfter = requireProvableIdentity(fs.fstatSync(fd, { bigint: true }), full);
+          const pathAfter = requireProvableIdentity(fs.lstatSync(full, { bigint: true }), full);
+          if (
+            !sameIdentity(descriptorBefore, descriptorAfter) ||
+            !sameIdentity(descriptorAfter, pathAfter)
+          ) {
+            throw new Error(`backup material changed during read: ${entry.name}`);
+          }
+          const componentsAfter = componentSnapshot(resolvedRoot, full);
+          if (
+            componentsAfter.size !== componentsBefore.size ||
+            [...componentsBefore].some(
+              ([component, before]) =>
+                !componentsAfter.has(component) || !sameIdentity(before, componentsAfter.get(component)!),
+            )
+          ) {
+            throw new Error(`backup material containment changed: ${entry.name}`);
+          }
+          results.push({
+            archivePath: `${FILES_PREFIX}${path.relative(resolvedRoot, full).split(path.sep).join("/")}`,
+            data,
+          });
+        } finally {
+          if (fd !== undefined) fs.closeSync(fd);
+        }
+      }
+    } finally {
+      opened.closeSync();
+    }
+
+    hooks.afterDirectoryRead?.(directory);
+    const directoryAfter = requireProvableDirectoryIdentity(
+      fs.lstatSync(directory, { bigint: true }),
+      label,
+    );
+    if (!sameIdentity(directoryBefore, directoryAfter)) {
+      throw new Error(`backup material directory changed during traversal: ${label}`);
     }
   };
-  walk(resolvedRoot);
+  walk(resolvedRoot, rootIdentity);
   return results;
 }
 

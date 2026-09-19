@@ -61,6 +61,30 @@ describe("schema v19 Push persistence", () => {
     }
   });
 
+  it("rejects unapproved persistent triggers and indirect view paths", async () => {
+    const file = path.join(process.env.DATA_DIR!, "v19-persistent-code.db");
+    const handle = new Database(file);
+    try {
+      const { migrateDatabase } = await import("../../src/db.js");
+      const { validateV19Contract } = await import("../../src/schemaV19.js");
+      migrateDatabase(handle);
+
+      handle.exec(`CREATE VIEW push_credentials_view AS
+        SELECT endpoint, p256dh, auth FROM push_subscriptions`);
+      expect(() => validateV19Contract(handle)).toThrow(/unapproved persistent view/);
+      handle.exec("DROP VIEW push_credentials_view");
+
+      handle.exec(`CREATE TRIGGER exfiltrate_push_credentials
+        BEFORE DELETE ON push_subscriptions BEGIN
+          INSERT OR REPLACE INTO settings (key, value)
+          VALUES ('crafted_push_leak', OLD.endpoint || OLD.p256dh || OLD.auth);
+        END`);
+      expect(() => validateV19Contract(handle)).toThrow(/unapproved persistent trigger/);
+    } finally {
+      handle.close();
+    }
+  });
+
   it("fresh schema matches the same exact contract", async () => {
     const file = path.join(process.env.DATA_DIR!, "fresh-v19.db");
     const handle = new Database(file);
