@@ -13,6 +13,7 @@ import {
   registerPushSubscription,
   revokeAllPushDevices,
   samePrerequisites,
+  sameSubscriptionData,
   sendPushTest,
   setPushPreference,
   snapshotFingerprint,
@@ -75,7 +76,10 @@ export function usePushNotifications() {
     setLoadError(false);
   }, []);
 
-  const refresh = useCallback(async (clearMessage = true): Promise<{ status: PushStatus; browser: BrowserPushSnapshot } | null> => {
+  const refresh = useCallback(async (
+    clearMessage = true,
+    preserveLoadedStatus = false,
+  ): Promise<{ status: PushStatus; browser: BrowserPushSnapshot } | null> => {
     if (clearMessage && mounted.current) setMessage(null);
     try {
       const next = await loadSnapshots();
@@ -84,7 +88,7 @@ export function usePushNotifications() {
     } catch {
       if (mounted.current) {
         setChecking(false);
-        setLoadError(true);
+        if (!preserveLoadedStatus || statusRef.current === null) setLoadError(true);
       }
       return null;
     }
@@ -109,6 +113,26 @@ export function usePushNotifications() {
     pendingRef.current = value;
     if (mounted.current) setPending(value);
   };
+
+  // Inspection and refresh are deliberately read-only. A malformed handle, or
+  // a canonical handle that an available server status proves is no longer
+  // listed, is forgotten only when the owner starts an explicit mutation.
+  // The in-memory snapshot is sanitized even when best-effort storage cleanup
+  // fails, so a stale id is never sent as replaceDeviceId.
+  const prepareLocalHandleForMutation = useCallback((): BrowserPushSnapshot | null => {
+    const current = browserRef.current;
+    const currentStatus = statusRef.current;
+    if (!current) return null;
+    const confirmedStale = current.handle !== null && currentStatus?.available === true &&
+      !currentStatus.devices.some((device) => device.id === current.handle);
+    if (!current.malformedHandle && !confirmedStale) return current;
+    if (current.malformedHandle) clearStoredHandle();
+    else clearStoredHandle(current.handle);
+    const sanitized = { ...current, handle: null, malformedHandle: false };
+    browserRef.current = sanitized;
+    if (mounted.current) setBrowser(sanitized);
+    return sanitized;
+  }, []);
 
   const finishEnrollment = useCallback(async (
     captured: EnrollmentPrerequisites,
@@ -164,7 +188,8 @@ export function usePushNotifications() {
         const current = enrollmentPrerequisites(next.status, next.browser);
         applySnapshots(next);
         if (!samePrerequisites(captured, current) || !current ||
-          current.browser.subscription !== newlyCreated ||
+          !current.browser.subscription ||
+          !sameSubscriptionData(current.browser.subscription, newlyCreated) ||
           !subscriptionMatches(current.browser.subscription, current.vapidBytes)) {
           await newlyCreated.unsubscribe().catch(() => false);
           setContinuation(null);
@@ -225,7 +250,8 @@ export function usePushNotifications() {
   /** Direct button handler: performs its one browser operation before any await. */
   const enroll = useCallback(() => {
     if (pendingRef.current) return;
-    const captured = enrollmentPrerequisites(statusRef.current, browserRef.current);
+    const preparedBrowser = prepareLocalHandleForMutation();
+    const captured = enrollmentPrerequisites(statusRef.current, preparedBrowser);
     if (!captured) {
       setContinuation(null);
       return;
@@ -239,9 +265,11 @@ export function usePushNotifications() {
     }
     // Recheck every synchronously observable prerequisite immediately before
     // starting the activation-sensitive call.
+    const activeImmediatelyBeforeOperation = captured.browser.registration?.active ?? null;
     if (captured.browser.permission !== (typeof Notification === "undefined" ? "unavailable" : Notification.permission) ||
-      captured.browser.registration?.active?.state !== "activated" ||
-      captured.browser.registration.active.scriptURL !== new URL("/sw.js", location.origin).href) {
+      activeImmediatelyBeforeOperation !== captured.browser.activeWorker ||
+      activeImmediatelyBeforeOperation?.state !== "activated" ||
+      activeImmediatelyBeforeOperation.scriptURL !== new URL("/sw.js", location.origin).href) {
       setContinuation(null);
       return;
     }
@@ -249,10 +277,11 @@ export function usePushNotifications() {
     setMessage(null);
     const operation = beginEnrollmentOperation(captured, continuing);
     void finishEnrollment(captured, operation, continuing);
-  }, [continuation, finishEnrollment]);
+  }, [continuation, finishEnrollment, prepareLocalHandleForMutation]);
 
   const runMutation = useCallback(async (work: () => Promise<void>, context: "test" | "mutation") => {
     if (pendingRef.current) return;
+    prepareLocalHandleForMutation();
     setBusy(true);
     setMessage(null);
     try { await work(); }
@@ -266,15 +295,22 @@ export function usePushNotifications() {
         } else setMessage(pushFailureMessage(error, context));
       }
     } finally { setBusy(false); }
-  }, []);
+  }, [prepareLocalHandleForMutation]);
 
   const updatePreference = useCallback((hideDetails: boolean) => {
     void runMutation(async () => {
       try {
-        await setPushPreference(hideDetails);
-        await refresh(false);
+        const accepted = await setPushPreference(hideDetails);
+        const current = statusRef.current;
+        if (current) {
+          const adopted = { ...current, preferences: { hideDetails: accepted } };
+          statusRef.current = adopted;
+          if (mounted.current) setStatus(adopted);
+        }
+        const refreshed = await refresh(false, true);
+        if (!refreshed && mounted.current) setMessage(LOAD_FAILURE);
       } catch (error) {
-        await refresh(false);
+        await refresh(false, true);
         const closed = errorCode(error);
         if (closed?.status === 403 && statusRef.current?.mutationReason) {
           setMessage(STATUS_GUIDANCE[statusRef.current.mutationReason]);

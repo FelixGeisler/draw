@@ -128,19 +128,23 @@ export function TasksPage() {
   // user on an empty page.
   useEffect(() => {
     if (pendingFocusId == null || tasks.data == null) return;
-    const el = document.querySelector<HTMLElement>(`[data-task-id="${pendingFocusId}"]`);
+    const focusedTask = taskById.get(pendingFocusId);
+    const el = focusedTask?.status === "archived"
+      ? null
+      : document.querySelector<HTMLElement>(`[data-task-id="${pendingFocusId}"]`);
     if (el) {
       el.scrollIntoView({ block: "center" });
       el.classList.add("palette-flash");
       window.setTimeout(() => el.classList.remove("palette-flash"), 1500);
       setPendingFocusId(null);
-    } else if (scope != null && taskById.has(pendingFocusId)) {
+    } else if (scope != null && focusedTask?.status !== "archived" && taskById.has(pendingFocusId)) {
       // A task known in loaded data can be hidden only by work mode here.
       // Clear once and keep the focus pending for the unscoped render.
       setScope(undefined);
     } else {
-      // Loaded but absent (deleted/archived) or otherwise unrenderable: the
-      // durable landing quietly degrades to the Tasks page.
+      // Deleted targets are absent; archived targets can remain in the
+      // historical all-status list but are deliberately not focusable. Both
+      // quietly degrade to the Tasks page.
       setPendingFocusId(null);
     }
   }, [pendingFocusId, tasks.data, scope, setScope, taskById]);

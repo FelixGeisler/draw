@@ -17,6 +17,7 @@ import {
   registerPushSubscription,
   revokeAllPushDevices,
   samePrerequisites,
+  sameSubscriptionData,
   sendPushTest,
   setPushPreference,
   snapshotFingerprint,
@@ -145,11 +146,21 @@ describe("strict Push client boundary", () => {
     expect(enrollmentPrerequisites(status(), snapshot)).not.toBeNull();
   });
 
-  it("matches subscriptions bytewise and handles only exact listed ids", () => {
+  it("matches subscription data rather than JavaScript wrapper identity", () => {
     const current = subscription();
+    const equivalentWrapper = subscription();
+    expect(current).not.toBe(equivalentWrapper);
     expect(subscriptionMatches(current, VAPID)).toBe(true);
+    expect(sameSubscriptionData(current, equivalentWrapper)).toBe(true);
+    expect(sameSubscriptionData(current, subscription(Uint8Array.of(1)))).toBe(false);
+    const differentEndpoint = subscription();
+    Object.defineProperty(differentEndpoint, "endpoint", { value: "https://push.example.test/other" });
+    expect(sameSubscriptionData(current, differentEndpoint)).toBe(false);
     expect(subscriptionMatches(subscription(Uint8Array.of(1)), VAPID)).toBe(false);
     expect(subscriptionMatches({ ...current, options: { applicationServerKey: null } } as PushSubscription, VAPID)).toBe(false);
+  });
+
+  it("identifies this browser only by an exact listed local handle", () => {
     expect(listedHandle(status({ devices: [{ id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" }] }), DEVICE)).toBe(DEVICE);
     expect(listedHandle(status(), DEVICE)).toBeNull();
   });

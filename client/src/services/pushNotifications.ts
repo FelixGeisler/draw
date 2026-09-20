@@ -320,6 +320,35 @@ export function subscriptionMatches(subscription: PushSubscription | null, vapid
   return subscription !== null && equalBytes(subscription.options.applicationServerKey, vapidBytes);
 }
 
+function equalNullableBuffers(
+  left: ArrayBuffer | ArrayBufferView | null,
+  right: ArrayBuffer | ArrayBufferView | null,
+): boolean {
+  if (left === null || right === null) return left === right;
+  const leftBytes = left instanceof ArrayBuffer
+    ? new Uint8Array(left)
+    : new Uint8Array(left.buffer, left.byteOffset, left.byteLength);
+  const rightBytes = right instanceof ArrayBuffer
+    ? new Uint8Array(right)
+    : new Uint8Array(right.buffer, right.byteOffset, right.byteLength);
+  return leftBytes.byteLength === rightBytes.byteLength &&
+    leftBytes.every((byte, index) => byte === rightBytes[index]);
+}
+
+/**
+ * PushManager may return a fresh JavaScript wrapper for the subscription it
+ * just created. Identity is the exact browser subscription data, never the
+ * wrapper object reference.
+ */
+export function sameSubscriptionData(left: PushSubscription, right: PushSubscription): boolean {
+  return left.endpoint === right.endpoint &&
+    left.expirationTime === right.expirationTime &&
+    left.options.userVisibleOnly === right.options.userVisibleOnly &&
+    equalNullableBuffers(left.options.applicationServerKey, right.options.applicationServerKey) &&
+    equalNullableBuffers(left.getKey("p256dh"), right.getKey("p256dh")) &&
+    equalNullableBuffers(left.getKey("auth"), right.getKey("auth"));
+}
+
 export function listedHandle(status: PushStatus, handle: string | null): string | null {
   return handle !== null && status.devices.some((device) => device.id === handle) ? handle : null;
 }

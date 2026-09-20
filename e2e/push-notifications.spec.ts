@@ -1,10 +1,40 @@
 import { devices, expect, test, type Page } from "@playwright/test";
+import { spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import vm from "node:vm";
 
 const PROD = `http://127.0.0.1:${process.env.E2E_PROD_PORT || "3102"}`;
 const DEVICE = "123e4567-e89b-42d3-a456-426614174000";
 const EVENT_ID = "AAAAAAAAAAAAAAAAAAAAAA";
 const { defaultBrowserType: _defaultBrowserType, ...PIXEL_7 } = devices["Pixel 7"];
+const VAPID_PUBLIC_KEY = "B" + "A".repeat(86);
+
+interface SyntheticStatus {
+  available: boolean;
+  reason: null | "not-production" | "authority-unavailable" | "recovery-pending";
+  mutationAllowed: boolean;
+  mutationReason: null | "secure-transport-required" | "proxy-configuration-unsupported";
+  vapidPublicKey: string | null;
+  maxDevices: 16;
+  preferences: { hideDetails: boolean };
+  devices: Array<{ id: string; createdAt: string; lastSeenAt: string }>;
+}
+
+function syntheticStatus(overrides: Partial<SyntheticStatus> = {}): SyntheticStatus {
+  return {
+    available: true,
+    reason: null,
+    mutationAllowed: true,
+    mutationReason: null,
+    vapidPublicKey: VAPID_PUBLIC_KEY,
+    maxDevices: 16,
+    preferences: { hideDetails: false },
+    devices: [],
+    ...overrides,
+  };
+}
 
 interface WorkerHarness {
   listeners: Map<string, (event: any) => void>;
@@ -287,6 +317,123 @@ async function installDeferredSyntheticPushBrowser(page: Page) {
   });
 }
 
+type ControlledBrowserOptions = {
+  permission?: NotificationPermission;
+  subscription?: "none" | "matching" | "mismatch";
+  failStorageSet?: boolean;
+  failStorageRemove?: boolean;
+  unsubscribeResult?: boolean;
+  storedHandle?: string | null;
+};
+
+async function installControlledSyntheticPushBrowser(
+  page: Page,
+  options: ControlledBrowserOptions = {},
+) {
+  await page.addInitScript((initial) => {
+    type SubscriptionRecord = { endpoint: string; key: Uint8Array };
+    const events: string[] = [];
+    let permission: NotificationPermission = initial.permission ?? "granted";
+    const matchingKey = Uint8Array.from(atob("B" + "A".repeat(86) + "="), (character) => character.charCodeAt(0));
+    const mismatchKey = Uint8Array.from({ length: 65 }, (_, index) => index === 0 ? 4 : 9);
+    let current: SubscriptionRecord | null = initial.subscription === "matching"
+      ? { endpoint: "https://push.example.test/controlled", key: matchingKey }
+      : initial.subscription === "mismatch"
+        ? { endpoint: "https://push.example.test/old", key: mismatchKey }
+        : null;
+    const firstWorker = { state: "activated", scriptURL: `${location.origin}/sw.js` };
+    const replacementWorker = { state: "activated", scriptURL: `${location.origin}/sw.js` };
+    let activeWorker = firstWorker;
+
+    const makeSubscription = (record: SubscriptionRecord): PushSubscription => ({
+      endpoint: record.endpoint,
+      expirationTime: null,
+      options: { applicationServerKey: record.key.buffer, userVisibleOnly: true },
+      getKey: (name: PushEncryptionKeyName) => name === "p256dh"
+        ? Uint8Array.from({ length: 65 }, (_, index) => index === 0 ? 4 : index).buffer
+        : Uint8Array.from({ length: 16 }, (_, index) => index).buffer,
+      unsubscribe: () => {
+        events.push("unsubscribe");
+        if (initial.unsubscribeResult === false) return Promise.resolve(false);
+        current = null;
+        return Promise.resolve(true);
+      },
+      toJSON: () => ({}),
+    } as PushSubscription);
+
+    const control = {
+      events,
+      setPermission: (value: NotificationPermission) => { permission = value; },
+      replaceWorkerAtSameUrl: () => { activeWorker = replacementWorker; },
+      record: (value: string) => events.push(value),
+    };
+    Object.defineProperty(globalThis, "__pushControl", { configurable: true, value: control });
+    Object.defineProperty(globalThis, "PushManager", { configurable: true, value: class PushManager {} });
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: {
+        get permission() { return permission; },
+        requestPermission: () => {
+          events.push("permission");
+          permission = "granted";
+          return Promise.resolve(permission);
+        },
+      },
+    });
+    const registration = {
+      scope: `${location.origin}/`,
+      get active() { return activeWorker; },
+      pushManager: {
+        // Deliberately return a distinct standards-equivalent wrapper on every
+        // read. Product code must identify the subscription by exact data.
+        getSubscription: async () => current ? makeSubscription(current) : null,
+        subscribe: () => {
+          events.push("subscribe");
+          current = { endpoint: "https://push.example.test/controlled", key: matchingKey };
+          return Promise.resolve(makeSubscription(current));
+        },
+      },
+    };
+    Object.defineProperty(navigator.serviceWorker, "getRegistration", {
+      configurable: true,
+      value: async () => registration,
+    });
+
+    const nativeSet = Storage.prototype.setItem;
+    const nativeRemove = Storage.prototype.removeItem;
+    Object.defineProperty(Storage.prototype, "setItem", {
+      configurable: true,
+      value(this: Storage, key: string, value: string) {
+        if (key === "draw.push.device.v1" && initial.failStorageSet) throw new Error("synthetic storage set failure");
+        return nativeSet.call(this, key, value);
+      },
+    });
+    Object.defineProperty(Storage.prototype, "removeItem", {
+      configurable: true,
+      value(this: Storage, key: string) {
+        if (key === "draw.push.device.v1") events.push("storage-remove");
+        if (key === "draw.push.device.v1" && initial.failStorageRemove) throw new Error("synthetic storage remove failure");
+        return nativeRemove.call(this, key);
+      },
+    });
+    if (initial.storedHandle !== undefined && initial.storedHandle !== null) {
+      nativeSet.call(localStorage, "draw.push.device.v1", initial.storedHandle);
+    }
+  }, options);
+}
+
+async function pushEvents(page: Page): Promise<string[]> {
+  return page.evaluate(() => (
+    globalThis as typeof globalThis & { __pushControl: { events: string[] } }
+  ).__pushControl.events.slice());
+}
+
+async function recordPushEvent(page: Page, value: string) {
+  await page.evaluate((event) => (
+    globalThis as typeof globalThis & { __pushControl: { record: (entry: string) => void } }
+  ).__pushControl.record(event), value);
+}
+
 async function exerciseSyntheticSettings(page: Page) {
   let hideDetails = false;
   let putBody: unknown = null;
@@ -373,6 +520,95 @@ test.describe("production durable Push landings", () => {
     await page.goto(`${PROD}/tasks?focus=%31&showDone=1&keep=yes#invalid`);
     await expect(page).toHaveURL(`${PROD}/tasks?keep=yes#invalid`);
     await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
+  });
+
+  test("absent and archived task targets degrade quietly after consuming the focused URL", async ({ page }) => {
+    await page.goto(`${PROD}/tasks?focus=900719925&showDone=1&keep=absent#quiet`);
+    await expect(page).toHaveURL(`${PROD}/tasks?keep=absent#quiet`);
+    await expect(page.getByRole("heading", { name: "Tasks" })).toBeVisible();
+    await expect(page.getByRole("alert")).toHaveCount(0);
+
+    const categories = await (await page.request.get(`${PROD}/api/categories`)).json() as Array<{ id: number }>;
+    const created = await page.request.post(`${PROD}/api/tasks`, {
+      data: { title: "Archived Push landing", categoryId: categories[0].id },
+    });
+    const task = await created.json() as { id: number };
+    expect((await page.request.patch(`${PROD}/api/tasks/${task.id}`, { data: { status: "archived" } })).ok()).toBeTruthy();
+    await page.goto(`${PROD}/tasks?focus=${task.id}&showDone=1`);
+    await expect(page).toHaveURL(`${PROD}/tasks`);
+    await expect(page.locator(`[data-task-id="${task.id}"]`).first()).not.toHaveClass(/palette-flash/);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  });
+
+  test("resolved and deleted goal targets degrade quietly after consuming the focused URL", async ({ page }) => {
+    const createGoal = async (title: string) => {
+      const response = await page.request.post(`${PROD}/api/goals`, { data: { title } });
+      expect(response.ok()).toBeTruthy();
+      return response.json() as Promise<{ id: number }>;
+    };
+    const resolved = await createGoal("Resolved Push landing");
+    expect((await page.request.patch(`${PROD}/api/goals/${resolved.id}`, { data: { status: "achieved" } })).ok()).toBeTruthy();
+    await page.goto(`${PROD}/goals?focus=${resolved.id}&keep=resolved#quiet`);
+    await expect(page).toHaveURL(`${PROD}/goals?keep=resolved#quiet`);
+    await expect(page.locator(`[data-goal-id="${resolved.id}"]`)).toHaveCount(0);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+
+    const deleted = await createGoal("Deleted Push landing");
+    expect((await page.request.delete(`${PROD}/api/goals/${deleted.id}`)).ok()).toBeTruthy();
+    await page.goto(`${PROD}/goals?focus=${deleted.id}`);
+    await expect(page).toHaveURL(`${PROD}/goals`);
+    await expect(page.locator(`[data-goal-id="${deleted.id}"]`)).toHaveCount(0);
+    await expect(page.getByRole("alert")).toHaveCount(0);
+  });
+});
+
+test.describe("password-gated production Push landing", () => {
+  test("retains the exact focused deep link through unlock, then consumes it", async ({ page }) => {
+    const port = process.env.E2E_PUSH_AUTH_PORT || "34604";
+    const base = `http://127.0.0.1:${port}`;
+    const password = "push-landing-e2e-password";
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-e2e-push-auth-"));
+    const server = spawn(process.execPath, [path.resolve(__dirname, "..", "node_modules", "tsx", "dist", "cli.mjs"), "src/prod.ts"], {
+      cwd: path.resolve(__dirname, "..", "server"),
+      env: { ...process.env, DATA_DIR: dataDir, API_PORT: port, HOST: "", DRAW_PASSWORD: password, ANTHROPIC_API_KEY: "" },
+      stdio: "ignore",
+    });
+    try {
+      const deadline = Date.now() + 60_000;
+      for (;;) {
+        try { if ((await fetch(`${base}/api/health`)).ok) break; } catch { /* wait */ }
+        if (server.exitCode !== null) throw new Error(`Push auth server exited early (${server.exitCode})`);
+        if (Date.now() > deadline) throw new Error("Push auth server did not become healthy");
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+      const headers = { "content-type": "application/json", "x-draw-password": password };
+      const categories = await (await fetch(`${base}/api/categories`, { headers })).json() as Array<{ id: number }>;
+      const created = await fetch(`${base}/api/tasks`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ title: "Password-gated Push landing", categoryId: categories[0].id }),
+      });
+      expect(created.ok).toBeTruthy();
+      const task = await created.json() as { id: number };
+
+      const focused = `${base}/tasks?focus=${task.id}&showDone=1&keep=auth#landing`;
+      const response = await page.goto(focused);
+      expect(response?.status()).toBe(401);
+      await expect(page).toHaveURL(focused);
+      await page.getByLabel("Password").fill(password);
+      await page.getByRole("button", { name: "Unlock" }).click();
+      await expect(page).toHaveURL(`${base}/tasks?keep=auth#landing`);
+      const row = page.locator(`[data-task-id="${task.id}"]`).first();
+      await expect(row).toBeVisible();
+      await expect(row).toHaveClass(/palette-flash/);
+    } finally {
+      if (server.exitCode === null) {
+        const exited = new Promise((resolve) => server.once("exit", resolve));
+        server.kill();
+        await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5_000))]);
+      }
+      try { fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* OS cleanup */ }
+    }
   });
 });
 
@@ -466,6 +702,54 @@ test.describe("Deadline notification Settings — desktop production build", () 
     expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
   });
 
+  test("POSTs a newly subscribed browser when PushManager returns an equivalent distinct wrapper", async ({ page }) => {
+    let enrolled = false;
+    let posts = 0;
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus({
+        devices: enrolled ? [{ id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" }] : [],
+      })),
+    }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      posts++;
+      enrolled = true;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ device: { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" } }),
+      });
+    });
+    await installControlledSyntheticPushBrowser(page);
+    await page.goto(`${PROD}/settings`);
+    await page.getByRole("button", { name: "Enable", exact: true }).click();
+    await expect(page.getByText("Notifications are enabled for this browser.", { exact: true })).toBeVisible();
+    expect(posts).toBe(1);
+    expect(await pushEvents(page)).toEqual(["subscribe"]);
+  });
+
+  test("a same-URL active-worker replacement prevents every activation-sensitive operation", async ({ page }) => {
+    let posts = 0;
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus()),
+    }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() === "POST") posts++;
+      await route.abort();
+    });
+    await installControlledSyntheticPushBrowser(page);
+    await page.goto(`${PROD}/settings`);
+    await expect(page.getByRole("button", { name: "Enable", exact: true })).toBeVisible();
+    await page.evaluate(() => (
+      globalThis as typeof globalThis & { __pushControl: { replaceWorkerAtSameUrl: () => void } }
+    ).__pushControl.replaceWorkerAtSameUrl());
+    await page.getByRole("button", { name: "Enable", exact: true }).click();
+    await expect.poll(() => pushEvents(page)).toEqual([]);
+    expect(posts).toBe(0);
+  });
+
   test("unmount during a pending synthetic subscription cleans the new orphan and never POSTs", async ({ page }) => {
     let posts = 0;
     await page.route("**/api/push/status", async (route) => route.fulfill({
@@ -489,6 +773,320 @@ test.describe("Deadline notification Settings — desktop production build", () 
     await page.evaluate(() => (globalThis as typeof globalThis & { __resolvePushSubscribe: () => void }).__resolvePushSubscribe());
     await expect.poll(() => page.evaluate(() => (globalThis as typeof globalThis & { __pushEvents: string[] }).__pushEvents)).toEqual(["subscribe", "unsubscribe"]);
     expect(posts).toBe(0);
+  });
+
+  test("replaces a VAPID-mismatched subscription only across two explicit clicks", async ({ page }) => {
+    let posts = 0;
+    let postBody: Record<string, unknown> | null = null;
+    let enrolled = false;
+    const listedDevice = { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" };
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus({ devices: enrolled ? [listedDevice] : [listedDevice] })),
+    }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      posts++;
+      postBody = route.request().postDataJSON() as Record<string, unknown>;
+      enrolled = true;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ device: listedDevice }) });
+    });
+    await installControlledSyntheticPushBrowser(page, { subscription: "mismatch", storedHandle: DEVICE });
+    await page.goto(`${PROD}/settings`);
+    await page.getByRole("button", { name: "Re-enable" }).click();
+    await expect(page.getByRole("button", { name: "Continue enabling" })).toBeVisible();
+    expect(posts).toBe(0);
+    expect(await pushEvents(page)).toEqual(["unsubscribe"]);
+    await page.getByRole("button", { name: "Continue enabling" }).click();
+    await expect(page.getByText("Notifications are enabled for this browser.", { exact: true })).toBeVisible();
+    expect(posts).toBe(1);
+    expect(postBody).toMatchObject({ replaceDeviceId: DEVICE });
+    expect(await pushEvents(page)).toEqual(["unsubscribe", "subscribe"]);
+  });
+
+  test("cleans only a newly-created orphan after POST failure and never retries", async ({ page }) => {
+    let posts = 0;
+    await page.route("**/api/push/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(syntheticStatus()) }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      posts++;
+      await route.fulfill({ status: 502, contentType: "application/json", body: JSON.stringify({ error: "push-endpoint-unavailable" }) });
+    });
+    await installControlledSyntheticPushBrowser(page);
+    await page.goto(`${PROD}/settings`);
+    await page.getByRole("button", { name: "Enable", exact: true }).click();
+    await expect(page.getByText("The browser push service could not be reached. No device was enabled.")).toBeVisible();
+    expect(posts).toBe(1);
+    expect(await pushEvents(page)).toEqual(["subscribe", "unsubscribe"]);
+  });
+
+  test("keeps successful enrollment in view when storage persistence fails", async ({ page }) => {
+    let enrolled = false;
+    const listedDevice = { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" };
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus({ devices: enrolled ? [listedDevice] : [] })),
+    }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      enrolled = true;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ device: listedDevice }) });
+    });
+    await installControlledSyntheticPushBrowser(page, { failStorageSet: true });
+    await page.goto(`${PROD}/settings`);
+    await page.getByRole("button", { name: "Enable", exact: true }).click();
+    await expect(page.getByText("Notifications were enabled, but Draw could not remember this browser. Re-enable after reloading.")).toBeVisible();
+    await expect(page.getByText("This device", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBeNull();
+    expect(await pushEvents(page)).toEqual(["subscribe"]);
+  });
+
+  test("keeps inspection read-only, then clears malformed and confirmed-stale handles at an explicit mutation", async ({ page }) => {
+    let postBody: Record<string, unknown> | null = null;
+    const listedDevice = { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" };
+    let enrolled = false;
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus({ devices: enrolled ? [listedDevice] : [] })),
+    }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      postBody = route.request().postDataJSON() as Record<string, unknown>;
+      enrolled = true;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ device: listedDevice }) });
+    });
+    await installControlledSyntheticPushBrowser(page, { subscription: "matching", storedHandle: DEVICE });
+    await page.goto(`${PROD}/settings`);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
+    expect(await pushEvents(page)).toEqual([]);
+    await page.getByRole("button", { name: "Re-enable" }).click();
+    await expect(page.getByText("Notifications are enabled for this browser.", { exact: true })).toBeVisible();
+    expect(postBody).not.toHaveProperty("replaceDeviceId");
+    expect(await pushEvents(page)).toContain("storage-remove");
+  });
+
+  test("does not clear a malformed handle during inspection but clears it on Enable", async ({ page }) => {
+    let enrolled = false;
+    const listedDevice = { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" };
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus({ devices: enrolled ? [listedDevice] : [] })),
+    }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      expect(route.request().postDataJSON()).not.toHaveProperty("replaceDeviceId");
+      enrolled = true;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ device: listedDevice }) });
+    });
+    await installControlledSyntheticPushBrowser(page, { storedHandle: "malformed-local-handle" });
+    await page.goto(`${PROD}/settings`);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe("malformed-local-handle");
+    expect(await pushEvents(page)).toEqual([]);
+    await page.getByRole("button", { name: "Enable", exact: true }).click();
+    await expect(page.getByText("Notifications are enabled for this browser.", { exact: true })).toBeVisible();
+    expect(await pushEvents(page)).toEqual(["storage-remove", "subscribe"]);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
+  });
+
+  test("does not treat an unavailable status as proof that a handle is stale", async ({ page }) => {
+    await installControlledSyntheticPushBrowser(page, { subscription: "matching", storedHandle: DEVICE });
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus({ available: false, reason: "authority-unavailable", vapidPublicKey: null })),
+    }));
+    await page.goto(`${PROD}/settings`);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
+    expect(await pushEvents(page)).toEqual([]);
+  });
+
+  test("does not treat a failed status read as proof that a handle is stale", async ({ page }) => {
+    await installControlledSyntheticPushBrowser(page, { subscription: "matching", storedHandle: DEVICE });
+    await page.route("**/api/push/status", (route) => route.abort());
+    await page.goto(`${PROD}/settings`);
+    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
+    expect(await pushEvents(page)).toEqual([]);
+  });
+
+  test("adopts a validated privacy PUT even when the follow-up status read fails", async ({ page }) => {
+    let statusReads = 0;
+    await page.route("**/api/push/status", async (route) => {
+      statusReads++;
+      if (statusReads > 1) return route.abort();
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(syntheticStatus()) });
+    });
+    await page.route("**/api/push/preferences", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ hideDetails: true }),
+    }));
+    await installControlledSyntheticPushBrowser(page);
+    await page.goto(`${PROD}/settings`);
+    const preference = page.getByRole("checkbox", { name: "Hide notification details" });
+    await preference.click();
+    await expect(preference).toBeChecked();
+    await expect(page.getByText("Could not load deadline notification status. Check the connection and try again.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Deadline notifications" })).toBeVisible();
+  });
+
+  for (const variant of [
+    {
+      name: "availability",
+      status: syntheticStatus({ available: false, reason: "recovery-pending", vapidPublicKey: null }),
+    },
+    {
+      name: "mutation allowance",
+      status: syntheticStatus({ mutationAllowed: false, mutationReason: "secure-transport-required" }),
+    },
+    {
+      name: "VAPID key",
+      status: syntheticStatus({ vapidPublicKey: "B" + "A".repeat(85) + "E" }),
+    },
+  ]) {
+    test(`invalidates a rendered continuation when loaded ${variant.name} changes`, async ({ page }) => {
+      let currentStatus = syntheticStatus();
+      let posts = 0;
+      await page.route("**/api/push/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(currentStatus) }));
+      await page.route("**/api/push/preferences", (route) => {
+        currentStatus = { ...variant.status, preferences: { hideDetails: true } };
+        return route.fulfill({ contentType: "application/json", body: JSON.stringify({ hideDetails: true }) });
+      });
+      await page.route("**/api/push/subscriptions", async (route) => {
+        if (route.request().method() === "POST") posts++;
+        await route.abort();
+      });
+      await installControlledSyntheticPushBrowser(page, { permission: "default" });
+      await page.goto(`${PROD}/settings`);
+      await page.getByRole("button", { name: "Enable", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Continue enabling" })).toBeVisible();
+      await page.getByRole("checkbox", { name: "Hide notification details" }).click();
+      await expect(page.getByRole("button", { name: "Continue enabling" })).toHaveCount(0);
+      expect(posts).toBe(0);
+      expect(await pushEvents(page)).toEqual(["permission"]);
+    });
+  }
+
+  test("invalidates a rendered continuation on live permission and worker identity changes before mutation", async ({ page }) => {
+    let posts = 0;
+    await page.route("**/api/push/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(syntheticStatus()) }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() === "POST") posts++;
+      await route.abort();
+    });
+    await installControlledSyntheticPushBrowser(page, { permission: "default" });
+    await page.goto(`${PROD}/settings`);
+    await page.getByRole("button", { name: "Enable", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Continue enabling" })).toBeVisible();
+    await page.evaluate(() => {
+      const control = (globalThis as typeof globalThis & {
+        __pushControl: { setPermission: (value: NotificationPermission) => void; replaceWorkerAtSameUrl: () => void };
+      }).__pushControl;
+      control.setPermission("denied");
+      control.replaceWorkerAtSameUrl();
+    });
+    await page.getByRole("button", { name: "Continue enabling" }).click();
+    expect(posts).toBe(0);
+    expect(await pushEvents(page)).toEqual(["permission"]);
+  });
+
+  test("orders local disable, other-device revoke, revoke-all, and recovery cleanup", async ({ page }) => {
+    const OTHER = "223e4567-e89b-42d3-a456-426614174000";
+    const row = (id: string) => ({ id, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" });
+    let devicesState = [row(DEVICE), row(OTHER)];
+    let failRevokeAll = false;
+    await page.route("**/api/push/status", async (route) => {
+      await recordPushEvent(page, "status");
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(syntheticStatus({ devices: devicesState })) });
+    });
+    await page.route("**/api/push/subscriptions/**", async (route) => {
+      const id = route.request().url().split("/").pop()!;
+      await recordPushEvent(page, `delete:${id}`);
+      devicesState = devicesState.filter((device) => device.id !== id);
+      await route.fulfill({ status: 204 });
+    });
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback();
+      await recordPushEvent(page, failRevokeAll ? "delete-all-failed" : "delete-all");
+      devicesState = [];
+      await route.fulfill(failRevokeAll
+        ? { status: 503, contentType: "application/json", body: JSON.stringify({ error: "push-busy" }) }
+        : { status: 204 });
+    });
+    await installControlledSyntheticPushBrowser(page, { subscription: "matching", storedHandle: DEVICE });
+    await page.goto(`${PROD}/settings`);
+    await page.evaluate(() => { (globalThis as typeof globalThis & { __pushControl: { events: string[] } }).__pushControl.events.length = 0; });
+    const localRow = page.locator(".push-device").filter({ hasText: "This device" });
+    await localRow.getByRole("button", { name: "Disable this device" }).click();
+    await expect(localRow).toHaveCount(0);
+    expect((await pushEvents(page)).slice(-4)).toEqual([`delete:${DEVICE}`, "unsubscribe", "storage-remove", "status"]);
+
+    // Reload with only an other row: revoking it must never mutate the browser.
+    devicesState = [row(OTHER)];
+    await page.reload();
+    await page.evaluate(() => { (globalThis as typeof globalThis & { __pushControl: { events: string[] } }).__pushControl.events.length = 0; });
+    await page.locator(".push-device").filter({ hasText: "Other device" }).getByRole("button", { name: "Revoke" }).click();
+    await expect(page.locator(".push-device")).toHaveCount(0);
+    expect((await pushEvents(page)).slice(-3)).toEqual(["storage-remove", `delete:${OTHER}`, "status"]);
+
+    devicesState = [row(DEVICE)];
+    await page.reload();
+    await page.evaluate(() => { (globalThis as typeof globalThis & { __pushControl: { events: string[] } }).__pushControl.events.length = 0; });
+    await page.getByRole("button", { name: "Revoke all devices" }).click();
+    await expect(page.locator(".push-device")).toHaveCount(0);
+    expect((await pushEvents(page)).slice(-4)).toEqual(["delete-all", "unsubscribe", "storage-remove", "status"]);
+
+    // Failed revoke-all whose read-back proves removal performs local cleanup,
+    // then reports the original closed failure after the second read-back.
+    devicesState = [row(DEVICE)];
+    failRevokeAll = true;
+    await page.evaluate((id) => localStorage.setItem("draw.push.device.v1", id), DEVICE);
+    await page.reload();
+    await page.evaluate(() => { (globalThis as typeof globalThis & { __pushControl: { events: string[] } }).__pushControl.events.length = 0; });
+    await page.getByRole("button", { name: "Revoke all devices" }).click();
+    await expect(page.getByText("Notification service is busy. Try again.")).toBeVisible();
+    expect((await pushEvents(page)).slice(-5)).toEqual(["delete-all-failed", "status", "unsubscribe", "storage-remove", "status"]);
+  });
+
+  test("reports cleanup failure after confirmed server removal without reconstructing server state", async ({ page }) => {
+    let devicesState = [{ id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" }];
+    await page.route("**/api/push/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(syntheticStatus({ devices: devicesState })) }));
+    await page.route("**/api/push/subscriptions/**", async (route) => {
+      devicesState = [];
+      await route.fulfill({ status: 204 });
+    });
+    await installControlledSyntheticPushBrowser(page, {
+      subscription: "matching",
+      storedHandle: DEVICE,
+      unsubscribeResult: false,
+      failStorageRemove: true,
+    });
+    await page.goto(`${PROD}/settings`);
+    await page.getByRole("button", { name: "Disable this device" }).click();
+    await expect(page.getByText("The server device was removed, but browser cleanup could not be confirmed. Reload Draw and check browser site settings.")).toBeVisible();
+    expect(devicesState).toEqual([]);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
+  });
+
+  test("refetches and closes test/mutation error states before presenting guidance", async ({ page }) => {
+    const listedDevice = { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" };
+    let currentStatus = syntheticStatus({ devices: [listedDevice] });
+    let testCode = "push-test-cancelled";
+    await page.route(`**/api/push/subscriptions/${DEVICE}/test`, (route) => route.fulfill({
+      status: testCode === "push-device-not-found" ? 404 : 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: testCode }),
+    }));
+    await page.route("**/api/push/status", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify(currentStatus) }));
+    await installControlledSyntheticPushBrowser(page, { subscription: "matching", storedHandle: DEVICE });
+    await page.goto(`${PROD}/settings`);
+    await page.getByRole("button", { name: "Send test" }).click();
+    await expect(page.getByText("Test send cancelled because notification state changed")).toBeVisible();
+
+    testCode = "push-device-not-found";
+    currentStatus = syntheticStatus();
+    await page.getByRole("button", { name: "Send test" }).click();
+    await expect(page.getByText("This device is no longer enrolled. Choose Enable to enroll it again.")).toBeVisible();
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBeNull();
+    await expect(page.getByText("This device", { exact: true })).toHaveCount(0);
   });
 });
 
