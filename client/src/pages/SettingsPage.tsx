@@ -18,6 +18,7 @@ import {
 import { UpdateVerifier, type UpdateVerificationPhase } from "../lib/updateVerification";
 import { currentVersionLabel } from "../lib/updatePresentation";
 import type { Category } from "../api/types";
+import { PushNotificationsSection } from "../components/PushNotificationsSection";
 
 function SettingInput({
   label,
@@ -789,6 +790,8 @@ export function SettingsPage() {
       <AiKeySection />
 
       <NotifySection />
+
+      <PushNotificationsSection />
 
       <section className="panel" style={{ display: "grid", gap: 12, marginTop: 16 }}>
         <h3 style={{ margin: 0 }}>Draw tuning</h3>

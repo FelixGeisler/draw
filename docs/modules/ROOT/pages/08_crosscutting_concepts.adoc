@@ -350,7 +350,12 @@ schema change: registration upserts at most 16 rows transactionally, the shared
 Hide-details preference remains the closed `0|1` value, and the synthetic
 sender reads one exact seven-column row fingerprint without adding delivery or
 schedule state. Provider 404/410 removes only that unchanged fingerprint, so a
-late old-registration result cannot remove newly committed credentials.
+late old-registration result cannot remove newly committed credentials. Stage
+1C adds no persistence: the per-origin browser handle is only a canonical UUID
+in `draw.push.device.v1`, staged enrollment continuation is in-memory, and the
+classic production worker accepts only ADR-72's bounded closed payloads and
+worker-created same-origin routes. All Stage 1 is implemented but not
+field-verified; Stage 2 scheduling remains planned.
 
 == 8.9 Backup and restore
 

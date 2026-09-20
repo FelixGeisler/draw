@@ -16,6 +16,7 @@ import { TaskRow } from "../components/TaskRow";
 import { TaskDndContext, TaskDragOverlay, useTaskDnd } from "../components/TaskDnd";
 import { classifyTask, flattenOpen, groupSiblings, type DrawGroup } from "../lib/drawable";
 import { localToday } from "../lib/localDay";
+import { consumePushLanding } from "../lib/pushLanding";
 import type { Task } from "../api/types";
 
 /**
@@ -104,20 +105,18 @@ export function TasksPage() {
     reorder: (id, beforeId) => reorderSubtask.mutateAsync({ id, beforeId }),
   });
 
-  // Palette landing (#243, ADR-68): the palette navigates here with
-  // { focusTaskId, showDone } in router state. Consume it ONCE — the replace
-  // strips the state so back/reload cannot re-scroll — and flip "show done"
-  // first when the target is done: the row cannot render under the default
-  // open-only query.
+  // Palette and durable Push landing (#243/#343, ADR-68/72). URL focus owns
+  // focus/showDone, takes precedence over palette state, and is consumed once
+  // while unrelated query bytes, hash and router-state fields survive.
   const location = useLocation();
   const navigate = useNavigate();
   const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
   useEffect(() => {
-    const state = location.state as { focusTaskId?: number; showDone?: boolean } | null;
-    if (state?.focusTaskId == null) return;
-    if (state.showDone) setShowDone(true);
-    setPendingFocusId(state.focusTaskId);
-    navigate(location.pathname, { replace: true });
+    const landing = consumePushLanding(location, "task");
+    if (!landing.consumed) return;
+    if (landing.showDone) setShowDone(true);
+    setPendingFocusId(landing.focusId);
+    navigate(landing.destination, { replace: true, state: landing.state });
   }, [location, navigate]);
 
   // Scroll-and-flash once the row exists. classList, not a prop: the flash is
@@ -129,14 +128,24 @@ export function TasksPage() {
   // user on an empty page.
   useEffect(() => {
     if (pendingFocusId == null || tasks.data == null) return;
-    const el = document.querySelector<HTMLElement>(`[data-task-id="${pendingFocusId}"]`);
+    const focusedTask = taskById.get(pendingFocusId);
+    const el = focusedTask?.status === "archived"
+      ? null
+      : document.querySelector<HTMLElement>(`[data-task-id="${pendingFocusId}"]`);
     if (el) {
       el.scrollIntoView({ block: "center" });
       el.classList.add("palette-flash");
       window.setTimeout(() => el.classList.remove("palette-flash"), 1500);
       setPendingFocusId(null);
-    } else if (scope != null && taskById.has(pendingFocusId)) {
+    } else if (scope != null && focusedTask?.status !== "archived" && taskById.has(pendingFocusId)) {
+      // A task known in loaded data can be hidden only by work mode here.
+      // Clear once and keep the focus pending for the unscoped render.
       setScope(undefined);
+    } else {
+      // Deleted targets are absent; archived targets can remain in the
+      // historical all-status list but are deliberately not focusable. Both
+      // quietly degrade to the Tasks page.
+      setPendingFocusId(null);
     }
   }, [pendingFocusId, tasks.data, scope, setScope, taskById]);
 

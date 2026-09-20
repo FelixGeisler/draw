@@ -546,6 +546,54 @@ textarea:focus {
   }
 }
 
+.push-guidance,
+.push-message {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.push-error {
+  color: var(--danger);
+}
+
+.push-message,
+.push-actions,
+.push-preference,
+.push-device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.push-preference {
+  align-items: flex-start;
+}
+
+.push-preference > span,
+.push-device-meta {
+  display: grid;
+  gap: 4px;
+}
+
+.push-preference small,
+.push-device-meta span {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.push-device-list {
+  display: grid;
+  gap: 8px;
+}
+
+.push-device {
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
 /* ---- Phone layout (#193) ------------------------------------------------
    ONE width breakpoint for the whole client: 640px — its first and only width
    query (before #193 every @media in the client was prefers-reduced-motion, and
@@ -557,6 +605,19 @@ textarea:focus {
    The visual identity is untouched: the same cards, colors and type, adapted
    to a single column with a thumb-reachable bottom nav. */
 @media (max-width: 640px) {
+  .push-device,
+  .push-actions {
+    align-items: stretch;
+  }
+
+  .push-device {
+    display: grid;
+  }
+
+  .push-actions > button {
+    min-height: 44px;
+  }
+
   .layout {
     flex-direction: column;
   }
