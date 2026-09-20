@@ -14,19 +14,23 @@ interface ToastSnapshot {
 
 async function reserveLoopbackPort(): Promise<number> {
   const reservation = net.createServer();
-  await new Promise<void>((resolve, reject) => {
-    reservation.once("error", reject);
-    reservation.listen(0, "127.0.0.1", resolve);
-  });
-  const address = reservation.address();
-  if (address == null || typeof address === "string") {
-    reservation.close();
-    throw new Error("Failed to reserve a loopback port");
+  try {
+    await new Promise<void>((resolve, reject) => {
+      reservation.once("error", reject);
+      reservation.listen(0, "127.0.0.1", resolve);
+    });
+    const address = reservation.address();
+    if (address == null || typeof address === "string") {
+      throw new Error("Failed to reserve a loopback port");
+    }
+    return address.port;
+  } finally {
+    if (reservation.listening) {
+      await new Promise<void>((resolve, reject) =>
+        reservation.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
   }
-  await new Promise<void>((resolve, reject) =>
-    reservation.close((error) => (error ? reject(error) : resolve())),
-  );
-  return address.port;
 }
 
 async function snapshot(page: Page): Promise<ToastSnapshot | null> {
@@ -54,17 +58,17 @@ test("achievement toast identities survive StrictMode Fast Refresh and reset onl
     "components",
     "AchievementToast.tsx",
   );
-  const harnessRoot = fs.mkdtempSync(path.join(os.tmpdir(), "draw-toast-refresh-"));
-  const sourceRoot = path.join(harnessRoot, "src");
-  const harnessComponent = path.join(sourceRoot, "AchievementToast.tsx");
-  const requireFromRepository = createRequire(path.join(repositoryRoot, "package.json"));
-  const dependencyRoot = path.dirname(requireFromRepository.resolve("react/package.json"));
   const browserErrors: string[] = [];
   const externalRequests: string[] = [];
   let context: Awaited<ReturnType<typeof browser.newContext>> | undefined;
   let viteServer: { close(): Promise<void> } | undefined;
+  const harnessRoot = fs.mkdtempSync(path.join(os.tmpdir(), "draw-toast-refresh-"));
 
   try {
+    const sourceRoot = path.join(harnessRoot, "src");
+    const harnessComponent = path.join(sourceRoot, "AchievementToast.tsx");
+    const requireFromRepository = createRequire(path.join(repositoryRoot, "package.json"));
+    const dependencyRoot = path.dirname(requireFromRepository.resolve("react/package.json"));
     fs.mkdirSync(sourceRoot, { recursive: true });
     const componentSource = fs.readFileSync(productSource, "utf8");
     fs.writeFileSync(harnessComponent, componentSource);
@@ -165,12 +169,24 @@ window.mount();`,
     await unlock(page, ["repeated", "repeated"]);
     await expect(page.getByText("repeated", { exact: true })).toBeVisible();
     const repeatedFirst = await snapshot(page);
+    expect(repeatedFirst).not.toBeNull();
+    expect(repeatedFirst?.key).not.toBeNull();
     await page.waitForFunction(
-      (firstNode) => (window as any).toastSnapshot()?.node !== firstNode,
-      repeatedFirst?.node,
+      (first) => {
+        const second = (window as any).toastSnapshot();
+        return (
+          second !== null &&
+          second.key !== null &&
+          second.key !== first.key &&
+          second.node !== first.node
+        );
+      },
+      repeatedFirst,
       { timeout: 6_500 },
     );
     const repeatedSecond = await snapshot(page);
+    expect(repeatedSecond).not.toBeNull();
+    expect(repeatedSecond?.key).not.toBeNull();
     expect(repeatedSecond?.key).not.toBe(repeatedFirst?.key);
     expect(repeatedSecond?.node).not.toBe(repeatedFirst?.node);
     await expectQueueToDrain(page);
