@@ -49,6 +49,9 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v2Schema = current
+    .replace(/-- Stage 2A deadline-reminder[\s\S]*?CREATE TABLE deadline_reminder_claims[\s\S]*?\);\r?\n\r?\n/, "")
+    .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+    .replace(/,\r?\n  \('push_lead_days', '1'\)[\s\S]*?\('push_quiet_end', NULL\)/, "")
     .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
     .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
     .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
@@ -300,10 +303,10 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
   });
 });
 
-describe("migration v2 → v19 (including Push persistence and prior infrastructure)", () => {
-  it("bumps user_version to 19", async () => {
+describe("migration v2 → v20 (including Push and deadline foundations)", () => {
+  it("bumps user_version to 20", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(19);
+    expect(db.pragma("user_version", { simple: true })).toBe(20);
   });
 
   it("creates the xp_ledger table, empty (#230, ADR-62)", async () => {

@@ -14,6 +14,7 @@ import {
 } from "../db.js";
 import { validateV18Contract } from "../schemaV18.js";
 import { validateV19Contract } from "../schemaV19.js";
+import { validateV20Contract } from "../schemaV20.js";
 import { disabledPushDependency, type PushDependency } from "../push/authority.js";
 
 // Backup archive layout (#61, ADR-26): one zip holding a `VACUUM INTO`
@@ -169,14 +170,14 @@ function tableExists(handle: Database.Database, table: string): boolean {
 function scrubCredentialRows(handle: Database.Database, removeApiKey: boolean): void {
   handle.transaction(() => {
     if (removeApiKey) handle.prepare("DELETE FROM settings WHERE key = ?").run(API_KEY_SETTING);
-    if (tableExists(handle, "push_subscriptions")) {
-      handle.prepare("DELETE FROM push_subscriptions").run();
-    }
-    // The table is a fixed Stage-2 contract, not a Stage-1A schema object.
-    // Recognizing it here keeps future backups credential-free without
-    // creating it early.
+    // Claims are privacy-sensitive delivery history. Delete them explicitly
+    // even when foreign_keys is disabled on a standalone sanitizer handle;
+    // deleting subscriptions afterwards also proves the production cascade.
     if (tableExists(handle, "deadline_reminder_claims")) {
       handle.prepare("DELETE FROM deadline_reminder_claims").run();
+    }
+    if (tableExists(handle, "push_subscriptions")) {
+      handle.prepare("DELETE FROM push_subscriptions").run();
     }
   })();
 }
@@ -741,9 +742,14 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
       );
     }
     try {
+      // Validate a stamped input under its own version before migration or
+      // credential/claim deletion. In particular, v20's nullable settings
+      // must never be sent through v19's non-null settings validator.
+      if (version === 19) validateV19Contract(staged);
+      if (version === 20) validateV20Contract(staged);
       migrateDatabase(staged);
       validateV18Contract(staged);
-      validateV19Contract(staged);
+      validateV20Contract(staged);
       scrubCredentialRows(staged, false);
       if (staged.pragma("integrity_check", { simple: true }) !== "ok") {
         throw new Error("integrity_check failed after migration");
@@ -751,7 +757,7 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
     } catch (error) {
       throw new BackupError(
         400,
-        `the backup database does not satisfy the schema v18 contract or schema v19 contract: ${
+        `the backup database does not satisfy the schema v18 contract, schema v19 contract, or schema v20 contract: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

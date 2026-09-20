@@ -93,10 +93,25 @@ export const SUBTASK_CATEGORY_ERROR =
  * draw cheerfully reports that it comes back on its own. The UTC round-trip
  * also rejects a well-shaped non-day like "2026-02-30".
  */
-function isCalendarDate(value: unknown): boolean {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+export function isCalendarDate(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (year < 1 || year > 9999) return false;
+
+  // Do not use Date.UTC(year, ...): ECMAScript rewrites years 0-99 to
+  // 1900-1999. setUTCFullYear applies the literal year, while exact component
+  // equality rejects normalization such as 2026-02-30.
+  const roundTrip = new Date(0);
+  roundTrip.setUTCFullYear(year, month - 1, day);
+  return (
+    roundTrip.getUTCFullYear() === year &&
+    roundTrip.getUTCMonth() === month - 1 &&
+    roundTrip.getUTCDate() === day
+  );
 }
 
 /**

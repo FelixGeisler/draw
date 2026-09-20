@@ -23,6 +23,9 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const current = fs.readFileSync(schemaPath, "utf-8");
   const v13Schema = current
+    .replace(/-- Stage 2A deadline-reminder[\s\S]*?CREATE TABLE deadline_reminder_claims[\s\S]*?\);\r?\n\r?\n/, "")
+    .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+    .replace(/,\r?\n  \('push_lead_days', '1'\)[\s\S]*?\('push_quiet_end', NULL\)/, "")
     .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
     .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
     .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
@@ -65,9 +68,9 @@ beforeAll(async () => {
 });
 
 describe("migration v13 → v14 (#156, ADR-42)", () => {
-  it("runs the chain through the current v19 schema", async () => {
+  it("runs the chain through the current v20 schema", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(19);
+    expect(db.pragma("user_version", { simple: true })).toBe(20);
   });
 
   it("creates the draws log with the append-only shape", async () => {

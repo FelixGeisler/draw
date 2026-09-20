@@ -941,11 +941,12 @@ aborts with a 409 before the first destructive step rather than deleting a
 WAL that connection is still writing into and swapping a different file
 underneath it.
 
-*Amendment (#337, schema v19 / ADR-72):* Draw-created manual and scheduled
-archives, imported live databases, and `app.db.bak` are physically free of Web
-Push device credentials. Export takes the ordinary WAL-consistent snapshot,
-deletes `push_subscriptions` (and the future `deadline_reminder_claims`) from
-that copy, then performs a second `VACUUM INTO`; only the rewrite is packaged.
+*Amendment (#337 schema v19; #345 schema v20 / ADR-72):* Draw-created manual
+and scheduled archives, imported live databases, and `app.db.bak` are physically
+free of Web Push device credentials and deadline occurrence claims. Export takes
+the ordinary WAL-consistent snapshot, deletes `push_subscriptions` and
+`deadline_reminder_claims` from that copy, then performs a second `VACUUM INTO`;
+only the rewrite is packaged.
 Import migrates and validates in staging, deletes those rows, and performs the
 same second rewrite before swap. The credential-bearing first copies and every
 `-wal`, `-shm`, or `-journal` sidecar are deleted before publication. Preferences
@@ -2924,7 +2925,8 @@ ADR-72 Stage 1A authority/schema/recovery/backup foundations, Stage 1B status,
 registration, preferences, deletion, revoke, and bounded synthetic sender APIs,
 and Stage 1C staged browser enrollment, closed worker receive/click behavior,
 and durable landings are implemented but not field-verified. All Stage 1 is
-complete; deadline scheduling (Stage 2) remains planned. iOS remains progressive
+complete. Stage 2A's inert foundation is implemented; Stage 2B deadline
+activation remains planned and not field-verified. iOS remains progressive
 enhancement and never gates Android-first delivery.
 * *Adaptation, not redesign.* The card face's own language — full-bleed art under
 its legibility scrim, the category pill, the effort chip, the impact stars, the
@@ -4018,7 +4020,25 @@ keeps restored data and the marker and returns committed
 Stage 1A introduced no API/provider sender, browser/worker behavior, or
 scheduler. Stage 1B implements registration and the bounded synthetic sender,
 and Stage 1C implements the browser receive path described below. All Stage 1
-is complete but not field-verified; Stage 2 remains planned.
+is complete but not field-verified.
+
+*Implemented amendment — Stage 2A foundation (#345):* schema v20 keeps the
+exact v19 step and validator independent, then transactionally rebuilds
+`settings` as `CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)`,
+preserves existing values, seeds lead `1`, send time `09:00`, and nullable
+timezone/quiet endpoints, and creates the exact composite-primary-key
+`deadline_reminder_claims` table with device-delete cascade and no secondary
+index. Runtime and restore validation prove exact DDL, columns, indexes, FK,
+full inherited trigger/no-view inventory, Hide-details, timing domains, and the
+three-key nullable allowlist. Task and goal writes share strict real Gregorian
+`YYYY-MM-DD` validation for years 0001–9999; malformed legacy rows remain
+readable. Device/source deletion and restore clear applicable claims, while
+completion, resolution, and deadline edits retain them. Manual/scheduled
+archives, imported live data, and `app.db.bak` physically remove subscriptions
+and claims while preserving timing/privacy preferences. Stage 2A adds no timing
+endpoint/control, evaluator, sender, scheduler, network behavior, dependency,
+login, or access change. Stage 2B activation remains planned and not
+field-verified.
 
 *Dependency and supply-chain decision:* runtime `web-push` is pinned exactly to
 3.6.7 and type-only `@types/web-push` to 3.6.4 in the committed lockfile.
@@ -4101,7 +4121,7 @@ issues. It is recorded verbatim so later implementation does not depend on a
 movable planning artifact. Its Markdown heading notation is retained as text.
 
 ....
-This normative planned architecture must be recorded by Stage 1A but does not expand its implementation. Top-level approved access/effective-password/backup/retry/privacy decisions and authority apply without repetition. The merged Stage 1A ADR becomes the anchor for downstream issues. Shared boundaries: Android-first standards Web Push in the PWA, including desktop; iPhone only through the same feature-detected path and never a gate. No native/iOS workaround, hosted platform, email/SMS/inbox/digest/private service, generic event bus, or ntfy change. `prod.ts` alone constructs real authority/resolver/transport/scheduler through `AppDependencies`; defaults/tests use fakes and no real network. Use v19 subscriptions/settings/authority/recovery/sanitization. Return no endpoint, keys, private authority, generation, password state, or provider text. Invalidation committed before final synchronous check prevents provider-request creation; initiated request cannot be recalled.
+This normative planned architecture must be recorded by Stage 1A but does not expand its implementation. Top-level approved access/effective-password/backup/retry/privacy decisions and authority apply without repetition. The merged Stage 1A ADR becomes the anchor for downstream issues. Shared boundaries: Android-first standards Web Push in the PWA, including desktop; iPhone only through the same feature-detected path and never a gate. No native/iOS workaround, hosted platform, email/SMS/inbox/digest/private service, generic event bus, or ntfy change. `prod.ts` alone constructs real authority/resolver/transport/scheduler through `AppDependencies`; defaults/tests use fakes and no real network. Use v20 subscriptions/settings/claims/authority/recovery/sanitization. Return no endpoint, keys, private authority, generation, password state, or provider text. Invalidation committed before final synchronous check prevents provider-request creation; initiated request cannot be recalled.
 
 ### Stage 1B — registration (1B.1 implemented) and bounded synthetic sender (1B.2 implemented)
 
@@ -4216,7 +4236,12 @@ Automated Stage 1C evidence covers all capability/topology states; gesture permi
 
 ### Stage 2 — deterministic deadline attempts
 
-**PLANNED — NOT READY FOR IMPLEMENTATION.** Starts only after 1A/1B/1C merge and an issue cites exact accepted digests/heads, v19 schema/APIs/seams and merged ADR.
+**FOUNDATION IMPLEMENTED; ACTIVATION PLANNED AND NOT FIELD-VERIFIED.** #345
+implements only schema v20, strict calendar writes, physical backup
+sanitization, and deletion/cascade claim integrity. The timing API/UI,
+evaluator, occurrence insertion/pruning, sender, and production scheduler
+remain Stage 2B and require a separate accepted issue on the merged Stage 2A
+head.
 
 Fixed policy (**Requirements Engineer delegated authority**, also approved human privacy/delivery policy):
 - One reminder attempt per enrolled device/item/deadline occurrence. Lead exactly `0,1,2,3,7,14,30` days, default 1. Send time `HH:(00|15|30|45)` from `00:00` through `23:45`, default `09:00`.

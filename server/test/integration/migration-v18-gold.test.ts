@@ -7,6 +7,9 @@ import { fileURLToPath } from "node:url";
 const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
 const currentSchema = fs.readFileSync(schemaPath, "utf-8");
 const v17Schema = currentSchema
+  .replace(/-- Stage 2A deadline-reminder[\s\S]*?CREATE TABLE deadline_reminder_claims[\s\S]*?\);\r?\n\r?\n/, "")
+  .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+  .replace(/,\r?\n  \('push_lead_days', '1'\)[\s\S]*?\('push_quiet_end', NULL\)/, "")
   .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
   .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
   .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
@@ -75,7 +78,7 @@ afterAll(() => {
 describe("v17 → v18 migration", () => {
   it("is the exact complete schema contract and applies owner defaults without rewrites", async () => {
     const { validateV18Contract } = await import("../../src/schemaV18.js");
-    expect(database.pragma("user_version", { simple: true })).toBe(19);
+    expect(database.pragma("user_version", { simple: true })).toBe(20);
     expect(() => validateV18Contract(database)).not.toThrow();
     expect(
       database
@@ -194,7 +197,7 @@ describe("fresh v18 schema", () => {
       const { migrateDatabase } = await import("../../src/db.js");
       const { validateV18Contract } = await import("../../src/schemaV18.js");
       migrateDatabase(fresh);
-      expect(fresh.pragma("user_version", { simple: true })).toBe(19);
+      expect(fresh.pragma("user_version", { simple: true })).toBe(20);
       expect(() => validateV18Contract(fresh)).not.toThrow();
       expect(
         fresh

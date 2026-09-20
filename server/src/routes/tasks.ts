@@ -980,6 +980,20 @@ tasksRouter.delete("/:id", (req, res) => {
   // revives as a leaf (PR #102), not as done. The reopen direction needs no
   // hook: a delete only ever removes children, never adds an open one.
   const parentCompletion = db.transaction((): CompletionResult | null => {
+    // Claims deliberately have no task FK: identity includes creation time and
+    // deadline, and Stage 2B owns pruning. Source deletion is the one eager
+    // cleanup boundary. Collect the addressed task plus every descendant the
+    // existing task FK will cascade-delete, then remove all matching claims
+    // regardless of their stored occurrence identity.
+    db.prepare(
+      `WITH RECURSIVE doomed(id) AS (
+         SELECT id FROM tasks WHERE id = ?
+         UNION ALL
+         SELECT child.id FROM tasks child JOIN doomed ON child.parent_id = doomed.id
+       )
+       DELETE FROM deadline_reminder_claims
+       WHERE item_type = 'task' AND item_id IN (SELECT id FROM doomed)`,
+    ).run(id);
     db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
     return row.parentId != null ? maybeAutoCompleteParent(row.parentId) : null;
   })();

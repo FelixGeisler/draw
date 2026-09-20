@@ -50,6 +50,9 @@ beforeAll(async () => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const schema = fs
     .readFileSync(schemaPath, "utf-8")
+    .replace(/-- Stage 2A deadline-reminder[\s\S]*?CREATE TABLE deadline_reminder_claims[\s\S]*?\);\r?\n\r?\n/, "")
+    .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+    .replace(/,\r?\n  \('push_lead_days', '1'\)[\s\S]*?\('push_quiet_end', NULL\)/, "")
     .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
     .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
     .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")

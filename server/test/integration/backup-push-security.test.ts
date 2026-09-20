@@ -11,7 +11,8 @@ import {
   createBackupArchive,
   readMaterialFilesSafely,
 } from "../../src/services/backupService.js";
-import { validateV19Contract, V19_STATEMENTS } from "../../src/schemaV19.js";
+import { V19_STATEMENTS } from "../../src/schemaV19.js";
+import { validateV20Contract } from "../../src/schemaV20.js";
 import {
   AUTHORITY_FILE,
   PushLifecycle,
@@ -23,6 +24,8 @@ import {
 const ENDPOINT_CANARY = "https://push.invalid/ENDPOINT-CANARY-337";
 const P256DH_CANARY = "P256DH-CANARY-337";
 const AUTH_CANARY = "AUTH-CANARY-337";
+const CLAIM_CREATED_CANARY = "CLAIM-CREATED-CANARY-345";
+const CLAIM_DEADLINE_CANARY = "9999-12-31-CLAIM-DEADLINE-CANARY-345";
 const dataDir = () => process.env.DATA_DIR!;
 const filesDir = () => path.join(dataDir(), "files");
 
@@ -43,8 +46,24 @@ function insertPushRow(database: Database.Database, suffix = "") {
     );
 }
 
+function insertClaim(database: Database.Database, suffix = "") {
+  database
+    .prepare(
+      `INSERT INTO deadline_reminder_claims
+       (device_id, item_type, item_id, item_created_at, deadline)
+       VALUES (?, 'task', 345, ?, ?)`,
+    )
+    .run(`device${suffix}`, `${CLAIM_CREATED_CANARY}${suffix}`, `${CLAIM_DEADLINE_CANARY}${suffix}`);
+}
+
 function expectNoCanaries(bytes: Buffer) {
-  for (const canary of [ENDPOINT_CANARY, P256DH_CANARY, AUTH_CANARY]) {
+  for (const canary of [
+    ENDPOINT_CANARY,
+    P256DH_CANARY,
+    AUTH_CANARY,
+    CLAIM_CREATED_CANARY,
+    CLAIM_DEADLINE_CANARY,
+  ]) {
     expect(bytes.includes(Buffer.from(canary))).toBe(false);
   }
 }
@@ -78,7 +97,9 @@ describe("credential-free backup artifacts", () => {
   it("physically rewrites manual/scheduled archive DBs and excludes authority/markers", async () => {
     const database = await testDb();
     insertPushRow(database);
+    insertClaim(database);
     database.prepare("UPDATE settings SET value = '1' WHERE key = 'push_hide_details'").run();
+    database.prepare("UPDATE settings SET value = 'Europe/Berlin' WHERE key = 'push_timezone'").run();
     fs.writeFileSync(path.join(dataDir(), "push-authority.json"), "AUTHORITY-FILE-CANARY-337");
     fs.writeFileSync(path.join(dataDir(), "push-authority-reset-pending"), "RESET-MARKER-CANARY-337");
     fs.writeFileSync(path.join(dataDir(), "push-restore-pending"), "RESTORE-MARKER-CANARY-337");
@@ -98,8 +119,12 @@ describe("credential-free backup artifacts", () => {
       const exported = new Database(extracted, { readonly: true });
       try {
         expect(exported.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
+        expect(exported.prepare("SELECT COUNT(*) AS n FROM deadline_reminder_claims").get()).toEqual({ n: 0 });
         expect(exported.prepare("SELECT value FROM settings WHERE key = 'push_hide_details'").get()).toEqual({
           value: "1",
+        });
+        expect(exported.prepare("SELECT value FROM settings WHERE key = 'push_timezone'").get()).toEqual({
+          value: "Europe/Berlin",
         });
       } finally {
         exported.close();
@@ -230,6 +255,18 @@ describe("credential-free backup artifacts", () => {
           );
         },
       ],
+      [
+        "claims-extra-index",
+        (handle) => {
+          handle.exec("CREATE INDEX claims_deadline_idx ON deadline_reminder_claims(deadline)");
+        },
+      ],
+      [
+        "invalid-timing-domain",
+        (handle) => {
+          handle.prepare("UPDATE settings SET value = '4' WHERE key = 'push_lead_days'").run();
+        },
+      ],
     ];
 
     for (const [name, mutate] of cases) {
@@ -248,19 +285,36 @@ describe("credential-free backup artifacts", () => {
     }
   });
 
-  it("continues to import canonical fresh-v19 and real-v18-migrated schemas", async () => {
+  it("imports canonical v20, v19, and v18 source fixtures through the applicable validators", async () => {
     const freshArchivePath = createBackupArchive();
     const freshBytes = fs.readFileSync(freshArchivePath);
     fs.rmSync(freshArchivePath, { force: true });
 
     await request(app)
       .post("/api/backup/import")
-      .attach("file", freshBytes, "canonical-fresh-v19.zip")
+      .attach("file", freshBytes, "canonical-v20.zip")
       .expect(200);
     const fresh = await testDb();
-    expect(() => validateV19Contract(fresh)).not.toThrow();
+    expect(() => validateV20Contract(fresh)).not.toThrow();
 
-    const v18Bytes = rewriteArchiveDatabase(freshBytes, "canonical-v18", (handle) => {
+    const v19Bytes = rewriteArchiveDatabase(freshBytes, "canonical-v19", (handle) => {
+      handle.exec("DROP TABLE deadline_reminder_claims");
+      handle.prepare(
+        "DELETE FROM settings WHERE key IN ('push_lead_days', 'push_send_time', 'push_timezone', 'push_quiet_start', 'push_quiet_end')",
+      ).run();
+      handle.exec("ALTER TABLE settings RENAME TO settings_v20");
+      handle.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+      handle.exec("INSERT INTO settings SELECT key, value FROM settings_v20; DROP TABLE settings_v20");
+      handle.pragma("user_version = 19");
+    });
+    await request(app)
+      .post("/api/backup/import")
+      .attach("file", v19Bytes, "canonical-v19.zip")
+      .expect(200);
+    const fromV19 = await testDb();
+    expect(() => validateV20Contract(fromV19)).not.toThrow();
+
+    const v18Bytes = rewriteArchiveDatabase(v19Bytes, "canonical-v18", (handle) => {
       handle.exec("DROP TABLE push_subscriptions");
       handle.prepare("DELETE FROM settings WHERE key = 'push_hide_details'").run();
       handle.pragma("user_version = 18");
@@ -270,13 +324,14 @@ describe("credential-free backup artifacts", () => {
       .attach("file", v18Bytes, "canonical-v18.zip")
       .expect(200);
     const migrated = await testDb();
-    expect(migrated.pragma("user_version", { simple: true })).toBe(19);
-    expect(() => validateV19Contract(migrated)).not.toThrow();
+    expect(migrated.pragma("user_version", { simple: true })).toBe(20);
+    expect(() => validateV20Contract(migrated)).not.toThrow();
   });
 
   it("sanitizes crafted imports and the app.db.bak safety copy physically", async () => {
     const database = await testDb();
     insertPushRow(database, "-old-live");
+    insertClaim(database, "-old-live");
     const cleanArchivePath = createBackupArchive();
     const zip = new AdmZip(cleanArchivePath);
     fs.rmSync(cleanArchivePath, { force: true });
@@ -284,6 +339,7 @@ describe("credential-free backup artifacts", () => {
     fs.writeFileSync(craftedPath, zip.getEntry("app.db")!.getData());
     const crafted = new Database(craftedPath);
     insertPushRow(crafted, "-crafted");
+    insertClaim(crafted, "-crafted");
     crafted.close();
     zip.deleteFile("app.db");
     zip.addFile("app.db", fs.readFileSync(craftedPath));
@@ -297,12 +353,14 @@ describe("credential-free backup artifacts", () => {
 
     const restored = await testDb();
     expect(restored.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
+    expect(restored.prepare("SELECT COUNT(*) AS n FROM deadline_reminder_claims").get()).toEqual({ n: 0 });
     expectNoCanaries(fs.readFileSync(path.join(dataDir(), "app.db")));
     const bakBytes = fs.readFileSync(path.join(dataDir(), "app.db.bak"));
     expectNoCanaries(bakBytes);
     const bak = new Database(path.join(dataDir(), "app.db.bak"), { readonly: true });
     try {
       expect(bak.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
+      expect(bak.prepare("SELECT COUNT(*) AS n FROM deadline_reminder_claims").get()).toEqual({ n: 0 });
     } finally {
       bak.close();
     }
