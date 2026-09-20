@@ -50,6 +50,64 @@ function claims(itemType?: "task" | "goal") {
     .all(...(itemType ? [itemType] : []));
 }
 
+const TIMING_SETTING_KEYS = [
+  "push_lead_days",
+  "push_send_time",
+  "push_timezone",
+  "push_quiet_start",
+  "push_quiet_end",
+] as const;
+
+function expectGenericSettingsContract(settings: Record<string, unknown>) {
+  for (const key of TIMING_SETTING_KEYS) expect(settings).not.toHaveProperty(key);
+  expect(settings.push_hide_details).toBe("0");
+  expect(Object.values(settings).every((value) => typeof value === "string")).toBe(true);
+}
+
+describe("deadline timing settings API boundary", () => {
+  it("excludes exactly the five timing keys from generic GET and PATCH responses", async () => {
+    const fresh = (await request(app).get("/api/settings").expect(200)).body as Record<
+      string,
+      unknown
+    >;
+    expectGenericSettingsContract(fresh);
+    expect(fresh.max_draw_effort).toBe("30");
+
+    database
+      .prepare("INSERT INTO settings (key, value) VALUES (?, ?)")
+      .run("deadline_test_public", "still-visible");
+    const update = database.prepare("UPDATE settings SET value = ? WHERE key = ?");
+    const configured = ["7", "18:45", "Europe/Berlin", "22:00", "07:00"];
+    try {
+      for (const [index, key] of TIMING_SETTING_KEYS.entries()) {
+        update.run(configured[index], key);
+      }
+
+      const get = (await request(app).get("/api/settings").expect(200)).body as Record<
+        string,
+        unknown
+      >;
+      expectGenericSettingsContract(get);
+      expect(get.deadline_test_public).toBe("still-visible");
+
+      const patch = (
+        await request(app).patch("/api/settings").send({ max_draw_effort: 25 }).expect(200)
+      ).body as Record<string, unknown>;
+      expectGenericSettingsContract(patch);
+      expect(patch.max_draw_effort).toBe("25");
+      expect(patch.deadline_test_public).toBe("still-visible");
+    } finally {
+      database.prepare("DELETE FROM settings WHERE key = ?").run("deadline_test_public");
+      update.run("30", "max_draw_effort");
+      update.run("1", "push_lead_days");
+      update.run("09:00", "push_send_time");
+      for (const key of ["push_timezone", "push_quiet_start", "push_quiet_end"]) {
+        update.run(null, key);
+      }
+    }
+  });
+});
+
 describe("shared Gregorian date validation", () => {
   it.each(["0001-01-01", "0099-12-31", "2000-02-29", "2026-09-20", "9999-12-31"])(
     "accepts the real boundary date %s for tasks and goals",

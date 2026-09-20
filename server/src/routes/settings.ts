@@ -27,7 +27,9 @@ function publicSettings(): Record<string, string> {
   // The placeholder count is hand-maintained — a new excluded key needs BOTH
   // another `?` and another bound argument below.
   const rows = db
-    .prepare("SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?, ?, ?, ?)")
+    .prepare(
+      "SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
     .all(
       API_KEY_SETTING,
       CURRENT_DRAW_SETTING,
@@ -42,6 +44,13 @@ function publicSettings(): Record<string, string> {
       UPDATE_TRIGGER_URL_SETTING,
       UPDATE_TRIGGER_TOKEN_SETTING,
       UPDATE_LAST_NOTIFIED_SETTING,
+      // Stage 2A stores inert reminder timing foundations, but only Stage 2B's
+      // dedicated typed Push preferences API may expose nullable timing state.
+      "push_lead_days",
+      "push_send_time",
+      "push_timezone",
+      "push_quiet_start",
+      "push_quiet_end",
     ) as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
 }

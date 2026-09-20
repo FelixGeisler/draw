@@ -183,11 +183,44 @@ describe("read tools", () => {
     expect(names).toEqual(expect.arrayContaining(["Work", "Study", "Household"]));
   });
 
-  it("get_settings exposes max_draw_effort and never the API key", async () => {
-    const res = await callTool("get_settings");
-    const settings = res.json<Record<string, string>>();
-    expect(settings.max_draw_effort).toBe("30");
-    expect(JSON.stringify(settings)).not.toContain("anthropic");
+  it("get_settings exposes ordinary strings but never timing state or the API key", async () => {
+    const timingKeys = [
+      "push_lead_days",
+      "push_send_time",
+      "push_timezone",
+      "push_quiet_start",
+      "push_quiet_end",
+    ] as const;
+    const assertGenericContract = (settings: Record<string, unknown>) => {
+      for (const key of timingKeys) expect(settings).not.toHaveProperty(key);
+      expect(settings.push_hide_details).toBe("0");
+      expect(Object.values(settings).every((value) => typeof value === "string")).toBe(true);
+      expect(JSON.stringify(settings)).not.toContain("anthropic");
+    };
+
+    const fresh = (await callTool("get_settings")).json<Record<string, unknown>>();
+    assertGenericContract(fresh);
+    expect(fresh.max_draw_effort).toBe("30");
+
+    const database = await testDb();
+    database
+      .prepare("INSERT INTO settings (key, value) VALUES (?, ?)")
+      .run("mcp_deadline_test_public", "still-visible");
+    const update = database.prepare("UPDATE settings SET value = ? WHERE key = ?");
+    const configured = ["7", "18:45", "Europe/Berlin", "22:00", "07:00"];
+    try {
+      for (const [index, key] of timingKeys.entries()) update.run(configured[index], key);
+      const settings = (await callTool("get_settings")).json<Record<string, unknown>>();
+      assertGenericContract(settings);
+      expect(settings.mcp_deadline_test_public).toBe("still-visible");
+    } finally {
+      database.prepare("DELETE FROM settings WHERE key = ?").run("mcp_deadline_test_public");
+      update.run("1", "push_lead_days");
+      update.run("09:00", "push_send_time");
+      for (const key of ["push_timezone", "push_quiet_start", "push_quiet_end"]) {
+        update.run(null, key);
+      }
+    }
   });
 });
 
