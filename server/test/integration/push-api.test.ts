@@ -6,8 +6,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import webPush from "web-push";
 import { createApp } from "../../src/app.js";
-import { PushLifecycle } from "../../src/push/authority.js";
+import { AUTHORITY_FILE, PushLifecycle } from "../../src/push/authority.js";
+import { PushAdmission } from "../../src/push/admission.js";
 import { PushService } from "../../src/push/service.js";
+import { invalidNoBodyFraming } from "../../src/routes/push.js";
 import type { IsolatedResolver, ResolverFactory } from "../../src/push/resolver.js";
 import { normalizeIp } from "../../src/push/topology.js";
 import { testDb } from "../helpers.js";
@@ -34,6 +36,7 @@ describe("Push registration HTTP API", () => {
     trustProxy: boolean | number | string = false,
     listenerPort = 1234,
     resolverFactory: ResolverFactory = resolver,
+    overrides: Partial<ConstructorParameters<typeof PushService>[0]> = {},
   ) {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-api-"));
     roots.push(dataDir);
@@ -45,6 +48,7 @@ describe("Push registration HTTP API", () => {
       database, lifecycle, resolverFactory,
       topology: { listenerHost: "127.0.0.1", listenerPort, trustProxy },
       wallNow: () => Date.parse("2026-09-19T12:00:00Z"),
+      ...overrides,
     });
   }
 
@@ -77,6 +81,165 @@ describe("Push registration HTTP API", () => {
     expect((await direct(request(app).delete("/api/push/subscriptions"))).status).toBe(204);
   });
 
+  it("rejects every no-body framing variant before route work", async () => {
+    expect(invalidNoBodyFraming([])).toBe(false);
+    expect(invalidNoBodyFraming(["Content-Length", "0"])).toBe(false);
+    for (const rawHeaders of [
+      ["Transfer-Encoding", "chunked"],
+      ["Content-Length", "0", "Content-Length", "0"],
+      ["Content-Length", "not-decimal"],
+      ["Content-Length", "1"],
+    ]) expect(invalidNoBodyFraming(rawHeaders), rawHeaders.join(":")).toBe(true);
+
+    let resolutions = 0;
+    let sends = 0;
+    const endpoint = "https://push.example/test";
+    const push = service(false, 1234, () => ({
+      resolve4: async () => { resolutions += 1; return ["8.8.8.8"]; },
+      resolve6: async () => { resolutions += 1; throw Object.assign(new Error("none"), { code: "ENODATA" }); },
+      cancel() {},
+    }), {
+      generateRequestDetails: () => ({ endpoint, method: "POST", headers: {}, body: Buffer.from("encrypted") }),
+      transport: { send: async () => { sends += 1; return "success"; } },
+    });
+    const app = createApp({}, { push });
+    const missingId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(missingId, endpoint, keys.publicKey, crypto.randomBytes(16).toString("base64url"), "a", "b");
+    const nonzero = await direct(request(app).post(`/api/push/subscriptions/${missingId}/test`)
+      .set("Content-Length", "1").send("x"));
+    expect(nonzero).toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
+    const chunked = await direct(request(app).post(`/api/push/subscriptions/${missingId}/test`)
+      .set("Transfer-Encoding", "chunked").send(""));
+    expect(chunked).toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
+    expect({ resolutions, sends }).toEqual({ resolutions: 0, sends: 0 });
+  });
+
+  it("serves exact manual-test outcomes and precedence without leaking provider detail", async () => {
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const endpoint = "https://push.example/test";
+    const push = service(false, 1234, resolver, {
+      generateRequestDetails: () => ({ endpoint, method: "POST", headers: {}, body: Buffer.from("encrypted") }),
+      transport: { send: async () => "success" },
+    });
+    database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+    ).run(deviceId, endpoint, keys.publicKey, crypto.randomBytes(16).toString("base64url"), "a", "b");
+    const app = createApp({}, { push });
+    const success = await direct(request(app).post(`/api/push/subscriptions/${deviceId}/test`));
+    expect(success.status).toBe(204);
+    expect(success.text).toBe("");
+
+    const limited = await direct(request(app).post(`/api/push/subscriptions/${deviceId}/test`));
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({ error: "push-rate-limited" });
+    expect(limited.headers["retry-after"]).toBe("10");
+    expect(Object.keys(limited.body)).toEqual(["error"]);
+
+    expect(await direct(request(app).post("/api/push/subscriptions/not-a-uuid/test")))
+      .toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
+    expect(await request(app).post("/api/push/subscriptions/not-a-uuid/test")
+      .set("Host", "evil.example").set("Origin", "http://evil.example"))
+      .toMatchObject({ status: 403, body: { error: "push-mutation-forbidden" } });
+    expect(await direct(request(app).post(`/api/push/subscriptions/${deviceId}/test`).set("Content-Length", "1").send("x")))
+      .toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
+    expect(JSON.stringify(limited.body)).not.toContain("push.example");
+  });
+
+  it("serves the complete closed manual-test HTTP matrix", async () => {
+    const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const endpoint = "https://push.example/private/path?provider-secret=1";
+    const matrixAuth = crypto.randomBytes(16).toString("base64url");
+    const insert = (values: { endpoint?: string; expiration?: number | null } = {}) => database.prepare(
+      `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(deviceId, values.endpoint ?? endpoint, keys.publicKey, matrixAuth,
+      values.expiration ?? null, "private-created", "private-seen");
+    const invoke = async (push: PushService) => direct(
+      request(createApp({}, { push })).post(`/api/push/subscriptions/${deviceId}/test`),
+    );
+    const assertClosed = (response: request.Response, status: number, error: string) => {
+      expect(response.status, JSON.stringify(response.body)).toBe(status);
+      expect(response.body).toEqual({ error });
+      const text = JSON.stringify(response.body);
+      for (const value of [
+        "push.example", "/private/path", "provider-secret", "8.8.8.8", keys.publicKey, matrixAuth,
+        "private-created", "private-seen", "encrypted", "authorization", "raw exception",
+      ]) expect(text).not.toContain(value);
+    };
+
+    assertClosed(await invoke(service()), 404, "push-device-not-found");
+
+    const expired = service();
+    insert({ expiration: Date.parse("2026-09-19T12:00:00Z") });
+    assertClosed(await invoke(expired), 410, "push-subscription-gone");
+    expect(database.prepare("SELECT id FROM push_subscriptions").get()).toBeUndefined();
+
+    const corrupt = service();
+    insert({ endpoint: "http://corrupt.invalid/private" });
+    assertClosed(await invoke(corrupt), 502, "push-delivery-failed");
+    database.prepare("DELETE FROM push_subscriptions").run();
+
+    const recovery = service();
+    insert();
+    recovery.invalidate();
+    assertClosed(await invoke(recovery), 503, "push-recovery-pending");
+    database.prepare("DELETE FROM push_subscriptions").run();
+
+    const unavailableDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-unavailable-"));
+    roots.push(unavailableDir);
+    fs.writeFileSync(path.join(unavailableDir, AUTHORITY_FILE), "{not-json");
+    const unavailableLifecycle = new PushLifecycle({
+      dataDir: unavailableDir,
+      deleteSubscriptions: () => database.transaction(() => database.prepare("DELETE FROM push_subscriptions").run())(),
+    });
+    const unavailable = new PushService({
+      database, lifecycle: unavailableLifecycle, resolverFactory: resolver,
+      topology: { listenerHost: "127.0.0.1", listenerPort: 1234, trustProxy: false },
+    });
+    assertClosed(await invoke(unavailable), 503, "push-unavailable");
+
+    const busy = service(false, 1234, resolver, { admission: new PushAdmission(() => 0, { active: 4 }) });
+    insert();
+    assertClosed(await invoke(busy), 503, "push-busy");
+    database.prepare("DELETE FROM push_subscriptions").run();
+
+    let cancellation!: PushService;
+    cancellation = service(false, 1234, () => ({
+      resolve4: async () => ["8.8.8.8"],
+      resolve6: async () => {
+        database.prepare("UPDATE push_subscriptions SET last_seen_at='changed' WHERE id=?").run(deviceId);
+        throw Object.assign(new Error("none"), { code: "ENODATA" });
+      },
+      cancel() {},
+    }), { transport: { send: async () => "success" } });
+    insert();
+    assertClosed(await invoke(cancellation), 409, "push-test-cancelled");
+    database.prepare("DELETE FROM push_subscriptions").run();
+
+    for (const [outcome, status, error] of [
+      ["success", 204, null],
+      ["gone", 410, "push-subscription-gone"],
+      ["failed", 502, "push-delivery-failed"],
+      ["timeout", 504, "push-timeout"],
+    ] as const) {
+      database.prepare("DELETE FROM push_subscriptions").run();
+      const push = service(false, 1234, resolver, {
+        generateRequestDetails: () => ({ endpoint, method: "POST", headers: {}, body: Buffer.from("encrypted") }),
+        transport: { send: async () => outcome },
+      });
+      insert();
+      const response = await invoke(push);
+      if (status === 204) {
+        expect(response.status).toBe(204);
+        expect(response.text).toBe("");
+      } else assertClosed(response, status, error!);
+    }
+  });
+
   it("keeps the whole namespace auth-first, while login/non-Push retain general parser behavior", async () => {
     const password = "owner-secret";
     const push = service();
@@ -87,6 +250,7 @@ describe("Push registration HTTP API", () => {
       request(app).post("/api/push/subscriptions").set("Content-Type", "application/json").set("Content-Encoding", "gzip").send("x"),
       request(app).post("/api/push/subscriptions").set("Content-Type", "application/json").send("x".repeat(8193)),
       request(app).get("/api/push/status").set("Content-Length", "1").send("x"),
+      request(app).post("/api/push/subscriptions/not-a-uuid/test").set("Content-Length", "1").send("x"),
     ];
     for (const call of unauthenticated) {
       const response = await call;

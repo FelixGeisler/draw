@@ -19,8 +19,10 @@ import { startServer } from "./server.js";
 import { startBackupScheduler } from "./backupScheduler.js";
 import { startUpdateScheduler } from "./updateScheduler.js";
 import { dataDir, db } from "./db.js";
+import { PushAdmission } from "./push/admission.js";
 import { PushLifecycle } from "./push/authority.js";
 import { PushService } from "./push/service.js";
+import { createNodePushTransport } from "./push/transport.js";
 import type { ResolverFactory } from "./push/resolver.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +38,8 @@ export interface ProductionAssemblyOptions {
   password?: string;
   trustProxy?: boolean | number | string;
   resolverFactory?: ResolverFactory;
+  /** Test-only CA seam for an isolated temporary Push TLS provider. */
+  pushTransportCa?: string | Buffer;
   startSchedulers?: boolean;
 }
 
@@ -66,11 +70,17 @@ export function startProduction(options: ProductionAssemblyOptions = {}): Produc
 
   const database = options.database ?? db;
   const root = options.dataDir ?? dataDir;
+  const admission = new PushAdmission();
   const lifecycle = new PushLifecycle({
     dataDir: root,
     password,
     deleteSubscriptions: () => {
-      database.transaction(() => database.prepare("DELETE FROM push_subscriptions").run())();
+      const removed = database.transaction(() => {
+        const ids = database.prepare("SELECT id FROM push_subscriptions").all() as { id: string }[];
+        database.prepare("DELETE FROM push_subscriptions").run();
+        return ids.map(({ id }) => id);
+      })();
+      removed.forEach((id) => admission.removeDevice(id));
     },
   });
   let server: Server | undefined;
@@ -86,6 +96,8 @@ export function startProduction(options: ProductionAssemblyOptions = {}): Produc
       },
       trustProxy,
     },
+    admission,
+    transport: createNodePushTransport(options.pushTransportCa === undefined ? {} : { ca: options.pushTransportCa }),
     ...(options.resolverFactory ? { resolverFactory: options.resolverFactory } : {}),
   });
   const state = push.snapshot();

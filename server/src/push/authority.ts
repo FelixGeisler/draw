@@ -20,6 +20,13 @@ export interface PushSnapshot {
   generation: string | null;
 }
 
+/** Service-internal signing view; never expose this through PushDependency or API state. */
+export interface PushSigningAuthority {
+  generation: string;
+  publicKey: string;
+  privateKey: string;
+}
+
 export interface PushDependency {
   snapshot(): PushSnapshot;
   generation(): string | null;
@@ -320,6 +327,8 @@ export class PushLifecycle implements PushDependency {
   };
   private pendingCandidate: AuthorityDocument | null = null;
   private preRestoreState: PushSnapshot | null = null;
+  private preRestoreSigning: PushSigningAuthority | null = null;
+  private signingView: PushSigningAuthority | null = null;
 
   constructor(private readonly options: PushLifecycleOptions) {
     fs.mkdirSync(options.dataDir, { recursive: true });
@@ -339,7 +348,12 @@ export class PushLifecycle implements PushDependency {
   }
 
   invalidate(): void {
+    this.signingView = null;
     this.state = { available: false, reason: "recovery-pending", publicVapidKey: null, generation: null };
+  }
+
+  signingAuthority(): PushSigningAuthority | null {
+    return this.signingView ? { ...this.signingView } : null;
   }
 
   currentWorkGeneration(): number {
@@ -364,6 +378,11 @@ export class PushLifecycle implements PushDependency {
   }
 
   private makeAvailable(authority: AuthorityDocument): void {
+    this.signingView = {
+      generation: authority.generation,
+      publicKey: authority.vapid.publicKey,
+      privateKey: authority.vapid.privateKey,
+    };
     this.state = {
       available: true,
       reason: null,
@@ -477,6 +496,7 @@ export class PushLifecycle implements PushDependency {
   revokeAll(): void {
     const candidate = this.candidate();
     const previous = this.snapshot();
+    const previousSigning = this.signingAuthority();
     let deleted = false;
     createMarker(this.revokeMarkerPath, this.options.fault);
     try {
@@ -497,6 +517,7 @@ export class PushLifecycle implements PushDependency {
         try {
           removeMarker(this.revokeMarkerPath, this.options.fault);
           this.state = previous;
+          this.signingView = previousSigning;
         } catch {
           this.invalidate();
         }
@@ -517,6 +538,7 @@ export class PushLifecycle implements PushDependency {
     }
     this.pendingCandidate = this.candidate();
     this.preRestoreState = this.snapshot();
+    this.preRestoreSigning = this.signingAuthority();
     try {
       this.advanceWorkGeneration();
       this.invalidate();
@@ -529,10 +551,12 @@ export class PushLifecycle implements PushDependency {
           removeMarker(this.restoreMarkerPath, this.options.fault);
         }
         this.state = this.preRestoreState;
+        this.signingView = this.preRestoreSigning;
       } catch {
         this.invalidate();
       }
       this.preRestoreState = null;
+      this.preRestoreSigning = null;
       this.pendingCandidate = null;
       throw error;
     }
@@ -553,14 +577,19 @@ export class PushLifecycle implements PushDependency {
     this.makeAvailable(this.pendingCandidate);
     this.pendingCandidate = null;
     this.preRestoreState = null;
+    this.preRestoreSigning = null;
   }
 
   abortRestore(): void {
     try {
       removeMarker(this.restoreMarkerPath, this.options.fault);
-      if (this.preRestoreState) this.state = this.preRestoreState;
+      if (this.preRestoreState) {
+        this.state = this.preRestoreState;
+        this.signingView = this.preRestoreSigning;
+      }
       this.pendingCandidate = null;
       this.preRestoreState = null;
+      this.preRestoreSigning = null;
     } catch {
       this.invalidate();
       throw new Error("Push restore rollback could not be proven durable");
