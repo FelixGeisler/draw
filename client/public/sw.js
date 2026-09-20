@@ -26,9 +26,10 @@
  * activate handler drops the previous version's cache. Bump CACHE when the
  * precached shell list changes shape or what may become the shell changes.
  */
-// v3 (#255): the icon rasters and the manifest's felt theme/background were
-// retuned to the card-table identity — refresh the precached copies.
-const CACHE = "draw-shell-v3";
+// v4 (#343): Stage 1C adds closed Push receive/click handlers. The shell list
+// is unchanged; one bump retires every older worker/cache alongside the new
+// protocol while Push data remains entirely outside Cache Storage.
+const CACHE = "draw-shell-v4";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
 
 function temporaryUnavailable() {
@@ -62,6 +63,128 @@ self.addEventListener("activate", (event) => {
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
+});
+
+function exactKeys(value, keys) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  const expected = [...keys].sort();
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+function positiveSafeInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function canonicalEventId(value) {
+  if (typeof value !== "string" || value.length !== 22 || !/^[A-Za-z0-9_-]+$/.test(value)) return false;
+  try {
+    const base64 = value.replace(/-/g, "+").replace(/_/g, "/") + "==";
+    const binary = atob(base64);
+    if (binary.length !== 16) return false;
+    const roundTrip = btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+    return roundTrip === value;
+  } catch {
+    return false;
+  }
+}
+
+function canonicalDate(value) {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+}
+
+function notificationFromPayload(payload) {
+  if (exactKeys(payload, ["v", "kind"]) && payload.v === 1 && payload.kind === "test") {
+    return {
+      title: "Draw",
+      options: {
+        body: "Notifications are enabled",
+        tag: "draw-push-test",
+        data: { v: 1, route: "/settings" },
+      },
+    };
+  }
+  const shared = payload && payload.v === 1 && payload.kind === "deadline" &&
+    (payload.itemType === "task" || payload.itemType === "goal") &&
+    positiveSafeInteger(payload.itemId) && canonicalEventId(payload.eventId);
+  if (!shared) return null;
+  const route = payload.itemType === "task"
+    ? `/tasks?focus=${payload.itemId}&showDone=1`
+    : `/goals?focus=${payload.itemId}`;
+  if (payload.detail === "generic" && exactKeys(payload, ["v", "kind", "detail", "itemType", "itemId", "eventId"])) {
+    return {
+      title: "Draw",
+      options: {
+        body: "You have an upcoming deadline in Draw",
+        tag: `draw-deadline-${payload.eventId}`,
+        data: { v: 1, route },
+      },
+    };
+  }
+  if (payload.detail === "detailed" &&
+    exactKeys(payload, ["v", "kind", "detail", "itemType", "itemId", "eventId", "itemTitle", "context", "deadline"]) &&
+    typeof payload.itemTitle === "string" && (payload.context === null || typeof payload.context === "string") &&
+    canonicalDate(payload.deadline)) {
+    return {
+      title: payload.itemTitle,
+      options: {
+        body: payload.context === null ? `Due ${payload.deadline}` : `${payload.context} · Due ${payload.deadline}`,
+        tag: `draw-deadline-${payload.eventId}`,
+        data: { v: 1, route },
+      },
+    };
+  }
+  return null;
+}
+
+self.addEventListener("push", (event) => {
+  event.waitUntil((async () => {
+    if (!event.data) return;
+    try {
+      const blob = event.data.blob();
+      if (blob.size > 3072) return;
+      const bytes = await blob.arrayBuffer();
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      const notification = notificationFromPayload(JSON.parse(text));
+      if (!notification) return;
+      await self.registration.showNotification(notification.title, notification.options);
+    } catch {
+      // Closed protocol: malformed, oversized, unknown, or non-UTF-8 input
+      // produces no notification and exposes no payload/provider detail.
+    }
+  })());
+});
+
+function canonicalClickRoute(value) {
+  if (value === "/settings") return value;
+  const match = /^(?:\/tasks\?focus=([1-9]\d*)&showDone=1|\/goals\?focus=([1-9]\d*))$/.exec(value);
+  if (!match) return null;
+  const decimal = match[1] || match[2];
+  const number = Number(decimal);
+  return Number.isSafeInteger(number) && number > 0 && String(number) === decimal ? value : null;
+}
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const data = event.notification.data;
+  if (!exactKeys(data, ["v", "route"]) || data.v !== 1 || typeof data.route !== "string") return;
+  const route = canonicalClickRoute(data.route);
+  if (!route) return;
+  event.waitUntil((async () => {
+    const target = new URL(route, self.location.origin);
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    const client = windows.find((candidate) => {
+      try { return new URL(candidate.url).origin === self.location.origin; } catch { return false; }
+    });
+    if (client) {
+      await client.navigate(target.href);
+      await client.focus();
+    } else {
+      await self.clients.openWindow(target.href);
+    }
+  })());
 });
 
 self.addEventListener("fetch", (event) => {

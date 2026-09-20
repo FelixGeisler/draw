@@ -12,6 +12,7 @@ import { TaskForm } from "../components/TaskForm";
 import { VictoryOverlay } from "../components/VictoryOverlay";
 import { daysUntil, feasibility, type Feasibility } from "../lib/feasibility";
 import { bossBar } from "../lib/bossBar";
+import { consumePushLanding } from "../lib/pushLanding";
 import { BossBar } from "../components/BossBar";
 
 const VERDICT_STYLE = {
@@ -345,17 +346,16 @@ export function GoalsPage() {
   const [victory, setVictory] = useState<Goal | null>(null);
   const [missedNotice, setMissedNotice] = useState<string | null>(null);
 
-  // Palette landing (#246, the TasksPage #243 pattern): the palette navigates
-  // here with { focusGoalId } in router state. Consume it ONCE — the replace
-  // strips the state so back/reload cannot re-scroll.
+  // Palette and durable Push landing (#246/#343). The URL takes precedence,
+  // owns only focus on this page, and preserves unrelated query/hash/state.
   const location = useLocation();
   const navigate = useNavigate();
   const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
   useEffect(() => {
-    const state = location.state as { focusGoalId?: number } | null;
-    if (state?.focusGoalId == null) return;
-    setPendingFocusId(state.focusGoalId);
-    navigate(location.pathname, { replace: true });
+    const landing = consumePushLanding(location, "goal");
+    if (!landing.consumed) return;
+    setPendingFocusId(landing.focusId);
+    navigate(landing.destination, { replace: true, state: landing.state });
   }, [location, navigate]);
 
   // Scroll-and-flash once the card exists — same classList idiom as the

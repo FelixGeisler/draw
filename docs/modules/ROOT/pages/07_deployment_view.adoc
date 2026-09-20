@@ -103,7 +103,7 @@ headless Pi keeps backing itself up with the process it already runs. Restore is
 the existing `POST /api/backup/import` (section 8.9); the archives are ordinary
 credential-free Draw application backups. Unset/0 (the default) starts nothing.
 
-Production alone creates the complete Stage 1B Web Push lifecycle,
+Production alone creates the complete Stage 1 Web Push lifecycle,
 registration service, process-wide admission guard, isolated Node DNS resolver,
 and one-attempt core-HTTPS transport (ADR-72). `prod.ts` resolves host, port,
 password, and proxy trust once and reuses those values for both the listener and
@@ -111,12 +111,14 @@ Push topology checks; default/dev app construction remains disabled and
 network-inert. Durable state is `DATA_DIR/push-authority.json` plus normally
 absent `push-authority-reset-pending`, `push-restore-pending`, and
 `push-revoke-pending` recovery markers. The registration/status/preferences/
-device-delete/revoke API and the bounded manual synthetic test route are
-implemented but not field-verified. Each accepted test resolves and pins one
-permitted address while preserving the endpoint hostname for Host, SNI, and
-certificate verification; it makes one non-reused HTTPS request with no proxy,
-redirect, retry, queue, or offline backlog. Browser UI/service-worker behavior
-(Stage 1C) and deadline reads/scheduling (Stage 2) remain planned.
+device-delete/revoke API, bounded manual synthetic test route, explicit staged
+Settings enrollment, closed production-worker receive/click protocol, and
+durable task/goal landings are implemented but not field-verified. Each
+accepted test resolves and pins one permitted address while preserving the
+endpoint hostname for Host, SNI, and certificate verification; it makes one
+non-reused HTTPS request with no proxy, redirect, retry, queue, or offline
+backlog. Stage 1 is complete; deadline reads and scheduling (Stage 2) remain
+planned.
 
 These files are never archive inputs. Manual/scheduled Draw archives, imported
 live DBs and `app.db.bak` physically exclude notification device credentials
@@ -882,6 +884,7 @@ setting or `UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls,
 enrollment validates its submitted HTTPS endpoint and, only when an authorized
 user explicitly invokes the Stage 1B.2 manual test route, one DNS-pinned
 provider HTTPS POST through Node core HTTPS. That manual request has no proxy,
-redirect, retry, queue, or socket reuse; Stage 1C browser UI/service-worker work
-and Stage 2 scheduled deadline delivery remain planned — and the user-configured
+redirect, retry, queue, or socket reuse; Stage 1C browser UI/service-worker
+receive handling is implemented but not field-verified, while Stage 2 scheduled
+deadline delivery remains planned — and the user-configured
 update trigger URL, one POST per explicit **Update** action, never automatically.

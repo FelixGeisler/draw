@@ -2920,12 +2920,12 @@ LAN, so installability costs a manifest and a worker — no second build
 pipeline, no signing keys, no store review, no divergent codebase. A native or
 Capacitor shell is still unnecessary: standards Web Push is now the approved
 PWA path (ADR-72), including desktop and feature-detected iPhone support.
-ADR-72 Stage 1A authority/schema/recovery/backup foundations and complete
-Stage 1B status, registration, preferences, deletion, revoke, and bounded
-synthetic sender APIs are implemented but not field-verified. Browser
-enrollment/worker behavior (Stage 1C) and deadline scheduling (Stage 2) remain
-planned. iOS remains progressive enhancement and never gates Android-first
-delivery.
+ADR-72 Stage 1A authority/schema/recovery/backup foundations, Stage 1B status,
+registration, preferences, deletion, revoke, and bounded synthetic sender APIs,
+and Stage 1C staged browser enrollment, closed worker receive/click behavior,
+and durable landings are implemented but not field-verified. All Stage 1 is
+complete; deadline scheduling (Stage 2) remains planned. iOS remains progressive
+enhancement and never gates Android-first delivery.
 * *Adaptation, not redesign.* The card face's own language — full-bleed art under
 its legibility scrim, the category pill, the effort chip, the impact stars, the
 holo shimmer on a drawn 5★ (ADR-33, which superseded ADR-31's literal TCG frame;
@@ -4016,9 +4016,9 @@ state and removes the marker; after the `app.db` rename, finalization failure
 keeps restored data and the marker and returns committed
 `pushRecoveryPending:true`. Normal success remains `{tasks,goals,materials}`.
 Stage 1A introduced no API/provider sender, browser/worker behavior, or
-scheduler. Stage 1B now implements registration and the bounded synthetic
-sender described below; Stage 1C and Stage 2 remain planned. The implemented
-capability is not field-verified.
+scheduler. Stage 1B implements registration and the bounded synthetic sender,
+and Stage 1C implements the browser receive path described below. All Stage 1
+is complete but not field-verified; Stage 2 remains planned.
 
 *Dependency and supply-chain decision:* runtime `web-push` is pinned exactly to
 3.6.7 and type-only `@types/web-push` to 3.6.4 in the committed lockfile.
@@ -4060,9 +4060,9 @@ marker. Any valid reset/restore/revoke marker subset performs one boot clear
 and rotation; malformed markers fail closed. Hide-details advances volatile
 work after its DB commit without rotating VAPID. `prod.ts` alone assembles the
 real service/resolver from one resolved host/port/password/trust set; defaults
-and tests remain network-inert. Browser UI/worker, deadline sender, and
-scheduler remain planned. The registration capability is implemented but not
-field-verified.
+and tests remain network-inert. Stage 1C now implements browser UI/worker
+handling; the deadline sender and scheduler remain planned. The complete Stage
+1 capability is implemented but not field-verified.
 
 *Implemented amendment — Stage 1B.2 (#341):* `POST
 /api/push/subscriptions/:deviceId/test` adds the no-body synthetic sender on the
@@ -4085,7 +4085,8 @@ queue, or reusable socket. DNS is bounded at two seconds and the complete
 DNS/request/4,096-byte response drain at five. Complete 2xx succeeds; complete
 404/410 conditionally deletes only the captured fingerprint; every other
 provider result fails closed. Browser UI/worker, deadline/domain reads,
-automatic scheduling, and field-delivery claims remain outside Stage 1B.
+automatic scheduling, and field-delivery claims remain outside Stage 1B; the
+merged Stage 1C receive path does not alter this sender.
 
 *Cross-links:* ADR-49 owns the production entry, ADR-50 the unchanged access
 and effective-password resolution, ADR-55 secure proxy deployment, ADR-67 ntfy,
@@ -4158,13 +4159,47 @@ recovery, request construction, exact-fingerprint races, provider matrices,
 and pinning with original Host/SNI/certificate identity against an isolated
 temporary TLS provider. Tests use fake DNS and make no external provider call.
 
-### Stage 1C — browser enrollment, receive/click and durable landings
+### Stage 1C — browser enrollment, receive/click and durable landings (implemented)
 
-Starts after 1B. Adds Notifications controls, closed worker receive/click and task/goal landings. Only synthetic test sends; deadline payload acceptance establishes Stage 2 contract, without scheduler/evaluator/claims/automatic send/timing UI/goal write change.
+Stage 1C adds Notifications controls, closed worker receive/click and task/goal
+landings. Only synthetic test sends; deadline payload acceptance establishes
+the Stage 2 contract without scheduler/evaluator/claims/automatic send/timing
+UI/goal write change. The complete stage is implemented but not field-verified.
 
-Settings distinguishes insecure context, missing service worker/PushManager/Notification API, denied permission, server unavailable/recovery pending, secure transport required, unsupported proxy. Existing login handles configured-password unauthenticated state. Controls use `mutationAllowed`; supported passwordless HTTPS can manage devices and is never told to set `DRAW_PASSWORD`. Shared Hide details explains future deadline effect; no Stage 1 timing fields.
+Settings distinguishes insecure context, missing active root Draw service
+worker/PushManager/Notification API, denied permission, server unavailable or
+recovery pending, secure transport required, and unsupported proxy. Existing
+login handles configured-password unauthenticated state. Controls use
+`mutationAllowed`; supported passwordless HTTPS can manage devices and is never
+told to set `DRAW_PASSWORD`. Shared Hide details explains future deadline
+effect; no Stage 1 timing fields.
 
-Only Enable/Re-enable click requests permission; await `navigator.serviceWorker.ready`. Byte-compare active subscription application-server key with status. Never silently subscribe/resubscribe/replace mismatch; show Re-enable. Per-origin localStorage `draw.push.device.v1` stores only opaque server UUID (convenience, not auth); POST current handle as `replaceDeviceId`, save returned id only after success, and on failure best-effort unsubscribe only a newly created orphan. Stale/missing handle cannot be recovered from endpoint. “This device” only on id equality; show created/last-seen and per-row test/revoke. Current-device Disable deletes server first, then best-effort local unsubscribe/clear; pre-delete failure retains both. Revoke-all completes server first, then best-effort local unsubscribe/clear. Disable buttons while pending; server admission controls. On 409 cancellation, refetch status and show exactly `Test send cancelled because notification state changed`; never retry. Present other bounded errors without secrets. Test always synthetic and routes `/settings`; read no item/user content.
+Read-only inspection never prompts, subscribes, unsubscribes, writes storage or
+mutates the server. Enable, Re-enable, and Continue enabling use one generic
+staged flow: each direct click handler snapshots the rendered prerequisites and
+starts at most one activation-sensitive `requestPermission()`, `unsubscribe()`,
+or `subscribe()` synchronously before its first `await`. Permission grant and
+VAPID-mismatch removal stage a later explicit subscription click when needed;
+there is no one-click permission-plus-subscription or replacement promise and
+no browser-family restriction. Matching subscriptions are reused. A staged
+continuation is in-memory and is discarded when permission, eligible worker,
+status availability, mutation allowance, or canonical VAPID key changes.
+
+The active subscription application-server key is byte-compared with status.
+The per-origin localStorage `draw.push.device.v1` stores only an opaque canonical
+server UUID (convenience, not auth); POST includes only a snapshotted canonical
+handle as `replaceDeviceId`, saves the returned id only after success, and on
+failure best-effort unsubscribes only a subscription newly created by that
+explicit click. Stale/missing handle cannot be recovered from endpoint. “This
+device” only follows exact id equality; rows show created/last-seen and per-row
+test/revoke. Current-device Disable deletes server first, then best-effort local
+unsubscribe/clear; pre-delete failure retains both. Revoke-all completes server
+first, then best-effort local unsubscribe/clear, including a closed recovery
+read-back. All panel mutations share one pending gate; server admission remains
+authoritative. On 409 cancellation, refetch status and show exactly `Test send
+cancelled because notification state changed`; never retry. Other bounded
+errors reveal no secret/provider/user data. Test always remains synthetic and
+routes `/settings`; it reads no item/user content.
 
 Classic production-only `client/public/sw.js` reads ≤3,072 bytes, parses in `try/catch`, accepts only exact closed schemas (unknown keys/types show nothing):
 - `{v:1,kind:"test"}`;
