@@ -9,7 +9,7 @@ import { PushLifecycle, REVOKE_MARKER } from "../../src/push/authority.js";
 import { PushAdmission } from "../../src/push/admission.js";
 import { PushApiError, PushService, validateRegistration } from "../../src/push/service.js";
 import type { IsolatedResolver } from "../../src/push/resolver.js";
-import type { PushTransport } from "../../src/push/transport.js";
+import type { PushTransport, PushTransportResult } from "../../src/push/transport.js";
 
 const roots: string[] = [];
 const root = () => { const value = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-service-")); roots.push(value); return value; };
@@ -421,6 +421,100 @@ describe("Push registration service", () => {
     };
     const total = make({ resolverFactory: () => pending, dnsDeadlineMs: 100, totalAttemptMs: 2 });
     await expect(total.testDevice(deviceId)).rejects.toMatchObject({ status: 504, code: "push-timeout" });
+  });
+
+  it("keeps response-first classification while delayed local closure holds admission past the deadline", async () => {
+    vi.useFakeTimers();
+    try {
+      const deviceId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+      const endpoint = "https://push.example/test";
+      const scenarios: Array<{
+        name: string;
+        terminalAtThreeMs?: PushTransportResult;
+        expectedStatus?: number;
+      }> = [
+        { name: "complete 302", terminalAtThreeMs: "failed", expectedStatus: 502 },
+        { name: "complete 500", terminalAtThreeMs: "failed", expectedStatus: 502 },
+        { name: "complete 404", terminalAtThreeMs: "gone", expectedStatus: 410 },
+        { name: "complete 410", terminalAtThreeMs: "gone", expectedStatus: 410 },
+        { name: "complete 204", terminalAtThreeMs: "success" },
+        { name: "network failure", terminalAtThreeMs: "failed", expectedStatus: 502 },
+        { name: "incomplete response", expectedStatus: 504 },
+      ];
+
+      for (const scenario of scenarios) {
+        database.prepare("DELETE FROM push_subscriptions").run();
+        database.prepare(
+          `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+           VALUES (?, ?, ?, ?, NULL, ?, ?)`,
+        ).run(deviceId, endpoint, keys.publicKey, auth, "a", "b");
+
+        let monotonicNow = 0;
+        let transportStarted = false;
+        let terminal: PushTransportResult | undefined;
+        let terminalAt: number | undefined;
+        let physicallyClosedAt: number | undefined;
+        const admission = new PushAdmission(() => monotonicNow);
+        const transport: PushTransport = {
+          send: ({ signal, timedOut }) => new Promise((resolve) => {
+            transportStarted = true;
+            const becomeTerminal = (outcome: PushTransportResult) => {
+              if (terminal !== undefined) return;
+              terminal = outcome;
+              terminalAt = monotonicNow;
+            };
+            if (scenario.terminalAtThreeMs !== undefined) {
+              setTimeout(() => becomeTerminal(scenario.terminalAtThreeMs!), 3);
+            }
+            signal.addEventListener("abort", () => {
+              if (terminal === undefined) becomeTerminal(timedOut() ? "timeout" : "aborted");
+              setTimeout(() => {
+                physicallyClosedAt = monotonicNow;
+                resolve(terminal!);
+              }, 51);
+            }, { once: true });
+          }),
+        };
+        const service = make({
+          admission,
+          totalAttemptMs: 15,
+          generateRequestDetails: () => ({ endpoint, method: "POST", headers: {}, body: Buffer.from("encrypted") }),
+          transport,
+        });
+        const attempt = service.testDevice(deviceId).then(
+          () => ({ status: 204 }),
+          (error: unknown) => ({ status: error instanceof PushApiError ? error.status : -1 }),
+        );
+        let settled = false;
+        void attempt.then(() => { settled = true; });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(transportStarted, scenario.name).toBe(true);
+
+        monotonicNow = 3;
+        await vi.advanceTimersByTimeAsync(3);
+        expect(terminalAt, scenario.name).toBe(scenario.terminalAtThreeMs === undefined ? undefined : 3);
+        expect(admission.snapshot(), scenario.name).toMatchObject({ active: 1, testInFlight: 1 });
+
+        monotonicNow = 15;
+        await vi.advanceTimersByTimeAsync(12);
+        expect(terminalAt, scenario.name).toBe(scenario.terminalAtThreeMs === undefined ? 15 : 3);
+        expect(settled, scenario.name).toBe(false);
+        expect(admission.snapshot(), scenario.name).toMatchObject({ active: 1, testInFlight: 1 });
+
+        monotonicNow = 65;
+        await vi.advanceTimersByTimeAsync(50);
+        expect(settled, scenario.name).toBe(false);
+        expect(admission.snapshot(), scenario.name).toMatchObject({ active: 1, testInFlight: 1 });
+
+        monotonicNow = 66;
+        await vi.advanceTimersByTimeAsync(1);
+        expect(physicallyClosedAt, scenario.name).toBe(66);
+        expect((await attempt).status, scenario.name).toBe(scenario.expectedStatus ?? 204);
+        expect(admission.snapshot(), scenario.name).toMatchObject({ active: 0, testInFlight: 0 });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("retains same-endpoint rate state and clears only rows removed by committed replacement, delete, revoke, reset, and import", async () => {

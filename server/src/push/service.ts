@@ -461,7 +461,11 @@ export class PushService implements PushServiceDependency {
         this.deleteFingerprint(initial);
         throw new PushApiError(410, "push-subscription-gone");
       }
-      if (outcome === "timeout" || totalTimedOut) throw new PushApiError(504, "push-timeout");
+      // Transport fixes the logical outcome when provider/network work becomes terminal,
+      // but keeps this await pending until every locally owned handle closes. The total
+      // timer may fire during that physical cleanup and must not reclassify the earlier
+      // terminal outcome.
+      if (outcome === "timeout") throw new PushApiError(504, "push-timeout");
       if (outcome === "aborted") throw new PushResolutionError("aborted");
       throw new PushApiError(502, "push-delivery-failed");
     } finally {
