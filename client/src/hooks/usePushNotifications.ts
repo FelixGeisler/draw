@@ -73,6 +73,7 @@ export function usePushNotifications() {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [continuation, setContinuation] = useState<Continuation | null>(null);
+  const [timingReadbackRevision, setTimingReadbackRevision] = useState(0);
   const mounted = useRef(true);
   const pendingRef = useRef(false);
   const statusRef = useRef(status);
@@ -358,8 +359,20 @@ export function usePushNotifications() {
         if (!refreshed && mounted.current) setMessage(LOAD_FAILURE);
         else if (mounted.current) setMessage("Reminder timing saved.");
       } catch {
-        await refresh(false, true);
-        if (mounted.current) setMessage("Check the reminder timing and time zone. No settings were changed.");
+        const refreshed = await refresh(false, true);
+        if (!mounted.current) return;
+        if (!refreshed) {
+          setMessage(LOAD_FAILURE);
+          return;
+        }
+        setTimingReadbackRevision((revision) => revision + 1);
+        if (!refreshed.status.available && refreshed.status.reason) {
+          setMessage(STATUS_GUIDANCE[refreshed.status.reason]);
+        } else if (!refreshed.status.mutationAllowed && refreshed.status.mutationReason) {
+          setMessage(STATUS_GUIDANCE[refreshed.status.mutationReason]);
+        } else {
+          setMessage("Check the reminder timing and time zone. No settings were changed.");
+        }
       }
     }, "mutation");
   }, [refresh, runMutation]);
@@ -466,6 +479,7 @@ export function usePushNotifications() {
     enabled,
     matchingHandle,
     enrollmentLabel,
+    timingReadbackRevision,
     enroll,
     refresh: () => void refresh(),
     updatePreference,

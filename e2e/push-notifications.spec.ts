@@ -1074,7 +1074,7 @@ test.describe("Deadline notification Settings — desktop production build", () 
     await expect(page.getByRole("heading", { name: "Deadline notifications" })).toBeVisible();
   });
 
-  for (const detection of ["throws", "blank"] as const) {
+  for (const detection of ["invalid", "whitespace", "throws", "blank"] as const) {
     test(`requires manual timezone entry when browser detection ${detection} without persisting a proposal`, async ({ page }) => {
       await page.addInitScript((mode) => {
         const native = Intl.DateTimeFormat.prototype.resolvedOptions;
@@ -1082,7 +1082,8 @@ test.describe("Deadline notification Settings — desktop production build", () 
           configurable: true,
           value() {
             if (mode === "throws") throw new Error("synthetic timezone detection failure");
-            return { ...native.call(this), timeZone: "" };
+            const timeZone = mode === "invalid" ? "Invalid/Detected" : mode === "whitespace" ? "   " : "";
+            return { ...native.call(this), timeZone };
           },
         });
       }, detection);
@@ -1112,32 +1113,119 @@ test.describe("Deadline notification Settings — desktop production build", () 
     });
   }
 
-  test("adopts validated timing immediately when refresh fails and restores server values after a rejected save", async ({ page }) => {
+  test("adopts a validated timing PUT when the follow-up status read fails", async ({ page }) => {
     let statusReads = 0;
-    let reject = false;
     const initial = syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } });
     await page.route("**/api/push/status", async (route) => {
       statusReads++;
-      if (statusReads > 1 && !reject) return route.abort();
+      if (statusReads > 1) return route.abort();
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(initial) });
     });
-    await page.route("**/api/push/preferences", async (route) => {
-      if (reject) return route.fulfill({ status: 400, contentType: "application/json", body: JSON.stringify({ error: "invalid-push-request" }) });
-      await route.fulfill({ contentType: "application/json", body: route.request().postData()! });
-    });
+    await page.route("**/api/push/preferences", (route) => route.fulfill({
+      contentType: "application/json",
+      body: route.request().postData()!,
+    }));
     await installControlledSyntheticPushBrowser(page);
     await page.goto(`${PROD}/settings`);
     const lead = page.getByLabel("Remind me");
     await lead.selectOption("2");
     await page.getByRole("button", { name: "Save reminder timing" }).click();
     await expect(lead).toHaveValue("2");
-    await expect(page.getByText("Could not load deadline notification status. Check the connection and try again.")).toBeVisible();
+    await expect(page.getByRole("status")).toHaveText("Could not load deadline notification status. Check the connection and try again.");
+  });
 
-    reject = true;
-    await lead.selectOption("3");
+  for (const rejection of [
+    {
+      name: "400 rejection",
+      putStatus: 400,
+      readback: syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } }),
+      message: "Check the reminder timing and time zone. No settings were changed.",
+    },
+    {
+      name: "503 rejection with unavailable status",
+      putStatus: 503,
+      readback: syntheticStatus({
+        available: false,
+        reason: "recovery-pending",
+        vapidPublicKey: null,
+        preferences: { ...timingPreferences(), timezone: "UTC" },
+      }),
+      message: "Deadline notifications are unavailable until Draw restarts and completes Push recovery.",
+    },
+  ]) {
+    test(`restores controls from an identical authoritative readback after a ${rejection.name}`, async ({ page }) => {
+      let statusReads = 0;
+      const initial = syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } });
+      await page.route("**/api/push/status", (route) => {
+        statusReads++;
+        return route.fulfill({
+          contentType: "application/json",
+          body: JSON.stringify(statusReads === 1 ? initial : rejection.readback),
+        });
+      });
+      await page.route("**/api/push/preferences", (route) => route.fulfill({
+        status: rejection.putStatus,
+        contentType: "application/json",
+        body: JSON.stringify({ error: rejection.putStatus === 400 ? "invalid-push-request" : "push-recovery-pending" }),
+      }));
+      await installControlledSyntheticPushBrowser(page);
+      await page.goto(`${PROD}/settings`);
+      const lead = page.getByLabel("Remind me");
+      await lead.selectOption("2");
+      await page.getByRole("button", { name: "Save reminder timing" }).click();
+      await expect(lead).toHaveValue("1");
+      await expect(page.getByRole("status")).toHaveText(rejection.message);
+    });
+  }
+
+  test("restores newly authoritative timing values after a rejected save", async ({ page }) => {
+    let statusReads = 0;
+    const initial = syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } });
+    const changed = syntheticStatus({ preferences: {
+      ...timingPreferences(), leadDays: 7, sendTime: "10:15", timezone: "Europe/Berlin",
+    } });
+    await page.route("**/api/push/status", (route) => {
+      statusReads++;
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(statusReads === 1 ? initial : changed) });
+    });
+    await page.route("**/api/push/preferences", (route) => route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "invalid-push-request" }),
+    }));
+    await installControlledSyntheticPushBrowser(page);
+    await page.goto(`${PROD}/settings`);
+    await page.getByLabel("Remind me").selectOption("2");
+    await page.getByLabel("Time zone (IANA)").fill("America/New_York");
     await page.getByRole("button", { name: "Save reminder timing" }).click();
-    await expect(page.getByText("Check the reminder timing and time zone. No settings were changed.")).toBeVisible();
-    await expect(lead).toHaveValue("1");
+    await expect(page.getByLabel("Remind me")).toHaveValue("7");
+    await expect(page.getByLabel("Send time")).toHaveValue("10:15");
+    await expect(page.getByLabel("Time zone (IANA)")).toHaveValue("Europe/Berlin");
+    await expect(page.getByRole("status")).toHaveText("Check the reminder timing and time zone. No settings were changed.");
+  });
+
+  test("keeps attempted controls and avoids confirmation when rejection readback fails", async ({ page }) => {
+    let statusReads = 0;
+    const initial = syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } });
+    await page.route("**/api/push/status", (route) => {
+      statusReads++;
+      return statusReads === 1
+        ? route.fulfill({ contentType: "application/json", body: JSON.stringify(initial) })
+        : route.abort();
+    });
+    await page.route("**/api/push/preferences", (route) => route.fulfill({
+      status: 400,
+      contentType: "application/json",
+      body: JSON.stringify({ error: "invalid-push-request" }),
+    }));
+    await installControlledSyntheticPushBrowser(page);
+    await page.goto(`${PROD}/settings`);
+    const lead = page.getByLabel("Remind me");
+    await lead.selectOption("2");
+    await page.getByRole("button", { name: "Save reminder timing" }).click();
+    await expect(lead).toHaveValue("2");
+    await expect(page.getByRole("status")).toHaveText("Could not load deadline notification status. Check the connection and try again.");
+    await expect(page.getByText("Check the reminder timing and time zone. No settings were changed.")).toHaveCount(0);
   });
 
   for (const variant of [

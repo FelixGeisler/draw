@@ -9,15 +9,23 @@ function LocalTime({ value }: { value: string }) {
 
 const TIMING_ERROR = "Check the reminder timing and time zone. No settings were changed.";
 
+function validTimeZone(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 128 ||
+    [...value].some((character) => character.charCodeAt(0) > 0x7f)) return false;
+  try { new Intl.DateTimeFormat("en-CA", { timeZone: value }).format(0); } catch { return false; }
+  return true;
+}
+
 function proposedTimeZone(): string {
-  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { return ""; }
+  try {
+    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return validTimeZone(detected) ? detected : "";
+  } catch { return ""; }
 }
 
 function validTiming(timing: PushTiming, quietEnabled: boolean): timing is PushTiming & { timezone: string } {
   const quarter = (value: string | null) => typeof value === "string" && /^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/.test(value);
-  if (!quarter(timing.sendTime) || typeof timing.timezone !== "string" || timing.timezone.length < 1 ||
-    timing.timezone.length > 128 || [...timing.timezone].some((character) => character.charCodeAt(0) > 0x7f)) return false;
-  try { new Intl.DateTimeFormat("en-CA", { timeZone: timing.timezone }).format(0); } catch { return false; }
+  if (!quarter(timing.sendTime) || !validTimeZone(timing.timezone)) return false;
   return quietEnabled
     ? quarter(timing.quietStart) && quarter(timing.quietEnd) && timing.quietStart !== timing.quietEnd
     : timing.quietStart === null && timing.quietEnd === null;
@@ -44,7 +52,7 @@ export function PushNotificationsSection() {
     });
     setQuietEnabled(saved.quietStart !== null && saved.quietEnd !== null);
   }, [status?.preferences.leadDays, status?.preferences.sendTime, status?.preferences.timezone,
-    status?.preferences.quietStart, status?.preferences.quietEnd]);
+    status?.preferences.quietStart, status?.preferences.quietEnd, push.timingReadbackRevision]);
 
   const submitTiming = (event: FormEvent) => {
     event.preventDefault();
