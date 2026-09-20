@@ -177,18 +177,24 @@ async function closedFetch(url: string, init?: RequestInit): Promise<Response> {
   return response;
 }
 
-async function strictJson(response: Response): Promise<unknown> {
-  try { return await response.json(); } catch { throw new Error("invalid Push response"); }
-}
-
 export class PushNetworkError extends Error {
   constructor() { super("Push network unavailable"); }
 }
 
+/** A successful HTTP response that does not satisfy the closed Push API contract. */
+export class PushResponseError extends Error {
+  constructor() { super("invalid Push response"); }
+}
+
+async function strictJson(response: Response): Promise<unknown> {
+  try { return await response.json(); } catch { throw new PushResponseError(); }
+}
+
 export async function fetchPushStatus(): Promise<PushStatus> {
   const response = await closedFetch("/api/push/status");
-  if (response.status !== 200) throw new Error("invalid Push response");
-  return parsePushStatus(await strictJson(response));
+  if (response.status !== 200) throw new PushResponseError();
+  const body = await strictJson(response);
+  try { return parsePushStatus(body); } catch { throw new PushResponseError(); }
 }
 
 function parseDeviceResponse(value: unknown): PushDevice {
@@ -196,7 +202,7 @@ function parseDeviceResponse(value: unknown): PushDevice {
   const device = root && exactKeys(root, ["device"]) ? object(root.device) : null;
   if (!device || !exactKeys(device, ["id", "createdAt", "lastSeenAt"]) ||
     !isCanonicalUuidV4(device.id) || !validIsoTimestamp(device.createdAt) || !validIsoTimestamp(device.lastSeenAt)) {
-    throw new Error("invalid Push response");
+    throw new PushResponseError();
   }
   return { id: device.id, createdAt: device.createdAt, lastSeenAt: device.lastSeenAt };
 }
@@ -225,7 +231,7 @@ export async function registerPushSubscription(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (response.status !== 200 && response.status !== 201) throw new Error("invalid Push response");
+  if (response.status !== 200 && response.status !== 201) throw new PushResponseError();
   return parseDeviceResponse(await strictJson(response));
 }
 
@@ -235,10 +241,10 @@ export async function setPushPreference(hideDetails: boolean): Promise<boolean> 
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ hideDetails }),
   });
-  if (response.status !== 200) throw new Error("invalid Push response");
+  if (response.status !== 200) throw new PushResponseError();
   const root = object(await strictJson(response));
   if (!root || !exactKeys(root, ["hideDetails"]) || root.hideDetails !== hideDetails) {
-    throw new Error("invalid Push response");
+    throw new PushResponseError();
   }
   return hideDetails;
 }
@@ -246,18 +252,18 @@ export async function setPushPreference(hideDetails: boolean): Promise<boolean> 
 export async function deletePushDevice(deviceId: string): Promise<void> {
   if (!isCanonicalUuidV4(deviceId)) throw new Error("invalid device id");
   const response = await closedFetch(`/api/push/subscriptions/${deviceId}`, { method: "DELETE" });
-  if (response.status !== 204) throw new Error("invalid Push response");
+  if (response.status !== 204) throw new PushResponseError();
 }
 
 export async function revokeAllPushDevices(): Promise<void> {
   const response = await closedFetch("/api/push/subscriptions", { method: "DELETE" });
-  if (response.status !== 204) throw new Error("invalid Push response");
+  if (response.status !== 204) throw new PushResponseError();
 }
 
 export async function sendPushTest(deviceId: string): Promise<void> {
   if (!isCanonicalUuidV4(deviceId)) throw new Error("invalid device id");
   const response = await closedFetch(`/api/push/subscriptions/${deviceId}/test`, { method: "POST" });
-  if (response.status !== 204) throw new Error("invalid Push response");
+  if (response.status !== 204) throw new PushResponseError();
 }
 
 export async function inspectBrowserPush(): Promise<BrowserPushSnapshot> {
@@ -436,6 +442,7 @@ export type PushFailureContext = "enroll" | "test" | "mutation";
 
 export function pushFailureMessage(error: unknown, context: PushFailureContext): string {
   if (error instanceof PushNetworkError) return "Could not reach Draw. Check the connection and try again.";
+  if (error instanceof PushResponseError) return "The notification request was rejected. Refresh Draw and try again.";
   if (!(error instanceof ApiError)) return context === "enroll"
     ? "Could not enable notifications in this browser. No device was enabled."
     : "The notification request was rejected. Refresh Draw and try again.";

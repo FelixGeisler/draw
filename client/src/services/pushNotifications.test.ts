@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../api/client";
 import {
   STATUS_GUIDANCE,
+  PushResponseError,
   beginEnrollmentOperation,
   clearStoredHandle,
   deletePushDevice,
@@ -245,6 +246,21 @@ describe("strict Push client boundary", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    ["unexpected success status", () => new Response(JSON.stringify({
+      device: { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" },
+    }), { status: 202 })],
+    ["unreadable success body", () => new Response("not-json", { status: 201 })],
+    ["invalid success body", () => new Response(JSON.stringify({ device: { id: "not-a-device" } }), { status: 201 })],
+  ])("classifies an enrollment %s as a closed API response failure", async (_name, reply) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply()));
+    const error = await registerPushSubscription(subscription(), null).catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(PushResponseError);
+    expect(pushFailureMessage(error, "enroll")).toBe(
+      "The notification request was rejected. Refresh Draw and try again.",
+    );
+  });
+
   it("uses exact no-body device calls, exact preference JSON and never retries", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
@@ -320,9 +336,10 @@ describe("strict Push client boundary", () => {
       [502, "push-endpoint-unavailable", "enroll", "The browser push service could not be reached. No device was enabled."],
       [502, "push-delivery-failed", "test", "The test was not accepted by the push service. Draw will not retry it."],
       [401, "anything-secret", "test", "Your Draw session expired. Reload Draw to unlock it."],
-      [400, "provider body secret", "test", "The notification request was rejected. Refresh Draw and try again."],
-      [413, "push-body-too-large", "test", "The notification request was rejected. Refresh Draw and try again."],
-      [415, "push-json-required", "test", "The notification request was rejected. Refresh Draw and try again."],
+      [400, "invalid-push-request", "enroll", "The notification request was rejected. Refresh Draw and try again."],
+      [413, "push-body-too-large", "mutation", "The notification request was rejected. Refresh Draw and try again."],
+      [415, "push-json-required", "enroll", "The notification request was rejected. Refresh Draw and try again."],
+      [418, "unknown-closed-code", "enroll", "The notification request was rejected. Refresh Draw and try again."],
     ];
     for (const [statusCode, code, context, expected] of cases) {
       expect(pushFailureMessage(new ApiError(statusCode, code, { error: code }), context)).toBe(expected);

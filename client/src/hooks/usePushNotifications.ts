@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api/client";
 import {
   STATUS_GUIDANCE,
+  PushNetworkError,
+  PushResponseError,
   beginEnrollmentOperation,
   clearStoredHandle,
   deletePushDevice,
@@ -29,6 +31,21 @@ const LOAD_FAILURE = "Could not load deadline notification status. Check the con
 const ENABLE_FAILURE = "Could not enable notifications in this browser. No device was enabled.";
 const STORAGE_FAILURE = "Notifications were enabled, but Draw could not remember this browser. Re-enable after reloading.";
 const CLEANUP_FAILURE = "The server device was removed, but browser cleanup could not be confirmed. Reload Draw and check browser site settings.";
+
+export function enrollmentFailureMessage(error: unknown, operation: ActivationOperation | null): string {
+  const failedDuringBrowserOperation = operation !== null &&
+    !(error instanceof ApiError) &&
+    !(error instanceof PushNetworkError) &&
+    !(error instanceof PushResponseError);
+  return failedDuringBrowserOperation ? ENABLE_FAILURE : pushFailureMessage(error, "enroll");
+}
+
+export async function rollbackFailedEnrollment(
+  subscription: PushSubscription | null,
+  newlyCreated: boolean,
+): Promise<void> {
+  if (newlyCreated && subscription !== null) await subscription.unsubscribe().catch(() => false);
+}
 
 interface Continuation {
   fingerprint: string;
@@ -230,7 +247,7 @@ export function usePushNotifications() {
       }
       await refresh(false);
     } catch (error) {
-      if (newlyCreated !== null) await newlyCreated.unsubscribe().catch(() => false);
+      await rollbackFailedEnrollment(newlyCreated ?? captured.browser.subscription, newlyCreated !== null);
       if (mounted.current) {
         setContinuation(null);
         await refresh(false);
@@ -240,9 +257,7 @@ export function usePushNotifications() {
         } else if (closed?.status === 503 && statusRef.current?.reason) {
           setMessage(STATUS_GUIDANCE[statusRef.current.reason]);
         } else {
-          setMessage(operation && (operation.kind === "permission" || operation.kind === "unsubscribe" || operation.kind === "subscribe") && !(error instanceof ApiError)
-            ? ENABLE_FAILURE
-            : pushFailureMessage(error, "enroll"));
+          setMessage(enrollmentFailureMessage(error, operation));
         }
       }
     } finally {
