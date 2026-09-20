@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import webPush from "web-push";
 import { startProduction } from "../../src/prod.js";
+import { dataDir as productionDataDir, db, reopenDatabase } from "../../src/db.js";
 import { createApp } from "../../src/app.js";
 import { PushLifecycle } from "../../src/push/authority.js";
 import { PushService } from "../../src/push/service.js";
@@ -125,6 +126,87 @@ describe("real production Push assembly", () => {
 
     const without = start(false);
     expect(without.deadlineScheduler).toBeNull();
+  });
+
+  it("keeps one unavailable-start scheduler and recovers through the reopened live database", async () => {
+    db.prepare("DELETE FROM deadline_reminder_claims").run();
+    db.prepare("DELETE FROM push_subscriptions").run();
+    db.prepare("DELETE FROM tasks").run();
+    db.prepare("UPDATE settings SET value='0' WHERE key='push_lead_days'").run();
+    db.prepare("UPDATE settings SET value='09:00' WHERE key='push_send_time'").run();
+    db.prepare("UPDATE settings SET value='UTC' WHERE key='push_timezone'").run();
+    db.prepare("UPDATE settings SET value=NULL WHERE key IN ('push_quiet_start','push_quiet_end')").run();
+    for (const marker of ["push-authority-reset-pending", "push-restore-pending", "push-revoke-pending"]) {
+      fs.rmSync(path.join(productionDataDir, marker), { force: true });
+    }
+    fs.writeFileSync(path.join(productionDataDir, "push-authority.json"), "malformed");
+
+    const clientDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-live-db-client-"));
+    roots.push(clientDir);
+    fs.writeFileSync(path.join(clientDir, "index.html"), "<!doctype html><title>test</title>");
+    const callbacks: Array<() => void> = [];
+    let sends = 0;
+    let schedulerNow = new Date("2026-09-20T09:00:00Z");
+    const assembly = startProduction({
+      clientDir, host: "127.0.0.1", port: 0,
+      env: { BACKUP_INTERVAL_HOURS: "0", UPDATE_CHECK_INTERVAL_HOURS: "0" },
+      resolverFactory: fakeResolver,
+      pushTransport: { send: async () => { sends += 1; return "success"; } },
+      generateRequestDetails: (_subscription, _payload, options) => ({
+        endpoint: "https://push.example/deadline", method: "POST",
+        headers: { Topic: String(options.topic), TTL: String(options.TTL) }, body: Buffer.from("encrypted"),
+      }),
+      deadlineNow: () => schedulerNow,
+      deadlineTimer: { set: (callback) => { callbacks.push(callback); return { unref() {} }; }, clear() {} },
+    });
+    servers.push(assembly.server);
+    const onlyScheduler = assembly.deadlineScheduler;
+    expect(onlyScheduler).not.toBeNull();
+    expect(callbacks).toHaveLength(1);
+    expect(assembly.push.snapshot().available).toBe(false);
+    const prepare = vi.spyOn(db, "prepare");
+    await onlyScheduler!.runNow();
+    expect(prepare).not.toHaveBeenCalled();
+    prepare.mockRestore();
+
+    assembly.push.beginRestore();
+    const closedHandle = db;
+    reopenDatabase();
+    expect(closedHandle.open).toBe(false);
+    assembly.push.completeRestore();
+    expect(assembly.push.snapshot().available).toBe(true);
+    expect(assembly.deadlineScheduler).toBe(onlyScheduler);
+    expect(callbacks).toHaveLength(1);
+
+    db.prepare(
+      `INSERT INTO push_subscriptions(id,endpoint,p256dh,auth,expiration_time,created_at,last_seen_at)
+       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','https://push.example/deadline',?,?,NULL,'created','seen')`,
+    ).run(keys.publicKey, crypto.randomBytes(16).toString("base64url"));
+    db.prepare(
+      `INSERT INTO tasks(id,title,category_id,due_date,recur_every_days,status,created_at)
+       VALUES (900001,'Reopened database deadline',1,'2026-09-20',7,'open','reopened-created')`,
+    ).run();
+    await onlyScheduler!.runNow();
+    expect(sends).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM deadline_reminder_claims WHERE item_id=900001").get())
+      .toEqual({ count: 1 });
+
+    await new Promise<void>((resolve) => assembly.server.listening ? resolve() : assembly.server.once("listening", resolve));
+    const port = (assembly.server.address() as AddressInfo).port;
+    const completion = await send(port, {
+      method: "PATCH", path: "/api/tasks/900001",
+      headers: { Host: `localhost:${port}`, "Content-Type": "application/json" },
+    }, [JSON.stringify({ status: "done" })]);
+    expect(completion.status).toBe(200);
+    const nextDeadline = (completion.body as { task: { dueDate: string } }).task.dueDate;
+    expect(nextDeadline).not.toBe("2026-09-20");
+    schedulerNow = new Date(`${nextDeadline}T09:00:00Z`);
+    await onlyScheduler!.runNow();
+    expect(sends).toBe(2);
+    expect(db.prepare(
+      "SELECT deadline FROM deadline_reminder_claims WHERE item_id=900001 ORDER BY deadline",
+    ).all()).toEqual([{ deadline: nextDeadline }]);
+    onlyScheduler!.stop();
   });
 
   it("reuses resolved host/ephemeral port and accepts bounded chunked identity JSON on the real listener", async () => {

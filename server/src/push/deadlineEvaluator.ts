@@ -69,13 +69,15 @@ export function createZonedFormatter(timezone: string): Intl.DateTimeFormat {
 
 export function zonedMinute(formatter: Intl.DateTimeFormat, instant: Date): ZonedMinute {
   const values = new Map(formatter.formatToParts(instant).map((part) => [part.type, part.value]));
-  const year = values.get("year");
+  const yearPart = values.get("year");
   const month = values.get("month");
   const day = values.get("day");
   const hour = values.get("hour");
   const minute = values.get("minute");
-  if (!year || !month || !day || !hour || !minute) throw new Error("timezone-format-unavailable");
-  const date = `${year}-${month}-${day}`;
+  if (!yearPart || !month || !day || !hour || !minute) throw new Error("timezone-format-unavailable");
+  const year = Number(yearPart);
+  if (!Number.isInteger(year) || year < 1 || year > 9999) throw new Error("timezone-format-unavailable");
+  const date = `${String(year).padStart(4, "0")}-${month}-${day}`;
   const time = `${hour}:${minute}`;
   return { date, time, dateTime: `${date}T${time}` };
 }

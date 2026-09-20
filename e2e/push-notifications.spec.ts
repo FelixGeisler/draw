@@ -1074,6 +1074,44 @@ test.describe("Deadline notification Settings — desktop production build", () 
     await expect(page.getByRole("heading", { name: "Deadline notifications" })).toBeVisible();
   });
 
+  for (const detection of ["throws", "blank"] as const) {
+    test(`requires manual timezone entry when browser detection ${detection} without persisting a proposal`, async ({ page }) => {
+      await page.addInitScript((mode) => {
+        const native = Intl.DateTimeFormat.prototype.resolvedOptions;
+        Object.defineProperty(Intl.DateTimeFormat.prototype, "resolvedOptions", {
+          configurable: true,
+          value() {
+            if (mode === "throws") throw new Error("synthetic timezone detection failure");
+            return { ...native.call(this), timeZone: "" };
+          },
+        });
+      }, detection);
+      let writes = 0;
+      let body: unknown;
+      let preferences = timingPreferences();
+      await page.route("**/api/push/status", (route) => route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(syntheticStatus({ preferences })),
+      }));
+      await page.route("**/api/push/preferences", async (route) => {
+        writes += 1;
+        body = route.request().postDataJSON();
+        preferences = { ...preferences, ...(body as typeof preferences) };
+        await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+      });
+      await installControlledSyntheticPushBrowser(page);
+      await page.goto(`${PROD}/settings`);
+      const timezone = page.getByLabel("Time zone (IANA)");
+      await expect(timezone).toHaveValue("");
+      expect(writes).toBe(0);
+      await timezone.fill("UTC");
+      await page.getByRole("button", { name: "Save reminder timing" }).click();
+      await expect(page.getByText("Reminder timing saved.")).toBeVisible();
+      expect(writes).toBe(1);
+      expect(body).toMatchObject({ timezone: "UTC" });
+    });
+  }
+
   test("adopts validated timing immediately when refresh fails and restores server values after a rejected save", async ({ page }) => {
     let statusReads = 0;
     let reject = false;

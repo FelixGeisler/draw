@@ -2,8 +2,12 @@ import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 import { PushService, type DeadlineClaimedOccurrence, type SendRow } from "./service.js";
 import {
+  addCalendarDays,
   createZonedFormatter,
+  LEAD_DAYS,
   occurrenceEligible,
+  QUARTER_HOUR,
+  scheduledDateTime,
   validCalendarDate,
   validTimeZone,
   zonedMinute,
@@ -59,7 +63,12 @@ function readTiming(database: Database.Database): DeadlineTiming | null {
   const timezone = values.get("push_timezone");
   const quietStart = values.get("push_quiet_start") ?? null;
   const quietEnd = values.get("push_quiet_end") ?? null;
-  if (!Number.isInteger(leadDays) || typeof sendTime !== "string" || !validTimeZone(timezone)) return null;
+  if (!Number.isInteger(leadDays) || !LEAD_DAYS.has(leadDays) || typeof sendTime !== "string" ||
+    !QUARTER_HOUR.test(sendTime) || !validTimeZone(timezone)) return null;
+  const quietValid = quietStart === null && quietEnd === null ||
+    typeof quietStart === "string" && typeof quietEnd === "string" &&
+      QUARTER_HOUR.test(quietStart) && QUARTER_HOUR.test(quietEnd) && quietStart !== quietEnd;
+  if (!quietValid) return null;
   return { leadDays, sendTime, timezone, quietStart, quietEnd };
 }
 
@@ -74,29 +83,80 @@ export function deadlineEventId(
     .digest().subarray(0, 16).toString("base64url");
 }
 
-function candidates(database: Database.Database): CandidateRow[] {
-  return database.prepare(
-    `SELECT device_id, item_type, item_id, item_created_at, deadline FROM (
-       SELECT s.id AS device_id, 'task' AS item_type, t.id AS item_id,
-              t.created_at AS item_created_at, t.due_date AS deadline
-       FROM push_subscriptions s CROSS JOIN tasks t
-       WHERE t.status = 'open' AND t.due_date IS NOT NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM deadline_reminder_claims c
-           WHERE c.device_id=s.id AND c.item_type='task' AND c.item_id=t.id
-             AND c.item_created_at=t.created_at AND c.deadline=t.due_date)
-       UNION ALL
-       SELECT s.id, 'goal', g.id, g.created_at, g.target_date
-       FROM push_subscriptions s CROSS JOIN goals g
-       WHERE g.status = 'active' AND g.target_date IS NOT NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM deadline_reminder_claims c
-           WHERE c.device_id=s.id AND c.item_type='goal' AND c.item_id=g.id
-             AND c.item_created_at=g.created_at AND c.deadline=g.target_date)
-     )
-     ORDER BY deadline, item_type, item_id, item_created_at, device_id
-     LIMIT ?`,
-  ).all(DEADLINE_EXAMINE_LIMIT) as CandidateRow[];
+interface EligibleDate {
+  deadline: string;
+  scheduled: string;
+}
+
+function eligibleDueDates(timing: DeadlineTiming, now: ReturnType<typeof zonedMinute>): EligibleDate[] {
+  const dates: EligibleDate[] = [];
+  for (let offset = 0; offset <= timing.leadDays; offset++) {
+    const deadline = addCalendarDays(now.date, offset);
+    if (deadline === null || !occurrenceEligible(deadline, timing, now)) continue;
+    const scheduled = scheduledDateTime(deadline, timing);
+    if (scheduled !== null) dates.push({ deadline, scheduled });
+  }
+  return dates;
+}
+
+/** Stable SQL factory exported only so tests can execute EXPLAIN on the exact production query. */
+export function deadlineCandidateSql(eligibleDateCount: number): string {
+  if (!Number.isInteger(eligibleDateCount) || eligibleDateCount < 1 || eligibleDateCount > 31) {
+    throw new Error("invalid eligible deadline count");
+  }
+  const dateValues = Array.from({ length: eligibleDateCount }, () => "(?, ?)").join(",");
+  return `WITH
+    eligible_dates(deadline, scheduled) AS MATERIALIZED (VALUES ${dateValues}),
+    eligible_devices(device_id) AS MATERIALIZED (
+      SELECT id FROM push_subscriptions
+      WHERE expiration_time IS NULL OR
+        (typeof(expiration_time) = 'integer' AND expiration_time > ? AND expiration_time <= 8640000000000000)
+      ORDER BY id LIMIT 16
+    ),
+    source_entities(item_type,item_id,item_created_at,deadline,scheduled) AS (
+      SELECT 'task', t.id, t.created_at, t.due_date, d.scheduled
+      FROM tasks t JOIN eligible_dates d ON d.deadline = t.due_date
+      WHERE t.status = 'open'
+      UNION ALL
+      SELECT 'goal', g.id, g.created_at, g.target_date, d.scheduled
+      FROM goals g JOIN eligible_dates d ON d.deadline = g.target_date
+      WHERE g.status = 'active'
+    ),
+    eligible_entities AS MATERIALIZED (
+      SELECT e.item_type,e.item_id,e.item_created_at,e.deadline,e.scheduled
+      FROM source_entities e
+      WHERE EXISTS (
+        SELECT 1 FROM eligible_devices d
+        WHERE NOT EXISTS (
+          SELECT 1 FROM deadline_reminder_claims c
+          WHERE c.device_id=d.device_id AND c.item_type=e.item_type AND c.item_id=e.item_id
+            AND c.item_created_at=e.item_created_at AND c.deadline=e.deadline
+        )
+      )
+      ORDER BY e.scheduled,e.deadline,e.item_type,e.item_id,e.item_created_at
+      LIMIT ${DEADLINE_EXAMINE_LIMIT}
+    )
+    SELECT d.device_id,e.item_type,e.item_id,e.item_created_at,e.deadline
+    FROM eligible_entities e CROSS JOIN eligible_devices d
+    WHERE NOT EXISTS (
+      SELECT 1 FROM deadline_reminder_claims c
+      WHERE c.device_id=d.device_id AND c.item_type=e.item_type AND c.item_id=e.item_id
+        AND c.item_created_at=e.item_created_at AND c.deadline=e.deadline
+    )
+    ORDER BY e.scheduled,e.deadline,e.item_type,e.item_id,e.item_created_at,d.device_id
+    LIMIT ${DEADLINE_EXAMINE_LIMIT}`;
+}
+
+function candidates(
+  database: Database.Database,
+  dates: EligibleDate[],
+  nowInstant: Date,
+): CandidateRow[] {
+  if (dates.length === 0) return [];
+  return database.prepare(deadlineCandidateSql(dates.length)).all(
+    ...dates.flatMap(({ deadline, scheduled }) => [deadline, scheduled]),
+    nowInstant.valueOf(),
+  ) as CandidateRow[];
 }
 
 function prune(database: Database.Database, localDate: string): void {
@@ -208,7 +268,7 @@ export function startDeadlineScheduler(options: DeadlineSchedulerOptions): Deadl
       const instant = now();
       const local = localMinute(timing.timezone, instant);
       prune(database, local.date);
-      const rows = candidates(database);
+      const rows = candidates(database, eligibleDueDates(timing, local), instant);
       let index = 0;
       let admitted = 0;
       while (!stopped && index < rows.length && admitted < DEADLINE_ATTEMPT_LIMIT) {

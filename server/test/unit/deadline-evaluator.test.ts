@@ -41,6 +41,19 @@ describe("deadline wall-calendar evaluator", () => {
     expect(scheduledDateTime("2026-10-31", timing({ leadDays: 0 }))).toBe("2026-10-31T09:00");
   });
 
+  it("canonicalizes native-Intl lower years for lexical eligibility", () => {
+    const zone = createZonedFormatter("UTC");
+    for (const [instant, expected] of [
+      ["0001-01-01T09:00:00.000Z", "0001-01-01T09:00"],
+      ["0099-12-31T09:00:00.000Z", "0099-12-31T09:00"],
+      ["0999-06-15T09:00:00.000Z", "0999-06-15T09:00"],
+    ] as const) {
+      const now = zonedMinute(zone, new Date(instant));
+      expect(now.dateTime).toBe(expected);
+      expect(occurrenceEligible(now.date, timing({ leadDays: 0 }), now)).toBe(true);
+    }
+  });
+
   it("uses the first real wall minute after a spring gap and the first fold occurrence", () => {
     const zone = createZonedFormatter("America/New_York");
     const gapTiming = timing({ timezone: "America/New_York", leadDays: 0, sendTime: "02:15" });
