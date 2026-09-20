@@ -1134,6 +1134,71 @@ test.describe("Deadline notification Settings — desktop production build", () 
     await expect(page.getByRole("status")).toHaveText("Could not load deadline notification status. Check the connection and try again.");
   });
 
+  test("adopts a committed timing PUT from readback when the response is lost", async ({ page }) => {
+    let preferences = { ...timingPreferences(), timezone: "UTC" };
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus({ preferences })),
+    }));
+    await page.route("**/api/push/preferences", async (route) => {
+      preferences = { ...preferences, ...route.request().postDataJSON() };
+      await route.abort("failed");
+    });
+    await installControlledSyntheticPushBrowser(page);
+    await page.goto(`${PROD}/settings`);
+    const lead = page.getByLabel("Remind me");
+    await lead.selectOption("2");
+    await page.getByRole("button", { name: "Save reminder timing" }).click();
+    await expect(lead).toHaveValue("2");
+    await expect(page.getByRole("status")).toHaveText(
+      "Could not confirm whether reminder timing was saved. Check the current values before trying again.",
+    );
+  });
+
+  for (const response of [
+    { name: "malformed", fulfill: { contentType: "application/json", body: "{" } },
+    { name: "unexpected", fulfill: { status: 201, contentType: "application/json", body: "{}" } },
+  ]) {
+    test(`restores an unchanged authoritative readback after a ${response.name} PUT response`, async ({ page }) => {
+      const initial = syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } });
+      await page.route("**/api/push/status", (route) => route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(initial),
+      }));
+      await page.route("**/api/push/preferences", (route) => route.fulfill(response.fulfill));
+      await installControlledSyntheticPushBrowser(page);
+      await page.goto(`${PROD}/settings`);
+      const lead = page.getByLabel("Remind me");
+      await lead.selectOption("2");
+      await page.getByRole("button", { name: "Save reminder timing" }).click();
+      await expect(lead).toHaveValue("1");
+      await expect(page.getByRole("status")).toHaveText(
+        "Could not confirm whether reminder timing was saved. Check the current values before trying again.",
+      );
+    });
+  }
+
+  test("retains attempted timing when an ambiguous PUT and its readback both fail", async ({ page }) => {
+    let statusReads = 0;
+    const initial = syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } });
+    await page.route("**/api/push/status", (route) => {
+      statusReads++;
+      return statusReads === 1
+        ? route.fulfill({ contentType: "application/json", body: JSON.stringify(initial) })
+        : route.abort("failed");
+    });
+    await page.route("**/api/push/preferences", (route) => route.abort("failed"));
+    await installControlledSyntheticPushBrowser(page);
+    await page.goto(`${PROD}/settings`);
+    const lead = page.getByLabel("Remind me");
+    await lead.selectOption("2");
+    await page.getByRole("button", { name: "Save reminder timing" }).click();
+    await expect(lead).toHaveValue("2");
+    await expect(page.getByRole("status")).toHaveText(
+      "Could not confirm whether reminder timing was saved. Check the current values before trying again.",
+    );
+  });
+
   for (const rejection of [
     {
       name: "400 rejection",
@@ -1204,7 +1269,7 @@ test.describe("Deadline notification Settings — desktop production build", () 
     await expect(page.getByRole("status")).toHaveText("Check the reminder timing and time zone. No settings were changed.");
   });
 
-  test("keeps attempted controls and avoids confirmation when rejection readback fails", async ({ page }) => {
+  test("restores the last loaded controls after invalid input when readback fails", async ({ page }) => {
     let statusReads = 0;
     const initial = syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } });
     await page.route("**/api/push/status", (route) => {
@@ -1223,9 +1288,10 @@ test.describe("Deadline notification Settings — desktop production build", () 
     const lead = page.getByLabel("Remind me");
     await lead.selectOption("2");
     await page.getByRole("button", { name: "Save reminder timing" }).click();
-    await expect(lead).toHaveValue("2");
-    await expect(page.getByRole("status")).toHaveText("Could not load deadline notification status. Check the connection and try again.");
-    await expect(page.getByText("Check the reminder timing and time zone. No settings were changed.")).toHaveCount(0);
+    await expect(lead).toHaveValue("1");
+    await expect(page.getByRole("status")).toHaveText(
+      "Check the reminder timing and time zone. No settings were changed.",
+    );
   });
 
   for (const variant of [
