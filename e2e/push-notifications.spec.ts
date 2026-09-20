@@ -841,8 +841,8 @@ test.describe("Deadline notification Settings — desktop production build", () 
     expect(await pushEvents(page)).toEqual(["subscribe"]);
   });
 
-  test("keeps inspection read-only, then clears malformed and confirmed-stale handles at an explicit mutation", async ({ page }) => {
-    let postBody: Record<string, unknown> | null = null;
+  test("does not restore a confirmed-stale handle when cleanup fails before reusing a subscription", async ({ page }) => {
+    const staleDevice = "123e4567-e89b-42d3-b456-426614174001";
     const listedDevice = { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" };
     let enrolled = false;
     await page.route("**/api/push/status", (route) => route.fulfill({
@@ -851,18 +851,49 @@ test.describe("Deadline notification Settings — desktop production build", () 
     }));
     await page.route("**/api/push/subscriptions", async (route) => {
       if (route.request().method() !== "POST") return route.fallback();
-      postBody = route.request().postDataJSON() as Record<string, unknown>;
+      expect(route.request().postDataJSON()).not.toHaveProperty("replaceDeviceId");
       enrolled = true;
       await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ device: listedDevice }) });
     });
-    await installControlledSyntheticPushBrowser(page, { subscription: "matching", storedHandle: DEVICE });
+    await installControlledSyntheticPushBrowser(page, {
+      subscription: "matching",
+      storedHandle: staleDevice,
+      failStorageRemove: true,
+    });
     await page.goto(`${PROD}/settings`);
-    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(staleDevice);
     expect(await pushEvents(page)).toEqual([]);
     await page.getByRole("button", { name: "Re-enable" }).click();
     await expect(page.getByText("Notifications are enabled for this browser.", { exact: true })).toBeVisible();
-    expect(postBody).not.toHaveProperty("replaceDeviceId");
-    expect(await pushEvents(page)).toContain("storage-remove");
+    expect(await pushEvents(page)).toEqual(["storage-remove"]);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
+  });
+
+  test("does not restore a confirmed-stale handle when cleanup fails before creating a subscription", async ({ page }) => {
+    const staleDevice = "123e4567-e89b-42d3-b456-426614174001";
+    const listedDevice = { id: DEVICE, createdAt: "2026-01-01T00:00:00.000Z", lastSeenAt: "2026-01-01T00:00:00.000Z" };
+    let enrolled = false;
+    await page.route("**/api/push/status", (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(syntheticStatus({ devices: enrolled ? [listedDevice] : [] })),
+    }));
+    await page.route("**/api/push/subscriptions", async (route) => {
+      if (route.request().method() !== "POST") return route.fallback();
+      expect(route.request().postDataJSON()).not.toHaveProperty("replaceDeviceId");
+      enrolled = true;
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ device: listedDevice }) });
+    });
+    await installControlledSyntheticPushBrowser(page, {
+      storedHandle: staleDevice,
+      failStorageRemove: true,
+    });
+    await page.goto(`${PROD}/settings`);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(staleDevice);
+    expect(await pushEvents(page)).toEqual([]);
+    await page.getByRole("button", { name: "Enable", exact: true }).click();
+    await expect(page.getByText("Notifications are enabled for this browser.", { exact: true })).toBeVisible();
+    expect(await pushEvents(page)).toEqual(["storage-remove", "subscribe"]);
+    expect(await page.evaluate(() => localStorage.getItem("draw.push.device.v1"))).toBe(DEVICE);
   });
 
   test("does not clear a malformed handle during inspection but clears it on Enable", async ({ page }) => {

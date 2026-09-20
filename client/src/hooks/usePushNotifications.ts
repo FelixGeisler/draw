@@ -139,6 +139,10 @@ export function usePushNotifications() {
     operation: ActivationOperation | null,
     wasContinuation: boolean,
   ) => {
+    // Keep the identity captured at the explicit mutation boundary. Snapshot
+    // reloads validate current status, worker, permission, and subscription,
+    // but localStorage remains untrusted after best-effort stale cleanup.
+    const capturedHandle = captured.browser.handle;
     let newlyCreated: PushSubscription | null = null;
     try {
       if (operation?.kind === "permission") {
@@ -214,8 +218,7 @@ export function usePushNotifications() {
         if (wasContinuation && mounted.current) setContinuation(null);
         return;
       }
-      const replaceDeviceId = captured.browser.handle;
-      const device = await registerPushSubscription(subscription, replaceDeviceId);
+      const device = await registerPushSubscription(subscription, capturedHandle);
       if (!mounted.current) return;
       setContinuation(null);
       if (!storeHandle(device.id)) {
