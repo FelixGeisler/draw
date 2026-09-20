@@ -118,9 +118,14 @@ accepted test resolves and pins one permitted address while preserving the
 endpoint hostname for Host, SNI, and certificate verification; it makes one
 non-reused HTTPS request with no proxy, redirect, retry, queue, or offline
 backlog. Stage 1 is complete. Stage 2A's schema-v20, calendar-validation,
-backup-sanitization, and source-claim-cleanup foundation is implemented; the
-Stage 2B timing API/UI, evaluator, sender, and production scheduler remain
-planned and are not field-verified.
+backup-sanitization, and source-claim-cleanup foundation is implemented. Stage
+2B adds the strict typed timing API/UI, native-Intl evaluator, metadata-only
+atomic claims, bounded one-attempt sender, and exactly one production-owned
+recursive deadline scheduler. The scheduler is always created when production
+schedulers are enabled, but remains inert while Push/recovery/signing,
+timezone, or subscription prerequisites are absent. Development, `createApp()`,
+and `startSchedulers:false` create none. Automatic deadline attempts are
+implemented but not field-verified.
 
 These files are never archive inputs. Manual/scheduled Draw archives, imported
 live DBs and `app.db.bak` physically exclude notification device credentials
@@ -889,9 +894,10 @@ setting or `UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls,
 `UPDATE_CHECK_URL` redirects it) — bounded A+AAAA DNS when an accepted Push
 enrollment validates its submitted HTTPS endpoint and, only when an authorized
 user explicitly invokes the Stage 1B.2 manual test route, one DNS-pinned
-provider HTTPS POST through Node core HTTPS. That manual request has no proxy,
-redirect, retry, queue, or socket reuse; Stage 1C browser UI/service-worker
-receive handling is implemented but not field-verified. Stage 2A's inert v20
-persistence/domain/backup foundation is implemented, while Stage 2B scheduled
-deadline delivery remains planned and not field-verified — and the user-configured
-update trigger URL, one POST per explicit **Update** action, never automatically.
+provider HTTPS POST through Node core HTTPS. Automatic deadline work may make
+one equivalent DNS-pinned TTL-0 POST for each newly claimed eligible
+device-occurrence while Draw runs. Both paths have no proxy, redirect, retry,
+queue, backlog, or socket reuse; Stage 1C receive handling and Stage 2B
+automatic deadline attempts are implemented but not field-verified. The
+user-configured update trigger URL receives one POST per explicit **Update**
+action, never automatically.

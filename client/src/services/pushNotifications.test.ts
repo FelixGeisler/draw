@@ -21,6 +21,7 @@ import {
   sameSubscriptionData,
   sendPushTest,
   setPushPreference,
+  setPushTiming,
   snapshotFingerprint,
   storeHandle,
   subscriptionMatches,
@@ -54,7 +55,9 @@ function status(overrides: Partial<PushStatus> = {}): PushStatus {
     mutationReason: null,
     vapidPublicKey: VAPID_TEXT,
     maxDevices: 16,
-    preferences: { hideDetails: false },
+    preferences: {
+      hideDetails: false, leadDays: 1, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
+    },
     devices: [],
     ...overrides,
   };
@@ -106,6 +109,13 @@ describe("strict Push client boundary", () => {
     expect(() => parsePushStatus({ ...value, secret: "no" })).toThrow("invalid Push status");
     expect(() => parsePushStatus({ ...value, available: false })).toThrow("inconsistent Push status");
     expect(() => parsePushStatus({ ...value, vapidPublicKey: "not canonical" })).toThrow("invalid Push status");
+    for (const preferences of [
+      { ...value.preferences, sendTime: "09:01" },
+      { ...value.preferences, timezone: " UTC" },
+      { ...value.preferences, quietStart: "22:00", quietEnd: null },
+      { ...value.preferences, quietStart: "08:00", quietEnd: "08:00" },
+      { ...value.preferences, unknown: true },
+    ]) expect(() => parsePushStatus({ ...value, preferences })).toThrow("invalid Push status");
   });
 
   it("inspects capabilities without prompting, subscribing, mutating or writing storage", async () => {
@@ -266,17 +276,23 @@ describe("strict Push client boundary", () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ hideDetails: true }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ hideDetails: true }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        leadDays: 2, sendTime: "10:15", timezone: "UTC", quietStart: null, quietEnd: null,
+      }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await sendPushTest(DEVICE);
     await deletePushDevice(DEVICE);
     await revokeAllPushDevices();
     expect(await setPushPreference(true)).toBe(true);
+    const timing = { leadDays: 2 as const, sendTime: "10:15", timezone: "UTC", quietStart: null, quietEnd: null };
+    expect(await setPushTiming(timing)).toEqual(timing);
     expect(fetchMock.mock.calls).toEqual([
       [`/api/push/subscriptions/${DEVICE}/test`, { method: "POST" }],
       [`/api/push/subscriptions/${DEVICE}`, { method: "DELETE" }],
       ["/api/push/subscriptions", { method: "DELETE" }],
       ["/api/push/preferences", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hideDetails: true }) }],
+      ["/api/push/preferences", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(timing) }],
     ]);
 
     fetchMock.mockReset();

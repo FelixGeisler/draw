@@ -5,7 +5,7 @@ import https from "node:https";
 import os from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import webPush from "web-push";
 import { startProduction } from "../../src/prod.js";
 import { createApp } from "../../src/app.js";
@@ -99,6 +99,33 @@ describe("real production Push assembly", () => {
     servers.push(assembly.server);
     return assembly;
   }
+
+  it("always constructs one delayed unref deadline scheduler unless scheduler startup is disabled", async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-prod-scheduler-data-"));
+    const clientDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-prod-scheduler-client-"));
+    roots.push(dataDir, clientDir);
+    fs.writeFileSync(path.join(clientDir, "index.html"), "<!doctype html><title>test</title>");
+    fs.writeFileSync(path.join(dataDir, "push-authority.json"), "malformed");
+    const callbacks: Array<() => void> = [];
+    const unref = vi.fn();
+    const assembly = startProduction({
+      database, dataDir, clientDir, host: "127.0.0.1", port: 0,
+      env: { BACKUP_INTERVAL_HOURS: "0", UPDATE_CHECK_INTERVAL_HOURS: "0" },
+      deadlineTimer: {
+        set: (callback, delay) => { expect(delay).toBe(60_000); callbacks.push(callback); return { unref }; },
+        clear: vi.fn(),
+      },
+    });
+    servers.push(assembly.server);
+    expect(assembly.push.snapshot().available).toBe(false);
+    expect(assembly.deadlineScheduler).not.toBeNull();
+    expect(callbacks).toHaveLength(1);
+    expect(unref).toHaveBeenCalledOnce();
+    assembly.deadlineScheduler?.stop();
+
+    const without = start(false);
+    expect(without.deadlineScheduler).toBeNull();
+  });
 
   it("reuses resolved host/ephemeral port and accepts bounded chunked identity JSON on the real listener", async () => {
     const assembly = start();

@@ -18,6 +18,7 @@ import {
   sameSubscriptionData,
   sendPushTest,
   setPushPreference,
+  setPushTiming,
   snapshotFingerprint,
   storeHandle,
   subscriptionMatches,
@@ -25,6 +26,7 @@ import {
   type BrowserPushSnapshot,
   type EnrollmentPrerequisites,
   type PushStatus,
+  type PushTiming,
 } from "../services/pushNotifications";
 
 const LOAD_FAILURE = "Could not load deadline notification status. Check the connection and try again.";
@@ -321,7 +323,7 @@ export function usePushNotifications() {
         const accepted = await setPushPreference(hideDetails);
         const current = statusRef.current;
         if (current) {
-          const adopted = { ...current, preferences: { hideDetails: accepted } };
+          const adopted = { ...current, preferences: { ...current.preferences, hideDetails: accepted } };
           statusRef.current = adopted;
           if (mounted.current) setStatus(adopted);
         }
@@ -335,6 +337,29 @@ export function usePushNotifications() {
         } else if (closed?.status === 503 && statusRef.current?.reason) {
           setMessage(STATUS_GUIDANCE[statusRef.current.reason]);
         } else throw error;
+      }
+    }, "mutation");
+  }, [refresh, runMutation]);
+
+  const updateTiming = useCallback((timing: PushTiming & { timezone: string }) => {
+    void runMutation(async () => {
+      try {
+        const accepted = await setPushTiming(timing);
+        const current = statusRef.current;
+        if (current) {
+          const adopted = {
+            ...current,
+            preferences: { ...current.preferences, ...accepted },
+          };
+          statusRef.current = adopted;
+          if (mounted.current) setStatus(adopted);
+        }
+        const refreshed = await refresh(false, true);
+        if (!refreshed && mounted.current) setMessage(LOAD_FAILURE);
+        else if (mounted.current) setMessage("Reminder timing saved.");
+      } catch {
+        await refresh(false, true);
+        if (mounted.current) setMessage("Check the reminder timing and time zone. No settings were changed.");
       }
     }, "mutation");
   }, [refresh, runMutation]);
@@ -444,6 +469,7 @@ export function usePushNotifications() {
     enroll,
     refresh: () => void refresh(),
     updatePreference,
+    updateTiming,
     revokeDevice,
     revokeAll,
     testDevice,

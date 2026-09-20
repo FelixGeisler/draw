@@ -82,6 +82,12 @@ export class PushAdmission {
     };
   }
 
+  /** Scheduler-only no-queue admission: the shared physical permit, no API buckets. */
+  tryAcquireScheduled(): { release: () => void } | undefined {
+    const release = this.acquirePermit();
+    return release ? { release } : undefined;
+  }
+
   tryAcquire(clientKey: string): AdmissionDecision {
     const release = this.acquirePermit();
     if (!release) return { allowed: false, error: "push-busy" };

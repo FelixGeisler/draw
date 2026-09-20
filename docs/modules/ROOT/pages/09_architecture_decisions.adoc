@@ -2925,8 +2925,9 @@ ADR-72 Stage 1A authority/schema/recovery/backup foundations, Stage 1B status,
 registration, preferences, deletion, revoke, and bounded synthetic sender APIs,
 and Stage 1C staged browser enrollment, closed worker receive/click behavior,
 and durable landings are implemented but not field-verified. All Stage 1 is
-complete. Stage 2A's inert foundation is implemented; Stage 2B deadline
-activation remains planned and not field-verified. iOS remains progressive
+complete. Stage 2A's foundation and Stage 2B typed timing, deterministic
+eligibility/claims, bounded sending, and production scheduling are implemented
+but not field-verified. iOS remains progressive
 enhancement and never gates Android-first delivery.
 * *Adaptation, not redesign.* The card face's own language — full-bleed art under
 its legibility scrim, the category pill, the effort chip, the impact stars, the
@@ -4037,8 +4038,31 @@ completion, resolution, and deadline edits retain them. Manual/scheduled
 archives, imported live data, and `app.db.bak` physically remove subscriptions
 and claims while preserving timing/privacy preferences. Stage 2A adds no timing
 endpoint/control, evaluator, sender, scheduler, network behavior, dependency,
-login, or access change. Stage 2B activation remains planned and not
-field-verified.
+login, or access change.
+
+*Implemented amendment — Stage 2B activation (#347):* the dedicated Push status
+and two closed preference variants expose shared Hide-details separately from
+complete typed timing. The five timing keys remain absent from generic settings
+and MCP. Native `Intl.DateTimeFormat` wall-calendar evaluation admits every
+valid open-task and active-goal occurrence independent of drawability. A shared
+physical permit is acquired before one short metadata-only `INSERT OR IGNORE`
+claim transaction; no transaction spans DNS or HTTPS. After DNS, authority/work
+generation, exact subscription/expiry, source identity/status/deadline, and
+Hide-details are synchronously re-read before current title/category is read
+and one request is constructed. Failure or cancellation retains the claim and
+never retries. Detailed oversize falls back once to the closed generic payload;
+TTL is zero and provider initiation occurs at most once.
+
+`prod.ts` constructs exactly one recursive, unref'd 60-second deadline scheduler
+whenever scheduler startup is enabled, including unavailable startup. Guards
+make unavailable/recovery, missing authority/timezone, and device-free ticks
+inert before claims or network. Development, `createApp()`, and
+`startSchedulers:false` construct none. Stop is idempotent, non-overlap is
+structural, and a successful restore uses the same scheduler plus live reopened
+database binding without a callback. Per tick the implementation examines at
+most 256 ordered candidates, admits at most 32 claims in shared-four batches,
+and prunes at most 500 claims. The feature is implemented but not
+field-verified; ADR-67 remains separate.
 
 *Dependency and supply-chain decision:* runtime `web-push` is pinned exactly to
 3.6.7 and type-only `@types/web-push` to 3.6.4 in the committed lockfile.
@@ -4080,9 +4104,10 @@ marker. Any valid reset/restore/revoke marker subset performs one boot clear
 and rotation; malformed markers fail closed. Hide-details advances volatile
 work after its DB commit without rotating VAPID. `prod.ts` alone assembles the
 real service/resolver from one resolved host/port/password/trust set; defaults
-and tests remain network-inert. Stage 1C now implements browser UI/worker
-handling; the deadline sender and scheduler remain planned. The complete Stage
-1 capability is implemented but not field-verified.
+and tests remain network-inert. Stage 1C implements browser UI/worker
+handling, and Stage 2B consumes these unchanged resolver/transport and
+lifecycle boundaries for automatic deadline attempts. The complete Stage 1
+capability is implemented but not field-verified.
 
 *Implemented amendment — Stage 1B.2 (#341):* `POST
 /api/push/subscriptions/:deviceId/test` adds the no-body synthetic sender on the
@@ -4146,7 +4171,7 @@ Admission client = normalized direct socket IP on direct-loopback; normalized `r
 
 `GET /api/push/status` returns exactly:
 ```json
-{"available":true,"reason":null,"mutationAllowed":true,"mutationReason":null,"vapidPublicKey":"...","maxDevices":16,"preferences":{"hideDetails":false},"devices":[{"id":"...","createdAt":"...","lastSeenAt":"..."}]}
+{"available":true,"reason":null,"mutationAllowed":true,"mutationReason":null,"vapidPublicKey":"...","maxDevices":16,"preferences":{"hideDetails":false,"leadDays":1,"sendTime":"09:00","timezone":null,"quietStart":null,"quietEnd":null},"devices":[{"id":"...","createdAt":"...","lastSeenAt":"..."}]}
 ```
 `reason`: `null|not-production|authority-unavailable|recovery-pending`; `mutationReason`: `null|secure-transport-required|proxy-configuration-unsupported` (never `password-required`). Public key null when unavailable; devices ordered `createdAt,id`. Supported passwordless HTTPS can mutate; malformed/insecure topology fails only for topology. Effective-password unauthenticated requests are stopped by ADR-50 first.
 
@@ -4154,7 +4179,7 @@ Admission client = normalized direct socket IP on direct-loopback; normalized `r
 - `DELETE /api/push/subscriptions/:deviceId`: UUIDv4, idempotent 204, no authority rotation.
 - `DELETE /api/push/subscriptions`: revoke-all prepares validated authority; durably creates `$DATA_DIR/push-revoke-pending`; invalidates work; transactionally deletes all rows; installs authority; removes marker; returns 204 (also empty). Pre-delete failure preserves state. Post-delete failure returns `503 {"error":"push-recovery-pending"}`, restores no rows, and remains unavailable until boot clear/rotate/remove.
 - **Implemented Stage 1B.2:** `POST /api/push/subscriptions/:deviceId/test`: no body; only that device; 204 only provider 2xx. Initial missing/expired 404/410; provider 404/410 deletes and returns 410; timeout 504; other DNS/TLS/network/provider failure 502; bounded allowlisted errors.
-- `PUT /api/push/preferences`: exactly `{hideDetails:boolean}`; atomic `push_hide_details`, increment volatile generation, return `{hideDetails}`. Future deadline sends use it; test remains generic.
+- `PUT /api/push/preferences`: either exactly `{hideDetails:boolean}` (atomic `push_hide_details`, increment volatile generation, return `{hideDetails}`) or exactly complete `{leadDays,sendTime,timezone,quietStart,quietEnd}` (validate all, atomically write all five, return the same shape). Mixed/partial/unknown input fails. Timing-only commits do not advance work generation. Future uninitiated deadline sends use current Hide-details; test remains generic.
 
 A 17th distinct endpoint returns 409 `{"error":"push-device-limit"}`; no dormant/enabled row. Endpoint: ≤2,048 UTF-8 bytes; absolute `https:`; no credentials/fragment/IP literal; explicit port only 443; query allowed; normalized DNS hostname ≤253 ASCII bytes. `p256dh`: canonical unpadded base64url, 87 chars→65-byte uncompressed P-256 beginning `0x04`; `auth`: 22 chars→16 bytes. `expirationTime`: null or nonnegative safe integer ≤`8,640,000,000,000,000`; reject expired enrollment and delete before send if expired. IDs UUIDv4; max 16 rows. Validation 400; redacted resolution 502/504; never log endpoint.
 
@@ -4236,12 +4261,11 @@ Automated Stage 1C evidence covers all capability/topology states; gesture permi
 
 ### Stage 2 — deterministic deadline attempts
 
-**FOUNDATION IMPLEMENTED; ACTIVATION PLANNED AND NOT FIELD-VERIFIED.** #345
-implements only schema v20, strict calendar writes, physical backup
-sanitization, and deletion/cascade claim integrity. The timing API/UI,
-evaluator, occurrence insertion/pruning, sender, and production scheduler
-remain Stage 2B and require a separate accepted issue on the merged Stage 2A
-head.
+**FOUNDATION AND ACTIVATION IMPLEMENTED; NOT FIELD-VERIFIED.** #345 implements
+schema v20, strict calendar writes, physical backup sanitization, and
+deletion/cascade claim integrity. #347 implements the timing API/UI, evaluator,
+occurrence insertion/pruning, sender, and one production scheduler on that
+unchanged foundation.
 
 Fixed policy (**Requirements Engineer delegated authority**, also approved human privacy/delivery policy):
 - One reminder attempt per enrolled device/item/deadline occurrence. Lead exactly `0,1,2,3,7,14,30` days, default 1. Send time `HH:(00|15|30|45)` from `00:00` through `23:45`, default `09:00`.
