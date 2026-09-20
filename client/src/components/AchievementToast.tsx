@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGamification } from "../hooks/useGamification";
 import { achievementRarity } from "../lib/achievementRarity";
 import { celebrate, prefersReducedMotion } from "../lib/celebrate";
@@ -9,8 +9,6 @@ interface Unlock {
   id: number;
   key: string;
 }
-
-let unlockId = 1;
 
 /**
  * The unlock celebration (#124 toast → #224 staged reveal). One coordinator
@@ -35,11 +33,13 @@ let unlockId = 1;
 export function AchievementToast() {
   const { data } = useGamification();
   const [queue, setQueue] = useState<Unlock[]>([]);
+  const nextUnlockId = useRef(1);
 
   useEffect(() => {
     function onUnlock(e: Event) {
       const keys = (e as CustomEvent<string[]>).detail;
-      setQueue((q) => [...q, ...keys.map((key) => ({ id: unlockId++, key }))]);
+      const unlocks = keys.map((key) => ({ id: nextUnlockId.current++, key }));
+      setQueue((q) => [...q, ...unlocks]);
     }
     window.addEventListener("achievements-unlocked", onUnlock);
     return () => window.removeEventListener("achievements-unlocked", onUnlock);
