@@ -2,8 +2,14 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { V18_STATEMENTS } from "./schemaV18.js";
-import { V19_STATEMENTS } from "./schemaV19.js";
+import { validateV18Contract, V18_STATEMENTS } from "./schemaV18.js";
+import { validateV19Contract, V19_STATEMENTS } from "./schemaV19.js";
+import {
+  DEADLINE_REMINDER_CLAIMS_SQL,
+  validateV20Contract,
+  V20_SETTINGS_SQL,
+  V20_TIMING_DEFAULTS,
+} from "./schemaV20.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
@@ -30,7 +36,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 19;
+export const CURRENT_VERSION = 20;
 
 export function migrateDatabase(database: Database.Database = db) {
   const version = database.pragma("user_version", { simple: true }) as number;
@@ -382,14 +388,40 @@ export function migrateDatabase(database: Database.Database = db) {
     }
     if (version < 19) {
       // Web Push persistence (#337, ADR-72). No device is inferred: the new
-      // table starts empty and authority remains outside SQLite.
+      // table starts empty and authority remains outside SQLite. Keep this
+      // historical step independently stamped: v20 must never make a pre-v19
+      // file skip the exact v19 boundary.
       database.transaction(() => {
         for (const statement of V19_STATEMENTS) database.exec(statement);
-        database.pragma(`user_version = ${CURRENT_VERSION}`);
+        database.pragma("user_version = 19");
+      })();
+    }
+    if (version < 20) {
+      // Deadline-reminder persistence foundation (#345, ADR-72). Validate the
+      // complete v19 input before any rebuild, then make settings nullability,
+      // typed defaults, claims DDL, validation and the stamp one transaction.
+      // A collision or contract failure therefore leaves a valid stamped v19.
+      validateV19Contract(database);
+      database.transaction(() => {
+        database.exec("ALTER TABLE settings RENAME TO settings_v19");
+        database.exec(V20_SETTINGS_SQL);
+        database.exec("INSERT INTO settings (key, value) SELECT key, value FROM settings_v19");
+        database.exec("DROP TABLE settings_v19");
+        const insert = database.prepare("INSERT INTO settings (key, value) VALUES (?, ?)");
+        for (const [key, value] of V20_TIMING_DEFAULTS) insert.run(key, value);
+        database.exec(DEADLINE_REMINDER_CLAIMS_SQL);
+        validateV20Contract(database);
+        database.pragma("user_version = 20");
       })();
     }
   }
   if (version < 1) database.pragma(`user_version = ${CURRENT_VERSION}`);
+
+  // Startup, fresh creation, every migration, and a reopened restore all use
+  // the same final runtime contract. The v20 validator inherits v19's exact
+  // Push/persistent-code checks; v18 remains independently complete.
+  validateV18Contract(database);
+  validateV20Contract(database);
 }
 
 migrateDatabase();

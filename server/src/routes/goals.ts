@@ -3,6 +3,7 @@ import { db } from "../db.js";
 import { checkAchievements } from "../services/gamificationService.js";
 import { notifyGoalAchieved, notifyUnlocks } from "../services/notifyService.js";
 import { MINUTES_EXPR } from "../services/statsService.js";
+import { isCalendarDate } from "../services/taskWrites.js";
 
 export const goalsRouter = Router();
 
@@ -65,6 +66,9 @@ goalsRouter.get("/", (req, res) => {
 goalsRouter.post("/", (req, res) => {
   const { title, outcome, targetDate } = req.body ?? {};
   if (!title?.trim()) return res.status(400).json({ error: "title is required" });
+  if (targetDate != null && !isCalendarDate(targetDate)) {
+    return res.status(400).json({ error: "targetDate must be a YYYY-MM-DD string" });
+  }
   const r = db
     .prepare("INSERT INTO goals (title, outcome, target_date, created_at) VALUES (?, ?, ?, ?)")
     .run(title.trim(), outcome ?? null, targetDate ?? null, new Date().toISOString());
@@ -76,6 +80,9 @@ goalsRouter.patch("/:id", (req, res) => {
   const body = req.body ?? {};
   if ("status" in body && !GOAL_STATUSES.includes(body.status)) {
     return res.status(400).json({ error: `status must be one of ${GOAL_STATUSES.join(", ")}` });
+  }
+  if ("targetDate" in body && body.targetDate !== null && !isCalendarDate(body.targetDate)) {
+    return res.status(400).json({ error: "targetDate must be a YYYY-MM-DD string" });
   }
   const existing = db
     .prepare("SELECT status, resolved_at AS resolvedAt FROM goals WHERE id = ?")
@@ -128,7 +135,16 @@ goalsRouter.patch("/:id", (req, res) => {
 });
 
 goalsRouter.delete("/:id", (req, res) => {
-  const r = db.prepare("DELETE FROM goals WHERE id = ?").run(Number(req.params.id));
+  const id = Number(req.params.id);
+  const r = db.transaction(() => {
+    const deleted = db.prepare("DELETE FROM goals WHERE id = ?").run(id);
+    if (deleted.changes > 0) {
+      db.prepare(
+        "DELETE FROM deadline_reminder_claims WHERE item_type = 'goal' AND item_id = ?",
+      ).run(id);
+    }
+    return deleted;
+  })();
   if (r.changes === 0) return res.status(404).json({ error: "goal not found" });
   res.json({ ok: true });
 });

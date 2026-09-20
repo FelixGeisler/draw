@@ -301,10 +301,18 @@ CREATE TABLE push_subscriptions (
   last_seen_at TEXT NOT NULL
 );
 
-CREATE TABLE settings (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL
+-- Stage 2A deadline-reminder occurrence claims (#345, ADR-72). Stage 2B will
+-- claim rows before provider I/O; this foundation creates no producer.
+CREATE TABLE deadline_reminder_claims (
+  device_id TEXT NOT NULL REFERENCES push_subscriptions(id) ON DELETE CASCADE,
+  item_type TEXT NOT NULL CHECK (item_type IN ('task', 'goal')),
+  item_id INTEGER NOT NULL,
+  item_created_at TEXT NOT NULL,
+  deadline TEXT NOT NULL,
+  PRIMARY KEY (device_id, item_type, item_id, item_created_at, deadline)
 );
+
+CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
 
 INSERT INTO categories (name, color, is_default) VALUES
   ('Work', '#4f8cff', 1),
@@ -316,4 +324,9 @@ INSERT INTO settings (key, value) VALUES
   ('draw_cooldown_minutes', '60'),
   ('daily_goal_completions', '1'),
   ('warmup_every_hours', '8'),
-  ('push_hide_details', '0');
+  ('push_hide_details', '0'),
+  ('push_lead_days', '1'),
+  ('push_send_time', '09:00'),
+  ('push_timezone', NULL),
+  ('push_quiet_start', NULL),
+  ('push_quiet_end', NULL);

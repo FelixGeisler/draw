@@ -23,6 +23,9 @@ const currentSchema = fs.readFileSync(schemaPath, "utf-8");
 // The v15 schema: today's schema.sql minus only the v16
 // achievement_customizations table (ADDED by the v16 migration).
 const v15Schema = currentSchema
+  .replace(/-- Stage 2A deadline-reminder[\s\S]*?CREATE TABLE deadline_reminder_claims[\s\S]*?\);\r?\n\r?\n/, "")
+  .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+  .replace(/,\r?\n  \('push_lead_days', '1'\)[\s\S]*?\('push_quiet_end', NULL\)/, "")
   .replace(/-- Stage 1A Web Push[\s\S]*?CREATE TABLE push_subscriptions[\s\S]*?\);\r?\n\r?\n/, "")
   .replace(/,\r?\n  \('push_hide_details', '0'\)/, "")
   .replace(/,\r?\n  gold_awarded INTEGER NOT NULL DEFAULT 0 CHECK \(gold_awarded >= 0\)/, "")
@@ -49,9 +52,9 @@ beforeAll(async () => {
 });
 
 describe("migration v15 → v16 adds achievement_customizations (#177, ADR-44)", () => {
-  it("bumps user_version through the current v19 chain", async () => {
+  it("bumps user_version through the current v20 chain", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(19);
+    expect(db.pragma("user_version", { simple: true })).toBe(20);
   });
 
   it("creates achievement_customizations with the display-override shape", async () => {

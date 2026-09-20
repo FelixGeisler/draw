@@ -117,11 +117,14 @@ durable task/goal landings are implemented but not field-verified. Each
 accepted test resolves and pins one permitted address while preserving the
 endpoint hostname for Host, SNI, and certificate verification; it makes one
 non-reused HTTPS request with no proxy, redirect, retry, queue, or offline
-backlog. Stage 1 is complete; deadline reads and scheduling (Stage 2) remain
-planned.
+backlog. Stage 1 is complete. Stage 2A's schema-v20, calendar-validation,
+backup-sanitization, and source-claim-cleanup foundation is implemented; the
+Stage 2B timing API/UI, evaluator, sender, and production scheduler remain
+planned and are not field-verified.
 
 These files are never archive inputs. Manual/scheduled Draw archives, imported
 live DBs and `app.db.bak` physically exclude notification device credentials
+and deadline occurrence claims
 and require every device to re-enable after restore. A privileged
 whole-`DATA_DIR` or volume snapshot remains permitted for disaster recovery
 but contains full state, including authority and possibly markers; use the
@@ -144,7 +147,7 @@ node "Host (PC, or the #191 container — see 7.3)" as host {
   }
   artifact "client/dist\n(vite build, gitignored)" as dist
   folder "server/data/" as data {
-    database "app.db\nschema v19" as db
+    database "app.db\nschema v20" as db
     artifact "push-authority.json\nreset/restore/revoke markers\n(production only)" as pushstate
   }
 }
@@ -365,9 +368,12 @@ if a migration ran in between — restore a backup from before the update
 (xref:09_architecture_decisions.adoc[ADR-26]; the backup importer refuses
 newer-versioned archives, so restoring an older backup into an older image
 is the supported direction). Current images accept backups through schema
-v19: older files migrate and undergo complete v18 immutability plus v19 Push
-schema validation in staging before the live database moves; a missing or
-weakened contract leaves the live deployment untouched. *Bare-npm path:* `git pull`, `npm ci`,
+v20: stamped v19 input receives its complete non-null-settings/Push validation
+before migration, stamped v20 input receives the exact nullable-settings,
+timing-domain, claims-index/FK, Push, and persistent-code validation, and older
+files migrate through both. Complete v18 validation also runs before the live
+database moves; a missing or weakened contract leaves the live deployment
+untouched. *Bare-npm path:* `git pull`, `npm ci`,
 `npm run build`, restart `npm start` — release discovery and the minimal status
 work the same; without an operator-configured trigger, **Update** receives the
 existing `409` and bare-npm updating remains manual.
@@ -885,6 +891,7 @@ enrollment validates its submitted HTTPS endpoint and, only when an authorized
 user explicitly invokes the Stage 1B.2 manual test route, one DNS-pinned
 provider HTTPS POST through Node core HTTPS. That manual request has no proxy,
 redirect, retry, queue, or socket reuse; Stage 1C browser UI/service-worker
-receive handling is implemented but not field-verified, while Stage 2 scheduled
-deadline delivery remains planned — and the user-configured
+receive handling is implemented but not field-verified. Stage 2A's inert v20
+persistence/domain/backup foundation is implemented, while Stage 2B scheduled
+deadline delivery remains planned and not field-verified — and the user-configured
 update trigger URL, one POST per explicit **Update** action, never automatically.

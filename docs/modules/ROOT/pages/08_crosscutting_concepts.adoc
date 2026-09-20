@@ -339,13 +339,18 @@ steps. No migration framework. Version 18 adds the two Gold owner columns, the
 append-only `gold_ledger`, immutable `pack_openings`, and the XP-ledger reason
 index. Version 19 adds only `push_subscriptions` and the
 `push_hide_details='0'` setting (xref:09_architecture_decisions.adoc[ADR-72]).
-Each version advances in one transaction with `user_version` last, so failed
-DDL leaves the previous version intact. Backup import (section 8.9) runs these
-same migrations against its staged copy before any live swap, then validates
-the complete v18 and v19 runtime contracts. For v19 this includes the exact
-Push table/default and every persistent trigger or view before any credential
-row is deleted; unapproved executable schema code is rejected rather than run
-during sanitization. Stage 1B reuses those exact tables and setting without a
+Version 20 rebuilds only `settings` so `value` is nullable, seeds the five typed
+timing rows, and adds the exact `deadline_reminder_claims` composite-key table
+with device-delete cascade. The v19 step always stamps 19 independently; v20
+validates that complete input before its own transaction and stamps 20 last, so
+a failed v20 migration leaves a valid v19 file. Backup import (section 8.9)
+runs these same migrations against its staged copy before any live swap, then
+validates the complete v18 and final v20 runtime contracts. Stamped v19 input is
+first checked under v19's non-null settings contract; stamped v20 input is
+checked only under v20's exact settings/claims DDL, column, index, FK, timing,
+Push, trigger, and no-view contract before any credential or claim row is
+deleted. Unapproved executable schema code is rejected rather than run during
+sanitization. Stage 1B reuses those exact tables and setting without a
 schema change: registration upserts at most 16 rows transactionally, the shared
 Hide-details preference remains the closed `0|1` value, and the synthetic
 sender reads one exact seven-column row fingerprint without adding delivery or
@@ -355,15 +360,17 @@ late old-registration result cannot remove newly committed credentials. Stage
 in `draw.push.device.v1`, staged enrollment continuation is in-memory, and the
 classic production worker accepts only ADR-72's bounded closed payloads and
 worker-created same-origin routes. All Stage 1 is implemented but not
-field-verified; Stage 2 scheduling remains planned.
+field-verified. Stage 2A's persistence/domain foundation is implemented;
+Stage 2B scheduling and sending remain planned and not field-verified.
 
 == 8.9 Backup and restore
 
 `GET /api/backup/export` streams one zip: an `app.db` snapshot taken with
 `VACUUM INTO` (safe under WAL — the live file is never copied raw), all
 material files, and a manifest (ADR-26). The Claude API key and Web Push device
-credential rows are stripped from the snapshot only; preferences remain and
-the live DB keeps its rows. Push removal is physical: after deleting rows,
+credential and deadline-claim rows are stripped from the snapshot only;
+timing/privacy preferences remain and the live DB keeps its rows. Removal is
+physical: after deleting rows,
 Draw performs a second `VACUUM INTO`, deletes the credential-bearing first
 copy and its sidecars, and packages only the rewrite. Push authority and
 recovery markers are outside the export inputs. Material traversal opens each
@@ -382,15 +389,16 @@ Safety nets, both inside `DATA_DIR`:
   (overwritten on the next import),
 - the previous material files as `files.bak`.
 
-Every rejected import (foreign zip, corrupt or newer-than-v19 database,
-unsafe paths) is a `400` with the live data untouched. Versions through v19
+Every rejected import (foreign zip, corrupt or newer-than-v20 database,
+unsafe paths) is a `400` with the live data untouched. Versions through v20
 are accepted; older snapshots migrate in staging. The staged database must
 then match the complete runtime v18 contract: both owner columns, exact
 Gold/opening definitions and CHECK/unique/AUTOINCREMENT rules, all six
 immutable triggers (definition and rollback-only behavior), and the
-XP-ledger reason index; it must also match v19's exact Push shape and persistent
-schema-code allowlist. Only that validated, row-scrubbed, physically rewritten
-file reaches the atomic swap. A round trip therefore preserves append-only
+XP-ledger reason index; it must also match v20's exact nullable-settings,
+timing-domain, claims-index/FK, inherited Push shape, and persistent-schema
+allowlist. Only that validated, row-scrubbed, physically rewritten file reaches
+the atomic swap. A round trip therefore preserves append-only
 rows, opening order and `sqlite_sequence`, not merely table names. #266 relies
 on that unchanged whole-database format: refs/payments/rarities/bonuses/
 timestamps, applicable Gold effects, ownership and equipment reproduce the

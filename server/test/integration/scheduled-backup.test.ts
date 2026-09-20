@@ -1,10 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import AdmZip from "adm-zip";
+import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import type express from "express";
-import { freshApp } from "../helpers.js";
+import { freshApp, testDb } from "../helpers.js";
 import { CURRENT_VERSION } from "../../src/db.js";
 import { startBackupScheduler } from "../../src/backupScheduler.js";
 import {
@@ -71,6 +72,49 @@ describe("runScheduledBackup — writes a valid archive under DATA_DIR/backups/"
     expect(manifest.app).toBe(MANIFEST_APP);
     expect(manifest.userVersion).toBe(CURRENT_VERSION);
     expect(manifest.counts).toEqual({ tasks: 1, goals: 1, materials: 1 });
+  });
+
+  it("physically strips subscription and claim canaries while retaining timing preferences", async () => {
+    wipeBackups();
+    const database = await testDb();
+    const canaries = [
+      "SCHEDULED-ENDPOINT-CANARY-345",
+      "SCHEDULED-P256DH-CANARY-345",
+      "SCHEDULED-AUTH-CANARY-345",
+      "SCHEDULED-CLAIM-CREATED-CANARY-345",
+      "SCHEDULED-CLAIM-DEADLINE-CANARY-345",
+    ];
+    database.prepare(
+      `INSERT INTO push_subscriptions
+       (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
+       VALUES ('scheduled-device-345', ?, ?, ?, NULL, '2026-09-20T00:00:00.000Z', '2026-09-20T00:00:00.000Z')`,
+    ).run(canaries[0], canaries[1], canaries[2]);
+    database.prepare(
+      `INSERT INTO deadline_reminder_claims
+       (device_id, item_type, item_id, item_created_at, deadline)
+       VALUES ('scheduled-device-345', 'task', 345, ?, ?)`,
+    ).run(canaries[3], canaries[4]);
+    database.prepare("UPDATE settings SET value = 'Europe/Berlin' WHERE key = 'push_timezone'").run();
+
+    try {
+      const result = runScheduledBackup(3, new Date("2026-09-20T02:00:00Z"));
+      const bytes = new AdmZip(result.path).getEntry("app.db")!.getData();
+      for (const canary of canaries) expect(bytes.includes(Buffer.from(canary))).toBe(false);
+      const extracted = path.join(dataDir(), "scheduled-sanitized.db");
+      fs.writeFileSync(extracted, bytes);
+      const snapshot = new Database(extracted, { readonly: true });
+      try {
+        expect(snapshot.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
+        expect(snapshot.prepare("SELECT COUNT(*) AS n FROM deadline_reminder_claims").get()).toEqual({ n: 0 });
+        expect(snapshot.prepare("SELECT value FROM settings WHERE key = 'push_timezone'").get()).toEqual({ value: "Europe/Berlin" });
+      } finally {
+        snapshot.close();
+        fs.rmSync(extracted, { force: true });
+      }
+    } finally {
+      database.prepare("DELETE FROM push_subscriptions WHERE id = 'scheduled-device-345'").run();
+      database.prepare("UPDATE settings SET value = NULL WHERE key = 'push_timezone'").run();
+    }
   });
 
   it("never includes the backups/ directory itself — the recursion guard holds", () => {

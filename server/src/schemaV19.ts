@@ -45,6 +45,26 @@ const PUSH_SUBSCRIPTIONS_SQL = V19_STATEMENTS.find((sql) =>
   /^CREATE TABLE push_subscriptions\b/.test(sql),
 )!;
 
+export const V19_SETTINGS_SQL =
+  "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)";
+
+const EXPECTED_SETTINGS_COLUMNS = [
+  ["key", "TEXT", 0, null, 1],
+  ["value", "TEXT", 1, null, 0],
+] as const;
+
+const EXPECTED_SETTINGS_INDEX = [
+  {
+    unique: 1,
+    origin: "pk",
+    partial: 0,
+    columns: [
+      [0, 0, "key", 0, "BINARY", 1],
+      [1, -1, null, 0, "BINARY", 0],
+    ],
+  },
+] as const;
+
 const EXPECTED_INDEX_INVENTORY = [
   {
     unique: 1,
@@ -155,35 +175,104 @@ function validatePersistentSchemaCode(database: Database.Database): void {
   }
 }
 
-/** Reject a stamped v19 database whose table/default/code is incomplete or weakened. */
-export function validateV19Contract(database: Database.Database): void {
-  validatePersistentSchemaCode(database);
-  validatePushSubscriptionStructure(database);
-  const columns = database.prepare("PRAGMA table_info(push_subscriptions)").all() as {
+function columnInventory(database: Database.Database, table: string): unknown[][] {
+  const columns = database.prepare(`PRAGMA table_info(${table})`).all() as {
     name: string;
     type: string;
     notnull: number;
     dflt_value: string | null;
     pk: number;
   }[];
-  const actual = columns.map((column) => [
+  return columns.map((column) => [
     column.name,
     column.type.toUpperCase(),
     column.notnull,
     column.dflt_value,
     column.pk,
   ]);
-  if (JSON.stringify(actual) !== JSON.stringify(EXPECTED_COLUMNS)) {
+}
+
+function settingsIndexInventory(database: Database.Database): unknown[] {
+  const indexes = database.prepare("PRAGMA index_list(settings)").all() as {
+    name: string;
+    unique: number;
+    origin: string;
+    partial: number;
+  }[];
+  return indexes.map((index) => ({
+    unique: index.unique,
+    origin: index.origin,
+    partial: index.partial,
+    columns: (
+      database.prepare(`PRAGMA index_xinfo(${JSON.stringify(index.name)})`).all() as {
+        seqno: number;
+        cid: number;
+        name: string | null;
+        desc: number;
+        coll: string;
+        key: number;
+      }[]
+    ).map((column) => [
+      column.seqno,
+      column.cid,
+      column.name,
+      column.desc,
+      column.coll,
+      column.key,
+    ]),
+  }));
+}
+
+/**
+ * Version-independent part of v19 inherited by v20: exact Push persistence,
+ * Hide-details domain, and the complete literal-aware trigger/view inventory.
+ */
+export function validateV19InheritedContract(database: Database.Database): void {
+  validatePersistentSchemaCode(database);
+  validatePushSubscriptionStructure(database);
+  if (
+    JSON.stringify(columnInventory(database, "push_subscriptions")) !==
+    JSON.stringify(EXPECTED_COLUMNS)
+  ) {
     throw new Error("schema v19 contract mismatch: push_subscriptions columns");
   }
 
   const setting = database
     .prepare("SELECT value FROM settings WHERE key = 'push_hide_details'")
-    .get() as { value: string } | undefined;
+    .get() as { value: string | null } | undefined;
   // The migration/fresh default is 0; a later preference write may
   // legitimately persist 1, so restore validation proves the closed boolean
   // domain rather than resetting user state.
   if (setting?.value !== "0" && setting?.value !== "1") {
     throw new Error("schema v19 contract mismatch: push_hide_details");
+  }
+}
+
+/** Reject a stamped v19 database whose table/default/code is incomplete or weakened. */
+export function validateV19Contract(database: Database.Database): void {
+  validateV19InheritedContract(database);
+  const settingsSql = objectSql(database, "table", "settings");
+  if (
+    !settingsSql ||
+    schemaSqlTokens(settingsSql).join("\0") !== schemaSqlTokens(V19_SETTINGS_SQL).join("\0")
+  ) {
+    throw new Error("schema v19 contract mismatch: settings DDL");
+  }
+  if (
+    JSON.stringify(columnInventory(database, "settings")) !==
+    JSON.stringify(EXPECTED_SETTINGS_COLUMNS)
+  ) {
+    throw new Error("schema v19 contract mismatch: settings columns");
+  }
+  if (
+    JSON.stringify(settingsIndexInventory(database)) !== JSON.stringify(EXPECTED_SETTINGS_INDEX)
+  ) {
+    throw new Error("schema v19 contract mismatch: settings index inventory");
+  }
+  if (database.prepare("PRAGMA foreign_key_list(settings)").all().length !== 0) {
+    throw new Error("schema v19 contract mismatch: settings foreign keys");
+  }
+  if (database.prepare("SELECT key FROM settings WHERE value IS NULL LIMIT 1").get()) {
+    throw new Error("schema v19 contract mismatch: null setting value");
   }
 }
