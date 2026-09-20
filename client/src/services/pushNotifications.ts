@@ -19,6 +19,14 @@ export interface PushDevice {
   lastSeenAt: string;
 }
 
+export interface PushTiming {
+  leadDays: 0 | 1 | 2 | 3 | 7 | 14 | 30;
+  sendTime: string;
+  timezone: string | null;
+  quietStart: string | null;
+  quietEnd: string | null;
+}
+
 export interface PushStatus {
   available: boolean;
   reason: PushUnavailableReason;
@@ -26,7 +34,7 @@ export interface PushStatus {
   mutationReason: PushMutationReason;
   vapidPublicKey: string | null;
   maxDevices: 16;
-  preferences: { hideDetails: boolean };
+  preferences: { hideDetails: boolean } & PushTiming;
   devices: PushDevice[];
 }
 
@@ -115,6 +123,17 @@ function validIsoTimestamp(value: unknown): value is string {
   return Number.isFinite(parsed.valueOf()) && parsed.toISOString() === value;
 }
 
+function validQuarterHour(value: unknown): value is string {
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/.test(value);
+}
+
+function validStatusTimezone(value: unknown): value is string | null {
+  if (value === null) return true;
+  if (typeof value !== "string" || value.length < 1 || value.length > 128 ||
+    [...value].some((character) => character.charCodeAt(0) > 0x7f)) return false;
+  try { new Intl.DateTimeFormat("en-CA", { timeZone: value }).format(0); return true; } catch { return false; }
+}
+
 export function parsePushStatus(value: unknown): PushStatus {
   const root = object(value);
   if (!root || !exactKeys(root, [
@@ -127,8 +146,17 @@ export function parsePushStatus(value: unknown): PushStatus {
   if (
     typeof root.available !== "boolean" || !reasons.includes(root.reason as PushUnavailableReason) ||
     typeof root.mutationAllowed !== "boolean" || !mutationReasons.includes(root.mutationReason as PushMutationReason) ||
-    root.maxDevices !== 16 || !preferences || !exactKeys(preferences, ["hideDetails"]) ||
-    typeof preferences.hideDetails !== "boolean" || !Array.isArray(root.devices)
+    root.maxDevices !== 16 || !preferences || !exactKeys(preferences, [
+      "hideDetails", "leadDays", "sendTime", "timezone", "quietStart", "quietEnd",
+    ]) ||
+    typeof preferences.hideDetails !== "boolean" ||
+    ![0, 1, 2, 3, 7, 14, 30].includes(preferences.leadDays as number) ||
+    !validQuarterHour(preferences.sendTime) || !validStatusTimezone(preferences.timezone) ||
+    !(
+      preferences.quietStart === null && preferences.quietEnd === null ||
+      validQuarterHour(preferences.quietStart) && validQuarterHour(preferences.quietEnd) &&
+        preferences.quietStart !== preferences.quietEnd
+    ) || !Array.isArray(root.devices)
   ) throw new Error("invalid Push status");
   if (root.available !== (root.reason === null) || root.mutationAllowed !== (root.mutationReason === null)) {
     throw new Error("inconsistent Push status");
@@ -153,7 +181,14 @@ export function parsePushStatus(value: unknown): PushStatus {
     mutationReason: root.mutationReason as PushMutationReason,
     vapidPublicKey: vapidPublicKey as string | null,
     maxDevices: 16,
-    preferences: { hideDetails: preferences.hideDetails },
+    preferences: {
+      hideDetails: preferences.hideDetails,
+      leadDays: preferences.leadDays as PushTiming["leadDays"],
+      sendTime: preferences.sendTime,
+      timezone: preferences.timezone as string | null,
+      quietStart: preferences.quietStart as string | null,
+      quietEnd: preferences.quietEnd as string | null,
+    },
     devices,
   };
 }
@@ -247,6 +282,20 @@ export async function setPushPreference(hideDetails: boolean): Promise<boolean> 
     throw new PushResponseError();
   }
   return hideDetails;
+}
+
+export async function setPushTiming(timing: PushTiming & { timezone: string }): Promise<PushTiming & { timezone: string }> {
+  const response = await closedFetch("/api/push/preferences", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(timing),
+  });
+  if (response.status !== 200) throw new PushResponseError();
+  const root = object(await strictJson(response));
+  if (!root || !exactKeys(root, ["leadDays", "sendTime", "timezone", "quietStart", "quietEnd"]) ||
+    root.leadDays !== timing.leadDays || root.sendTime !== timing.sendTime || root.timezone !== timing.timezone ||
+    root.quietStart !== timing.quietStart || root.quietEnd !== timing.quietEnd) throw new PushResponseError();
+  return timing;
 }
 
 export async function deletePushDevice(deviceId: string): Promise<void> {

@@ -1,4 +1,5 @@
-import { STATUS_GUIDANCE } from "../services/pushNotifications";
+import { useEffect, useState, type FormEvent } from "react";
+import { STATUS_GUIDANCE, type PushTiming } from "../services/pushNotifications";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 
 function LocalTime({ value }: { value: string }) {
@@ -6,11 +7,72 @@ function LocalTime({ value }: { value: string }) {
   return <time dateTime={value}>{date.toLocaleString()}</time>;
 }
 
+const TIMING_ERROR = "Check the reminder timing and time zone. No settings were changed.";
+
+function validTimeZone(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 128 ||
+    [...value].some((character) => character.charCodeAt(0) > 0x7f)) return false;
+  try { new Intl.DateTimeFormat("en-CA", { timeZone: value }).format(0); } catch { return false; }
+  return true;
+}
+
+function proposedTimeZone(): string {
+  try {
+    const detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return validTimeZone(detected) ? detected : "";
+  } catch { return ""; }
+}
+
+function validTiming(timing: PushTiming, quietEnabled: boolean): timing is PushTiming & { timezone: string } {
+  const quarter = (value: string | null) => typeof value === "string" && /^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/.test(value);
+  if (!quarter(timing.sendTime) || !validTimeZone(timing.timezone)) return false;
+  return quietEnabled
+    ? quarter(timing.quietStart) && quarter(timing.quietEnd) && timing.quietStart !== timing.quietEnd
+    : timing.quietStart === null && timing.quietEnd === null;
+}
+
 export function PushNotificationsSection() {
   const push = usePushNotifications();
   const { status, browser } = push;
+  const [timing, setTiming] = useState<PushTiming | null>(null);
+  const [quietEnabled, setQuietEnabled] = useState(false);
+  const [timingError, setTimingError] = useState<string | null>(null);
   const serverControls = status?.available === true && status.mutationAllowed;
   const blockers: string[] = [];
+
+  useEffect(() => {
+    if (!status) return;
+    const saved = status.preferences;
+    setTiming({
+      leadDays: saved.leadDays,
+      sendTime: saved.sendTime,
+      timezone: saved.timezone ?? proposedTimeZone(),
+      quietStart: saved.quietStart,
+      quietEnd: saved.quietEnd,
+    });
+    setQuietEnabled(saved.quietStart !== null && saved.quietEnd !== null);
+  }, [status?.preferences.leadDays, status?.preferences.sendTime, status?.preferences.timezone,
+    status?.preferences.quietStart, status?.preferences.quietEnd, push.timingReadbackRevision]);
+
+  const submitTiming = (event: FormEvent) => {
+    event.preventDefault();
+    if (!timing || !validTiming(timing, quietEnabled)) {
+      setTimingError(TIMING_ERROR);
+      if (status) {
+        setTiming({
+          leadDays: status.preferences.leadDays,
+          sendTime: status.preferences.sendTime,
+          timezone: status.preferences.timezone ?? proposedTimeZone(),
+          quietStart: status.preferences.quietStart,
+          quietEnd: status.preferences.quietEnd,
+        });
+        setQuietEnabled(status.preferences.quietStart !== null && status.preferences.quietEnd !== null);
+      }
+      return;
+    }
+    setTimingError(null);
+    push.updateTiming(timing);
+  };
 
   if (browser) {
     if (!browser.secureContext) blockers.push("Deadline notifications require HTTPS, or direct localhost access.");
@@ -62,6 +124,56 @@ export function PushNotificationsSection() {
                   <small>Applies to future deadline notifications on every enrolled device. When enabled, they say only &quot;You have an upcoming deadline in Draw&quot;. Test notifications are unchanged.</small>
                 </span>
               </label>
+
+              {timing && (
+                <form className="push-timing" onSubmit={submitTiming} noValidate>
+                  <h4>Reminder timing</h4>
+                  <label>
+                    <span>Remind me</span>
+                    <select
+                      value={timing.leadDays}
+                      disabled={!serverControls || push.pending}
+                      onChange={(event) => setTiming({ ...timing, leadDays: Number(event.target.value) as PushTiming["leadDays"] })}
+                    >
+                      <option value={0}>On the deadline</option>
+                      {[1, 2, 3, 7, 14, 30].map((days) => <option key={days} value={days}>{days} day{days === 1 ? "" : "s"} before</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    <span>Send time</span>
+                    <input type="time" step={900} value={timing.sendTime} disabled={!serverControls || push.pending}
+                      onChange={(event) => setTiming({ ...timing, sendTime: event.target.value })} />
+                  </label>
+                  <label>
+                    <span>Time zone (IANA)</span>
+                    <input type="text" value={timing.timezone ?? ""} maxLength={128} autoCapitalize="none" spellCheck={false}
+                      disabled={!serverControls || push.pending}
+                      onChange={(event) => setTiming({ ...timing, timezone: event.target.value })} />
+                  </label>
+                  <label className="push-preference">
+                    <input type="checkbox" checked={quietEnabled} disabled={!serverControls || push.pending}
+                      onChange={(event) => {
+                        const enabled = event.target.checked;
+                        setQuietEnabled(enabled);
+                        setTiming({ ...timing, quietStart: enabled ? timing.quietStart ?? "22:00" : null,
+                          quietEnd: enabled ? timing.quietEnd ?? "08:00" : null });
+                      }} />
+                    <span><strong>Quiet hours</strong></span>
+                  </label>
+                  {quietEnabled && (
+                    <div className="push-quiet-hours">
+                      <label><span>Start</span><input type="time" step={900} value={timing.quietStart ?? "22:00"}
+                        disabled={!serverControls || push.pending}
+                        onChange={(event) => setTiming({ ...timing, quietStart: event.target.value })} /></label>
+                      <label><span>End</span><input type="time" step={900} value={timing.quietEnd ?? "08:00"}
+                        disabled={!serverControls || push.pending}
+                        onChange={(event) => setTiming({ ...timing, quietEnd: event.target.value })} /></label>
+                    </div>
+                  )}
+                  <button type="submit" disabled={!serverControls || push.pending}>Save reminder timing</button>
+                  {timingError && <p role="alert" className="push-guidance">{timingError}</p>}
+                </form>
+              )}
 
               <div className="push-device-list" aria-label="Enrolled notification devices">
                 {status.devices.length === 0 ? (

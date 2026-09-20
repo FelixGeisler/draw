@@ -360,8 +360,11 @@ late old-registration result cannot remove newly committed credentials. Stage
 in `draw.push.device.v1`, staged enrollment continuation is in-memory, and the
 classic production worker accepts only ADR-72's bounded closed payloads and
 worker-created same-origin routes. All Stage 1 is implemented but not
-field-verified. Stage 2A's persistence/domain foundation is implemented;
-Stage 2B scheduling and sending remain planned and not field-verified.
+field-verified. Stage 2A's persistence/domain foundation and Stage 2B's typed
+timing controls, native-Intl eligibility evaluation, atomic occurrence claims,
+bounded sender, and production scheduler are implemented but not
+field-verified. Timing rows remain excluded from the legacy generic settings
+string map and MCP settings surface.
 
 == 8.9 Backup and restore
 
@@ -429,7 +432,10 @@ existing non-2xx error. The `app.db` rename remains the commit point. After it,
 Push-finalization failure never rolls back restored data or reconstructs
 credentials: HTTP 200 adds only `pushRecoveryPending:true`, Push remains
 unavailable, and marked boot recovery clears rows and rotates authority before
-removing the marker. Normal success retains the generic
+removing the marker. The one production deadline scheduler is not replaced or
+reactivated by restore: guarded ticks are inert during recovery, then a later
+tick reads the live reopened database binding and recovered authority. Normal
+success retains the generic
 `{tasks,goals,materials}` response (ADR-26/72). Any valid reset, restore, or
 revoke marker subset causes one boot clear/rotation and marker removal;
 malformed marker objects remain fail-closed.

@@ -18,6 +18,7 @@ import {
   sameSubscriptionData,
   sendPushTest,
   setPushPreference,
+  setPushTiming,
   snapshotFingerprint,
   storeHandle,
   subscriptionMatches,
@@ -25,9 +26,12 @@ import {
   type BrowserPushSnapshot,
   type EnrollmentPrerequisites,
   type PushStatus,
+  type PushTiming,
 } from "../services/pushNotifications";
 
 const LOAD_FAILURE = "Could not load deadline notification status. Check the connection and try again.";
+const TIMING_CONFIRMATION_UNKNOWN = "Could not confirm whether reminder timing was saved. Check the current values before trying again.";
+const TIMING_INVALID = "Check the reminder timing and time zone. No settings were changed.";
 const ENABLE_FAILURE = "Could not enable notifications in this browser. No device was enabled.";
 const STORAGE_FAILURE = "Notifications were enabled, but Draw could not remember this browser. Re-enable after reloading.";
 const CLEANUP_FAILURE = "The server device was removed, but browser cleanup could not be confirmed. Reload Draw and check browser site settings.";
@@ -71,6 +75,7 @@ export function usePushNotifications() {
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [continuation, setContinuation] = useState<Continuation | null>(null);
+  const [timingReadbackRevision, setTimingReadbackRevision] = useState(0);
   const mounted = useRef(true);
   const pendingRef = useRef(false);
   const statusRef = useRef(status);
@@ -321,7 +326,7 @@ export function usePushNotifications() {
         const accepted = await setPushPreference(hideDetails);
         const current = statusRef.current;
         if (current) {
-          const adopted = { ...current, preferences: { hideDetails: accepted } };
+          const adopted = { ...current, preferences: { ...current.preferences, hideDetails: accepted } };
           statusRef.current = adopted;
           if (mounted.current) setStatus(adopted);
         }
@@ -335,6 +340,53 @@ export function usePushNotifications() {
         } else if (closed?.status === 503 && statusRef.current?.reason) {
           setMessage(STATUS_GUIDANCE[statusRef.current.reason]);
         } else throw error;
+      }
+    }, "mutation");
+  }, [refresh, runMutation]);
+
+  const updateTiming = useCallback((timing: PushTiming & { timezone: string }) => {
+    void runMutation(async () => {
+      try {
+        const accepted = await setPushTiming(timing);
+        const current = statusRef.current;
+        if (current) {
+          const adopted = {
+            ...current,
+            preferences: { ...current.preferences, ...accepted },
+          };
+          statusRef.current = adopted;
+          if (mounted.current) setStatus(adopted);
+        }
+        const refreshed = await refresh(false, true);
+        if (!refreshed && mounted.current) setMessage(LOAD_FAILURE);
+        else if (mounted.current) setMessage("Reminder timing saved.");
+      } catch (error) {
+        const closed = errorCode(error);
+        const invalidInput = closed?.status === 400 && closed.code === "invalid-push-request";
+        const refreshed = await refresh(false, true);
+        if (!mounted.current) return;
+        if (invalidInput) {
+          // This is the only response that proves the request did not write.
+          // A failed read-back can still restore the last loaded server values.
+          setTimingReadbackRevision((revision) => revision + 1);
+          setMessage(TIMING_INVALID);
+          return;
+        }
+        if (refreshed) {
+          setTimingReadbackRevision((revision) => revision + 1);
+          if (!refreshed.status.available && refreshed.status.reason) {
+            setMessage(STATUS_GUIDANCE[refreshed.status.reason]);
+            return;
+          }
+          if (!refreshed.status.mutationAllowed && refreshed.status.mutationReason) {
+            setMessage(STATUS_GUIDANCE[refreshed.status.mutationReason]);
+            return;
+          }
+        }
+        // A network, malformed, or otherwise unexpected response may follow a
+        // committed write. Adopt any authoritative read-back without claiming
+        // either success or rollback; retain the attempted controls if it too fails.
+        setMessage(TIMING_CONFIRMATION_UNKNOWN);
       }
     }, "mutation");
   }, [refresh, runMutation]);
@@ -441,9 +493,11 @@ export function usePushNotifications() {
     enabled,
     matchingHandle,
     enrollmentLabel,
+    timingReadbackRevision,
     enroll,
     refresh: () => void refresh(),
     updatePreference,
+    updateTiming,
     revokeDevice,
     revokeAll,
     testDevice,

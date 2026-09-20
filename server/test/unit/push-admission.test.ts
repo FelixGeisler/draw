@@ -60,6 +60,30 @@ describe("Push admission", () => {
     expect(admission.snapshot().active).toBe(0);
   });
 
+  it("shares the same four physical permits with scheduled work without consuming API buckets", () => {
+    const admission = new PushAdmission(() => 0);
+    const enrollment = admission.tryAcquire("client-a");
+    const manual = admission.tryAcquireTest("device-a");
+    const scheduledA = admission.tryAcquireScheduled();
+    const scheduledB = admission.tryAcquireScheduled();
+    expect(enrollment.allowed).toBe(true);
+    expect(manual.allowed).toBe(true);
+    expect(scheduledA).toBeDefined();
+    expect(scheduledB).toBeDefined();
+    expect(admission.snapshot()).toMatchObject({ active: 4, global: 1, testGlobal: 1 });
+    expect(admission.tryAcquireScheduled()).toBeUndefined();
+    expect(admission.tryAcquire("client-b")).toEqual({ allowed: false, error: "push-busy" });
+    expect(admission.tryAcquireTest("device-b")).toEqual({ allowed: false, error: "push-busy" });
+    scheduledA?.release();
+    const replacement = admission.tryAcquireScheduled();
+    expect(replacement).toBeDefined();
+    replacement?.release();
+    scheduledB?.release();
+    if (manual.allowed) manual.release();
+    if (enrollment.allowed) enrollment.release();
+    expect(admission.snapshot().active).toBe(0);
+  });
+
   it("enforces test in-flight/device/global limits and uses the longest applicable remainder", () => {
     let now = 0;
     const admission = new PushAdmission(() => now);

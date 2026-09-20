@@ -8,6 +8,7 @@ import { PushAdmission } from "./admission.js";
 import { PushResolutionError, nodeResolverFactory, resolvePushEndpoint, type ResolverFactory } from "./resolver.js";
 import { evaluatePushTopology, type PushTopologyOptions, type TopologyResult } from "./topology.js";
 import { inertPushTransport, type PushTransport } from "./transport.js";
+import { validCalendarDate, type DeadlineTiming } from "./deadlineEvaluator.js";
 
 export const MAX_PUSH_DEVICES = 16;
 export const MAX_ENDPOINT_BYTES = 2_048;
@@ -38,14 +39,20 @@ export interface PushDevice {
   lastSeenAt: string;
 }
 
+export interface PushPreferences extends DeadlineTiming {
+  hideDetails: boolean;
+}
+
 export interface PushStatus {
   available: boolean;
   reason: PushSnapshot["reason"];
   vapidPublicKey: string | null;
   maxDevices: 16;
-  preferences: { hideDetails: boolean };
+  preferences: PushPreferences;
   devices: PushDevice[];
 }
+
+export type PushPreferenceResult = { hideDetails: boolean } | DeadlineTiming;
 
 export interface PushServiceDependency extends PushLifecycleDependency {
   topology(req: Request, mutation: boolean): TopologyResult;
@@ -54,7 +61,7 @@ export interface PushServiceDependency extends PushLifecycleDependency {
   testDevice(deviceId: string, signal?: AbortSignal): Promise<void>;
   deleteDevice(deviceId: string): void;
   revokeAllDevices(): void;
-  setPreferences(value: unknown): { hideDetails: boolean };
+  setPreferences(value: unknown): PushPreferenceResult;
 }
 
 function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
@@ -158,7 +165,7 @@ function unavailable(snapshot: PushSnapshot): PushApiError {
 }
 
 export interface PushServiceOptions {
-  database: Database.Database;
+  database: Database.Database | (() => Database.Database);
   lifecycle: PushLifecycle;
   topology: PushTopologyOptions;
   admission?: PushAdmission;
@@ -173,6 +180,21 @@ export interface PushServiceOptions {
     payload: Buffer,
     options: RequestOptions,
   ) => RequestDetails;
+  /** Internal synthetic-evidence seam; receives clear bytes, never persists them. */
+  observeDeadlinePayload?: (payload: Buffer) => void;
+}
+
+export interface DeadlineClaimedOccurrence {
+  deviceId: string;
+  itemType: "task" | "goal";
+  itemId: number;
+  itemCreatedAt: string;
+  deadline: string;
+  eventId: string;
+  subscription: SendRow;
+  workGeneration: number;
+  signing: { generation: string; publicKey: string; privateKey: string };
+  hideDetails: string;
 }
 
 interface DeviceRow {
@@ -181,7 +203,7 @@ interface DeviceRow {
   last_seen_at: string;
 }
 
-interface SendRow extends DeviceRow {
+export interface SendRow extends DeviceRow {
   endpoint: string;
   p256dh: string;
   auth: string;
@@ -206,6 +228,10 @@ export class PushService implements PushServiceDependency {
       webPush.generateRequestDetails(subscription, payload, requestOptions));
   }
 
+  private get database(): Database.Database {
+    return typeof this.options.database === "function" ? this.options.database() : this.options.database;
+  }
+
   snapshot() { return this.options.lifecycle.snapshot(); }
   generation() { return this.options.lifecycle.generation(); }
   invalidate() { this.options.lifecycle.invalidate(); }
@@ -220,8 +246,9 @@ export class PushService implements PushServiceDependency {
 
   status(): PushStatus {
     const snapshot = this.snapshot();
-    const preference = this.options.database.prepare("SELECT value FROM settings WHERE key = 'push_hide_details'").get() as { value: string };
-    const rows = this.options.database.prepare(
+    const database = this.database;
+    const preferences = this.preferences(database);
+    const rows = database.prepare(
       "SELECT id, created_at, last_seen_at FROM push_subscriptions ORDER BY created_at, id",
     ).all() as DeviceRow[];
     return {
@@ -229,13 +256,29 @@ export class PushService implements PushServiceDependency {
       reason: snapshot.reason,
       vapidPublicKey: snapshot.available ? snapshot.publicVapidKey : null,
       maxDevices: MAX_PUSH_DEVICES,
-      preferences: { hideDetails: preference.value === "1" },
+      preferences,
       devices: rows.map((row) => ({ id: row.id, createdAt: row.created_at, lastSeenAt: row.last_seen_at })),
     };
   }
 
+  private preferences(database: Database.Database = this.database): PushPreferences {
+    const rows = database.prepare(
+      `SELECT key, value FROM settings WHERE key IN
+       ('push_hide_details', 'push_lead_days', 'push_send_time', 'push_timezone', 'push_quiet_start', 'push_quiet_end')`,
+    ).all() as { key: string; value: string | null }[];
+    const values = new Map(rows.map((row) => [row.key, row.value]));
+    return {
+      hideDetails: values.get("push_hide_details") === "1",
+      leadDays: Number(values.get("push_lead_days")),
+      sendTime: values.get("push_send_time")!,
+      timezone: values.get("push_timezone") ?? null,
+      quietStart: values.get("push_quiet_start") ?? null,
+      quietEnd: values.get("push_quiet_end") ?? null,
+    };
+  }
+
   private row(deviceId: string): SendRow | undefined {
-    return this.options.database.prepare(
+    return this.database.prepare(
       `SELECT id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at
        FROM push_subscriptions WHERE id = ?`,
     ).get(deviceId) as SendRow | undefined;
@@ -249,7 +292,7 @@ export class PushService implements PushServiceDependency {
 
   /** Exact, null-safe fingerprint delete. Callers clear admission state only for one changed row. */
   private deleteFingerprint(row: SendRow): boolean {
-    const result = this.options.database.prepare(
+    const result = this.database.prepare(
       `DELETE FROM push_subscriptions
        WHERE id = ? AND endpoint = ? AND p256dh = ? AND auth = ?
          AND (expiration_time = ? OR (expiration_time IS NULL AND ? IS NULL))
@@ -260,7 +303,7 @@ export class PushService implements PushServiceDependency {
   }
 
   private hideDetails(): string {
-    return (this.options.database.prepare("SELECT value FROM settings WHERE key = 'push_hide_details'").get() as { value: string }).value;
+    return (this.database.prepare("SELECT value FROM settings WHERE key = 'push_hide_details'").get() as { value: string }).value;
   }
 
   async register(value: unknown, clientKey: string, signal?: AbortSignal): Promise<{ created: boolean; device: PushDevice }> {
@@ -278,33 +321,34 @@ export class PushService implements PushServiceDependency {
       const after = this.snapshot();
       if (!after.available || this.options.lifecycle.currentWorkGeneration() !== workGeneration) throw unavailable(after);
       const timestamp = new Date(nowMs).toISOString();
-      const committed = this.options.database.transaction(() => {
-        const same = this.options.database.prepare("SELECT id, created_at, last_seen_at FROM push_subscriptions WHERE endpoint = ?").get(input.endpoint) as DeviceRow | undefined;
+      const database = this.database;
+      const committed = database.transaction(() => {
+        const same = database.prepare("SELECT id, created_at, last_seen_at FROM push_subscriptions WHERE endpoint = ?").get(input.endpoint) as DeviceRow | undefined;
         let id: string;
         let createdAt: string;
         const removed: string[] = [];
         const replacement = input.replaceDeviceId
-          ? this.options.database.prepare("SELECT id FROM push_subscriptions WHERE id = ?").get(input.replaceDeviceId) as { id: string } | undefined
+          ? database.prepare("SELECT id FROM push_subscriptions WHERE id = ?").get(input.replaceDeviceId) as { id: string } | undefined
           : undefined;
         if (same) {
           id = same.id;
           createdAt = same.created_at;
           if (replacement && replacement.id !== same.id) {
-            this.options.database.prepare("DELETE FROM push_subscriptions WHERE id = ?").run(replacement.id);
+            database.prepare("DELETE FROM push_subscriptions WHERE id = ?").run(replacement.id);
             removed.push(replacement.id);
           }
         } else {
-          const count = (this.options.database.prepare("SELECT COUNT(*) AS count FROM push_subscriptions").get() as { count: number }).count;
+          const count = (database.prepare("SELECT COUNT(*) AS count FROM push_subscriptions").get() as { count: number }).count;
           if (count - (replacement ? 1 : 0) >= MAX_PUSH_DEVICES) throw new PushApiError(409, "push-device-limit");
           if (replacement) {
-            this.options.database.prepare("DELETE FROM push_subscriptions WHERE id = ?").run(replacement.id);
+            database.prepare("DELETE FROM push_subscriptions WHERE id = ?").run(replacement.id);
             removed.push(replacement.id);
           }
           id = this.randomUUID();
           if (!isUuidV4(id)) throw new Error("UUID source did not return v4");
           createdAt = timestamp;
         }
-        this.options.database.prepare(
+        database.prepare(
           `INSERT INTO push_subscriptions (id, endpoint, p256dh, auth, expiration_time, created_at, last_seen_at)
            VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(endpoint) DO UPDATE SET
@@ -475,11 +519,159 @@ export class PushService implements PushServiceDependency {
     }
   }
 
+  /** Shared physical admission for automatic attempts; intentionally bypasses API rate buckets. */
+  tryAcquireDeadline(): { release: () => void } | undefined {
+    return this.admission.tryAcquireScheduled();
+  }
+
+  deadlineClaimContext(): {
+    workGeneration: number;
+    signing: { generation: string; publicKey: string; privateKey: string };
+  } | null {
+    const snapshot = this.snapshot();
+    const signing = this.options.lifecycle.signingAuthority();
+    return snapshot.available && signing
+      ? { workGeneration: this.options.lifecycle.currentWorkGeneration(), signing }
+      : null;
+  }
+
+  async sendDeadline(occurrence: DeadlineClaimedOccurrence, stopSignal?: AbortSignal): Promise<void> {
+    const attempt = new AbortController();
+    let totalTimedOut = false;
+    let initiated = false;
+    const onStop = () => { if (!initiated) attempt.abort(); };
+    stopSignal?.addEventListener("abort", onStop, { once: true });
+    if (stopSignal?.aborted) attempt.abort();
+    const timer = setTimeout(() => {
+      totalTimedOut = true;
+      attempt.abort();
+    }, this.options.totalAttemptMs ?? 5_000);
+
+    try {
+      let validated: ValidSubscription;
+      try {
+        validated = validateRegistration({
+          subscription: {
+            endpoint: occurrence.subscription.endpoint,
+            expirationTime: occurrence.subscription.expiration_time,
+            keys: { p256dh: occurrence.subscription.p256dh, auth: occurrence.subscription.auth },
+          },
+        }, this.wallNow());
+      } catch { return; }
+      if (validated.endpoint !== occurrence.subscription.endpoint) return;
+
+      let address: string;
+      try {
+        address = await resolvePushEndpoint(
+          validated.hostname,
+          this.resolverFactory,
+          attempt.signal,
+          this.options.dnsDeadlineMs ?? 2_000,
+        );
+      } catch { return; }
+      if (attempt.signal.aborted) return;
+
+      // Everything from this final read through transport invocation is one
+      // synchronous turn. No title/context is read before DNS.
+      const snapshot = this.snapshot();
+      const signing = this.options.lifecycle.signingAuthority();
+      const currentSubscription = this.row(occurrence.deviceId);
+      if (!snapshot.available || !signing ||
+        this.options.lifecycle.currentWorkGeneration() !== occurrence.workGeneration ||
+        signing.generation !== occurrence.signing.generation ||
+        signing.publicKey !== occurrence.signing.publicKey || signing.privateKey !== occurrence.signing.privateKey ||
+        !currentSubscription || !this.sameRow(occurrence.subscription, currentSubscription) ||
+        this.hideDetails() !== occurrence.hideDetails || attempt.signal.aborted) return;
+      if (currentSubscription.expiration_time !== null && currentSubscription.expiration_time <= this.wallNow()) return;
+
+      const sourceMetadata = occurrence.itemType === "task"
+        ? this.database.prepare(
+          "SELECT status, due_date AS deadline, created_at AS createdAt FROM tasks WHERE id = ?",
+        ).get(occurrence.itemId) as { status: string; deadline: string | null; createdAt: string } | undefined
+        : this.database.prepare(
+          "SELECT status, target_date AS deadline, created_at AS createdAt FROM goals WHERE id = ?",
+        ).get(occurrence.itemId) as { status: string; deadline: string | null; createdAt: string } | undefined;
+      const expectedStatus = occurrence.itemType === "task" ? "open" : "active";
+      if (!sourceMetadata || sourceMetadata.status !== expectedStatus || sourceMetadata.deadline !== occurrence.deadline ||
+        sourceMetadata.createdAt !== occurrence.itemCreatedAt || !validCalendarDate(sourceMetadata.deadline)) return;
+
+      // Plaintext user content is read only after every cancellation field above
+      // matched, and remains memory-only for immediate payload construction.
+      const source = occurrence.itemType === "task"
+        ? this.database.prepare(
+          `SELECT t.title, c.name AS context FROM tasks t
+           LEFT JOIN categories c ON c.id = t.category_id WHERE t.id = ?`,
+        ).get(occurrence.itemId) as { title: string; context: string | null }
+        : this.database.prepare("SELECT title, NULL AS context FROM goals WHERE id = ?")
+          .get(occurrence.itemId) as { title: string; context: null };
+
+      const identity = {
+        v: 1 as const,
+        kind: "deadline" as const,
+        itemType: occurrence.itemType,
+        itemId: occurrence.itemId,
+        eventId: occurrence.eventId,
+      };
+      const generic = { ...identity, detail: "generic" as const };
+      const detailed = {
+        ...identity,
+        detail: "detailed" as const,
+        itemTitle: source.title,
+        context: occurrence.itemType === "task" ? source.context : null,
+        deadline: occurrence.deadline,
+      };
+      const build = (payload: object): { clear: Buffer; details: RequestDetails } | null => {
+        let clear: Buffer;
+        try { clear = Buffer.from(JSON.stringify(payload), "utf8"); } catch { return null; }
+        if (clear.length > 3_072) return null;
+        try {
+          const details = this.generateRequestDetails(
+            { endpoint: currentSubscription.endpoint, keys: { p256dh: currentSubscription.p256dh, auth: currentSubscription.auth } },
+            clear,
+            {
+              contentEncoding: "aes128gcm",
+              TTL: 0,
+              urgency: "normal",
+              topic: occurrence.eventId,
+              vapidDetails: {
+                subject: VAPID_SUBJECT,
+                publicKey: signing.publicKey,
+                privateKey: signing.privateKey,
+              },
+            },
+          );
+          if (details.endpoint !== currentSubscription.endpoint || details.method !== "POST" || details.proxy !== undefined ||
+            !Buffer.isBuffer(details.body) || details.body.length > 4_096) return null;
+          return { clear, details };
+        } catch { return null; }
+      };
+      const request = occurrence.hideDetails === "1" ? build(generic) : build(detailed) ?? build(generic);
+      if (!request) return;
+      this.options.observeDeadlinePayload?.(Buffer.from(request.clear));
+      initiated = true;
+      stopSignal?.removeEventListener("abort", onStop);
+      let outcome: Awaited<ReturnType<PushTransport["send"]>>;
+      try {
+        outcome = await this.transport.send({
+          details: request.details as RequestDetails & { body: Buffer },
+          hostname: validated.hostname,
+          address,
+          signal: attempt.signal,
+          timedOut: () => totalTimedOut,
+        });
+      } catch { return; }
+      if (outcome === "gone") this.deleteFingerprint(occurrence.subscription);
+    } finally {
+      clearTimeout(timer);
+      stopSignal?.removeEventListener("abort", onStop);
+    }
+  }
+
   deleteDevice(deviceId: string): void {
     if (!isUuidV4(deviceId)) throw new PushApiError(400, "invalid-push-request");
     const snapshot = this.snapshot();
     if (!snapshot.available) throw unavailable(snapshot);
-    const result = this.options.database.prepare("DELETE FROM push_subscriptions WHERE id = ?").run(deviceId);
+    const result = this.database.prepare("DELETE FROM push_subscriptions WHERE id = ?").run(deviceId);
     if (result.changes === 1) this.admission.removeDevice(deviceId);
   }
 
@@ -493,15 +685,53 @@ export class PushService implements PushServiceDependency {
     }
   }
 
-  setPreferences(value: unknown): { hideDetails: boolean } {
+  setPreferences(value: unknown): PushPreferenceResult {
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new PushApiError(400, "invalid-push-request");
     const record = value as Record<string, unknown>;
-    if (!exactKeys(record, ["hideDetails"]) || typeof record.hideDetails !== "boolean") throw new PushApiError(400, "invalid-push-request");
     const snapshot = this.snapshot();
     if (!snapshot.available) throw unavailable(snapshot);
-    this.options.database.prepare("UPDATE settings SET value = ? WHERE key = 'push_hide_details'").run(record.hideDetails ? "1" : "0");
-    this.options.lifecycle.advanceWorkGeneration();
-    return { hideDetails: record.hideDetails };
+    if (exactKeys(record, ["hideDetails"]) && typeof record.hideDetails === "boolean") {
+      this.database.prepare("UPDATE settings SET value = ? WHERE key = 'push_hide_details'").run(record.hideDetails ? "1" : "0");
+      this.options.lifecycle.advanceWorkGeneration();
+      return { hideDetails: record.hideDetails };
+    }
+
+    const keys = ["leadDays", "sendTime", "timezone", "quietStart", "quietEnd"] as const;
+    if (!exactKeys(record, keys)) throw new PushApiError(400, "invalid-push-request");
+    const leadDays = record.leadDays;
+    const sendTime = record.sendTime;
+    const timezone = record.timezone;
+    const quietStart = record.quietStart;
+    const quietEnd = record.quietEnd;
+    const quarterHour = (candidate: unknown): candidate is string =>
+      typeof candidate === "string" && /^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/.test(candidate);
+    const timezoneValid = typeof timezone === "string" && timezone.length >= 1 && timezone.length <= 128 &&
+      ![...timezone].some((character) => character.charCodeAt(0) > 0x7f) && (() => {
+        try { new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(0); return true; } catch { return false; }
+      })();
+    const quietValid = quietStart === null && quietEnd === null ||
+      quarterHour(quietStart) && quarterHour(quietEnd) && quietStart !== quietEnd;
+    if (!Number.isInteger(leadDays) || !new Set([0, 1, 2, 3, 7, 14, 30]).has(leadDays as number) ||
+      !quarterHour(sendTime) || !timezoneValid || !quietValid) {
+      throw new PushApiError(400, "invalid-push-request");
+    }
+    const result: DeadlineTiming = {
+      leadDays: leadDays as number,
+      sendTime,
+      timezone,
+      quietStart: quietStart as string | null,
+      quietEnd: quietEnd as string | null,
+    };
+    const database = this.database;
+    database.transaction(() => {
+      const update = database.prepare("UPDATE settings SET value = ? WHERE key = ?");
+      update.run(String(result.leadDays), "push_lead_days");
+      update.run(result.sendTime, "push_send_time");
+      update.run(result.timezone, "push_timezone");
+      update.run(result.quietStart, "push_quiet_start");
+      update.run(result.quietEnd, "push_quiet_end");
+    })();
+    return result;
   }
 }
 
@@ -513,7 +743,9 @@ export const disabledPushService: PushServiceDependency = Object.freeze({
   topology: (): TopologyResult => ({ allowed: false, reason: "secure-transport-required" }),
   status: () => ({
     available: false, reason: "not-production" as const, vapidPublicKey: null, maxDevices: 16 as const,
-    preferences: { hideDetails: false }, devices: [],
+    preferences: {
+      hideDetails: false, leadDays: 1, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
+    }, devices: [],
   }),
   register: async () => { throw new PushApiError(503, "push-unavailable"); },
   testDevice: async () => { throw new PushApiError(503, "push-unavailable"); },

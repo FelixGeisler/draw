@@ -65,7 +65,9 @@ describe("Push registration HTTP API", () => {
     expect(initial.body).toEqual({
       available: true, reason: null, mutationAllowed: true, mutationReason: null,
       vapidPublicKey: push.snapshot().publicVapidKey, maxDevices: 16,
-      preferences: { hideDetails: false }, devices: [],
+      preferences: {
+        hideDetails: false, leadDays: 1, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
+      }, devices: [],
     });
 
     const created = await direct(request(app).post("/api/push/subscriptions")).send(payload());
@@ -79,6 +81,37 @@ describe("Push registration HTTP API", () => {
     expect(preference.body).toEqual({ hideDetails: true });
     expect((await direct(request(app).delete(`/api/push/subscriptions/${created.body.device.id}`))).status).toBe(204);
     expect((await direct(request(app).delete("/api/push/subscriptions"))).status).toBe(204);
+  });
+
+  it("round-trips the strict atomic timing variant and rejects mixed, partial, and invalid values", async () => {
+    const app = createApp({}, { push: service() });
+    const accepted = { leadDays: 7, sendTime: "23:45", timezone: "Europe/Berlin", quietStart: "22:00", quietEnd: "08:00" };
+    const response = await direct(request(app).put("/api/push/preferences")).send(accepted);
+    expect(response).toMatchObject({ status: 200, body: accepted });
+    expect((await request(app).get("/api/push/status").set("Host", "localhost:1234")).body.preferences)
+      .toEqual({ hideDetails: false, ...accepted });
+
+    const before = database.prepare(
+      "SELECT key,value FROM settings WHERE key LIKE 'push_%' ORDER BY key",
+    ).all();
+    for (const invalid of [
+      { ...accepted, hideDetails: true },
+      { leadDays: 1 },
+      { ...accepted, leadDays: 4 },
+      { ...accepted, sendTime: "09:01" },
+      { ...accepted, timezone: " Europe/Berlin" },
+      { ...accepted, timezone: "No/Such_Zone" },
+      { ...accepted, quietStart: null },
+      { ...accepted, quietStart: "08:00", quietEnd: "08:00" },
+      { ...accepted, unknown: true },
+    ]) {
+      const rejected = await direct(request(app).put("/api/push/preferences")).send(invalid);
+      expect(rejected).toMatchObject({ status: 400, body: { error: "invalid-push-request" } });
+      expect(database.prepare("SELECT key,value FROM settings WHERE key LIKE 'push_%' ORDER BY key").all()).toEqual(before);
+    }
+    const quietOff = { ...accepted, quietStart: null, quietEnd: null };
+    expect(await direct(request(app).put("/api/push/preferences")).send(quietOff))
+      .toMatchObject({ status: 200, body: quietOff });
   });
 
   it("rejects every no-body framing variant before route work", async () => {
