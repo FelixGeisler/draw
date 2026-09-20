@@ -10,6 +10,8 @@ import vm from "node:vm";
 const PROD = `http://127.0.0.1:${process.env.E2E_PROD_PORT || "3102"}`;
 const DEVICE = "123e4567-e89b-42d3-a456-426614174000";
 const EVENT_ID = "AAAAAAAAAAAAAAAAAAAAAA";
+const NOTIFICATION_ICON = "/icons/icon-192.png";
+const NOTIFICATION_BADGE = "/icons/notification-badge-96.png";
 const { defaultBrowserType: _defaultBrowserType, ...PIXEL_7 } = devices["Pixel 7"];
 const VAPID_PUBLIC_KEY = "B" + "A".repeat(86);
 
@@ -47,16 +49,26 @@ interface WorkerHarness {
   listeners: Map<string, (event: any) => void>;
   notifications: Array<{ title: string; options: Record<string, unknown> }>;
   cacheCalls: string[];
+  cacheAdds: Array<{ cache: string; entries: string[] }>;
+  deletedCaches: string[];
   clients: any[];
   opened: string[];
+  lifecycleCalls: string[];
 }
 
-function executeWorker(source: string, origin = "https://draw.test"): WorkerHarness {
+function executeWorker(
+  source: string,
+  origin = "https://draw.test",
+  initialCacheKeys: string[] = [],
+): WorkerHarness {
   const listeners = new Map<string, (event: any) => void>();
   const notifications: WorkerHarness["notifications"] = [];
   const cacheCalls: string[] = [];
+  const cacheAdds: WorkerHarness["cacheAdds"] = [];
+  const deletedCaches: string[] = [];
   const clients: any[] = [];
   const opened: string[] = [];
+  const lifecycleCalls: string[] = [];
   const self = {
     location: { origin },
     addEventListener: (name: string, listener: (event: any) => void) => listeners.set(name, listener),
@@ -66,16 +78,22 @@ function executeWorker(source: string, origin = "https://draw.test"): WorkerHarn
       },
     },
     clients: {
-      claim: async () => undefined,
+      claim: async () => { lifecycleCalls.push("claim"); },
       matchAll: async () => clients,
       openWindow: async (url: string) => { opened.push(url); return null; },
     },
-    skipWaiting: async () => undefined,
+    skipWaiting: async () => { lifecycleCalls.push("skipWaiting"); },
   };
   const caches = {
-    open: async () => { cacheCalls.push("open"); return { addAll: async () => undefined, put: async () => undefined }; },
-    keys: async () => [],
-    delete: async () => true,
+    open: async (cache: string) => {
+      cacheCalls.push(`open:${cache}`);
+      return {
+        addAll: async (entries: string[]) => { cacheAdds.push({ cache, entries: [...entries] }); },
+        put: async () => undefined,
+      };
+    },
+    keys: async () => [...initialCacheKeys],
+    delete: async (cache: string) => { deletedCaches.push(cache); return true; },
     match: async () => undefined,
   };
   vm.runInNewContext(source, {
@@ -90,7 +108,15 @@ function executeWorker(source: string, origin = "https://draw.test"): WorkerHarn
     atob,
     btoa,
   }, { filename: "production-served-sw.js" });
-  return { listeners, notifications, cacheCalls, clients, opened };
+  return { listeners, notifications, cacheCalls, cacheAdds, deletedCaches, clients, opened, lifecycleCalls };
+}
+
+async function dispatchLifecycle(harness: WorkerHarness, name: "install" | "activate") {
+  let completion: Promise<unknown> | null = null;
+  harness.listeners.get(name)!({
+    waitUntil: (promise: Promise<unknown>) => { completion = promise; },
+  });
+  if (completion) await completion;
 }
 
 async function dispatchPush(harness: WorkerHarness, value?: unknown, raw?: Uint8Array) {
@@ -121,7 +147,7 @@ test.describe("production-served closed Push worker protocol", () => {
     const response = await request.get(`${PROD}/sw.js`);
     expect(response.ok()).toBeTruthy();
     source = await response.text();
-    expect(source).toContain('const CACHE = "draw-shell-v4"');
+    expect(source).toContain('const CACHE = "draw-shell-v5"');
   });
 
   test("renders only the exact test, generic and detailed schemas", async () => {
@@ -132,13 +158,12 @@ test.describe("production-served closed Push worker protocol", () => {
     await dispatchPush(worker, { v: 1, kind: "deadline", detail: "detailed", itemType: "task", itemId: 10, eventId: EVENT_ID, itemTitle: "Submit", context: null, deadline: "2028-02-29" });
 
     expect(worker.notifications).toEqual([
-      { title: "Draw", options: { body: "Notifications are enabled", tag: "draw-push-test", data: { v: 1, route: "/settings" } } },
-      { title: "Draw", options: { body: "You have an upcoming deadline in Draw", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/tasks?focus=7&showDone=1" } } },
-      { title: "Finish <paper>", options: { body: "Study · Due 2026-12-31", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/goals?focus=9" } } },
-      { title: "Submit", options: { body: "Due 2028-02-29", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/tasks?focus=10&showDone=1" } } },
+      { title: "Draw", options: { body: "Notifications are enabled", tag: "draw-push-test", data: { v: 1, route: "/settings" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
+      { title: "Draw", options: { body: "You have an upcoming deadline in Draw", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/tasks?focus=7&showDone=1" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
+      { title: "Finish <paper>", options: { body: "Study · Due 2026-12-31", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/goals?focus=9" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
+      { title: "Submit", options: { body: "Due 2028-02-29", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/tasks?focus=10&showDone=1" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
     ]);
     for (const notification of worker.notifications) {
-      expect(notification.options).not.toHaveProperty("icon");
       expect(notification.options).not.toHaveProperty("image");
       expect(notification.options).not.toHaveProperty("actions");
       expect(notification.options).not.toHaveProperty("url");
@@ -151,7 +176,7 @@ test.describe("production-served closed Push worker protocol", () => {
     await dispatchPush(worker);
     await dispatchPush(worker, undefined, Uint8Array.of(0xff));
     await dispatchPush(worker, undefined, new Uint8Array(3_073));
-    const rejected = [
+    const rejected: unknown[] = [
       null,
       [],
       { v: 2, kind: "test" },
@@ -166,9 +191,31 @@ test.describe("production-served closed Push worker protocol", () => {
       { v: 1, kind: "deadline", detail: "detailed", itemType: "goal", itemId: 1, eventId: EVENT_ID, itemTitle: "x", context: null, deadline: "2026-1-01" },
       { v: 1, kind: "deadline", detail: "generic", itemType: "goal", itemId: 1, eventId: EVENT_ID, url: "https://evil.test" },
     ];
+    for (const field of ["icon", "badge", "image", "actions", "url"]) {
+      rejected.push({ v: 1, kind: "test", [field]: field === "actions" ? [] : "https://evil.test/asset" });
+    }
     for (const payload of rejected) await dispatchPush(worker, payload);
     expect(worker.notifications).toEqual([]);
     expect(worker.cacheCalls).toEqual([]);
+  });
+
+  test("precache v5 is exact and activation removes v4 without changing lifecycle", async () => {
+    const worker = executeWorker(source, "https://draw.test", ["draw-shell-v4", "draw-shell-v5"]);
+    await dispatchLifecycle(worker, "install");
+    await dispatchLifecycle(worker, "activate");
+
+    expect(worker.cacheAdds).toEqual([{
+      cache: "draw-shell-v5",
+      entries: [
+        "/",
+        "/manifest.webmanifest",
+        "/icons/icon-192.png",
+        "/icons/icon-512.png",
+        "/icons/notification-badge-96.png",
+      ],
+    }]);
+    expect(worker.deletedCaches).toEqual(["draw-shell-v4"]);
+    expect(worker.lifecycleCalls).toEqual(["skipWaiting", "claim"]);
   });
 
   test("closes first, navigates and focuses the first same-origin window", async () => {

@@ -56,6 +56,62 @@ test.describe("PWA delivery", () => {
       expect(iconRes.ok(), `${icon.src} should be served`).toBeTruthy();
       expect(iconRes.headers()["content-type"]).toContain("image");
     }
+    expect((manifest.icons as { src: string }[]).map((icon) => icon.src)).not.toContain(
+      "/icons/notification-badge-96.png",
+    );
+  });
+
+  test("notification assets are served and the badge obeys its monochrome safe area", async ({ request, page }) => {
+    for (const asset of ["/icons/icon-192.png", "/icons/notification-badge-96.png"]) {
+      const response = await request.get(`${PROD}${asset}`);
+      expect(response.ok(), `${asset} should be served`).toBeTruthy();
+      expect(response.headers()["content-type"]).toContain("image");
+    }
+
+    await page.goto(`${PROD}/`);
+    const pixels = await page.evaluate(async () => {
+      const inspect = async (asset: string) => {
+        const response = await fetch(asset);
+        const image = await createImageBitmap(await response.blob());
+        const canvas = document.createElement("canvas");
+        canvas.width = image.width;
+        canvas.height = image.height;
+        const context = canvas.getContext("2d", { willReadFrequently: true })!;
+        context.drawImage(image, 0, 0);
+        const rgba = context.getImageData(0, 0, image.width, image.height).data;
+        let transparent = 0;
+        let visible = 0;
+        let antialiased = 0;
+        let nonWhiteVisible = 0;
+        let visibleOutsideSafeArea = 0;
+        for (let y = 0; y < image.height; y += 1) {
+          for (let x = 0; x < image.width; x += 1) {
+            const offset = (y * image.width + x) * 4;
+            const alpha = rgba[offset + 3];
+            if (alpha === 0) transparent += 1;
+            else {
+              visible += 1;
+              if (alpha < 255) antialiased += 1;
+              if (rgba[offset] !== 255 || rgba[offset + 1] !== 255 || rgba[offset + 2] !== 255) {
+                nonWhiteVisible += 1;
+              }
+              if (x < 12 || x >= 84 || y < 12 || y >= 84) visibleOutsideSafeArea += 1;
+            }
+          }
+        }
+        return { width: image.width, height: image.height, transparent, visible, antialiased, nonWhiteVisible, visibleOutsideSafeArea };
+      };
+      return {
+        icon: await inspect("/icons/icon-192.png"),
+        badge: await inspect("/icons/notification-badge-96.png"),
+      };
+    });
+
+    expect(pixels.icon).toMatchObject({ width: 192, height: 192 });
+    expect(pixels.badge).toMatchObject({ width: 96, height: 96, nonWhiteVisible: 0, visibleOutsideSafeArea: 0 });
+    expect(pixels.badge.transparent).toBeGreaterThan(0);
+    expect(pixels.badge.visible).toBeGreaterThan(0);
+    expect(pixels.badge.antialiased).toBeGreaterThan(0);
   });
 
   test("index.html carries the head an installable phone app needs", async ({ request }) => {
@@ -111,11 +167,17 @@ test.describe("PWA delivery", () => {
       }
       return { keys, entries };
     });
-    // The hard rule from #193: API responses are never served stale, so the
-    // worker must hold no /api entry at all.
+    // The hard rule from #193: API responses are never served stale, and the
+    // only cache is the exact v5 shell — no runtime asset hoarding.
+    expect(cacheState.keys).toEqual(["draw-shell-v5"]);
+    expect([...cacheState.entries].sort()).toEqual([
+      "/",
+      "/icons/icon-192.png",
+      "/icons/icon-512.png",
+      "/icons/notification-badge-96.png",
+      "/manifest.webmanifest",
+    ]);
     expect(cacheState.entries.filter((p) => p.startsWith("/api"))).toEqual([]);
-    // And the shell it does hold stays a shell — no runtime asset hoarding.
-    expect(cacheState.entries).toContain("/");
     expect(cacheState.entries.filter((p) => p.startsWith("/assets/"))).toEqual([]);
   });
 
