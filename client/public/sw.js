@@ -4,7 +4,8 @@
  * secure context) — NOT to make it offline-first. Scope discipline:
  *
  *   - Precache: the app shell only — "/", the manifest, the two regular
- *     icons. The content-hashed bundles under /assets/ are deliberately NOT
+ *     icons and the notification badge. The content-hashed bundles under
+ *     /assets/ are deliberately NOT
  *     precached: the HTTP layer already serves them immutable (server/src/
  *     app.ts), and a SW copy would be a second cache to invalidate.
  *   - /api: never intercepted, case-insensitively. Requests go straight to the
@@ -26,11 +27,18 @@
  * activate handler drops the previous version's cache. Bump CACHE when the
  * precached shell list changes shape or what may become the shell changes.
  */
-// v4 (#343): Stage 1C adds closed Push receive/click handlers. The shell list
-// is unchanged; one bump retires every older worker/cache alongside the new
-// protocol while Push data remains entirely outside Cache Storage.
-const CACHE = "draw-shell-v4";
-const SHELL = ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png"];
+// v5 (#351): fixed app-owned Push branding adds the monochrome badge to the
+// shell. The upgrade retires v4 while Push data remains outside Cache Storage.
+const CACHE = "draw-shell-v5";
+const SHELL = [
+  "/",
+  "/manifest.webmanifest",
+  "/icons/icon-192.png",
+  "/icons/icon-512.png",
+  "/icons/notification-badge-96.png",
+];
+const NOTIFICATION_ICON = "/icons/icon-192.png";
+const NOTIFICATION_BADGE = "/icons/notification-badge-96.png";
 
 function temporaryUnavailable() {
   return new Response("Draw is temporarily unavailable. Please try again shortly.", {
@@ -149,7 +157,11 @@ self.addEventListener("push", (event) => {
       const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       const notification = notificationFromPayload(JSON.parse(text));
       if (!notification) return;
-      await self.registration.showNotification(notification.title, notification.options);
+      await self.registration.showNotification(notification.title, {
+        ...notification.options,
+        icon: NOTIFICATION_ICON,
+        badge: NOTIFICATION_BADGE,
+      });
     } catch {
       // Closed protocol: malformed, oversized, unknown, or non-UTF-8 input
       // produces no notification and exposes no payload/provider detail.

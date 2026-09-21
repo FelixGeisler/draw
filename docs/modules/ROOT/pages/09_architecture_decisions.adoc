@@ -2949,7 +2949,15 @@ be served stale by the worker. That is the hard rule of #193, and it is what
 keeps the worker from becoming a correctness problem. The path test is
 case-insensitive, because Express matches its mounts that way (#189) — `/API/…`
 is API traffic too, and a case-sensitive test would have let its body through the
-navigation branch. The content-hashed bundles under `/assets/` are deliberately
+navigation branch. The v5 cache contains exactly `/`,
+`/manifest.webmanifest`, `/icons/icon-192.png`, `/icons/icon-512.png`, and
+`/icons/notification-badge-96.png`; activation deletes v4 and every other
+noncurrent cache. The badge is a repository-owned 96×96 RGBA monochrome
+derivative of `client/public/favicon.svg`: the same −8° tilted rounded-card
+outline and filled-star proportions in antialiased white on transparency, with
+all visible pixels inside the centered 72×72 safe area. It adds no third-party
+asset or generator dependency and is never generated at runtime. The badge is
+not a manifest icon. The content-hashed bundles under `/assets/` are deliberately
 *not* precached either — the HTTP layer already serves them immutable (ADR-49),
 and a worker copy would be a second cache to invalidate. Navigations are
 network-first with the cached shell as an *offline fallback only*, so an online
@@ -3014,9 +3022,12 @@ only exist once vite has copied them into `client/dist`: the manifest declares
 regular *and* maskable icons at 192 and 512 (asserted as purpose+size pairs) and
 every one of them resolves, index.html carries the manifest link, the
 `theme-color` and a `width=device-width` viewport, `sw.js` comes back
-revalidating rather than immutable, and the activated worker holds a shell entry
-but no `/api` and no `/assets/` entry in any cache — including after a navigation
-to `/API/tasks`, which answers JSON and must not become the shell.
+revalidating rather than immutable, and the activated worker holds the exact
+five-entry v5 shell but no `/api` and no `/assets/` entry in any cache — including
+after a navigation to `/API/tasks`, which answers JSON and must not become the
+shell. Production-serving checks also decode the fixed Push icon and badge as
+192×192 and 96×96 images and verify the badge's white-RGB, antialiased-alpha,
+transparent-border geometry.
 
 *Out of scope:* offline-first data sync and a native/Capacitor app. Web Push is
 no longer native-required or out of scope; its implemented and planned stages
@@ -4251,9 +4262,9 @@ Classic production-only `client/public/sw.js` reads ≤3,072 bytes, parses in `t
 - generic deadline `{v:1,kind:"deadline",detail:"generic",itemType:"task"|"goal",itemId:<positive safe integer>,eventId:<22-char canonical unpadded base64url>}`;
 - detailed = generic identity with `detail:"detailed"`, exact string `itemTitle`, nullable string `context`, and `deadline:"YYYY-MM-DD"`.
 
-Deadline validation parses `${value}T00:00:00Z`, requires finite and `toISOString().slice(0,10)===value`; impossible/noncanonical dates such as `2026-02-30` fail. Text is never HTML. Exact rendering: test title `Draw`, body `Notifications are enabled`, tag `draw-push-test`, route `/settings`; generic title `Draw`, body `You have an upcoming deadline in Draw`, tag `draw-deadline-<eventId>`; detailed title exact itemTitle, body `Due <YYYY-MM-DD>` if context null else `<context> · Due <YYYY-MM-DD>`, same deadline tag. Deadline route derives only from validated type/id: `/tasks?focus=<id>&showDone=1` or `/goals?focus=<id>`. Accept no payload URL/remote icon/image/action. Click closes, chooses a same-origin window via `clients.matchAll({type:"window",includeUncontrolled:true})`, navigates/focuses it, else `openWindow`. Existing password login reload retains URL.
+Deadline validation parses `${value}T00:00:00Z`, requires finite and `toISOString().slice(0,10)===value`; impossible/noncanonical dates such as `2026-02-30` fail. Text is never HTML. Exact rendering: test title `Draw`, body `Notifications are enabled`, tag `draw-push-test`, route `/settings`; generic title `Draw`, body `You have an upcoming deadline in Draw`, tag `draw-deadline-<eventId>`; detailed title exact itemTitle, body `Due <YYYY-MM-DD>` if context null else `<context> · Due <YYYY-MM-DD>`, same deadline tag. Deadline route derives only from validated type/id: `/tasks?focus=<id>&showDone=1` or `/goals?focus=<id>`. Accept no payload URL/icon/badge/image/action. After validation, the single `showNotification` call adds fixed same-origin `icon: "/icons/icon-192.png"` and `badge: "/icons/notification-badge-96.png"` options to every accepted variant; payload data cannot select or override either asset. Browsers and operating systems retain discretion to recolor, mask, alter, omit, or otherwise lay out either image, so this records the requested presentation rather than a universal rendering guarantee. Click closes, chooses a same-origin window via `clients.matchAll({type:"window",includeUncontrolled:true})`, navigates/focuses it, else `openWindow`. Existing password login reload retains URL.
 
-Keep shell-only cache, case-insensitive `/api` bypass, network-first navigation, `skipWaiting`, `clients.claim`, production-only registration; bump cache version. Never cache push/API data.
+Keep shell-only cache, case-insensitive `/api` bypass, network-first navigation, `skipWaiting`, `clients.claim`, production-only registration; v5 precaches exactly the five ADR-54 entries and activation removes v4. Never cache push/API data.
 
 Landings parse `focus` only canonical positive safe-integer decimal. Tasks accept `showDone=1` only with valid focus. Consume only owned query keys via history replace, preserving unrelated query/hash and router-state palette behavior. Scroll/flash existing row/card; make done task visible. Deleted/archived/resolved/unrendered target degrades quietly to containing page.
 

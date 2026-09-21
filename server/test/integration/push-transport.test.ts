@@ -1,8 +1,40 @@
+import { createPrivateKey, X509Certificate } from "node:crypto";
 import https from "node:https";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodePushTransport } from "../../src/push/transport.js";
 import { PUSH_TLS_CERT, PUSH_TLS_KEY } from "../support/push-tls-fixture.js";
+
+function readDerElement(input: Buffer, offset: number) {
+  const tag = input[offset];
+  const firstLengthByte = input[offset + 1];
+  if (tag === undefined || firstLengthByte === undefined) throw new Error("truncated DER element");
+  let length = firstLengthByte;
+  let valueStart = offset + 2;
+  if ((firstLengthByte & 0x80) !== 0) {
+    const lengthBytes = firstLengthByte & 0x7f;
+    if (lengthBytes === 0 || lengthBytes > 4 || valueStart + lengthBytes > input.length) {
+      throw new Error("unsupported DER length");
+    }
+    length = 0;
+    for (let index = 0; index < lengthBytes; index += 1) length = (length * 256) + input[valueStart + index]!;
+    valueStart += lengthBytes;
+  }
+  const end = valueStart + length;
+  if (end > input.length) throw new Error("truncated DER value");
+  return { tag, valueStart, end, next: end };
+}
+
+function certificateSignatureAlgorithmOid(certificate: X509Certificate) {
+  const outerSequence = readDerElement(certificate.raw, 0);
+  const certificateBody = readDerElement(certificate.raw, outerSequence.valueStart);
+  const signatureAlgorithm = readDerElement(certificate.raw, certificateBody.next);
+  const oid = readDerElement(certificate.raw, signatureAlgorithm.valueStart);
+  if (outerSequence.tag !== 0x30 || certificateBody.tag !== 0x30 || signatureAlgorithm.tag !== 0x30 || oid.tag !== 0x06) {
+    throw new Error("unexpected certificate DER profile");
+  }
+  return certificate.raw.subarray(oid.valueStart, oid.end).toString("hex");
+}
 
 const servers: https.Server[] = [];
 afterEach(async () => {
@@ -38,6 +70,32 @@ function send(
 }
 
 describe("core HTTPS Push transport", () => {
+  it("keeps the static synthetic certificate on its fixed profile and renewal horizon", () => {
+    const certificate = new X509Certificate(PUSH_TLS_CERT);
+    const privateKey = createPrivateKey(PUSH_TLS_KEY);
+    const validFrom = new Date(certificate.validFrom);
+    const validTo = new Date(certificate.validTo);
+    const now = new Date();
+    const renewalThreshold = new Date(now);
+    renewalThreshold.setUTCFullYear(renewalThreshold.getUTCFullYear() + 5);
+
+    expect(certificate.subject).toBe("CN=draw.example");
+    expect(certificate.issuer).toBe("CN=draw.example");
+    expect(certificate.subjectAltName).toBe("DNS:draw.example");
+    expect(certificateSignatureAlgorithmOid(certificate)).toBe("2a864886f70d01010b");
+    expect(certificate.publicKey.asymmetricKeyType).toBe("rsa");
+    expect(certificate.publicKey.asymmetricKeyDetails?.modulusLength).toBe(2_048);
+    expect(certificate.ca).toBe(true);
+    expect(certificate.checkIssued(certificate)).toBe(true);
+    expect(certificate.verify(certificate.publicKey)).toBe(true);
+    expect(certificate.checkPrivateKey(privateKey)).toBe(true);
+    expect(validFrom.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+    expect(validTo.toISOString()).toBe("2049-12-31T23:59:59.000Z");
+    expect(now.getTime()).toBeGreaterThanOrEqual(validFrom.getTime());
+    expect(now.getTime()).toBeLessThanOrEqual(validTo.getTime());
+    expect(validTo.getTime()).toBeGreaterThanOrEqual(renewalThreshold.getTime());
+  });
+
   it("pins one address while preserving original Host, SNI and certificate identity", async () => {
     let requests = 0;
     let observed: { host?: string; servername?: string; body?: string } = {};
