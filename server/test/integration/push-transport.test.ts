@@ -1,3 +1,4 @@
+import { createPrivateKey, X509Certificate } from "node:crypto";
 import https from "node:https";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
@@ -38,6 +39,33 @@ function send(
 }
 
 describe("core HTTPS Push transport", () => {
+  it("keeps the static synthetic certificate on its fixed profile and renewal horizon", () => {
+    const certificate = new X509Certificate(PUSH_TLS_CERT);
+    const privateKey = createPrivateKey(PUSH_TLS_KEY);
+    const validFrom = new Date(certificate.validFrom);
+    const validTo = new Date(certificate.validTo);
+    const now = new Date();
+    const renewalThreshold = new Date(now);
+    renewalThreshold.setUTCFullYear(renewalThreshold.getUTCFullYear() + 5);
+
+    expect(certificate.subject).toBe("CN=draw.example");
+    expect(certificate.issuer).toBe("CN=draw.example");
+    expect(certificate.subjectAltName).toBe("DNS:draw.example");
+    expect(certificate.signatureAlgorithm).toBe("sha256WithRSAEncryption");
+    expect(certificate.signatureAlgorithmOid).toBe("1.2.840.113549.1.1.11");
+    expect(certificate.publicKey.asymmetricKeyType).toBe("rsa");
+    expect(certificate.publicKey.asymmetricKeyDetails?.modulusLength).toBe(2_048);
+    expect(certificate.ca).toBe(true);
+    expect(certificate.checkIssued(certificate)).toBe(true);
+    expect(certificate.verify(certificate.publicKey)).toBe(true);
+    expect(certificate.checkPrivateKey(privateKey)).toBe(true);
+    expect(validFrom.toISOString()).toBe("2026-01-01T00:00:00.000Z");
+    expect(validTo.toISOString()).toBe("2049-12-31T23:59:59.000Z");
+    expect(now.getTime()).toBeGreaterThanOrEqual(validFrom.getTime());
+    expect(now.getTime()).toBeLessThanOrEqual(validTo.getTime());
+    expect(validTo.getTime()).toBeGreaterThanOrEqual(renewalThreshold.getTime());
+  });
+
   it("pins one address while preserving original Host, SNI and certificate identity", async () => {
     let requests = 0;
     let observed: { host?: string; servername?: string; body?: string } = {};
