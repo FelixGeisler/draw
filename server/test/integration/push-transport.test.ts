@@ -5,6 +5,37 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createNodePushTransport } from "../../src/push/transport.js";
 import { PUSH_TLS_CERT, PUSH_TLS_KEY } from "../support/push-tls-fixture.js";
 
+function readDerElement(input: Buffer, offset: number) {
+  const tag = input[offset];
+  const firstLengthByte = input[offset + 1];
+  if (tag === undefined || firstLengthByte === undefined) throw new Error("truncated DER element");
+  let length = firstLengthByte;
+  let valueStart = offset + 2;
+  if ((firstLengthByte & 0x80) !== 0) {
+    const lengthBytes = firstLengthByte & 0x7f;
+    if (lengthBytes === 0 || lengthBytes > 4 || valueStart + lengthBytes > input.length) {
+      throw new Error("unsupported DER length");
+    }
+    length = 0;
+    for (let index = 0; index < lengthBytes; index += 1) length = (length * 256) + input[valueStart + index]!;
+    valueStart += lengthBytes;
+  }
+  const end = valueStart + length;
+  if (end > input.length) throw new Error("truncated DER value");
+  return { tag, valueStart, end, next: end };
+}
+
+function certificateSignatureAlgorithmOid(certificate: X509Certificate) {
+  const outerSequence = readDerElement(certificate.raw, 0);
+  const certificateBody = readDerElement(certificate.raw, outerSequence.valueStart);
+  const signatureAlgorithm = readDerElement(certificate.raw, certificateBody.next);
+  const oid = readDerElement(certificate.raw, signatureAlgorithm.valueStart);
+  if (outerSequence.tag !== 0x30 || certificateBody.tag !== 0x30 || signatureAlgorithm.tag !== 0x30 || oid.tag !== 0x06) {
+    throw new Error("unexpected certificate DER profile");
+  }
+  return certificate.raw.subarray(oid.valueStart, oid.end).toString("hex");
+}
+
 const servers: https.Server[] = [];
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))));
@@ -51,8 +82,7 @@ describe("core HTTPS Push transport", () => {
     expect(certificate.subject).toBe("CN=draw.example");
     expect(certificate.issuer).toBe("CN=draw.example");
     expect(certificate.subjectAltName).toBe("DNS:draw.example");
-    expect(certificate.signatureAlgorithm).toBe("sha256WithRSAEncryption");
-    expect(certificate.signatureAlgorithmOid).toBe("1.2.840.113549.1.1.11");
+    expect(certificateSignatureAlgorithmOid(certificate)).toBe("2a864886f70d01010b");
     expect(certificate.publicKey.asymmetricKeyType).toBe("rsa");
     expect(certificate.publicKey.asymmetricKeyDetails?.modulusLength).toBe(2_048);
     expect(certificate.ca).toBe(true);
