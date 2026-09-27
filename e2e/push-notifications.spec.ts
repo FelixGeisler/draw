@@ -666,7 +666,7 @@ test.describe("password-gated production Push landing", () => {
       await page.getByLabel("Password").fill(password);
       await page.getByRole("button", { name: "Unlock" }).click();
       await expect(page).toHaveURL(`${base}/tasks?keep=auth#landing`);
-      const row = page.locator(`[data-task-id="${task.id}"]`).first();
+      const row = page.getByTestId("task-tree").locator(`[data-task-id="${task.id}"]`);
       await expect(row).toBeVisible();
       await expect(row).toHaveClass(/palette-flash/);
     } finally {
@@ -762,7 +762,7 @@ test.describe("Deadline notification composed production journey", () => {
       await dispatchClick(worker, worker.notifications[0].options.data);
       expect(worker.opened).toEqual([`${origin}/tasks?focus=${created.id}&showDone=1`]);
       await page.goto(worker.opened[0]);
-      await expect(page.locator(`[data-task-id="${created.id}"]`).first()).toHaveClass(/palette-flash/);
+      await expect(page.getByTestId("task-tree").locator(`[data-task-id="${created.id}"]`)).toHaveClass(/palette-flash/);
     } finally {
       assembly.deadlineScheduler?.stop();
       await new Promise<void>((resolve) => assembly.server.close(() => resolve()));

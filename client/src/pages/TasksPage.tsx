@@ -119,35 +119,46 @@ export function TasksPage() {
     navigate(landing.destination, { replace: true, state: landing.state });
   }, [location, navigate]);
 
-  // Scroll-and-flash once the row exists. classList, not a prop: the flash is
-  // a one-shot animation, and threading a transient id through the strip, the
-  // tree and the subtask recursion would be pure plumbing (a refetch may
-  // reconcile the class away early — harmless for a 1.5 s pulse). A work-mode
-  // scope can hide the row entirely; the palette exists to find what pages
-  // hide (ADR-68), so the scope yields to the search instead of landing the
-  // user on an empty page.
+  // Consume focus only after BOTH task and category prerequisites have
+  // settled and the category-gated ordinary tree has had a paint opportunity.
+  // The tree is deliberately scoped before querying, so a triage duplicate
+  // (possibly hidden in a closed <details>) can never steal the treatment.
   useEffect(() => {
-    if (pendingFocusId == null || tasks.data == null) return;
+    if (pendingFocusId == null || tasks.data == null || categories.data == null) return;
     const focusedTask = taskById.get(pendingFocusId);
-    const el = focusedTask?.status === "archived"
-      ? null
-      : document.querySelector<HTMLElement>(`[data-task-id="${pendingFocusId}"]`);
-    if (el) {
-      el.scrollIntoView({ block: "center" });
-      el.classList.add("palette-flash");
-      window.setTimeout(() => el.classList.remove("palette-flash"), 1500);
-      setPendingFocusId(null);
-    } else if (scope != null && focusedTask?.status !== "archived" && taskById.has(pendingFocusId)) {
-      // A task known in loaded data can be hidden only by work mode here.
-      // Clear once and keep the focus pending for the unscoped render.
+    if (scope != null && focusedTask?.status !== "archived" && taskById.has(pendingFocusId)) {
       setScope(undefined);
-    } else {
-      // Deleted targets are absent; archived targets can remain in the
-      // historical all-status list but are deliberately not focusable. Both
-      // quietly degrade to the Tasks page.
-      setPendingFocusId(null);
+      return;
     }
-  }, [pendingFocusId, tasks.data, scope, setScope, taskById]);
+
+    const frame = window.requestAnimationFrame(() => {
+      const tree = document.querySelector<HTMLElement>("[data-testid=\"task-tree\"]");
+      const el = focusedTask?.status === "archived"
+        ? null
+        : tree?.querySelector<HTMLElement>(`[data-task-id="${pendingFocusId}"]`) ?? null;
+      if (el) {
+        // Snoozed roots live in a closed details disclosure. Reveal every
+        // containing disclosure before checking visibility and scrolling.
+        let parent = el.parentElement;
+        while (parent && parent !== tree) {
+          if (parent instanceof HTMLDetailsElement) parent.open = true;
+          parent = parent.parentElement;
+        }
+        const visible = el.getClientRects().length > 0 && getComputedStyle(el).visibility !== "hidden";
+        if (visible) {
+          el.scrollIntoView({ block: "center" });
+          el.classList.add("palette-flash");
+          window.setTimeout(() => el.classList.remove("palette-flash"), 1500);
+          setPendingFocusId(null);
+          return;
+        }
+      }
+      // Only now are a deleted/absent or archived target honest misses: data
+      // and gated rows are settled, and disclosures have been revealed.
+      setPendingFocusId(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingFocusId, tasks.data, categories.data, scope, setScope, taskById]);
 
   // List-entry motion (#244): a task captured while the page is open fades
   // and slides in. Same classList idiom as the palette flash above — a
@@ -327,6 +338,7 @@ export function TasksPage() {
                       // offering a Household parent would move the task
                       // straight out of the view you are working in.
                       rootTasks={roots}
+                      focusTaskId={pendingFocusId}
                     />
                   ))}
                 </div>
@@ -347,6 +359,7 @@ export function TasksPage() {
                     goals={goals.data}
                     maxEffort={maxEffort}
                     rootTasks={roots}
+                    focusTaskId={pendingFocusId}
                   />
                 ))}
               </div>

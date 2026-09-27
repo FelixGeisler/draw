@@ -26,6 +26,7 @@ import { InProcessApiClient } from "./tools/inProcessApi.js";
 import { disabledPushService, type PushServiceDependency } from "./push/service.js";
 import { disabledPushDependency, type PushDependency } from "./push/authority.js";
 import { createPushRouter } from "./routes/push.js";
+import { dailyOverviewRouter } from "./routes/dailyOverview.js";
 
 export interface AppOptions {
   /**
@@ -109,6 +110,7 @@ export function createApp(options: AppOptions = {}, dependencies: AppDependencie
   }
 
   app.use("/api/push", createPushRouter(push));
+  app.use("/api/daily-overview", dailyOverviewRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/categories", categoriesRouter);
   app.use("/api/settings", settingsRouter);

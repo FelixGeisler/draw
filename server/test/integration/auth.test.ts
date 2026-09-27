@@ -73,7 +73,7 @@ describe("auth enabled", () => {
   });
 
   it("401s unauthenticated /api requests as JSON — known and unknown paths alike", async () => {
-    for (const apiPath of ["/api/tasks", "/api/settings", "/api/definitely-not-a-route", "/API/tasks"]) {
+    for (const apiPath of ["/api/tasks", "/api/daily-overview?timezone=UTC", "/api/settings", "/api/definitely-not-a-route", "/API/tasks"]) {
       const res = await request(app).get(apiPath);
       expect(res.status).toBe(401);
       expect(res.headers["content-type"]).toContain("application/json");
@@ -81,7 +81,7 @@ describe("auth enabled", () => {
   });
 
   it("serves the login page (status 401) for unauthenticated page views", async () => {
-    for (const pagePath of ["/", "/stats", "/assets/app.js"]) {
+    for (const pagePath of ["/", "/today", "/stats", "/assets/app.js"]) {
       const res = await request(app).get(pagePath);
       expect(res.status).toBe(401);
       expect(res.headers["content-type"]).toContain("text/html");

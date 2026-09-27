@@ -1,3 +1,14 @@
+.today-entry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  margin-bottom: 8px;
+  padding: 0 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+}
+
 .draw-scene {
   /* File-local design constants (#244): the drawn card's signature motion —
      the springy flip, the shuffle jitter, the art fade, the slow holo drift

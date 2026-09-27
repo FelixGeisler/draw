@@ -15,7 +15,10 @@ export function useCreateGoal() {
   return useMutation({
     mutationFn: (goal: { title: string; outcome?: string; targetDate?: string | null }) =>
       api.post<Goal>("/api/goals", goal),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["goals"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["goals"] });
+      qc.invalidateQueries({ queryKey: ["daily-overview"] });
+    },
   });
 }
 
@@ -29,6 +32,7 @@ export function useUpdateGoal() {
       api.patch<Goal & { newAchievements?: string[] }>(`/api/goals/${id}`, patch),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ["goals"] });
+      qc.invalidateQueries({ queryKey: ["daily-overview"] });
       announceAchievements(data.newAchievements);
       if (data.newAchievements?.length) qc.invalidateQueries({ queryKey: ["gamification"] });
     },
@@ -42,6 +46,7 @@ export function useDeleteGoal() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["goals"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["daily-overview"] });
     },
   });
 }

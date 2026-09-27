@@ -1,0 +1,117 @@
+.today-page {
+  max-width: 920px;
+}
+
+.today-subtitle,
+.today-context,
+.today-empty {
+  color: var(--text-dim);
+}
+
+.today-section {
+  margin-top: 16px;
+  overflow: hidden;
+}
+
+.today-section h2 {
+  margin-top: 0;
+}
+
+.today-section h2 span {
+  color: var(--text-dim);
+  font-size: 0.8em;
+  font-weight: 400;
+}
+
+.today-section ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.today-row {
+  border-top: 1px solid var(--border);
+  padding: 12px 0;
+}
+
+.today-row-summary,
+.today-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.today-row-summary a {
+  flex: 1 1 180px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.today-row-summary time {
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.today-type {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.today-actions {
+  margin-top: 8px;
+}
+
+.today-actions input[type="date"] {
+  max-width: 100%;
+}
+
+.today-row-error,
+.today-error {
+  color: var(--danger);
+}
+
+.today-row-error {
+  margin-top: 8px;
+}
+
+.today-all-empty {
+  font-weight: 600;
+  margin-top: 20px;
+}
+
+.sr-only {
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+@media (max-width: 700px) {
+  .today-page,
+  .today-section,
+  .today-row {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .today-row-summary a,
+  .today-actions label,
+  .today-actions button,
+  .today-actions input,
+  .today-error button {
+    min-height: 44px;
+  }
+
+  .today-row-summary a,
+  .today-actions label {
+    display: inline-flex;
+    align-items: center;
+  }
+}

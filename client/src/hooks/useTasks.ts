@@ -63,6 +63,9 @@ export function invalidateTaskMutationQueries(
   completionCapable = false,
 ) {
   qc.invalidateQueries({ queryKey: ["tasks"] });
+  // The Today page is an authoritative server classification, never an
+  // optimistic client splice. Every task write may change membership/order.
+  qc.invalidateQueries({ queryKey: ["daily-overview"] });
   qc.invalidateQueries({ queryKey: ["gamification"] });
   qc.invalidateQueries({ queryKey: ["challenge"] });
   // Only mutations that can create/remove a completion owner refresh the

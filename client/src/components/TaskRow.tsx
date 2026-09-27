@@ -62,6 +62,8 @@ interface Props {
    * without opening the edit form.
    */
   estimateInput?: boolean;
+  /** A durable Tasks-page landing expands the ordinary tree before focus. */
+  focusTaskId?: number | null;
 }
 
 export function TaskRow({
@@ -73,6 +75,7 @@ export function TaskRow({
   parentOrderMode,
   rootTasks,
   estimateInput,
+  focusTaskId,
 }: Props) {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
@@ -95,6 +98,12 @@ export function TaskRow({
   // in the list under "show done", so a leave-fade there would strand a
   // visible row at opacity 0.
   const [leaving, setLeaving] = useState(false);
+
+  useEffect(() => {
+    if (focusTaskId != null && task.subtasks?.some((subtask) => subtask.id === focusTaskId)) {
+      setExpanded(true);
+    }
+  }, [focusTaskId, task.subtasks]);
 
   const category = categories.find((c) => c.id === task.categoryId);
   const hasSubtasks = (task.subtasks?.length ?? 0) > 0;
@@ -679,6 +688,7 @@ export function TaskRow({
               // A childless subtask offers "Move under…" too (#167) — it needs
               // the same root pool as its parent to list cross-parent targets.
               rootTasks={rootTasks}
+              focusTaskId={focusTaskId}
             />
           </Fragment>
         ))}

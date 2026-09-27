@@ -10,6 +10,24 @@ export interface Health {
   time: string;
 }
 
+export interface DailyOverviewItem {
+  type: "goal" | "task";
+  id: number;
+  title: string;
+  date: string;
+}
+
+export interface DailyOverview {
+  timezone: string;
+  localDate: string;
+  counts: { overdue: number; today: number; tomorrow: number };
+  groups: {
+    overdue: DailyOverviewItem[];
+    today: DailyOverviewItem[];
+    tomorrow: DailyOverviewItem[];
+  };
+}
+
 /**
  * One row of GET /api/stats/estimation-bias (#55): a category's all-history
  * tracked/estimated ratio over its qualifying completed tasks. The server

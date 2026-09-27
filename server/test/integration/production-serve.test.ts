@@ -64,7 +64,7 @@ describe("production serve mode", () => {
 
   it("answers client deep links with index.html (SPA fallback)", async () => {
     // The query-string case pins req.path (not req.url) as the dispatch key.
-    for (const deepLink of ["/stats", "/goals", "/settings", "/stats?range=30d"]) {
+    for (const deepLink of ["/today", "/stats", "/goals", "/settings", "/stats?range=30d"]) {
       const res = await request(app).get(deepLink);
       expect(res.status).toBe(200);
       expect(res.text).toContain(INDEX_MARKER);
