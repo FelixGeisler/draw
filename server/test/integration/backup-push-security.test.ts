@@ -12,7 +12,8 @@ import {
   readMaterialFilesSafely,
 } from "../../src/services/backupService.js";
 import { V19_STATEMENTS } from "../../src/schemaV19.js";
-import { validateV20Contract } from "../../src/schemaV20.js";
+import { DEADLINE_REMINDER_CLAIMS_SQL } from "../../src/schemaV20.js";
+import { validateV21Contract } from "../../src/schemaV21.js";
 import {
   AUTHORITY_FILE,
   PushLifecycle,
@@ -24,8 +25,7 @@ import {
 const ENDPOINT_CANARY = "https://push.invalid/ENDPOINT-CANARY-337";
 const P256DH_CANARY = "P256DH-CANARY-337";
 const AUTH_CANARY = "AUTH-CANARY-337";
-const CLAIM_CREATED_CANARY = "CLAIM-CREATED-CANARY-345";
-const CLAIM_DEADLINE_CANARY = "9999-12-31-CLAIM-DEADLINE-CANARY-345";
+const CLAIM_DATE_CANARY = "9999-12-31-CLAIM-DATE-CANARY-355";
 const dataDir = () => process.env.DATA_DIR!;
 const filesDir = () => path.join(dataDir(), "files");
 
@@ -49,11 +49,10 @@ function insertPushRow(database: Database.Database, suffix = "") {
 function insertClaim(database: Database.Database, suffix = "") {
   database
     .prepare(
-      `INSERT INTO deadline_reminder_claims
-       (device_id, item_type, item_id, item_created_at, deadline)
-       VALUES (?, 'task', 345, ?, ?)`,
+      `INSERT INTO daily_digest_claims(device_id, local_date)
+       VALUES (?, ?)`,
     )
-    .run(`device${suffix}`, `${CLAIM_CREATED_CANARY}${suffix}`, `${CLAIM_DEADLINE_CANARY}${suffix}`);
+    .run(`device${suffix}`, `${CLAIM_DATE_CANARY}${suffix}`);
 }
 
 function expectNoCanaries(bytes: Buffer) {
@@ -61,8 +60,7 @@ function expectNoCanaries(bytes: Buffer) {
     ENDPOINT_CANARY,
     P256DH_CANARY,
     AUTH_CANARY,
-    CLAIM_CREATED_CANARY,
-    CLAIM_DEADLINE_CANARY,
+    CLAIM_DATE_CANARY,
   ]) {
     expect(bytes.includes(Buffer.from(canary))).toBe(false);
   }
@@ -119,7 +117,7 @@ describe("credential-free backup artifacts", () => {
       const exported = new Database(extracted, { readonly: true });
       try {
         expect(exported.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
-        expect(exported.prepare("SELECT COUNT(*) AS n FROM deadline_reminder_claims").get()).toEqual({ n: 0 });
+        expect(exported.prepare("SELECT COUNT(*) AS n FROM daily_digest_claims").get()).toEqual({ n: 0 });
         expect(exported.prepare("SELECT value FROM settings WHERE key = 'push_hide_details'").get()).toEqual({
           value: "1",
         });
@@ -201,7 +199,7 @@ describe("credential-free backup artifacts", () => {
     }
   });
 
-  it("rejects every behavior-affecting v19 DDL deviation before scrub or swap", async () => {
+  it("rejects every behavior-affecting v21 DDL deviation before scrub or swap", async () => {
     const database = await testDb();
     database.prepare("DELETE FROM push_subscriptions").run();
     const cleanArchivePath = createBackupArchive();
@@ -258,13 +256,13 @@ describe("credential-free backup artifacts", () => {
       [
         "claims-extra-index",
         (handle) => {
-          handle.exec("CREATE INDEX claims_deadline_idx ON deadline_reminder_claims(deadline)");
+          handle.exec("CREATE INDEX claims_date_idx ON daily_digest_claims(local_date)");
         },
       ],
       [
         "invalid-timing-domain",
         (handle) => {
-          handle.prepare("UPDATE settings SET value = '4' WHERE key = 'push_lead_days'").run();
+          handle.prepare("UPDATE settings SET value = '09:01' WHERE key = 'push_send_time'").run();
         },
       ],
     ];
@@ -285,19 +283,29 @@ describe("credential-free backup artifacts", () => {
     }
   });
 
-  it("imports canonical v20, v19, and v18 source fixtures through the applicable validators", async () => {
+  it("imports canonical v21, v20, v19, and v18 source fixtures through the applicable validators", async () => {
     const freshArchivePath = createBackupArchive();
     const freshBytes = fs.readFileSync(freshArchivePath);
     fs.rmSync(freshArchivePath, { force: true });
 
     await request(app)
       .post("/api/backup/import")
-      .attach("file", freshBytes, "canonical-v20.zip")
+      .attach("file", freshBytes, "canonical-v21.zip")
       .expect(200);
     const fresh = await testDb();
-    expect(() => validateV20Contract(fresh)).not.toThrow();
+    expect(() => validateV21Contract(fresh)).not.toThrow();
 
-    const v19Bytes = rewriteArchiveDatabase(freshBytes, "canonical-v19", (handle) => {
+    const v20Bytes = rewriteArchiveDatabase(freshBytes, "canonical-v20", (handle) => {
+      handle.exec("DROP TABLE daily_digest_claims");
+      handle.exec(DEADLINE_REMINDER_CLAIMS_SQL);
+      handle.prepare("INSERT INTO settings(key,value) VALUES ('push_lead_days','1')").run();
+      handle.pragma("user_version = 20");
+    });
+    await request(app).post("/api/backup/import").attach("file", v20Bytes, "canonical-v20.zip").expect(200);
+    const fromV20 = await testDb();
+    expect(() => validateV21Contract(fromV20)).not.toThrow();
+
+    const v19Bytes = rewriteArchiveDatabase(v20Bytes, "canonical-v19", (handle) => {
       handle.exec("DROP TABLE deadline_reminder_claims");
       handle.prepare(
         "DELETE FROM settings WHERE key IN ('push_lead_days', 'push_send_time', 'push_timezone', 'push_quiet_start', 'push_quiet_end')",
@@ -312,7 +320,7 @@ describe("credential-free backup artifacts", () => {
       .attach("file", v19Bytes, "canonical-v19.zip")
       .expect(200);
     const fromV19 = await testDb();
-    expect(() => validateV20Contract(fromV19)).not.toThrow();
+    expect(() => validateV21Contract(fromV19)).not.toThrow();
 
     const v18Bytes = rewriteArchiveDatabase(v19Bytes, "canonical-v18", (handle) => {
       handle.exec("DROP TABLE push_subscriptions");
@@ -324,8 +332,8 @@ describe("credential-free backup artifacts", () => {
       .attach("file", v18Bytes, "canonical-v18.zip")
       .expect(200);
     const migrated = await testDb();
-    expect(migrated.pragma("user_version", { simple: true })).toBe(20);
-    expect(() => validateV20Contract(migrated)).not.toThrow();
+    expect(migrated.pragma("user_version", { simple: true })).toBe(21);
+    expect(() => validateV21Contract(migrated)).not.toThrow();
   });
 
   it("sanitizes crafted imports and the app.db.bak safety copy physically", async () => {
@@ -353,14 +361,14 @@ describe("credential-free backup artifacts", () => {
 
     const restored = await testDb();
     expect(restored.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
-    expect(restored.prepare("SELECT COUNT(*) AS n FROM deadline_reminder_claims").get()).toEqual({ n: 0 });
+    expect(restored.prepare("SELECT COUNT(*) AS n FROM daily_digest_claims").get()).toEqual({ n: 0 });
     expectNoCanaries(fs.readFileSync(path.join(dataDir(), "app.db")));
     const bakBytes = fs.readFileSync(path.join(dataDir(), "app.db.bak"));
     expectNoCanaries(bakBytes);
     const bak = new Database(path.join(dataDir(), "app.db.bak"), { readonly: true });
     try {
       expect(bak.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
-      expect(bak.prepare("SELECT COUNT(*) AS n FROM deadline_reminder_claims").get()).toEqual({ n: 0 });
+      expect(bak.prepare("SELECT COUNT(*) AS n FROM daily_digest_claims").get()).toEqual({ n: 0 });
     } finally {
       bak.close();
     }

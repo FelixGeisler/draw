@@ -112,24 +112,24 @@ network-inert. Durable state is `DATA_DIR/push-authority.json` plus normally
 absent `push-authority-reset-pending`, `push-restore-pending`, and
 `push-revoke-pending` recovery markers. The registration/status/preferences/
 device-delete/revoke API, bounded manual synthetic test route, explicit staged
-Settings enrollment, closed production-worker receive/click protocol, and
-durable task/goal landings are implemented but not field-verified. Each
-accepted test resolves and pins one permitted address while preserving the
-endpoint hostname for Host, SNI, and certificate verification; it makes one
-non-reused HTTPS request with no proxy, redirect, retry, queue, or offline
-backlog. Stage 1 is complete. Stage 2A's schema-v20, calendar-validation,
-backup-sanitization, and source-claim-cleanup foundation is implemented. Stage
-2B adds the strict typed timing API/UI, native-Intl evaluator, metadata-only
-atomic claims, bounded one-attempt sender, and exactly one production-owned
-recursive deadline scheduler. The scheduler is always created when production
-schedulers are enabled, but remains inert while Push/recovery/signing,
-timezone, or subscription prerequisites are absent. Development, `createApp()`,
-and `startSchedulers:false` create none. Automatic deadline attempts are
-implemented but not field-verified.
+Settings enrollment, and closed production-worker receive/click protocol are
+implemented but not field-verified. Each accepted test resolves and pins one
+permitted address while preserving Host, SNI, and certificate verification; it
+makes one non-reused HTTPS request with no proxy, redirect, retry, queue, or
+offline backlog. Schema v21 and ADR-73 atomically replace automatic per-item
+reminders with one morning digest per enrolled device/saved-zone local date.
+The production entry owns exactly one recursive digest scheduler. It is inert
+without available Push authority, a valid saved timezone, an unexpired device,
+or an open send window; development, `createApp()`, and
+`startSchedulers:false` create none. The sender shares four physical permits,
+claims before DNS/content, retains claims without retry, uses a remaining
+same-day TTL of at most three hours, and reads counts plus at most five titles
+from the shared `/today` service. Digest and v2 worker behavior are implemented
+but not field-verified.
 
 These files are never archive inputs. Manual/scheduled Draw archives, imported
 live DBs and `app.db.bak` physically exclude notification device credentials
-and deadline occurrence claims
+and daily digest claims
 and require every device to re-enable after restore. A privileged
 whole-`DATA_DIR` or volume snapshot remains permitted for disaster recovery
 but contains full state, including authority and possibly markers; use the
@@ -152,7 +152,7 @@ node "Host (PC, or the #191 container — see 7.3)" as host {
   }
   artifact "client/dist\n(vite build, gitignored)" as dist
   folder "server/data/" as data {
-    database "app.db\nschema v20" as db
+    database "app.db\nschema v21" as db
     artifact "push-authority.json\nreset/restore/revoke markers\n(production only)" as pushstate
   }
 }
@@ -373,10 +373,11 @@ if a migration ran in between — restore a backup from before the update
 (xref:09_architecture_decisions.adoc[ADR-26]; the backup importer refuses
 newer-versioned archives, so restoring an older backup into an older image
 is the supported direction). Current images accept backups through schema
-v20: stamped v19 input receives its complete non-null-settings/Push validation
-before migration, stamped v20 input receives the exact nullable-settings,
-timing-domain, claims-index/FK, Push, and persistent-code validation, and older
-files migrate through both. Complete v18 validation also runs before the live
+v21: stamped v19, v20, and v21 inputs receive their own exact validation before
+migration. v20 retains its historical nullable settings, lead and per-item
+claim contract; v21 requires the four timing fields, no lead row, and the exact
+device/date digest table. Older files migrate through each boundary. Complete
+v18 validation also runs before the live
 database moves; a missing or weakened contract leaves the live deployment
 untouched. *Bare-npm path:* `git pull`, `npm ci`,
 `npm run build`, restart `npm start` — release discovery and the minimal status
@@ -894,10 +895,11 @@ setting or `UPDATE_CHECK_INTERVAL_HOURS=0` means zero calls,
 `UPDATE_CHECK_URL` redirects it) — bounded A+AAAA DNS when an accepted Push
 enrollment validates its submitted HTTPS endpoint and, only when an authorized
 user explicitly invokes the Stage 1B.2 manual test route, one DNS-pinned
-provider HTTPS POST through Node core HTTPS. Automatic deadline work may make
-one equivalent DNS-pinned TTL-0 POST for each newly claimed eligible
-device-occurrence while Draw runs. Both paths have no proxy, redirect, retry,
-queue, backlog, or socket reuse; Stage 1C receive handling and Stage 2B
-automatic deadline attempts are implemented but not field-verified. The
+provider HTTPS POST through Node core HTTPS. Automatic digest work may make one
+equivalent DNS-pinned normal-urgency POST for each newly claimed device/local
+date while Draw runs, with TTL equal to the positive whole-second lifetime
+remaining in its at-most-three-hour, same-local-day window. Both paths have no
+proxy, redirect, retry, queue, backlog, or socket reuse; v2 digest receive and
+automatic initiation are implemented but not field-verified. The
 user-configured update trigger URL receives one POST per explicit **Update**
 action, never automatically.

@@ -27,7 +27,7 @@ interface SyntheticStatus {
 }
 
 function timingPreferences(hideDetails = false) {
-  return { hideDetails, leadDays: 1 as 0 | 1 | 2 | 3 | 7 | 14 | 30, sendTime: "09:00", timezone: null as string | null,
+  return { hideDetails, sendTime: "09:00", timezone: null as string | null,
     quietStart: null as string | null, quietEnd: null as string | null };
 }
 
@@ -150,18 +150,18 @@ test.describe("production-served closed Push worker protocol", () => {
     expect(source).toContain('const CACHE = "draw-shell-v5"');
   });
 
-  test("renders only the exact test, generic and detailed schemas", async () => {
+  test("renders only the exact v2 test, generic and detailed schemas", async () => {
     const worker = executeWorker(source);
-    await dispatchPush(worker, { v: 1, kind: "test" });
-    await dispatchPush(worker, { v: 1, kind: "deadline", detail: "generic", itemType: "task", itemId: 7, eventId: EVENT_ID });
-    await dispatchPush(worker, { v: 1, kind: "deadline", detail: "detailed", itemType: "goal", itemId: 9, eventId: EVENT_ID, itemTitle: "Finish <paper>", context: "Study", deadline: "2026-12-31" });
-    await dispatchPush(worker, { v: 1, kind: "deadline", detail: "detailed", itemType: "task", itemId: 10, eventId: EVENT_ID, itemTitle: "Submit", context: null, deadline: "2028-02-29" });
+    await dispatchPush(worker, { v: 2, kind: "test" });
+    await dispatchPush(worker, { v: 2, kind: "digest", detail: "generic", eventId: EVENT_ID, todayCount: 2, tomorrowCount: 1, overdueCount: 3 });
+    await dispatchPush(worker, { v: 2, kind: "digest", detail: "generic", eventId: EVENT_ID, todayCount: 0, tomorrowCount: 0, overdueCount: 0 });
+    await dispatchPush(worker, { v: 2, kind: "digest", detail: "detailed", eventId: EVENT_ID, todayCount: 2, tomorrowCount: 1, overdueCount: 3, titles: ["Finish <paper>", "Submit"], remainingCount: 4 });
 
     expect(worker.notifications).toEqual([
-      { title: "Draw", options: { body: "Notifications are enabled", tag: "draw-push-test", data: { v: 1, route: "/settings" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
-      { title: "Draw", options: { body: "You have an upcoming deadline in Draw", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/tasks?focus=7&showDone=1" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
-      { title: "Finish <paper>", options: { body: "Study · Due 2026-12-31", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/goals?focus=9" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
-      { title: "Submit", options: { body: "Due 2028-02-29", tag: `draw-deadline-${EVENT_ID}`, data: { v: 1, route: "/tasks?focus=10&showDone=1" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
+      { title: "Draw", options: { body: "Notifications are enabled", tag: "draw-push-test", data: { v: 2, route: "/settings" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
+      { title: "Good morning", options: { body: "Today: 2 · Tomorrow: 1 · Overdue: 3", tag: `draw-digest-${EVENT_ID}`, data: { v: 2, route: "/today" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
+      { title: "Good morning", options: { body: "Nothing due today or tomorrow · Overdue: 0", tag: `draw-digest-${EVENT_ID}`, data: { v: 2, route: "/today" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
+      { title: "Good morning", options: { body: "Finish <paper>\nSubmit\n…and 4 more\nToday: 2 · Tomorrow: 1 · Overdue: 3", tag: `draw-digest-${EVENT_ID}`, data: { v: 2, route: "/today" }, icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE } },
     ]);
     for (const notification of worker.notifications) {
       expect(notification.options).not.toHaveProperty("image");
@@ -171,89 +171,58 @@ test.describe("production-served closed Push worker protocol", () => {
     expect(worker.cacheCalls).toEqual([]);
   });
 
-  test("rejects absent, malformed, oversized, unknown, extra and noncanonical payloads", async () => {
+  test("rejects malformed, inconsistent, oversized, non-UTF-8, v1, deadline, and extra-key payloads", async () => {
     const worker = executeWorker(source);
     await dispatchPush(worker);
     await dispatchPush(worker, undefined, Uint8Array.of(0xff));
     await dispatchPush(worker, undefined, new Uint8Array(3_073));
+    const valid = { v: 2, kind: "digest", detail: "detailed", eventId: EVENT_ID, todayCount: 1, tomorrowCount: 0, overdueCount: 0, titles: ["x"], remainingCount: 0 };
     const rejected: unknown[] = [
-      null,
-      [],
-      { v: 2, kind: "test" },
-      { v: 1, kind: "test", extra: true },
-      { v: 1, kind: "deadline", detail: "generic", itemType: "task", itemId: 0, eventId: EVENT_ID },
-      { v: 1, kind: "deadline", detail: "generic", itemType: "task", itemId: 1.5, eventId: EVENT_ID },
-      { v: 1, kind: "deadline", detail: "generic", itemType: "other", itemId: 1, eventId: EVENT_ID },
-      { v: 1, kind: "deadline", detail: "generic", itemType: "goal", itemId: 1, eventId: "AAAAAAAAAAAAAAAAAAAAAB" },
-      { v: 1, kind: "deadline", detail: "generic", itemType: "goal", itemId: 1, eventId: `${EVENT_ID}= ` },
-      { v: 1, kind: "deadline", detail: "detailed", itemType: "goal", itemId: 1, eventId: EVENT_ID, itemTitle: "x", context: null, deadline: "2026-02-30" },
-      { v: 1, kind: "deadline", detail: "detailed", itemType: "goal", itemId: 1, eventId: EVENT_ID, itemTitle: "x", context: 4, deadline: "2026-01-01" },
-      { v: 1, kind: "deadline", detail: "detailed", itemType: "goal", itemId: 1, eventId: EVENT_ID, itemTitle: "x", context: null, deadline: "2026-1-01" },
-      { v: 1, kind: "deadline", detail: "generic", itemType: "goal", itemId: 1, eventId: EVENT_ID, url: "https://evil.test" },
+      null, [], { v: 1, kind: "test" }, { v: 2, kind: "test", extra: true },
+      { v: 1, kind: "deadline" }, { ...valid, eventId: "AAAAAAAAAAAAAAAAAAAAAB" },
+      { ...valid, todayCount: -1 }, { ...valid, tomorrowCount: 1.5 },
+      { ...valid, titles: ["1", "2", "3", "4", "5", "6"], remainingCount: 0 },
+      { ...valid, titles: [1], remainingCount: 0 }, { ...valid, remainingCount: 1 },
+      { ...valid, unknown: true },
     ];
     for (const field of ["icon", "badge", "image", "actions", "url"]) {
-      rejected.push({ v: 1, kind: "test", [field]: field === "actions" ? [] : "https://evil.test/asset" });
+      rejected.push({ v: 2, kind: "test", [field]: field === "actions" ? [] : "https://evil.test/asset" });
     }
     for (const payload of rejected) await dispatchPush(worker, payload);
     expect(worker.notifications).toEqual([]);
     expect(worker.cacheCalls).toEqual([]);
   });
 
-  test("precache v5 is exact and activation removes v4 without changing lifecycle", async () => {
+  test("precache v5 remains exact without a protocol-only cache bump", async () => {
     const worker = executeWorker(source, "https://draw.test", ["draw-shell-v4", "draw-shell-v5"]);
     await dispatchLifecycle(worker, "install");
     await dispatchLifecycle(worker, "activate");
-
-    expect(worker.cacheAdds).toEqual([{
-      cache: "draw-shell-v5",
-      entries: [
-        "/",
-        "/manifest.webmanifest",
-        "/icons/icon-192.png",
-        "/icons/icon-512.png",
-        "/icons/notification-badge-96.png",
-      ],
-    }]);
+    expect(worker.cacheAdds[0]).toEqual({ cache: "draw-shell-v5", entries: ["/", "/manifest.webmanifest", "/icons/icon-192.png", "/icons/icon-512.png", "/icons/notification-badge-96.png"] });
     expect(worker.deletedCaches).toEqual(["draw-shell-v4"]);
     expect(worker.lifecycleCalls).toEqual(["skipWaiting", "claim"]);
   });
 
-  test("closes first, navigates and focuses the first same-origin window", async () => {
+  test("closes first, navigates/focuses /today, or opens /settings", async () => {
     const worker = executeWorker(source);
     const calls: string[] = [];
-    worker.clients.push(
-      { url: "https://elsewhere.test/", navigate: viNever, focus: viNever },
-      { url: "https://draw.test/old", navigate: async (url: string) => { calls.push(`navigate:${url}`); }, focus: async () => { calls.push("focus"); } },
-      { url: "https://draw.test/second", navigate: viNever, focus: viNever },
-    );
-    expect(await dispatchClick(worker, { v: 1, route: "/tasks?focus=7&showDone=1" })).toEqual(["close", "waitUntil"]);
-    expect(calls).toEqual(["navigate:https://draw.test/tasks?focus=7&showDone=1", "focus"]);
-    expect(worker.opened).toEqual([]);
-  });
-
-  test("opens a canonical same-origin route when no same-origin window exists", async () => {
-    const worker = executeWorker(source);
-    worker.clients.push({ url: "https://elsewhere.test/" });
-    await dispatchClick(worker, { v: 1, route: "/goals?focus=3" });
-    expect(worker.opened).toEqual(["https://draw.test/goals?focus=3"]);
+    worker.clients.push({ url: "https://draw.test/old", navigate: async (url: string) => { calls.push(`navigate:${url}`); }, focus: async () => { calls.push("focus"); } });
+    expect(await dispatchClick(worker, { v: 2, route: "/today" })).toEqual(["close", "waitUntil"]);
+    expect(calls).toEqual(["navigate:https://draw.test/today", "focus"]);
+    const opened = executeWorker(source);
+    await dispatchClick(opened, { v: 2, route: "/settings" });
+    expect(opened.opened).toEqual(["https://draw.test/settings"]);
   });
 
   test("rejects every noncanonical or attacker-controlled click route after closing", async () => {
-    const rejected = [
-      "https://draw.test/settings", "//evil.test/settings", "/settings?x=1", "/settings#x",
-      "/tasks?showDone=1&focus=1", "/tasks?focus=1", "/tasks?focus=1&showDone=1&x=1",
-      "/tasks?focus=1&focus=2&showDone=1", "/tasks?focus=%31&showDone=1",
-      "/tasks?focus=+1&showDone=1", "/tasks?focus=0&showDone=1", "/tasks?focus=01&showDone=1",
-      "/tasks?focus=1.0&showDone=1", "/tasks?focus=1e2&showDone=1", "/tasks?focus=9007199254740992&showDone=1",
-      "/goals?focus=%31", "/goals?focus=1#x", "/goals?focus=1&x=2",
-    ];
-    for (const route of rejected) {
+    for (const route of ["https://draw.test/today", "//evil.test/today", "/today?x=1", "/today#x", "/tasks", "/goals"]) {
       const worker = executeWorker(source);
-      expect(await dispatchClick(worker, { v: 1, route }), route).toEqual(["close"]);
+      expect(await dispatchClick(worker, { v: 2, route }), route).toEqual(["close"]);
       expect(worker.opened, route).toEqual([]);
     }
+    const old = executeWorker(source);
+    expect(await dispatchClick(old, { v: 1, route: "/today" })).toEqual(["close"]);
     const extra = executeWorker(source);
-    expect(await dispatchClick(extra, { v: 1, route: "/settings", extra: true })).toEqual(["close"]);
+    expect(await dispatchClick(extra, { v: 2, route: "/settings", extra: true })).toEqual(["close"]);
   });
 });
 
@@ -515,9 +484,14 @@ async function exerciseSyntheticSettings(page: Page) {
   });
   await installSyntheticPushBrowser(page);
   await page.goto(`${PROD}/settings`);
-  await expect(page.getByRole("heading", { name: "Deadline notifications" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Daily digest notifications" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Enable" })).toBeVisible();
   await expect(page.getByText("Other device")).toBeVisible();
+  await expect(page.getByText(
+    "Enrolled devices receive one daily digest. Delivery is best effort while the Draw server runs; provider retention ends after at most three hours and never crosses the saved-zone local day.",
+  )).toBeVisible();
+  await expect(page.locator(".push-notifications")).not.toContainText("Lead days");
+  await expect(page.locator(".push-notifications")).not.toContainText("deadline reminder");
   const preference = page.getByRole("checkbox", { name: "Hide notification details" });
   // The controlled checkbox intentionally keeps the prior server value while
   // the PUT is pending; click (rather than check's immediate-state contract),
@@ -525,23 +499,21 @@ async function exerciseSyntheticSettings(page: Page) {
   await preference.click();
   await expect(preference).toBeChecked();
   expect(putBody).toEqual({ hideDetails: true });
-
-  await page.getByLabel("Remind me").selectOption("2");
   await page.getByLabel("Send time").fill("10:15");
   await page.getByLabel("Time zone (IANA)").fill("UTC");
   await page.getByRole("checkbox", { name: "Quiet hours" }).check();
   await page.getByLabel("Start").fill("21:00");
   await page.getByLabel("End", { exact: true }).fill("07:30");
-  await page.getByRole("button", { name: "Save reminder timing" }).click();
-  await expect(page.getByText("Reminder timing saved.")).toBeVisible();
-  expect(putBody).toEqual({ leadDays: 2, sendTime: "10:15", timezone: "UTC", quietStart: "21:00", quietEnd: "07:30" });
+  await page.getByRole("button", { name: "Save digest timing" }).click();
+  await expect(page.getByText("Digest timing saved.")).toBeVisible();
+  expect(putBody).toEqual({ sendTime: "10:15", timezone: "UTC", quietStart: "21:00", quietEnd: "07:30" });
   const panel = page.locator(".push-notifications");
   const bounds = await panel.boundingBox();
   expect(bounds).not.toBeNull();
   expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
 }
 
-test.describe("production durable Push landings", () => {
+test.describe("production durable item landings", () => {
   test("reveals a done task, clears work mode, consumes owned URL fields and flashes the row", async ({ page }) => {
     const categoriesResponse = await page.request.get(`${PROD}/api/categories`);
     expect(categoriesResponse.ok()).toBeTruthy();
@@ -598,7 +570,7 @@ test.describe("production durable Push landings", () => {
 
     const categories = await (await page.request.get(`${PROD}/api/categories`)).json() as Array<{ id: number }>;
     const created = await page.request.post(`${PROD}/api/tasks`, {
-      data: { title: "Archived Push landing", categoryId: categories[0].id },
+      data: { title: "Archived item landing", categoryId: categories[0].id },
     });
     const task = await created.json() as { id: number };
     expect((await page.request.patch(`${PROD}/api/tasks/${task.id}`, { data: { status: "archived" } })).ok()).toBeTruthy();
@@ -614,14 +586,14 @@ test.describe("production durable Push landings", () => {
       expect(response.ok()).toBeTruthy();
       return response.json() as Promise<{ id: number }>;
     };
-    const resolved = await createGoal("Resolved Push landing");
+    const resolved = await createGoal("Resolved item landing");
     expect((await page.request.patch(`${PROD}/api/goals/${resolved.id}`, { data: { status: "achieved" } })).ok()).toBeTruthy();
     await page.goto(`${PROD}/goals?focus=${resolved.id}&keep=resolved#quiet`);
     await expect(page).toHaveURL(`${PROD}/goals?keep=resolved#quiet`);
     await expect(page.locator(`[data-goal-id="${resolved.id}"]`)).toHaveCount(0);
     await expect(page.getByRole("alert")).toHaveCount(0);
 
-    const deleted = await createGoal("Deleted Push landing");
+    const deleted = await createGoal("Deleted item landing");
     expect((await page.request.delete(`${PROD}/api/goals/${deleted.id}`)).ok()).toBeTruthy();
     await page.goto(`${PROD}/goals?focus=${deleted.id}`);
     await expect(page).toHaveURL(`${PROD}/goals`);
@@ -630,12 +602,12 @@ test.describe("production durable Push landings", () => {
   });
 });
 
-test.describe("password-gated production Push landing", () => {
+test.describe("password-gated production item landing", () => {
   test("retains the exact focused deep link through unlock, then consumes it", async ({ page }) => {
-    const port = process.env.E2E_PUSH_AUTH_PORT || "34604";
+    const port = process.env.E2E_ITEM_LANDING_AUTH_PORT || "34604";
     const base = `http://127.0.0.1:${port}`;
-    const password = "push-landing-e2e-password";
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-e2e-push-auth-"));
+    const password = "item-landing-e2e-password";
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-e2e-item-landing-auth-"));
     const server = spawn(process.execPath, [path.resolve(__dirname, "..", "node_modules", "tsx", "dist", "cli.mjs"), "src/prod.ts"], {
       cwd: path.resolve(__dirname, "..", "server"),
       env: { ...process.env, DATA_DIR: dataDir, API_PORT: port, HOST: "", DRAW_PASSWORD: password, ANTHROPIC_API_KEY: "" },
@@ -645,8 +617,8 @@ test.describe("password-gated production Push landing", () => {
       const deadline = Date.now() + 60_000;
       for (;;) {
         try { if ((await fetch(`${base}/api/health`)).ok) break; } catch { /* wait */ }
-        if (server.exitCode !== null) throw new Error(`Push auth server exited early (${server.exitCode})`);
-        if (Date.now() > deadline) throw new Error("Push auth server did not become healthy");
+        if (server.exitCode !== null) throw new Error(`Item-landing auth server exited early (${server.exitCode})`);
+        if (Date.now() > deadline) throw new Error("Item-landing auth server did not become healthy");
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
       const headers = { "content-type": "application/json", "x-draw-password": password };
@@ -654,7 +626,7 @@ test.describe("password-gated production Push landing", () => {
       const created = await fetch(`${base}/api/tasks`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ title: "Password-gated Push landing", categoryId: categories[0].id }),
+        body: JSON.stringify({ title: "Password-gated item landing", categoryId: categories[0].id }),
       });
       expect(created.ok).toBeTruthy();
       const task = await created.json() as { id: number };
@@ -680,9 +652,9 @@ test.describe("password-gated production Push landing", () => {
   });
 });
 
-test.describe("Deadline notification composed production journey", () => {
-  test("flows from typed timing and a real task through the production scheduler and built worker landing", async ({ page }) => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "draw-deadline-composed-"));
+test.describe("Daily digest composed production journey", () => {
+  test("flows detailed, Hide-details and zero-item variants through production assembly and the built worker", async ({ page }) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "draw-digest-composed-"));
     const moduleData = path.join(root, "module-data");
     const assemblyData = path.join(root, "assembly-data");
     fs.mkdirSync(moduleData);
@@ -695,7 +667,8 @@ test.describe("Deadline notification composed production journey", () => {
     ]);
     const database = dbModule.db;
     const captured: Buffer[] = [];
-    let providerRequests = 0;
+    const requests: Array<{ ttl: string | undefined; topic: string | undefined }> = [];
+    let schedulerNow = new Date("2026-09-20T09:00:00Z");
     const keys = webPush.generateVAPIDKeys();
     const assembly = startProduction({
       database,
@@ -704,15 +677,22 @@ test.describe("Deadline notification composed production journey", () => {
       host: "127.0.0.1",
       port: 0,
       env: { BACKUP_INTERVAL_HOURS: "0", UPDATE_CHECK_INTERVAL_HOURS: "0" },
-      deadlineNow: () => new Date("2026-09-20T09:00:00Z"),
-      deadlineTimer: { set: () => ({ unref() {} }), clear() {} },
+      digestNow: () => schedulerNow,
+      digestTimer: { set: () => ({ unref() {} }), clear() {} },
       resolverFactory: () => ({
         resolve4: async () => ["8.8.8.8"],
         resolve6: async () => { throw Object.assign(new Error("none"), { code: "ENODATA" }); },
         cancel() {},
       }),
-      pushTransport: { send: async () => { providerRequests += 1; return "success"; } },
-      observeDeadlinePayload: (payload) => captured.push(payload),
+      generateRequestDetails: (subscription, _payload, options) => ({
+        endpoint: subscription.endpoint, method: "POST",
+        headers: { TTL: String(options.TTL), Topic: String(options.topic) }, body: Buffer.from("encrypted"),
+      }),
+      pushTransport: { send: async ({ details }) => {
+        requests.push({ ttl: String(details.headers.TTL), topic: String(details.headers.Topic) });
+        return "success";
+      } },
+      observeDigestPayload: (payload) => captured.push(payload),
     });
     try {
       await new Promise<void>((resolve) => assembly.server.listening ? resolve() : assembly.server.once("listening", resolve));
@@ -723,15 +703,18 @@ test.describe("Deadline notification composed production journey", () => {
       const status = await (await fetch(`${origin}/api/push/status`)).json() as { vapidPublicKey: string };
       expect(status.vapidPublicKey).toMatch(/^[A-Za-z0-9_-]{87}$/);
 
-      const timing = { leadDays: 0, sendTime: "09:00", timezone: "UTC", quietStart: null, quietEnd: null };
+      const timing = { sendTime: "09:00", timezone: "UTC", quietStart: null, quietEnd: null };
       expect(await (await fetch(`${origin}/api/push/preferences`, {
         method: "PUT", headers: mutation, body: JSON.stringify(timing),
       })).json()).toEqual(timing);
       const categories = await (await fetch(`${origin}/api/categories`)).json() as Array<{ id: number }>;
-      const created = await (await fetch(`${origin}/api/tasks`, {
+      for (const [title, dueDate] of [
+        ["Old task", "2026-09-18"], ["Today one", "2026-09-20"], ["Today two", "2026-09-20"],
+        ["Tomorrow one", "2026-09-21"], ["Tomorrow two", "2026-09-21"], ["Tomorrow three", "2026-09-21"],
+      ]) await fetch(`${origin}/api/tasks`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: "Composed deadline", categoryId: categories[0].id, dueDate: "2026-09-20" }),
-      })).json() as { id: number };
+        body: JSON.stringify({ title, categoryId: categories[0].id, dueDate }),
+      });
       const enrolled = await fetch(`${origin}/api/push/subscriptions`, {
         method: "POST", headers: mutation,
         body: JSON.stringify({ subscription: {
@@ -741,30 +724,39 @@ test.describe("Deadline notification composed production journey", () => {
       });
       expect(enrolled.status).toBe(201);
 
-      expect(database.prepare("SELECT due_date AS dueDate,status FROM tasks WHERE id=?").get(created.id))
-        .toEqual({ dueDate: "2026-09-20", status: "open" });
+      expect(database.prepare("SELECT COUNT(*) AS count FROM tasks").get()).toEqual({ count: 6 });
       expect(database.prepare("SELECT COUNT(*) AS count FROM push_subscriptions").get()).toEqual({ count: 1 });
-      await assembly.deadlineScheduler?.runNow();
-      expect(database.prepare("SELECT COUNT(*) AS count FROM deadline_reminder_claims").get()).toEqual({ count: 1 });
-      expect(providerRequests).toBe(1);
-      expect(captured).toHaveLength(1);
-      const payload = JSON.parse(captured[0].toString("utf8"));
-      expect(payload).toMatchObject({
-        v: 1, kind: "deadline", detail: "detailed", itemType: "task", itemId: created.id,
-        itemTitle: "Composed deadline", deadline: "2026-09-20",
-      });
+      await assembly.digestScheduler?.runNow();
+      expect(database.prepare("SELECT COUNT(*) AS count FROM daily_digest_claims").get()).toEqual({ count: 1 });
+      expect(requests).toEqual([{ ttl: "10800", topic: crypto.createHash("sha256").update(JSON.stringify(["digest", "2026-09-20"])).digest().subarray(0, 16).toString("base64url") }]);
+      const detailed = JSON.parse(captured[0].toString("utf8"));
+      expect(detailed).toMatchObject({ v: 2, kind: "digest", detail: "detailed", overdueCount: 1, todayCount: 2, tomorrowCount: 3, remainingCount: 1 });
+      expect(detailed.titles).toHaveLength(5);
 
       const workerSource = await (await fetch(`${origin}/sw.js`)).text();
       const worker = executeWorker(workerSource, origin);
-      await dispatchPush(worker, payload);
-      expect(worker.notifications).toHaveLength(1);
-      expect(worker.notifications[0]).toMatchObject({ title: "Composed deadline" });
+      await dispatchPush(worker, detailed);
+      expect(worker.notifications[0]).toMatchObject({ title: "Good morning" });
       await dispatchClick(worker, worker.notifications[0].options.data);
-      expect(worker.opened).toEqual([`${origin}/tasks?focus=${created.id}&showDone=1`]);
+      expect(worker.opened).toEqual([`${origin}/today`]);
       await page.goto(worker.opened[0]);
-      await expect(page.getByTestId("task-tree").locator(`[data-task-id="${created.id}"]`)).toHaveClass(/palette-flash/);
+      await expect(page).toHaveURL(`${origin}/today`);
+
+      await fetch(`${origin}/api/push/preferences`, { method: "PUT", headers: mutation, body: JSON.stringify({ hideDetails: true }) });
+      schedulerNow = new Date("2026-09-21T09:00:00Z");
+      await assembly.digestScheduler?.runNow();
+      expect(JSON.parse(captured[1].toString("utf8"))).toMatchObject({ v: 2, kind: "digest", detail: "generic" });
+
+      database.prepare("DELETE FROM tasks").run();
+      database.prepare("DELETE FROM goals").run();
+      schedulerNow = new Date("2026-09-22T09:00:00Z");
+      await assembly.digestScheduler?.runNow();
+      expect(JSON.parse(captured[2].toString("utf8"))).toEqual(expect.objectContaining({
+        v: 2, kind: "digest", detail: "generic", overdueCount: 0, todayCount: 0, tomorrowCount: 0,
+      }));
+      expect(requests).toHaveLength(3);
     } finally {
-      assembly.deadlineScheduler?.stop();
+      assembly.digestScheduler?.stop();
       await new Promise<void>((resolve) => assembly.server.close(() => resolve()));
       database.close();
       if (previousDataDir === undefined) delete process.env.DATA_DIR;
@@ -774,7 +766,7 @@ test.describe("Deadline notification composed production journey", () => {
   });
 });
 
-test.describe("Deadline notification Settings — desktop production build", () => {
+test.describe("Daily digest notification Settings — desktop production build", () => {
   test.use({ viewport: { width: 1080, height: 800 } });
   test("uses synthetic browser/API seams without real enrollment", async ({ page }) => {
     await exerciseSyntheticSettings(page);
@@ -803,12 +795,12 @@ test.describe("Deadline notification Settings — desktop production build", () 
     await page.goto(`${PROD}/settings`);
     const panel = page.locator(".push-notifications");
     for (const text of [
-      "Deadline notifications require HTTPS, or direct localhost access.",
+      "Daily digest notifications require HTTPS, or direct localhost access.",
       "The Draw service worker is not available in this browser. Reload the production app and try again.",
       "This browser does not support Web Push.",
       "This browser does not support notifications.",
-      "Deadline notifications are unavailable because the server Push authority could not be loaded. Check the server logs.",
-      "Open Draw over HTTPS, or directly on localhost, to manage deadline notifications.",
+      "Daily digest notifications are unavailable because the server Push authority could not be loaded. Check the server logs.",
+      "Open Draw over HTTPS, or directly on localhost, to manage daily digest notifications.",
     ]) await expect(panel.getByText(text)).toBeVisible();
     await expect(panel).not.toContainText("DRAW_PASSWORD");
     await expect(panel).not.toContainText("set a password");
@@ -818,7 +810,7 @@ test.describe("Deadline notification Settings — desktop production build", () 
     await page.route("**/api/push/status", (route) => route.abort());
     await page.goto(`${PROD}/settings`);
     const panel = page.locator(".push-notifications");
-    await expect(panel).toContainText("Could not load deadline notification status. Check the connection and try again.");
+    await expect(panel).toContainText("Could not load daily digest notification status. Check the connection and try again.");
     await expect(panel.getByRole("button", { name: "Retry" })).toBeVisible();
   });
 
@@ -1117,8 +1109,8 @@ test.describe("Deadline notification Settings — desktop production build", () 
     const preference = page.getByRole("checkbox", { name: "Hide notification details" });
     await preference.click();
     await expect(preference).toBeChecked();
-    await expect(page.getByText("Could not load deadline notification status. Check the connection and try again.")).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Deadline notifications" })).toBeVisible();
+    await expect(page.getByText("Could not load daily digest notification status. Check the connection and try again.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Daily digest notifications" })).toBeVisible();
   });
 
   for (const detection of ["invalid", "whitespace", "throws", "blank"] as const) {
@@ -1153,8 +1145,8 @@ test.describe("Deadline notification Settings — desktop production build", () 
       await expect(timezone).toHaveValue("");
       expect(writes).toBe(0);
       await timezone.fill("UTC");
-      await page.getByRole("button", { name: "Save reminder timing" }).click();
-      await expect(page.getByText("Reminder timing saved.")).toBeVisible();
+      await page.getByRole("button", { name: "Save digest timing" }).click();
+      await expect(page.getByText("Digest timing saved.")).toBeVisible();
       expect(writes).toBe(1);
       expect(body).toMatchObject({ timezone: "UTC" });
     });
@@ -1174,11 +1166,11 @@ test.describe("Deadline notification Settings — desktop production build", () 
     }));
     await installControlledSyntheticPushBrowser(page);
     await page.goto(`${PROD}/settings`);
-    const lead = page.getByLabel("Remind me");
-    await lead.selectOption("2");
-    await page.getByRole("button", { name: "Save reminder timing" }).click();
-    await expect(lead).toHaveValue("2");
-    await expect(page.getByRole("status")).toHaveText("Could not load deadline notification status. Check the connection and try again.");
+    const sendTime = page.getByLabel("Send time");
+    await sendTime.fill("10:15");
+    await page.getByRole("button", { name: "Save digest timing" }).click();
+    await expect(sendTime).toHaveValue("10:15");
+    await expect(page.getByRole("status")).toHaveText("Could not load daily digest notification status. Check the connection and try again.");
   });
 
   test("adopts a committed timing PUT from readback when the response is lost", async ({ page }) => {
@@ -1193,12 +1185,12 @@ test.describe("Deadline notification Settings — desktop production build", () 
     });
     await installControlledSyntheticPushBrowser(page);
     await page.goto(`${PROD}/settings`);
-    const lead = page.getByLabel("Remind me");
-    await lead.selectOption("2");
-    await page.getByRole("button", { name: "Save reminder timing" }).click();
-    await expect(lead).toHaveValue("2");
+    const sendTime = page.getByLabel("Send time");
+    await sendTime.fill("10:15");
+    await page.getByRole("button", { name: "Save digest timing" }).click();
+    await expect(sendTime).toHaveValue("10:15");
     await expect(page.getByRole("status")).toHaveText(
-      "Could not confirm whether reminder timing was saved. Check the current values before trying again.",
+      "Could not confirm whether digest timing was saved. Check the current values before trying again.",
     );
   });
 
@@ -1215,12 +1207,12 @@ test.describe("Deadline notification Settings — desktop production build", () 
       await page.route("**/api/push/preferences", (route) => route.fulfill(response.fulfill));
       await installControlledSyntheticPushBrowser(page);
       await page.goto(`${PROD}/settings`);
-      const lead = page.getByLabel("Remind me");
-      await lead.selectOption("2");
-      await page.getByRole("button", { name: "Save reminder timing" }).click();
-      await expect(lead).toHaveValue("1");
+      const sendTime = page.getByLabel("Send time");
+      await sendTime.fill("10:15");
+      await page.getByRole("button", { name: "Save digest timing" }).click();
+      await expect(sendTime).toHaveValue("09:00");
       await expect(page.getByRole("status")).toHaveText(
-        "Could not confirm whether reminder timing was saved. Check the current values before trying again.",
+        "Could not confirm whether digest timing was saved. Check the current values before trying again.",
       );
     });
   }
@@ -1237,12 +1229,12 @@ test.describe("Deadline notification Settings — desktop production build", () 
     await page.route("**/api/push/preferences", (route) => route.abort("failed"));
     await installControlledSyntheticPushBrowser(page);
     await page.goto(`${PROD}/settings`);
-    const lead = page.getByLabel("Remind me");
-    await lead.selectOption("2");
-    await page.getByRole("button", { name: "Save reminder timing" }).click();
-    await expect(lead).toHaveValue("2");
+    const sendTime = page.getByLabel("Send time");
+    await sendTime.fill("10:15");
+    await page.getByRole("button", { name: "Save digest timing" }).click();
+    await expect(sendTime).toHaveValue("10:15");
     await expect(page.getByRole("status")).toHaveText(
-      "Could not confirm whether reminder timing was saved. Check the current values before trying again.",
+      "Could not confirm whether digest timing was saved. Check the current values before trying again.",
     );
   });
 
@@ -1251,7 +1243,7 @@ test.describe("Deadline notification Settings — desktop production build", () 
       name: "400 rejection",
       putStatus: 400,
       readback: syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } }),
-      message: "Check the reminder timing and time zone. No settings were changed.",
+      message: "Check the digest timing and time zone. No settings were changed.",
     },
     {
       name: "503 rejection with unavailable status",
@@ -1262,7 +1254,7 @@ test.describe("Deadline notification Settings — desktop production build", () 
         vapidPublicKey: null,
         preferences: { ...timingPreferences(), timezone: "UTC" },
       }),
-      message: "Deadline notifications are unavailable until Draw restarts and completes Push recovery.",
+      message: "Daily digest notifications are unavailable until Draw restarts and completes Push recovery.",
     },
   ]) {
     test(`restores controls from an identical authoritative readback after a ${rejection.name}`, async ({ page }) => {
@@ -1282,10 +1274,10 @@ test.describe("Deadline notification Settings — desktop production build", () 
       }));
       await installControlledSyntheticPushBrowser(page);
       await page.goto(`${PROD}/settings`);
-      const lead = page.getByLabel("Remind me");
-      await lead.selectOption("2");
-      await page.getByRole("button", { name: "Save reminder timing" }).click();
-      await expect(lead).toHaveValue("1");
+      const sendTime = page.getByLabel("Send time");
+      await sendTime.fill("10:15");
+      await page.getByRole("button", { name: "Save digest timing" }).click();
+      await expect(sendTime).toHaveValue("09:00");
       await expect(page.getByRole("status")).toHaveText(rejection.message);
     });
   }
@@ -1294,7 +1286,7 @@ test.describe("Deadline notification Settings — desktop production build", () 
     let statusReads = 0;
     const initial = syntheticStatus({ preferences: { ...timingPreferences(), timezone: "UTC" } });
     const changed = syntheticStatus({ preferences: {
-      ...timingPreferences(), leadDays: 7, sendTime: "10:15", timezone: "Europe/Berlin",
+      ...timingPreferences(), sendTime: "10:15", timezone: "Europe/Berlin",
     } });
     await page.route("**/api/push/status", (route) => {
       statusReads++;
@@ -1307,13 +1299,11 @@ test.describe("Deadline notification Settings — desktop production build", () 
     }));
     await installControlledSyntheticPushBrowser(page);
     await page.goto(`${PROD}/settings`);
-    await page.getByLabel("Remind me").selectOption("2");
     await page.getByLabel("Time zone (IANA)").fill("America/New_York");
-    await page.getByRole("button", { name: "Save reminder timing" }).click();
-    await expect(page.getByLabel("Remind me")).toHaveValue("7");
+    await page.getByRole("button", { name: "Save digest timing" }).click();
     await expect(page.getByLabel("Send time")).toHaveValue("10:15");
     await expect(page.getByLabel("Time zone (IANA)")).toHaveValue("Europe/Berlin");
-    await expect(page.getByRole("status")).toHaveText("Check the reminder timing and time zone. No settings were changed.");
+    await expect(page.getByRole("status")).toHaveText("Check the digest timing and time zone. No settings were changed.");
   });
 
   test("restores the last loaded controls after invalid input when readback fails", async ({ page }) => {
@@ -1332,12 +1322,12 @@ test.describe("Deadline notification Settings — desktop production build", () 
     }));
     await installControlledSyntheticPushBrowser(page);
     await page.goto(`${PROD}/settings`);
-    const lead = page.getByLabel("Remind me");
-    await lead.selectOption("2");
-    await page.getByRole("button", { name: "Save reminder timing" }).click();
-    await expect(lead).toHaveValue("1");
+    const sendTime = page.getByLabel("Send time");
+    await sendTime.fill("10:15");
+    await page.getByRole("button", { name: "Save digest timing" }).click();
+    await expect(sendTime).toHaveValue("09:00");
     await expect(page.getByRole("status")).toHaveText(
-      "Check the reminder timing and time zone. No settings were changed.",
+      "Check the digest timing and time zone. No settings were changed.",
     );
   });
 
@@ -1503,7 +1493,7 @@ test.describe("Deadline notification Settings — desktop production build", () 
   });
 });
 
-test.describe("Deadline notification Settings — Pixel 7 production build", () => {
+test.describe("Daily digest notification Settings — Pixel 7 production build", () => {
   test.use({ ...PIXEL_7 });
   test("keeps controls responsive with synthetic browser/API seams", async ({ page }) => {
     await exerciseSyntheticSettings(page);

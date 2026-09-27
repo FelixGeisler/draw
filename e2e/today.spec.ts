@@ -14,7 +14,7 @@ function pushStatus(timezone: unknown = "UTC") {
     mutationReason: "secure-transport-required",
     vapidPublicKey: null,
     maxDevices: 16,
-    preferences: { hideDetails: false, leadDays: 1, sendTime: "09:00", timezone, quietStart: null, quietEnd: null },
+    preferences: { hideDetails: false, sendTime: "09:00", timezone, quietStart: null, quietEnd: null },
     devices: [],
   };
 }

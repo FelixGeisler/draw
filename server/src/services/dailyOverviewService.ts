@@ -18,30 +18,52 @@ export interface DailyOverviewGroups {
   tomorrow: DailyOverviewItem[];
 }
 
-interface CandidateRow extends DailyOverviewItem {}
-
-const CANDIDATES_SQL = `
-  SELECT 'task' AS type, id, title, due_date AS date
-  FROM tasks
-  WHERE status = 'open' AND due_date IS NOT NULL
-  UNION ALL
-  SELECT 'goal' AS type, id, title, target_date AS date
-  FROM goals
-  WHERE status = 'active' AND target_date IS NOT NULL
-`;
-
-function compareItems(left: DailyOverviewItem, right: DailyOverviewItem): number {
-  if (left.date !== right.date) return left.date < right.date ? -1 : 1;
-  if (left.type !== right.type) return left.type < right.type ? -1 : 1;
-  return left.id - right.id;
+export interface DailyDigestProjection {
+  overdueCount: number;
+  todayCount: number;
+  tomorrowCount: number;
+  titles: string[];
 }
 
-/**
- * Read and classify deadline state for an explicit local calendar date.
- * This is the neutral server-domain boundary shared by HTTP now and the
- * digest sender later. It performs no writes and deliberately ignores deck
- * drawability, hierarchy, snooze, sequential and availability-window state.
- */
+// Both public projections are built from this one eligible relation. Date
+// validation is deliberately in SQL so malformed legacy rows cannot enter
+// either the aggregate or the bounded title read.
+export const DAILY_OVERVIEW_ELIGIBLE_SQL = `
+  eligible(type,id,title,date,created_at) AS MATERIALIZED (
+    SELECT 'task', id, title, due_date, created_at
+    FROM tasks
+    WHERE status = 'open' AND due_date IS NOT NULL
+      AND length(due_date)=10
+      AND due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+      AND substr(due_date,1,4) <> '0000'
+      AND strftime('%Y-%m-%d', due_date) = due_date
+    UNION ALL
+    SELECT 'goal', id, title, target_date, created_at
+    FROM goals
+    WHERE status = 'active' AND target_date IS NOT NULL
+      AND length(target_date)=10
+      AND target_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+      AND substr(target_date,1,4) <> '0000'
+      AND strftime('%Y-%m-%d', target_date) = target_date
+  )`;
+
+export const DAILY_DIGEST_COUNTS_SQL = `WITH ${DAILY_OVERVIEW_ELIGIBLE_SQL}
+  SELECT
+    COALESCE(SUM(CASE WHEN date < ? THEN 1 ELSE 0 END),0) AS overdueCount,
+    COALESCE(SUM(CASE WHEN date = ? THEN 1 ELSE 0 END),0) AS todayCount,
+    COALESCE(SUM(CASE WHEN date = ? THEN 1 ELSE 0 END),0) AS tomorrowCount
+  FROM eligible
+  WHERE date <= ?`;
+
+export const DAILY_DIGEST_TITLES_SQL = `WITH ${DAILY_OVERVIEW_ELIGIBLE_SQL}
+  SELECT title
+  FROM eligible
+  WHERE date <= ?
+  ORDER BY CASE WHEN date < ? THEN 0 WHEN date = ? THEN 1 ELSE 2 END,
+           date ASC, type ASC, id ASC, created_at ASC
+  LIMIT 5`;
+
+/** Read complete `/today` rows for an explicit local date. */
 export function dailyOverviewForDate(
   localDate: string,
   database: Database.Database = db,
@@ -49,25 +71,42 @@ export function dailyOverviewForDate(
   if (!validCalendarDate(localDate)) throw new Error("invalid local date");
   const tomorrowDate = addCalendarDays(localDate, 1);
   const groups: DailyOverviewGroups = { overdue: [], today: [], tomorrow: [] };
-  // At 9999-12-31 there is no representable tomorrow. Overdue and today are
-  // still meaningful; no candidate can qualify for the absent next day.
-  for (const row of database.prepare(CANDIDATES_SQL).all() as CandidateRow[]) {
-    if (
-      (row.type !== "goal" && row.type !== "task") ||
-      !Number.isSafeInteger(row.id) ||
-      row.id <= 0 ||
-      typeof row.title !== "string" ||
-      !validCalendarDate(row.date)
-    ) continue;
-
-    let group: DailyOverviewGroup | null = null;
-    if (row.date < localDate) group = "overdue";
-    else if (row.date === localDate) group = "today";
-    else if (tomorrowDate !== null && row.date === tomorrowDate) group = "tomorrow";
-    if (group !== null) groups[group].push({ type: row.type, id: row.id, title: row.title, date: row.date });
+  const upper = tomorrowDate ?? localDate;
+  const rows = database.prepare(`WITH ${DAILY_OVERVIEW_ELIGIBLE_SQL}
+    SELECT type,id,title,date
+    FROM eligible
+    WHERE date <= ?
+    ORDER BY date ASC,type ASC,id ASC,created_at ASC`).all(upper) as DailyOverviewItem[];
+  for (const row of rows) {
+    const group: DailyOverviewGroup | null = row.date < localDate
+      ? "overdue"
+      : row.date === localDate
+        ? "today"
+        : tomorrowDate !== null && row.date === tomorrowDate ? "tomorrow" : null;
+    if (group) groups[group].push(row);
   }
-  groups.overdue.sort(compareItems);
-  groups.today.sort(compareItems);
-  groups.tomorrow.sort(compareItems);
   return groups;
+}
+
+/**
+ * Digest-only bounded projection: complete counts are aggregated by SQLite
+ * while a separate query returns at most five title rows from the same CTE.
+ */
+export function dailyDigestForDate(
+  localDate: string,
+  database: Database.Database = db,
+): DailyDigestProjection {
+  if (!validCalendarDate(localDate)) throw new Error("invalid local date");
+  const tomorrowDate = addCalendarDays(localDate, 1);
+  const tomorrow = tomorrowDate ?? localDate;
+  const counts = database.prepare(DAILY_DIGEST_COUNTS_SQL).get(
+    localDate, localDate, tomorrow, tomorrow,
+  ) as Omit<DailyDigestProjection, "titles">;
+  const titles = (database.prepare(DAILY_DIGEST_TITLES_SQL).all(
+    tomorrow, localDate, localDate,
+  ) as { title: string }[]).map(({ title }) => title);
+  for (const count of [counts.overdueCount, counts.todayCount, counts.tomorrowCount]) {
+    if (!Number.isSafeInteger(count) || count < 0) throw new Error("invalid digest count");
+  }
+  return { ...counts, titles };
 }

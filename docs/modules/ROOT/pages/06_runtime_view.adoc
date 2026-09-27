@@ -349,3 +349,23 @@ deleted. No replacement card is dealt — a breakdown that redealt would be the
 re-roll ADR-13 removed, reached by another name (ADR-56). A reload at this
 point finds the pointer already gone and shows the idle deck, since the hold
 is session-local by construction.
+
+== 6.7 Morning digest initiation
+
+On each production tick, Draw evaluates the saved timezone's current local date
+and `[send time, min(send+3 elapsed hours,next local midnight))` window. Quiet
+hours or a non-positive whole-second TTL make the tick inert. For each of at
+most 16 unexpired devices it acquires one shared Push permit, then transactionally
+rechecks policy/subscription state and inserts `(device,local date)` before any
+DNS or content read. A busy permit leaves no claim; an existing claim ends work.
+
+After claim, DNS resolves under ADR-72. Immediately before initiation one
+synchronous turn rematches authority/signing/work generation, all seven device
+fields and expiry, timing, timezone, quiet endpoints, Hide-details, local date,
+window and TTL. A mismatch retains the claim and sends nothing. Only then the
+shared daily-overview service reads complete counts and at most five titles,
+the v2 request is constructed (detailed falling back once to generic), and the
+fake-or-real transport is invoked. From that point stop cannot recall provider
+work. Every terminal result retains the claim; only an exact-fingerprint
+provider 404/410 also removes the subscription. A later tick therefore retries
+neither a failed initiation nor a process/DNS/payload/provider failure.

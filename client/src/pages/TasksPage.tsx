@@ -16,7 +16,7 @@ import { TaskRow } from "../components/TaskRow";
 import { TaskDndContext, TaskDragOverlay, useTaskDnd } from "../components/TaskDnd";
 import { classifyTask, flattenOpen, groupSiblings, type DrawGroup } from "../lib/drawable";
 import { localToday } from "../lib/localDay";
-import { consumePushLanding } from "../lib/pushLanding";
+import { consumeItemLanding } from "../lib/itemLanding";
 import type { Task } from "../api/types";
 
 /**
@@ -105,14 +105,14 @@ export function TasksPage() {
     reorder: (id, beforeId) => reorderSubtask.mutateAsync({ id, beforeId }),
   });
 
-  // Palette and durable Push landing (#243/#343, ADR-68/72). URL focus owns
+  // Palette and durable item landing (#243/#343/#353, ADR-68/72). URL focus owns
   // focus/showDone, takes precedence over palette state, and is consumed once
   // while unrelated query bytes, hash and router-state fields survive.
   const location = useLocation();
   const navigate = useNavigate();
   const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
   useEffect(() => {
-    const landing = consumePushLanding(location, "task");
+    const landing = consumeItemLanding(location, "task");
     if (!landing.consumed) return;
     if (landing.showDone) setShowDone(true);
     setPendingFocusId(landing.focusId);

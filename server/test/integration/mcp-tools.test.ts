@@ -185,7 +185,6 @@ describe("read tools", () => {
 
   it("get_settings exposes ordinary strings but never timing state or the API key", async () => {
     const timingKeys = [
-      "push_lead_days",
       "push_send_time",
       "push_timezone",
       "push_quiet_start",
@@ -205,17 +204,16 @@ describe("read tools", () => {
     const database = await testDb();
     database
       .prepare("INSERT INTO settings (key, value) VALUES (?, ?)")
-      .run("mcp_deadline_test_public", "still-visible");
+      .run("mcp_digest_test_public", "still-visible");
     const update = database.prepare("UPDATE settings SET value = ? WHERE key = ?");
-    const configured = ["7", "18:45", "Europe/Berlin", "22:00", "07:00"];
+    const configured = ["18:45", "Europe/Berlin", "22:00", "07:00"];
     try {
       for (const [index, key] of timingKeys.entries()) update.run(configured[index], key);
       const settings = (await callTool("get_settings")).json<Record<string, unknown>>();
       assertGenericContract(settings);
-      expect(settings.mcp_deadline_test_public).toBe("still-visible");
+      expect(settings.mcp_digest_test_public).toBe("still-visible");
     } finally {
-      database.prepare("DELETE FROM settings WHERE key = ?").run("mcp_deadline_test_public");
-      update.run("1", "push_lead_days");
+      database.prepare("DELETE FROM settings WHERE key = ?").run("mcp_digest_test_public");
       update.run("09:00", "push_send_time");
       for (const key of ["push_timezone", "push_quiet_start", "push_quiet_end"]) {
         update.run(null, key);

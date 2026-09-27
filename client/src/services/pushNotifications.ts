@@ -20,7 +20,6 @@ export interface PushDevice {
 }
 
 export interface PushTiming {
-  leadDays: 0 | 1 | 2 | 3 | 7 | 14 | 30;
   sendTime: string;
   timezone: string | null;
   quietStart: string | null;
@@ -150,10 +149,9 @@ export function parsePushStatus(value: unknown): PushStatus {
     typeof root.available !== "boolean" || !reasons.includes(root.reason as PushUnavailableReason) ||
     typeof root.mutationAllowed !== "boolean" || !mutationReasons.includes(root.mutationReason as PushMutationReason) ||
     root.maxDevices !== 16 || !preferences || !exactKeys(preferences, [
-      "hideDetails", "leadDays", "sendTime", "timezone", "quietStart", "quietEnd",
+      "hideDetails", "sendTime", "timezone", "quietStart", "quietEnd",
     ]) ||
     typeof preferences.hideDetails !== "boolean" ||
-    ![0, 1, 2, 3, 7, 14, 30].includes(preferences.leadDays as number) ||
     !validQuarterHour(preferences.sendTime) || !validStatusTimezone(preferences.timezone) ||
     !(
       preferences.quietStart === null && preferences.quietEnd === null ||
@@ -186,7 +184,6 @@ export function parsePushStatus(value: unknown): PushStatus {
     maxDevices: 16,
     preferences: {
       hideDetails: preferences.hideDetails,
-      leadDays: preferences.leadDays as PushTiming["leadDays"],
       sendTime: preferences.sendTime,
       timezone: preferences.timezone as string | null,
       quietStart: preferences.quietStart as string | null,
@@ -295,8 +292,8 @@ export async function setPushTiming(timing: PushTiming & { timezone: string }): 
   });
   if (response.status !== 200) throw new PushResponseError();
   const root = object(await strictJson(response));
-  if (!root || !exactKeys(root, ["leadDays", "sendTime", "timezone", "quietStart", "quietEnd"]) ||
-    root.leadDays !== timing.leadDays || root.sendTime !== timing.sendTime || root.timezone !== timing.timezone ||
+  if (!root || !exactKeys(root, ["sendTime", "timezone", "quietStart", "quietEnd"]) ||
+    root.sendTime !== timing.sendTime || root.timezone !== timing.timezone ||
     root.quietStart !== timing.quietStart || root.quietEnd !== timing.quietEnd) throw new PushResponseError();
   return timing;
 }
@@ -483,10 +480,10 @@ export function storeHandle(deviceId: string): boolean {
 }
 
 export const STATUS_GUIDANCE: Record<Exclude<PushUnavailableReason | PushMutationReason, null>, string> = {
-  "not-production": "Deadline notifications are available only in the production app.",
-  "authority-unavailable": "Deadline notifications are unavailable because the server Push authority could not be loaded. Check the server logs.",
-  "recovery-pending": "Deadline notifications are unavailable until Draw restarts and completes Push recovery.",
-  "secure-transport-required": "Open Draw over HTTPS, or directly on localhost, to manage deadline notifications.",
+  "not-production": "Daily digest notifications are available only in the production app.",
+  "authority-unavailable": "Daily digest notifications are unavailable because the server Push authority could not be loaded. Check the server logs.",
+  "recovery-pending": "Daily digest notifications are unavailable until Draw restarts and completes Push recovery.",
+  "secure-transport-required": "Open Draw over HTTPS, or directly on localhost, to manage daily digest notifications.",
   "proxy-configuration-unsupported": "Draw cannot verify this proxy request for notification management. Check the deployment proxy configuration.",
 };
 

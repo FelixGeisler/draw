@@ -22,7 +22,7 @@ export function localDate(d: Date, offsetMinutes?: number): string {
   return new Date(d.getTime() + offset * 60_000).toISOString().slice(0, 10);
 }
 
-/** Canonical date-only value accepted by deadline-state features. */
+/** Canonical date-only value accepted by shared calendar-domain features. */
 export const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**

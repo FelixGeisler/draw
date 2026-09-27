@@ -29,9 +29,9 @@ import {
   type PushTiming,
 } from "../services/pushNotifications";
 
-const LOAD_FAILURE = "Could not load deadline notification status. Check the connection and try again.";
-const TIMING_CONFIRMATION_UNKNOWN = "Could not confirm whether reminder timing was saved. Check the current values before trying again.";
-const TIMING_INVALID = "Check the reminder timing and time zone. No settings were changed.";
+const LOAD_FAILURE = "Could not load daily digest notification status. Check the connection and try again.";
+const TIMING_CONFIRMATION_UNKNOWN = "Could not confirm whether digest timing was saved. Check the current values before trying again.";
+const TIMING_INVALID = "Check the digest timing and time zone. No settings were changed.";
 const ENABLE_FAILURE = "Could not enable notifications in this browser. No device was enabled.";
 const STORAGE_FAILURE = "Notifications were enabled, but Draw could not remember this browser. Re-enable after reloading.";
 const CLEANUP_FAILURE = "The server device was removed, but browser cleanup could not be confirmed. Reload Draw and check browser site settings.";
@@ -359,7 +359,7 @@ export function usePushNotifications() {
         }
         const refreshed = await refresh(false, true);
         if (!refreshed && mounted.current) setMessage(LOAD_FAILURE);
-        else if (mounted.current) setMessage("Reminder timing saved.");
+        else if (mounted.current) setMessage("Digest timing saved.");
       } catch (error) {
         const closed = errorCode(error);
         const invalidInput = closed?.status === 400 && closed.code === "invalid-push-request";

@@ -28,7 +28,7 @@ function publicSettings(): Record<string, string> {
   // another `?` and another bound argument below.
   const rows = db
     .prepare(
-      "SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .all(
       API_KEY_SETTING,
@@ -44,9 +44,7 @@ function publicSettings(): Record<string, string> {
       UPDATE_TRIGGER_URL_SETTING,
       UPDATE_TRIGGER_TOKEN_SETTING,
       UPDATE_LAST_NOTIFIED_SETTING,
-      // Stage 2A stores inert reminder timing foundations, but only Stage 2B's
-      // dedicated typed Push preferences API may expose nullable timing state.
-      "push_lead_days",
+      // Daily digest timing/privacy stays on the dedicated typed Push API.
       "push_send_time",
       "push_timezone",
       "push_quiet_start",

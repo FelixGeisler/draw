@@ -101,7 +101,7 @@ describe("real production Push assembly", () => {
     return assembly;
   }
 
-  it("always constructs one delayed unref deadline scheduler unless scheduler startup is disabled", async () => {
+  it("always constructs one delayed unref digest scheduler unless scheduler startup is disabled", async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-prod-scheduler-data-"));
     const clientDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-push-prod-scheduler-client-"));
     roots.push(dataDir, clientDir);
@@ -112,27 +112,26 @@ describe("real production Push assembly", () => {
     const assembly = startProduction({
       database, dataDir, clientDir, host: "127.0.0.1", port: 0,
       env: { BACKUP_INTERVAL_HOURS: "0", UPDATE_CHECK_INTERVAL_HOURS: "0" },
-      deadlineTimer: {
+      digestTimer: {
         set: (callback, delay) => { expect(delay).toBe(60_000); callbacks.push(callback); return { unref }; },
         clear: vi.fn(),
       },
     });
     servers.push(assembly.server);
     expect(assembly.push.snapshot().available).toBe(false);
-    expect(assembly.deadlineScheduler).not.toBeNull();
+    expect(assembly.digestScheduler).not.toBeNull();
     expect(callbacks).toHaveLength(1);
     expect(unref).toHaveBeenCalledOnce();
-    assembly.deadlineScheduler?.stop();
+    assembly.digestScheduler?.stop();
 
     const without = start(false);
-    expect(without.deadlineScheduler).toBeNull();
+    expect(without.digestScheduler).toBeNull();
   });
 
   it("keeps one unavailable-start scheduler and recovers through the reopened live database", async () => {
-    db.prepare("DELETE FROM deadline_reminder_claims").run();
+    db.prepare("DELETE FROM daily_digest_claims").run();
     db.prepare("DELETE FROM push_subscriptions").run();
     db.prepare("DELETE FROM tasks").run();
-    db.prepare("UPDATE settings SET value='0' WHERE key='push_lead_days'").run();
     db.prepare("UPDATE settings SET value='09:00' WHERE key='push_send_time'").run();
     db.prepare("UPDATE settings SET value='UTC' WHERE key='push_timezone'").run();
     db.prepare("UPDATE settings SET value=NULL WHERE key IN ('push_quiet_start','push_quiet_end')").run();
@@ -153,14 +152,14 @@ describe("real production Push assembly", () => {
       resolverFactory: fakeResolver,
       pushTransport: { send: async () => { sends += 1; return "success"; } },
       generateRequestDetails: (_subscription, _payload, options) => ({
-        endpoint: "https://push.example/deadline", method: "POST",
+        endpoint: "https://push.example/digest", method: "POST",
         headers: { Topic: String(options.topic), TTL: String(options.TTL) }, body: Buffer.from("encrypted"),
       }),
-      deadlineNow: () => schedulerNow,
-      deadlineTimer: { set: (callback) => { callbacks.push(callback); return { unref() {} }; }, clear() {} },
+      digestNow: () => schedulerNow,
+      digestTimer: { set: (callback) => { callbacks.push(callback); return { unref() {} }; }, clear() {} },
     });
     servers.push(assembly.server);
-    const onlyScheduler = assembly.deadlineScheduler;
+    const onlyScheduler = assembly.digestScheduler;
     expect(onlyScheduler).not.toBeNull();
     expect(callbacks).toHaveLength(1);
     expect(assembly.push.snapshot().available).toBe(false);
@@ -175,12 +174,12 @@ describe("real production Push assembly", () => {
     expect(closedHandle.open).toBe(false);
     assembly.push.completeRestore();
     expect(assembly.push.snapshot().available).toBe(true);
-    expect(assembly.deadlineScheduler).toBe(onlyScheduler);
+    expect(assembly.digestScheduler).toBe(onlyScheduler);
     expect(callbacks).toHaveLength(1);
 
     db.prepare(
       `INSERT INTO push_subscriptions(id,endpoint,p256dh,auth,expiration_time,created_at,last_seen_at)
-       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','https://push.example/deadline',?,?,NULL,'created','seen')`,
+       VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','https://push.example/digest',?,?,NULL,'created','seen')`,
     ).run(keys.publicKey, crypto.randomBytes(16).toString("base64url"));
     db.prepare(
       `INSERT INTO tasks(id,title,category_id,due_date,recur_every_days,status,created_at)
@@ -188,7 +187,7 @@ describe("real production Push assembly", () => {
     ).run();
     await onlyScheduler!.runNow();
     expect(sends).toBe(1);
-    expect(db.prepare("SELECT COUNT(*) AS count FROM deadline_reminder_claims WHERE item_id=900001").get())
+    expect(db.prepare("SELECT COUNT(*) AS count FROM daily_digest_claims WHERE local_date='2026-09-20'").get())
       .toEqual({ count: 1 });
 
     await new Promise<void>((resolve) => assembly.server.listening ? resolve() : assembly.server.once("listening", resolve));
@@ -198,14 +197,14 @@ describe("real production Push assembly", () => {
       headers: { Host: `localhost:${port}`, "Content-Type": "application/json" },
     }, [JSON.stringify({ status: "done" })]);
     expect(completion.status).toBe(200);
-    const nextDeadline = (completion.body as { task: { dueDate: string } }).task.dueDate;
-    expect(nextDeadline).not.toBe("2026-09-20");
-    schedulerNow = new Date(`${nextDeadline}T09:00:00Z`);
+    const nextDate = (completion.body as { task: { dueDate: string } }).task.dueDate;
+    expect(nextDate).not.toBe("2026-09-20");
+    schedulerNow = new Date(`${nextDate}T09:00:00Z`);
     await onlyScheduler!.runNow();
     expect(sends).toBe(2);
     expect(db.prepare(
-      "SELECT deadline FROM deadline_reminder_claims WHERE item_id=900001 ORDER BY deadline",
-    ).all()).toEqual([{ deadline: nextDeadline }]);
+      "SELECT local_date FROM daily_digest_claims ORDER BY local_date",
+    ).all()).toEqual([{ local_date: "2026-09-20" }, { local_date: nextDate }]);
     onlyScheduler!.stop();
   });
 

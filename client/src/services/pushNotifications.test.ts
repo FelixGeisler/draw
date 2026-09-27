@@ -56,7 +56,7 @@ function status(overrides: Partial<PushStatus> = {}): PushStatus {
     vapidPublicKey: VAPID_TEXT,
     maxDevices: 16,
     preferences: {
-      hideDetails: false, leadDays: 1, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
+      hideDetails: false, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
     },
     devices: [],
     ...overrides,
@@ -278,14 +278,14 @@ describe("strict Push client boundary", () => {
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ hideDetails: true }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
-        leadDays: 2, sendTime: "10:15", timezone: "UTC", quietStart: null, quietEnd: null,
+        sendTime: "10:15", timezone: "UTC", quietStart: null, quietEnd: null,
       }), { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
     await sendPushTest(DEVICE);
     await deletePushDevice(DEVICE);
     await revokeAllPushDevices();
     expect(await setPushPreference(true)).toBe(true);
-    const timing = { leadDays: 2 as const, sendTime: "10:15", timezone: "UTC", quietStart: null, quietEnd: null };
+    const timing = { sendTime: "10:15", timezone: "UTC", quietStart: null, quietEnd: null };
     expect(await setPushTiming(timing)).toEqual(timing);
     expect(fetchMock.mock.calls).toEqual([
       [`/api/push/subscriptions/${DEVICE}/test`, { method: "POST" }],
@@ -331,10 +331,10 @@ describe("strict Push client boundary", () => {
 
   it("keeps all server availability and topology guidance fixed and password-free", () => {
     expect(STATUS_GUIDANCE).toEqual({
-      "not-production": "Deadline notifications are available only in the production app.",
-      "authority-unavailable": "Deadline notifications are unavailable because the server Push authority could not be loaded. Check the server logs.",
-      "recovery-pending": "Deadline notifications are unavailable until Draw restarts and completes Push recovery.",
-      "secure-transport-required": "Open Draw over HTTPS, or directly on localhost, to manage deadline notifications.",
+      "not-production": "Daily digest notifications are available only in the production app.",
+      "authority-unavailable": "Daily digest notifications are unavailable because the server Push authority could not be loaded. Check the server logs.",
+      "recovery-pending": "Daily digest notifications are unavailable until Draw restarts and completes Push recovery.",
+      "secure-transport-required": "Open Draw over HTTPS, or directly on localhost, to manage daily digest notifications.",
       "proxy-configuration-unsupported": "Draw cannot verify this proxy request for notification management. Check the deployment proxy configuration.",
     });
     expect(JSON.stringify(STATUS_GUIDANCE)).not.toContain("password");

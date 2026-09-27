@@ -80,8 +80,8 @@ function exactKeys(value, keys) {
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-function positiveSafeInteger(value) {
-  return Number.isSafeInteger(value) && value > 0;
+function nonNegativeSafeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
 }
 
 function canonicalEventId(value) {
@@ -97,52 +97,48 @@ function canonicalEventId(value) {
   }
 }
 
-function canonicalDate(value) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return Number.isFinite(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+function countsLine(payload) {
+  return payload.todayCount === 0 && payload.tomorrowCount === 0 && payload.overdueCount === 0
+    ? "Nothing due today or tomorrow · Overdue: 0"
+    : `Today: ${payload.todayCount} · Tomorrow: ${payload.tomorrowCount} · Overdue: ${payload.overdueCount}`;
 }
 
 function notificationFromPayload(payload) {
-  if (exactKeys(payload, ["v", "kind"]) && payload.v === 1 && payload.kind === "test") {
+  if (exactKeys(payload, ["v", "kind"]) && payload.v === 2 && payload.kind === "test") {
     return {
       title: "Draw",
       options: {
         body: "Notifications are enabled",
         tag: "draw-push-test",
-        data: { v: 1, route: "/settings" },
+        data: { v: 2, route: "/settings" },
       },
     };
   }
-  const shared = payload && payload.v === 1 && payload.kind === "deadline" &&
-    (payload.itemType === "task" || payload.itemType === "goal") &&
-    positiveSafeInteger(payload.itemId) && canonicalEventId(payload.eventId);
+  const shared = payload && payload.v === 2 && payload.kind === "digest" &&
+    canonicalEventId(payload.eventId) &&
+    nonNegativeSafeInteger(payload.todayCount) && nonNegativeSafeInteger(payload.tomorrowCount) &&
+    nonNegativeSafeInteger(payload.overdueCount) &&
+    Number.isSafeInteger(payload.todayCount + payload.tomorrowCount + payload.overdueCount);
   if (!shared) return null;
-  const route = payload.itemType === "task"
-    ? `/tasks?focus=${payload.itemId}&showDone=1`
-    : `/goals?focus=${payload.itemId}`;
-  if (payload.detail === "generic" && exactKeys(payload, ["v", "kind", "detail", "itemType", "itemId", "eventId"])) {
-    return {
-      title: "Draw",
-      options: {
-        body: "You have an upcoming deadline in Draw",
-        tag: `draw-deadline-${payload.eventId}`,
-        data: { v: 1, route },
-      },
-    };
+  const options = {
+    tag: `draw-digest-${payload.eventId}`,
+    data: { v: 2, route: "/today" },
+  };
+  if (payload.detail === "generic" && exactKeys(payload, [
+    "v", "kind", "detail", "eventId", "todayCount", "tomorrowCount", "overdueCount",
+  ])) {
+    return { title: "Good morning", options: { ...options, body: countsLine(payload) } };
   }
-  if (payload.detail === "detailed" &&
-    exactKeys(payload, ["v", "kind", "detail", "itemType", "itemId", "eventId", "itemTitle", "context", "deadline"]) &&
-    typeof payload.itemTitle === "string" && (payload.context === null || typeof payload.context === "string") &&
-    canonicalDate(payload.deadline)) {
-    return {
-      title: payload.itemTitle,
-      options: {
-        body: payload.context === null ? `Due ${payload.deadline}` : `${payload.context} · Due ${payload.deadline}`,
-        tag: `draw-deadline-${payload.eventId}`,
-        data: { v: 1, route },
-      },
-    };
+  if (payload.detail === "detailed" && exactKeys(payload, [
+    "v", "kind", "detail", "eventId", "todayCount", "tomorrowCount", "overdueCount", "titles", "remainingCount",
+  ]) && Array.isArray(payload.titles) && payload.titles.length <= 5 &&
+    payload.titles.every((title) => typeof title === "string") &&
+    nonNegativeSafeInteger(payload.remainingCount) &&
+    payload.remainingCount === payload.todayCount + payload.tomorrowCount + payload.overdueCount - payload.titles.length) {
+    const lines = [...payload.titles];
+    if (payload.remainingCount > 0) lines.push(`…and ${payload.remainingCount} more`);
+    lines.push(countsLine(payload));
+    return { title: "Good morning", options: { ...options, body: lines.join("\n") } };
   }
   return null;
 }
@@ -170,18 +166,13 @@ self.addEventListener("push", (event) => {
 });
 
 function canonicalClickRoute(value) {
-  if (value === "/settings") return value;
-  const match = /^(?:\/tasks\?focus=([1-9]\d*)&showDone=1|\/goals\?focus=([1-9]\d*))$/.exec(value);
-  if (!match) return null;
-  const decimal = match[1] || match[2];
-  const number = Number(decimal);
-  return Number.isSafeInteger(number) && number > 0 && String(number) === decimal ? value : null;
+  return value === "/settings" || value === "/today" ? value : null;
 }
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data;
-  if (!exactKeys(data, ["v", "route"]) || data.v !== 1 || typeof data.route !== "string") return;
+  if (!exactKeys(data, ["v", "route"]) || data.v !== 2 || typeof data.route !== "string") return;
   const route = canonicalClickRoute(data.route);
   if (!route) return;
   event.waitUntil((async () => {

@@ -81,8 +81,7 @@ describe("runScheduledBackup — writes a valid archive under DATA_DIR/backups/"
       "SCHEDULED-ENDPOINT-CANARY-345",
       "SCHEDULED-P256DH-CANARY-345",
       "SCHEDULED-AUTH-CANARY-345",
-      "SCHEDULED-CLAIM-CREATED-CANARY-345",
-      "SCHEDULED-CLAIM-DEADLINE-CANARY-345",
+      "SCHEDULED-CLAIM-DATE-CANARY-345",
     ];
     database.prepare(
       `INSERT INTO push_subscriptions
@@ -90,10 +89,9 @@ describe("runScheduledBackup — writes a valid archive under DATA_DIR/backups/"
        VALUES ('scheduled-device-345', ?, ?, ?, NULL, '2026-09-20T00:00:00.000Z', '2026-09-20T00:00:00.000Z')`,
     ).run(canaries[0], canaries[1], canaries[2]);
     database.prepare(
-      `INSERT INTO deadline_reminder_claims
-       (device_id, item_type, item_id, item_created_at, deadline)
-       VALUES ('scheduled-device-345', 'task', 345, ?, ?)`,
-    ).run(canaries[3], canaries[4]);
+      `INSERT INTO daily_digest_claims(device_id, local_date)
+       VALUES ('scheduled-device-345', ?)`,
+    ).run(canaries[3]);
     database.prepare("UPDATE settings SET value = 'Europe/Berlin' WHERE key = 'push_timezone'").run();
 
     try {
@@ -105,7 +103,7 @@ describe("runScheduledBackup — writes a valid archive under DATA_DIR/backups/"
       const snapshot = new Database(extracted, { readonly: true });
       try {
         expect(snapshot.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
-        expect(snapshot.prepare("SELECT COUNT(*) AS n FROM deadline_reminder_claims").get()).toEqual({ n: 0 });
+        expect(snapshot.prepare("SELECT COUNT(*) AS n FROM daily_digest_claims").get()).toEqual({ n: 0 });
         expect(snapshot.prepare("SELECT value FROM settings WHERE key = 'push_timezone'").get()).toEqual({ value: "Europe/Berlin" });
       } finally {
         snapshot.close();

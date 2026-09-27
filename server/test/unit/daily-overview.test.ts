@@ -1,15 +1,17 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { dailyOverviewForDate } from "../../src/services/dailyOverviewService.js";
+import { dailyDigestForDate, dailyOverviewForDate } from "../../src/services/dailyOverviewService.js";
 import { addCalendarDays, validCalendarDate, zonedLocalDate } from "../../src/services/localDay.js";
 
 function fixture() {
   const database = new Database(":memory:");
   database.exec(`
-    CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, due_date TEXT, status TEXT NOT NULL,
+    CREATE TABLE tasks (id INTEGER PRIMARY KEY, title TEXT NOT NULL, description TEXT, due_date TEXT, status TEXT NOT NULL,
       recur_every_days INTEGER, blocked INTEGER, deferred_until TEXT, window_days TEXT, window_start TEXT, window_end TEXT,
-      parent_id INTEGER, subtask_order_mode TEXT NOT NULL DEFAULT 'parallel', sort_order INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE goals (id INTEGER PRIMARY KEY, title TEXT NOT NULL, target_date TEXT, status TEXT NOT NULL);
+      parent_id INTEGER, subtask_order_mode TEXT NOT NULL DEFAULT 'parallel', sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT 'fixture');
+    CREATE TABLE goals (id INTEGER PRIMARY KEY, title TEXT NOT NULL, outcome TEXT, target_date TEXT, status TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT 'fixture');
   `);
   return database;
 }
@@ -39,16 +41,17 @@ describe("daily overview domain service", () => {
     hierarchyTask.run(20, "qualifying parent", "2026-09-27", "open", null, 0, null, null, null, null, null, "sequential", 0);
     hierarchyTask.run(22, "qualifying sequential-held subtask", "2026-09-27", "open", null, 0, null, null, null, null, 20, "parallel", 2);
     hierarchyTask.run(21, "qualifying first subtask", "2026-09-27", "open", null, 0, null, null, null, null, 20, "parallel", 1);
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(8, "same-day goal", "2026-09-27", "active");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(4, "first same-day goal", "2026-09-27", "active");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(10, "last same-day goal", "2026-09-27", "active");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(7, "achieved goal", "2026-09-20", "achieved");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(11, "missed goal", "2026-09-20", "missed");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(12, "dropped goal", "2026-09-20", "dropped");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(13, "impossible goal", "2025-02-29", "active");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(99, "same-date overdue goal", "2026-09-25", "active");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(14, "middle overdue goal", "2026-09-23", "active");
-    db.prepare("INSERT INTO goals VALUES (?,?,?,?)").run(6, "tomorrow goal", "2026-09-28", "active");
+    const goal = db.prepare("INSERT INTO goals(id,title,target_date,status) VALUES (?,?,?,?)");
+    goal.run(8, "same-day goal", "2026-09-27", "active");
+    goal.run(4, "first same-day goal", "2026-09-27", "active");
+    goal.run(10, "last same-day goal", "2026-09-27", "active");
+    goal.run(7, "achieved goal", "2026-09-20", "achieved");
+    goal.run(11, "missed goal", "2026-09-20", "missed");
+    goal.run(12, "dropped goal", "2026-09-20", "dropped");
+    goal.run(13, "impossible goal", "2025-02-29", "active");
+    goal.run(99, "same-date overdue goal", "2026-09-25", "active");
+    goal.run(14, "middle overdue goal", "2026-09-23", "active");
+    goal.run(6, "tomorrow goal", "2026-09-28", "active");
 
     expect(dailyOverviewForDate("2026-09-27", db)).toEqual({
       overdue: [
@@ -71,6 +74,36 @@ describe("daily overview domain service", () => {
       tomorrow: [{ type: "goal", id: 6, title: "tomorrow goal", date: "2026-09-28" }],
     });
     db.close();
+  });
+
+  it("aggregates every eligible row but returns only five ordered titles and no forbidden fields", () => {
+    const db = fixture();
+    const task = db.prepare("INSERT INTO tasks(id,title,description,due_date,status,created_at) VALUES (?,?,?,?,?,?)");
+    const goal = db.prepare("INSERT INTO goals(id,title,outcome,target_date,status,created_at) VALUES (?,?,?,?,?,?)");
+    goal.run(9, "old goal", "FORBIDDEN OUTCOME", "2026-09-18", "active", "goal-9");
+    task.run(999, "old task", "FORBIDDEN DESCRIPTION", "2026-09-18", "open", "task-999");
+    for (let id = 1; id <= 100; id++) {
+      task.run(id, `today task ${id}`, `FORBIDDEN ${id}`, "2026-09-20", "open", `task-${id}`);
+    }
+    goal.run(1, "tomorrow goal", "FORBIDDEN TOMORROW", "2026-09-21", "active", "goal-1");
+    goal.run(2, "resolved", "FORBIDDEN RESOLVED", "2026-09-20", "achieved", "goal-2");
+    task.run(200, "malformed", "FORBIDDEN MALFORMED", "2026-02-30", "open", "task-200");
+
+    const projection = dailyDigestForDate("2026-09-20", db);
+    expect(projection).toEqual({
+      overdueCount: 2,
+      todayCount: 100,
+      tomorrowCount: 1,
+      titles: ["old goal", "old task", "today task 1", "today task 2", "today task 3"],
+    });
+    expect(JSON.stringify(projection)).not.toContain("FORBIDDEN");
+    db.close();
+
+    const empty = fixture();
+    expect(dailyDigestForDate("2026-09-20", empty)).toEqual({
+      overdueCount: 0, todayCount: 0, tomorrowCount: 0, titles: [],
+    });
+    empty.close();
   });
 
   it("uses canonical real Gregorian dates and bounded calendar addition", () => {

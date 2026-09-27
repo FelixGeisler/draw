@@ -7,7 +7,7 @@ function LocalTime({ value }: { value: string }) {
   return <time dateTime={value}>{date.toLocaleString()}</time>;
 }
 
-const TIMING_ERROR = "Check the reminder timing and time zone. No settings were changed.";
+const TIMING_ERROR = "Check the digest timing and time zone. No settings were changed.";
 
 function validTimeZone(value: unknown): value is string {
   if (typeof value !== "string" || value.length < 1 || value.length > 128 ||
@@ -44,14 +44,13 @@ export function PushNotificationsSection() {
     if (!status) return;
     const saved = status.preferences;
     setTiming({
-      leadDays: saved.leadDays,
       sendTime: saved.sendTime,
       timezone: saved.timezone ?? proposedTimeZone(),
       quietStart: saved.quietStart,
       quietEnd: saved.quietEnd,
     });
     setQuietEnabled(saved.quietStart !== null && saved.quietEnd !== null);
-  }, [status?.preferences.leadDays, status?.preferences.sendTime, status?.preferences.timezone,
+  }, [status?.preferences.sendTime, status?.preferences.timezone,
     status?.preferences.quietStart, status?.preferences.quietEnd, push.timingReadbackRevision]);
 
   const submitTiming = (event: FormEvent) => {
@@ -60,7 +59,6 @@ export function PushNotificationsSection() {
       setTimingError(TIMING_ERROR);
       if (status) {
         setTiming({
-          leadDays: status.preferences.leadDays,
           sendTime: status.preferences.sendTime,
           timezone: status.preferences.timezone ?? proposedTimeZone(),
           quietStart: status.preferences.quietStart,
@@ -75,7 +73,7 @@ export function PushNotificationsSection() {
   };
 
   if (browser) {
-    if (!browser.secureContext) blockers.push("Deadline notifications require HTTPS, or direct localhost access.");
+    if (!browser.secureContext) blockers.push("Daily digest notifications require HTTPS, or direct localhost access.");
     if (!browser.registration) blockers.push("The Draw service worker is not available in this browser. Reload the production app and try again.");
     if (!browser.hasPushManager) blockers.push("This browser does not support Web Push.");
     if (!browser.hasNotification) blockers.push("This browser does not support notifications.");
@@ -86,7 +84,7 @@ export function PushNotificationsSection() {
 
   return (
     <section className="panel push-notifications" style={{ display: "grid", gap: 12, marginTop: 16 }}>
-      <h3 style={{ margin: 0 }}>Deadline notifications</h3>
+      <h3 style={{ margin: 0 }}>Daily digest notifications</h3>
       {push.checking ? (
         <p style={{ margin: 0, color: "var(--text-dim)" }}>Checking notification support...</p>
       ) : push.loadError ? (
@@ -97,6 +95,11 @@ export function PushNotificationsSection() {
       ) : (
         <>
           {blockers.map((blocker) => <p key={blocker} className="push-guidance">{blocker}</p>)}
+          {status && (
+            <p style={{ margin: 0, color: "var(--text-dim)", fontSize: 13 }}>
+              Enrolled devices receive one daily digest. Delivery is best effort while the Draw server runs; provider retention ends after at most three hours and never crosses the saved-zone local day.
+            </p>
+          )}
           {push.enabled ? (
             <p style={{ margin: 0, color: "var(--ok)" }}>✓ Notifications are enabled for this browser.</p>
           ) : push.prerequisites ? (
@@ -104,9 +107,6 @@ export function PushNotificationsSection() {
               <button type="button" className="primary" disabled={push.pending} onClick={push.enroll}>
                 {push.enrollmentLabel}
               </button>
-              <span style={{ color: "var(--text-dim)", fontSize: 13 }}>
-                Enabling is explicit. Delivery is best effort while Draw runs.
-              </span>
             </div>
           ) : null}
 
@@ -121,24 +121,13 @@ export function PushNotificationsSection() {
                 />
                 <span>
                   <strong>Hide notification details</strong>
-                  <small>Applies to future deadline notifications on every enrolled device. When enabled, they say only &quot;You have an upcoming deadline in Draw&quot;. Test notifications are unchanged.</small>
+                  <small>Applies to future digests on every enrolled device. When enabled, digests contain counts only. Test notifications are unchanged.</small>
                 </span>
               </label>
 
               {timing && (
                 <form className="push-timing" onSubmit={submitTiming} noValidate>
-                  <h4>Reminder timing</h4>
-                  <label>
-                    <span>Remind me</span>
-                    <select
-                      value={timing.leadDays}
-                      disabled={!serverControls || push.pending}
-                      onChange={(event) => setTiming({ ...timing, leadDays: Number(event.target.value) as PushTiming["leadDays"] })}
-                    >
-                      <option value={0}>On the deadline</option>
-                      {[1, 2, 3, 7, 14, 30].map((days) => <option key={days} value={days}>{days} day{days === 1 ? "" : "s"} before</option>)}
-                    </select>
-                  </label>
+                  <h4>Daily digest timing</h4>
                   <label>
                     <span>Send time</span>
                     <input type="time" step={900} value={timing.sendTime} disabled={!serverControls || push.pending}
@@ -149,6 +138,7 @@ export function PushNotificationsSection() {
                     <input type="text" value={timing.timezone ?? ""} maxLength={128} autoCapitalize="none" spellCheck={false}
                       disabled={!serverControls || push.pending}
                       onChange={(event) => setTiming({ ...timing, timezone: event.target.value })} />
+                    <small>Automatic delivery requires an explicitly saved valid time zone. Detection failure does not prevent enrollment or Send test.</small>
                   </label>
                   <label className="push-preference">
                     <input type="checkbox" checked={quietEnabled} disabled={!serverControls || push.pending}
@@ -170,7 +160,7 @@ export function PushNotificationsSection() {
                         onChange={(event) => setTiming({ ...timing, quietEnd: event.target.value })} /></label>
                     </div>
                   )}
-                  <button type="submit" disabled={!serverControls || push.pending}>Save reminder timing</button>
+                  <button type="submit" disabled={!serverControls || push.pending}>Save digest timing</button>
                   {timingError && <p role="alert" className="push-guidance">{timingError}</p>}
                 </form>
               )}

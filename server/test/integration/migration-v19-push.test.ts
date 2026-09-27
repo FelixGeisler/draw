@@ -8,7 +8,7 @@ const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url
 const currentSchema = fs.readFileSync(schemaPath, "utf8");
 const v19Schema = currentSchema
   .replace(
-    /-- Stage 2A deadline-reminder[\s\S]*?CREATE TABLE deadline_reminder_claims[\s\S]*?\);\r?\n\r?\n/,
+    /-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/,
     "",
   )
   .replace(
@@ -16,7 +16,7 @@ const v19Schema = currentSchema
     "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
   )
   .replace(
-    /,\r?\n  \('push_lead_days', '1'\)[\s\S]*?\('push_quiet_end', NULL\)/,
+    /,\r?\n  \('push_send_time', '09:00'\)[\s\S]*?\('push_quiet_end', NULL\)/,
     "",
   );
 const v18Schema = v19Schema
@@ -54,17 +54,17 @@ function openV19(name: string): Database.Database {
 }
 
 describe("schema v19 Push persistence remains an exact migration boundary", () => {
-  it("validates a canonical v19 fixture, then migrates it to v20", async () => {
-    expect(v19Schema).not.toContain("deadline_reminder_claims");
+  it("validates a canonical v19 fixture, then migrates it through v20 to v21", async () => {
+    expect(v19Schema).not.toContain("daily_digest_claims");
     const handle = openV19("canonical-v19");
     try {
       const { migrateDatabase } = await import("../../src/db.js");
       const { validateV19Contract } = await import("../../src/schemaV19.js");
-      const { validateV20Contract } = await import("../../src/schemaV20.js");
+      const { validateV21Contract } = await import("../../src/schemaV21.js");
       expect(() => validateV19Contract(handle)).not.toThrow();
       migrateDatabase(handle);
-      expect(handle.pragma("user_version", { simple: true })).toBe(20);
-      expect(() => validateV20Contract(handle)).not.toThrow();
+      expect(handle.pragma("user_version", { simple: true })).toBe(21);
+      expect(() => validateV21Contract(handle)).not.toThrow();
     } finally {
       handle.close();
     }
