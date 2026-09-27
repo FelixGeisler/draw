@@ -15,6 +15,7 @@ const ASSET_BODY = "console.log('draw-asset');";
 
 let clientDir: string;
 let app: express.Express;
+let createApp: (options?: { clientDir?: string; password?: string }) => express.Express;
 
 beforeAll(async () => {
   clientDir = fs.mkdtempSync(path.join(os.tmpdir(), "draw-client-dist-"));
@@ -25,7 +26,7 @@ beforeAll(async () => {
   fs.mkdirSync(path.join(clientDir, "assets"));
   fs.writeFileSync(path.join(clientDir, "assets", "app.js"), ASSET_BODY);
 
-  const { createApp } = await import("../../src/app.js");
+  ({ createApp } = await import("../../src/app.js"));
   app = createApp({ clientDir });
 });
 
@@ -64,12 +65,28 @@ describe("production serve mode", () => {
 
   it("answers client deep links with index.html (SPA fallback)", async () => {
     // The query-string case pins req.path (not req.url) as the dispatch key.
-    for (const deepLink of ["/stats", "/goals", "/settings", "/stats?range=30d"]) {
+    for (const deepLink of ["/today", "/stats", "/goals", "/settings", "/stats?range=30d"]) {
       const res = await request(app).get(deepLink);
       expect(res.status).toBe(200);
       expect(res.text).toContain(INDEX_MARKER);
       expect(res.headers["cache-control"]).toBe("no-cache");
     }
+  });
+
+  it("serves an authenticated /today refresh from the production SPA", async () => {
+    const protectedApp = createApp({ clientDir, password: "production-refresh-secret" });
+    const login = await request(protectedApp)
+      .post("/api/auth/login")
+      .send({ password: "production-refresh-secret" });
+    expect(login.status).toBe(204);
+    const cookie = login.headers["set-cookie"]?.[0]?.split(";")[0] ?? "";
+    expect(cookie).toContain("draw_session=");
+
+    const res = await request(protectedApp).get("/today").set("Cookie", cookie);
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/html");
+    expect(res.text).toContain(INDEX_MARKER);
+    expect(res.headers["cache-control"]).toBe("no-cache");
   });
 
   it("leaves /api routes untouched", async () => {
@@ -103,7 +120,6 @@ describe("production serve mode", () => {
 
 describe("dev mode (no clientDir)", () => {
   it("serves no client — non-API paths 404, /api misses stay JSON", async () => {
-    const { createApp } = await import("../../src/app.js");
     const devApp = createApp();
     expect((await request(devApp).get("/")).status).toBe(404);
     expect((await request(devApp).get("/stats")).status).toBe(404);

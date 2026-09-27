@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { ApiError } from "../api/client";
 import {
   useCategories,
@@ -410,6 +411,7 @@ export function DrawPage() {
       <p style={{ color: "var(--text-dim)" }}>
         Stop choosing. Draw one small task and just start.
       </p>
+      <Link className="today-entry" to="/today">Today</Link>
 
       <ChallengeChip />
       <div className="draw-filters">

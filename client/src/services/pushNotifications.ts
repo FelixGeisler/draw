@@ -127,11 +127,14 @@ function validQuarterHour(value: unknown): value is string {
   return typeof value === "string" && /^(?:[01]\d|2[0-3]):(?:00|15|30|45)$/.test(value);
 }
 
-function validStatusTimezone(value: unknown): value is string | null {
-  if (value === null) return true;
+export function validIanaTimezone(value: unknown): value is string {
   if (typeof value !== "string" || value.length < 1 || value.length > 128 ||
     [...value].some((character) => character.charCodeAt(0) > 0x7f)) return false;
   try { new Intl.DateTimeFormat("en-CA", { timeZone: value }).format(0); return true; } catch { return false; }
+}
+
+function validStatusTimezone(value: unknown): value is string | null {
+  return value === null || validIanaTimezone(value);
 }
 
 export function parsePushStatus(value: unknown): PushStatus {

@@ -4,6 +4,7 @@ import { TasksPage } from "./pages/TasksPage";
 import { StatsPage } from "./pages/StatsPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { TodayPage } from "./pages/TodayPage";
 import { AssistantPage } from "./pages/AssistantPage";
 import { TimerBar } from "./components/TimerBar";
 import { GamificationHeader } from "./components/GamificationHeader";
@@ -86,6 +87,7 @@ export default function App() {
             {/* Capture merged into Tasks (#151, ADR-40) — the route survives
                 as a redirect for muscle memory and old links. */}
             <Route path="/capture" element={<Navigate to="/tasks" replace />} />
+            <Route path="/today" element={<TodayPage />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/goals" element={<GoalsPage />} />
             <Route path="/assistant" element={<AssistantPage />} />
