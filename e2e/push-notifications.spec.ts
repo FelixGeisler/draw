@@ -745,15 +745,46 @@ test.describe("Daily digest composed production journey", () => {
       await fetch(`${origin}/api/push/preferences`, { method: "PUT", headers: mutation, body: JSON.stringify({ hideDetails: true }) });
       schedulerNow = new Date("2026-09-21T09:00:00Z");
       await assembly.digestScheduler?.runNow();
-      expect(JSON.parse(captured[1].toString("utf8"))).toMatchObject({ v: 2, kind: "digest", detail: "generic" });
+      const hidden = JSON.parse(captured[1].toString("utf8"));
+      expect(hidden).toMatchObject({
+        v: 2, kind: "digest", detail: "generic", overdueCount: 3, todayCount: 3, tomorrowCount: 0,
+      });
+      await dispatchPush(worker, hidden);
+      expect(worker.notifications[1]).toEqual({
+        title: "Good morning",
+        options: {
+          body: "Today: 3 · Tomorrow: 0 · Overdue: 3",
+          tag: `draw-digest-${hidden.eventId}`,
+          data: { v: 2, route: "/today" },
+          icon: NOTIFICATION_ICON,
+          badge: NOTIFICATION_BADGE,
+        },
+      });
+      expect(JSON.stringify(worker.notifications[1])).not.toContain("Today one");
+      await dispatchClick(worker, worker.notifications[1].options.data);
+      expect(worker.opened.at(-1)).toBe(`${origin}/today`);
 
       database.prepare("DELETE FROM tasks").run();
       database.prepare("DELETE FROM goals").run();
       schedulerNow = new Date("2026-09-22T09:00:00Z");
       await assembly.digestScheduler?.runNow();
-      expect(JSON.parse(captured[2].toString("utf8"))).toEqual(expect.objectContaining({
+      const empty = JSON.parse(captured[2].toString("utf8"));
+      expect(empty).toEqual(expect.objectContaining({
         v: 2, kind: "digest", detail: "generic", overdueCount: 0, todayCount: 0, tomorrowCount: 0,
       }));
+      await dispatchPush(worker, empty);
+      expect(worker.notifications[2]).toEqual({
+        title: "Good morning",
+        options: {
+          body: "Nothing due today or tomorrow · Overdue: 0",
+          tag: `draw-digest-${empty.eventId}`,
+          data: { v: 2, route: "/today" },
+          icon: NOTIFICATION_ICON,
+          badge: NOTIFICATION_BADGE,
+        },
+      });
+      await dispatchClick(worker, worker.notifications[2].options.data);
+      expect(worker.opened.at(-1)).toBe(`${origin}/today`);
       expect(requests).toHaveLength(3);
     } finally {
       assembly.digestScheduler?.stop();

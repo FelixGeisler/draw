@@ -121,12 +121,19 @@ export function startDigestScheduler(options: DigestSchedulerOptions): DigestSch
           const permit = options.push.tryAcquireDigest();
           if (!permit) break;
           const row = rows[index++];
-          const occurrence = claim(options.database(), options.push, row.id, now());
-          if (!occurrence) {
-            permit.release();
-            continue;
+          let releaseHere = true;
+          try {
+            const occurrence = claim(options.database(), options.push, row.id, now());
+            if (!occurrence) continue;
+            const sending = options.push.sendDigest(occurrence, now, activeAbort.signal)
+              .finally(permit.release);
+            releaseHere = false;
+            batch.push(sending);
+          } finally {
+            // Ownership transfers only after a send promise has its release
+            // handler. Database/provider/transaction/claim throws release here.
+            if (releaseHere) permit.release();
           }
-          batch.push(options.push.sendDigest(occurrence, now, activeAbort.signal).finally(permit.release));
         }
         if (batch.length === 0) break;
         await Promise.allSettled(batch);

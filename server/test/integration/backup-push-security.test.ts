@@ -26,6 +26,8 @@ const ENDPOINT_CANARY = "https://push.invalid/ENDPOINT-CANARY-337";
 const P256DH_CANARY = "P256DH-CANARY-337";
 const AUTH_CANARY = "AUTH-CANARY-337";
 const CLAIM_DATE_CANARY = "9999-12-31-CLAIM-DATE-CANARY-355";
+const LEGACY_CREATED_CANARY = "LEGACY-ITEM-CREATED-CANARY-355";
+const LEGACY_DEADLINE_CANARY = "LEGACY-DEADLINE-CANARY-355";
 const dataDir = () => process.env.DATA_DIR!;
 const filesDir = () => path.join(dataDir(), "files");
 
@@ -61,6 +63,8 @@ function expectNoCanaries(bytes: Buffer) {
     P256DH_CANARY,
     AUTH_CANARY,
     CLAIM_DATE_CANARY,
+    LEGACY_CREATED_CANARY,
+    LEGACY_DEADLINE_CANARY,
   ]) {
     expect(bytes.includes(Buffer.from(canary))).toBe(false);
   }
@@ -299,11 +303,50 @@ describe("credential-free backup artifacts", () => {
       handle.exec("DROP TABLE daily_digest_claims");
       handle.exec(DEADLINE_REMINDER_CLAIMS_SQL);
       handle.prepare("INSERT INTO settings(key,value) VALUES ('push_lead_days','1')").run();
+      const update = handle.prepare("UPDATE settings SET value=? WHERE key=?");
+      update.run("1", "push_hide_details");
+      update.run("18:45", "push_send_time");
+      update.run("Europe/Berlin", "push_timezone");
+      update.run("22:00", "push_quiet_start");
+      update.run("07:00", "push_quiet_end");
+      insertPushRow(handle, "-v20-import");
+      handle.prepare(
+        `INSERT INTO deadline_reminder_claims
+         (device_id,item_type,item_id,item_created_at,deadline) VALUES (?,?,?,?,?)`,
+      ).run("device-v20-import", "task", 355, LEGACY_CREATED_CANARY, LEGACY_DEADLINE_CANARY);
       handle.pragma("user_version = 20");
     });
     await request(app).post("/api/backup/import").attach("file", v20Bytes, "canonical-v20.zip").expect(200);
     const fromV20 = await testDb();
     expect(() => validateV21Contract(fromV20)).not.toThrow();
+    expect(fromV20.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
+    expect(fromV20.prepare("SELECT COUNT(*) AS n FROM daily_digest_claims").get()).toEqual({ n: 0 });
+    expect(fromV20.prepare("SELECT 1 FROM sqlite_schema WHERE name='deadline_reminder_claims'").get()).toBeUndefined();
+    expect(fromV20.prepare("SELECT value FROM settings WHERE key='push_lead_days'").get()).toBeUndefined();
+    expect(fromV20.prepare(
+      `SELECT key,value FROM settings WHERE key IN
+       ('push_hide_details','push_send_time','push_timezone','push_quiet_start','push_quiet_end') ORDER BY key`,
+    ).all()).toEqual([
+      { key: "push_hide_details", value: "1" },
+      { key: "push_quiet_end", value: "07:00" },
+      { key: "push_quiet_start", value: "22:00" },
+      { key: "push_send_time", value: "18:45" },
+      { key: "push_timezone", value: "Europe/Berlin" },
+    ]);
+    for (const file of ["app.db", "app.db.bak"]) {
+      const filePath = path.join(dataDir(), file);
+      expectNoCanaries(fs.readFileSync(filePath));
+      const physical = new Database(filePath, { readonly: true });
+      try {
+        expect(() => validateV21Contract(physical)).not.toThrow();
+        expect(physical.prepare("SELECT COUNT(*) AS n FROM push_subscriptions").get()).toEqual({ n: 0 });
+        expect(physical.prepare("SELECT COUNT(*) AS n FROM daily_digest_claims").get()).toEqual({ n: 0 });
+        expect(physical.prepare("SELECT 1 FROM sqlite_schema WHERE name='deadline_reminder_claims'").get()).toBeUndefined();
+        expect(physical.prepare("SELECT value FROM settings WHERE key='push_lead_days'").get()).toBeUndefined();
+      } finally {
+        physical.close();
+      }
+    }
 
     const v19Bytes = rewriteArchiveDatabase(v20Bytes, "canonical-v19", (handle) => {
       handle.exec("DROP TABLE deadline_reminder_claims");

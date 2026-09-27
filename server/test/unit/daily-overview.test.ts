@@ -1,6 +1,10 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
-import { dailyDigestForDate, dailyOverviewForDate } from "../../src/services/dailyOverviewService.js";
+import {
+  dailyDigestCountsForDate,
+  dailyDigestForDate,
+  dailyOverviewForDate,
+} from "../../src/services/dailyOverviewService.js";
 import { addCalendarDays, validCalendarDate, zonedLocalDate } from "../../src/services/localDay.js";
 
 function fixture() {
@@ -104,6 +108,65 @@ describe("daily overview domain service", () => {
       overdueCount: 0, todayCount: 0, tomorrowCount: 0, titles: [],
     });
     empty.close();
+  });
+
+  it("excludes zero, negative and JS-unsafe IDs from overview and digest projections", () => {
+    const db = fixture();
+    db.exec(`
+      INSERT INTO tasks(id,title,due_date,status) VALUES
+        (1,'safe task','2026-09-20','open'),
+        (0,'zero task','2026-09-20','open'),
+        (-1,'negative task','2026-09-20','open'),
+        (9007199254740992,'unsafe task','2026-09-20','open');
+      INSERT INTO goals(id,title,target_date,status) VALUES
+        (2,'safe goal','2026-09-20','active'),
+        (0,'zero goal','2026-09-20','active'),
+        (-1,'negative goal','2026-09-20','active'),
+        (9007199254740992,'unsafe goal','2026-09-20','active');
+    `);
+
+    expect(dailyOverviewForDate("2026-09-20", db).today.map(({ type, id }) => ({ type, id })))
+      .toEqual([{ type: "goal", id: 2 }, { type: "task", id: 1 }]);
+    expect(dailyDigestForDate("2026-09-20", db)).toEqual({
+      overdueCount: 0,
+      todayCount: 2,
+      tomorrowCount: 0,
+      titles: ["safe goal", "safe task"],
+    });
+    db.close();
+  });
+
+  it("reads zero titles for counts and no more than five after identity selection", () => {
+    const db = new Database(":memory:");
+    let titleReads = 0;
+    db.function("observe_title", (value: string) => { titleReads += 1; return value; });
+    db.exec(`
+      CREATE TABLE task_source(id INTEGER PRIMARY KEY,title TEXT NOT NULL,due_date TEXT,status TEXT NOT NULL,created_at TEXT NOT NULL);
+      CREATE TABLE goal_source(id INTEGER PRIMARY KEY,title TEXT NOT NULL,target_date TEXT,status TEXT NOT NULL,created_at TEXT NOT NULL);
+      CREATE VIEW tasks AS SELECT id,observe_title(title) AS title,due_date,status,created_at FROM task_source;
+      CREATE VIEW goals AS SELECT id,observe_title(title) AS title,target_date,status,created_at FROM goal_source;
+    `);
+    const insert = db.prepare("INSERT INTO task_source VALUES (?,?,?,?,?)");
+    for (let id = 1; id <= 1_000; id++) insert.run(id, `private title ${id}`, "2026-09-20", "open", `created-${id}`);
+
+    expect(dailyDigestCountsForDate("2026-09-20", db)).toEqual({
+      overdueCount: 0, todayCount: 1_000, tomorrowCount: 0,
+    });
+    expect(titleReads).toBe(0);
+    expect(dailyDigestForDate("2026-09-20", db).titles).toEqual([
+      "private title 1", "private title 2", "private title 3", "private title 4", "private title 5",
+    ]);
+    expect(titleReads).toBe(5);
+    db.close();
+  });
+
+  it("does not alias the maximum supported date to tomorrow", () => {
+    const db = fixture();
+    db.prepare("INSERT INTO tasks(id,title,due_date,status) VALUES (1,'last day','9999-12-31','open')").run();
+    expect(dailyDigestForDate("9999-12-31", db)).toEqual({
+      overdueCount: 0, todayCount: 1, tomorrowCount: 0, titles: ["last day"],
+    });
+    db.close();
   });
 
   it("uses canonical real Gregorian dates and bounded calendar addition", () => {

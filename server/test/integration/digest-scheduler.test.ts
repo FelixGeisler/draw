@@ -13,7 +13,6 @@ import {
 } from "../../src/push/digestScheduler.js";
 import { PushService } from "../../src/push/service.js";
 import type { IsolatedResolver } from "../../src/push/resolver.js";
-import { DAILY_DIGEST_TITLES_SQL } from "../../src/services/dailyOverviewService.js";
 import { testDb } from "../helpers.js";
 
 const roots: string[] = [];
@@ -153,7 +152,26 @@ describe("automatic daily digest scheduler", () => {
       titles: ["old goal", "old task", "less old goal", "today task", "tomorrow goal"],
       remainingCount: 1,
     })]);
-    expect(DAILY_DIGEST_TITLES_SQL).toMatch(/LIMIT 5\s*$/);
+  });
+
+  it("deduplicates both fall-fold instants across a scheduler restart", async () => {
+    database.prepare("UPDATE settings SET value='01:30' WHERE key='push_send_time'").run();
+    database.prepare("UPDATE settings SET value='America/New_York' WHERE key='push_timezone'").run();
+    let sends = 0;
+    const push = service({ transport: { send: async () => { sends += 1; return "success"; } } });
+    instant = new Date("2026-11-01T05:30:00Z");
+    const first = scheduler(push);
+    await first.runNow();
+    first.stop();
+
+    instant = new Date("2026-11-01T06:30:00Z");
+    const restarted = scheduler(push);
+    await restarted.runNow();
+    restarted.stop();
+
+    expect(sends).toBe(1);
+    expect(database.prepare("SELECT * FROM daily_digest_claims").all())
+      .toEqual([{ device_id: deviceId, local_date: "2026-11-01" }]);
   });
 
   it("leaves busy devices unclaimed and shares at most four physical attempts", async () => {
@@ -180,6 +198,39 @@ describe("automatic daily digest scheduler", () => {
     await parallel.runNow();
     parallel.stop();
     expect({ sends, peak }).toEqual({ sends: 8, peak: 4 });
+  });
+
+  it("releases the shared permit when claim/database work throws and admits the next tick", async () => {
+    const admission = new PushAdmission(() => 0);
+    const logs: string[] = [];
+    let databaseCalls = 0;
+    let failClaimLookup = true;
+    let sends = 0;
+    const push = service({
+      admission,
+      transport: { send: async () => { sends += 1; return "success"; } },
+    });
+    const run = startDigestScheduler({
+      database: () => {
+        databaseCalls += 1;
+        if (failClaimLookup && databaseCalls === 2) throw new Error("SECRET claim failure");
+        return database;
+      },
+      push,
+      now: () => instant,
+      timer: inertTimer,
+      log: (message) => logs.push(message),
+    });
+
+    await run.runNow();
+    expect(admission.snapshot().active).toBe(0);
+    expect(logs).toEqual(["[push] digest tick failed (redacted)"]);
+    expect(logs.join(" ")).not.toContain("SECRET");
+    failClaimLookup = false;
+    await run.runNow();
+    run.stop();
+    expect(sends).toBe(1);
+    expect(admission.snapshot().active).toBe(0);
   });
 
   it("retains a claim after DNS/provider failure and never retries", async () => {
@@ -260,7 +311,7 @@ describe("automatic daily digest scheduler", () => {
     run.stop();
   });
 
-  it("uses remaining TTL/topic, generic privacy, and detailed-to-generic size fallback", async () => {
+  it("uses remaining TTL/topic and clear-body detailed-to-generic size fallback", async () => {
     task(1, "x".repeat(4_000), "2026-09-20");
     instant = new Date("2026-09-20T10:00:00.250Z");
     const generated: Array<{ payload: Record<string, unknown>; ttl: number; topic: string }> = [];
@@ -276,19 +327,84 @@ describe("automatic daily digest scheduler", () => {
     expect(generated[0]).toMatchObject({ ttl: 7_199, topic: digestEventId("2026-09-20"), payload: { detail: "generic" } });
     expect(JSON.stringify(generated[0].payload)).not.toContain("x".repeat(100));
     run.stop();
+  });
 
-    database.prepare("DELETE FROM daily_digest_claims").run();
+  it("constructs only generic and performs zero title reads when Hide-details is final", async () => {
+    task(1, "PRIVATE TITLE CANARY", "2026-09-20");
     database.prepare("UPDATE settings SET value='1' WHERE key='push_hide_details'").run();
-    generated.length = 0;
-    const hidden = scheduler(service({
-      generateRequestDetails: (subscription, payload, options) => {
-        generated.push({ payload: JSON.parse(payload.toString("utf8")), ttl: Number(options.TTL), topic: String(options.topic) });
+    let titleStatementPrepares = 0;
+    const guarded = new Proxy(database, {
+      get(target, property) {
+        if (property === "prepare") return (sql: string) => {
+          if (sql.includes("SELECT title FROM tasks") || sql.includes("SELECT title FROM goals")) {
+            titleStatementPrepares += 1;
+            throw new Error("title read forbidden for Hide-details");
+          }
+          return target.prepare(sql);
+        };
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const constructed: string[] = [];
+    let sends = 0;
+    const run = scheduler(service({
+      database: () => guarded,
+      generateRequestDetails: (subscription, payload) => {
+        constructed.push((JSON.parse(payload.toString("utf8")) as { detail: string }).detail);
         return { endpoint: subscription.endpoint, method: "POST", headers: {}, body: Buffer.from("encrypted") };
       },
+      transport: { send: async () => { sends += 1; return "success"; } },
     }));
-    await hidden.runNow();
-    expect(generated[0].payload).toMatchObject({ detail: "generic", todayCount: 1 });
-    hidden.stop();
+    await run.runNow();
+    run.stop();
+    expect({ titleStatementPrepares, sends }).toEqual({ titleStatementPrepares: 0, sends: 1 });
+    expect(constructed).toEqual(["generic"]);
+  });
+
+  it("falls back on a 4097-byte encrypted detailed body and sends nothing when generic is oversized", async () => {
+    task(1, "PRIVATE TITLE CANARY", "2026-09-20");
+    const constructed: string[] = [];
+    const observed: Record<string, unknown>[] = [];
+    let sends = 0;
+    const fallback = scheduler(service({
+      generateRequestDetails: (subscription, payload) => {
+        const parsed = JSON.parse(payload.toString("utf8")) as { detail: string };
+        constructed.push(parsed.detail);
+        return {
+          endpoint: subscription.endpoint,
+          method: "POST",
+          headers: {},
+          body: Buffer.alloc(parsed.detail === "detailed" ? 4_097 : 64),
+        };
+      },
+      observeDigestPayload: (payload) => observed.push(JSON.parse(payload.toString("utf8"))),
+      transport: { send: async () => { sends += 1; return "success"; } },
+    }));
+    await fallback.runNow();
+    fallback.stop();
+    expect(constructed).toEqual(["detailed", "generic"]);
+    expect(sends).toBe(1);
+    expect(observed).toEqual([expect.objectContaining({ detail: "generic", todayCount: 1 })]);
+    expect(JSON.stringify(observed)).not.toContain("PRIVATE TITLE CANARY");
+
+    database.prepare("DELETE FROM daily_digest_claims").run();
+    constructed.length = 0;
+    observed.length = 0;
+    sends = 0;
+    const rejected = scheduler(service({
+      generateRequestDetails: (subscription, payload) => {
+        constructed.push((JSON.parse(payload.toString("utf8")) as { detail: string }).detail);
+        return { endpoint: subscription.endpoint, method: "POST", headers: {}, body: Buffer.alloc(4_097) };
+      },
+      observeDigestPayload: (payload) => observed.push(JSON.parse(payload.toString("utf8"))),
+      transport: { send: async () => { sends += 1; return "success"; } },
+    }));
+    await rejected.runNow();
+    rejected.stop();
+    expect(constructed).toEqual(["detailed", "generic"]);
+    expect({ sends, observed }).toEqual({ sends: 0, observed: [] });
+    expect(database.prepare("SELECT COUNT(*) AS count FROM daily_digest_claims").get()).toEqual({ count: 1 });
   });
 
   it("retains claims when content or request construction fails and when transport times out", async () => {
@@ -325,7 +441,7 @@ describe("automatic daily digest scheduler", () => {
     const failingView = new Proxy(database, {
       get(target, property) {
         if (property === "prepare") return (sql: string) => {
-          if (failContent && sql.includes("eligible(type,id,title,date,created_at)")) {
+          if (failContent && sql.includes("eligible(type,id,date,created_at)")) {
             throw new Error("synthetic content-query failure");
           }
           return target.prepare(sql);

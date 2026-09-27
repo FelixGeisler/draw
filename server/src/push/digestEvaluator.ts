@@ -83,12 +83,28 @@ export function digestWindow(timing: DigestTiming, instant: Date): DigestWindow 
   const formatter = createZonedFormatter(timing.timezone);
   const localDate = zonedMinute(formatter, instant).date;
   const start = resolveWallMinute(localDate, timing.sendTime, timing.timezone);
-  const nextDate = addCalendarDays(localDate, 1);
-  if (!start || !nextDate) return null;
-  const nextDay = resolveWallMinute(nextDate, "00:00", timing.timezone);
-  if (!nextDay) return null;
+  if (!start) return null;
   const elapsedEnd = new Date(start.valueOf() + DIGEST_MAX_TTL_SECONDS * 1000);
-  return { localDate, start, end: elapsedEnd < nextDay ? elapsedEnd : nextDay };
+  const nextDate = addCalendarDays(localDate, 1);
+  let nextDay = nextDate ? resolveWallMinute(nextDate, "00:00", timing.timezone) : null;
+  if (nextDate && !nextDay) return null;
+  if (!nextDate) {
+    // 9999-12-31 is a valid supported date even though the next canonical
+    // YYYY-MM-DD is outside the domain. Find a same-window date transition
+    // directly so late send times still cannot cross the local-day boundary.
+    for (let value = start.valueOf() + 60_000; value <= elapsedEnd.valueOf(); value += 60_000) {
+      const candidate = new Date(value);
+      try {
+        if (zonedMinute(formatter, candidate).date === localDate) continue;
+      } catch {
+        // Crossing from supported year 9999 to 10000 is itself the boundary;
+        // zonedMinute intentionally rejects the latter as a calendar date.
+      }
+      nextDay = candidate;
+      break;
+    }
+  }
+  return { localDate, start, end: nextDay && nextDay < elapsedEnd ? nextDay : elapsedEnd };
 }
 
 export function evaluateDigestEligibility(timing: DigestTiming, instant: Date): DigestEligibility | null {

@@ -28,7 +28,7 @@ function publicSettings(): Record<string, string> {
   // another `?` and another bound argument below.
   const rows = db
     .prepare(
-      "SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "SELECT key, value FROM settings WHERE key NOT IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .all(
       API_KEY_SETTING,
@@ -45,6 +45,7 @@ function publicSettings(): Record<string, string> {
       UPDATE_TRIGGER_TOKEN_SETTING,
       UPDATE_LAST_NOTIFIED_SETTING,
       // Daily digest timing/privacy stays on the dedicated typed Push API.
+      "push_hide_details",
       "push_send_time",
       "push_timezone",
       "push_quiet_start",

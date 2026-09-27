@@ -3031,8 +3031,10 @@ shell. Production-serving checks also decode the fixed Push icon and badge as
 transparent-border geometry.
 
 *Out of scope:* offline-first data sync and a native/Capacitor app. Web Push is
-no longer native-required or out of scope; its implemented and planned stages
-are governed by ADR-72.
+no longer native-required or out of scope. ADR-72 remains the historical and
+retained foundation for authority, subscription lifecycle, topology, transport,
+manual tests, sanitation, and production assembly; ADR-73 is the normative
+replacement for automatic delivery, persistence, scheduling, and worker payloads.
 
 == ADR-55: TLS is delegated to Tailscale Serve, not a bundled reverse proxy — loopback-only port plus a one-hop TRUST_PROXY, and a request-derived Secure cookie
 

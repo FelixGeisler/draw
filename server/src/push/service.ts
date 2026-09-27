@@ -9,7 +9,10 @@ import { PushResolutionError, nodeResolverFactory, resolvePushEndpoint, type Res
 import { evaluatePushTopology, type PushTopologyOptions, type TopologyResult } from "./topology.js";
 import { inertPushTransport, type PushTransport } from "./transport.js";
 import { evaluateDigestEligibility, readDigestTiming, type DigestTiming } from "./digestEvaluator.js";
-import { dailyDigestForDate } from "../services/dailyOverviewService.js";
+import {
+  dailyDigestCountsForDate,
+  dailyDigestTitlesForDate,
+} from "../services/dailyOverviewService.js";
 
 export const MAX_PUSH_DEVICES = 16;
 export const MAX_ENDPOINT_BYTES = 2_048;
@@ -593,24 +596,20 @@ export class PushService implements PushServiceDependency {
         eligibility.localDate !== occurrence.localDate || attempt.signal.aborted) return;
       if (currentSubscription.expiration_time !== null && currentSubscription.expiration_time <= finalNow.valueOf()) return;
 
-      const projection = dailyDigestForDate(occurrence.localDate, this.database);
-      const total = projection.todayCount + projection.tomorrowCount + projection.overdueCount;
-      if (!Number.isSafeInteger(total) || total < projection.titles.length) return;
+      // Hide-details is a counts-only privacy boundary: after the final policy
+      // recheck it neither dereferences titles nor constructs a detailed object.
+      const counts = dailyDigestCountsForDate(occurrence.localDate, this.database);
+      const total = counts.todayCount + counts.tomorrowCount + counts.overdueCount;
+      if (!Number.isSafeInteger(total)) return;
       const identity = {
         v: 2 as const,
         kind: "digest" as const,
         eventId: occurrence.eventId,
-        todayCount: projection.todayCount,
-        tomorrowCount: projection.tomorrowCount,
-        overdueCount: projection.overdueCount,
+        todayCount: counts.todayCount,
+        tomorrowCount: counts.tomorrowCount,
+        overdueCount: counts.overdueCount,
       };
       const generic = { ...identity, detail: "generic" as const };
-      const detailed = {
-        ...identity,
-        detail: "detailed" as const,
-        titles: projection.titles,
-        remainingCount: total - projection.titles.length,
-      };
       const build = (payload: object): { clear: Buffer; details: RequestDetails } | null => {
         let clear: Buffer;
         try { clear = Buffer.from(JSON.stringify(payload), "utf8"); } catch { return null; }
@@ -636,7 +635,20 @@ export class PushService implements PushServiceDependency {
           return { clear, details };
         } catch { return null; }
       };
-      const request = occurrence.hideDetails === "1" ? build(generic) : build(detailed) ?? build(generic);
+      let request: { clear: Buffer; details: RequestDetails } | null;
+      if (occurrence.hideDetails === "1") {
+        request = build(generic);
+      } else {
+        const titles = dailyDigestTitlesForDate(occurrence.localDate, this.database);
+        if (titles.length > total) return;
+        const detailed = {
+          ...identity,
+          detail: "detailed" as const,
+          titles,
+          remainingCount: total - titles.length,
+        };
+        request = build(detailed) ?? build(generic);
+      }
       if (!request) return;
       this.options.observeDigestPayload?.(Buffer.from(request.clear));
       initiated = true;

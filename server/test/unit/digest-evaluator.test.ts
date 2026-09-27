@@ -29,6 +29,18 @@ describe("daily digest wall-calendar evaluator", () => {
     expect(evaluateDigestEligibility(value, new Date("2026-09-20T23:59:59.001Z"))).toBeNull();
   });
 
+  it("keeps the maximum supported local date schedulable without crossing its boundary", () => {
+    const ordinary = digestWindow(timing(), new Date("9999-12-31T09:00:00Z"));
+    expect(ordinary).toMatchObject({ localDate: "9999-12-31" });
+    expect(ordinary?.start.toISOString()).toBe("9999-12-31T09:00:00.000Z");
+    expect(ordinary?.end.toISOString()).toBe("9999-12-31T12:00:00.000Z");
+    expect(evaluateDigestEligibility(timing(), new Date("9999-12-31T09:00:00Z"))?.ttl).toBe(10_800);
+
+    const late = digestWindow(timing({ sendTime: "23:45" }), new Date("9999-12-31T23:45:00Z"));
+    expect(late?.end.toISOString()).toBe("+010000-01-01T00:00:00.000Z");
+    expect(evaluateDigestEligibility(timing({ sendTime: "23:45" }), new Date("9999-12-31T23:59:58Z"))?.ttl).toBe(2);
+  });
+
   it("advances a spring gap and chooses the first fold occurrence", () => {
     expect(resolveWallMinute("2026-03-08", "02:15", "America/New_York")?.toISOString())
       .toBe("2026-03-08T07:00:00.000Z");

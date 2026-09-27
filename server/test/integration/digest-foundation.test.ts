@@ -13,14 +13,15 @@ beforeAll(async () => {
   database = await testDb();
 });
 
-const TIMING_KEYS = ["push_send_time", "push_timezone", "push_quiet_start", "push_quiet_end"] as const;
+const TIMING_PRIVACY_KEYS = [
+  "push_hide_details", "push_send_time", "push_timezone", "push_quiet_start", "push_quiet_end",
+] as const;
 
 describe("daily digest persistence foundation", () => {
   it("keeps all timing/privacy fields out of generic Settings", async () => {
     const settings = (await request(app).get("/api/settings").expect(200)).body as Record<string, unknown>;
-    for (const key of TIMING_KEYS) expect(settings).not.toHaveProperty(key);
+    for (const key of TIMING_PRIVACY_KEYS) expect(settings).not.toHaveProperty(key);
     expect(settings).not.toHaveProperty("push_lead_days");
-    expect(settings.push_hide_details).toBe("0");
   });
 
   it("cascades device/date claims only with subscription lifecycle", () => {

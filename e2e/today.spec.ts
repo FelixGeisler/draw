@@ -53,14 +53,11 @@ async function seedGoal(page: Page, data: object) {
 }
 
 async function controlledDates(page: Page) {
-  // Keep the effective local time around noon for the whole scenario. A run
-  // may cross UTC midnight, but this fixed-offset zone remains on one local D
-  // with more than eleven hours of margin on either side.
-  const utcHour = new Date().getUTCHours();
-  const offsetHours = 12 - utcHour;
-  const timezone = offsetHours === 0
-    ? "UTC"
-    : `Etc/GMT${offsetHours > 0 ? `-${offsetHours}` : `+${-offsetHours}`}`;
+  // Recurrence advances from the server machine's local calendar day. The
+  // browser and throwaway server share that machine, so use its IANA zone for
+  // the overview too; an artificial fixed offset can straddle a different
+  // date near local midnight and falsely make the next occurrence look late.
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   await page.route("**/api/push/status", (route) => fulfillJson(route, pushStatus(timezone)));
   const response = await page.request.get(`/api/daily-overview?timezone=${encodeURIComponent(timezone)}`);
   expect(response.ok()).toBeTruthy();
