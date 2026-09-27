@@ -369,14 +369,20 @@ describe("credential-free backup artifacts", () => {
 
 describe("descriptor-bound material traversal", () => {
   function fixture() {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "draw-material-race-"));
+    // Keep the watched root under an owned, otherwise idle parent. The reader
+    // intentionally versions the root's parent to detect replacement; using
+    // the shared OS temp directory lets parallel test files change that parent
+    // before this race hook runs and makes the proof vacuous.
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), "draw-material-race-parent-"));
+    const root = path.join(parent, "files");
+    fs.mkdirSync(root);
     const original = path.join(root, "material.txt");
     fs.writeFileSync(original, "ORIGINAL-DESCRIPTOR-BYTES");
-    return { root, original };
+    return { parent, root, original };
   }
 
   it("rejects a material symlink without dereferencing it", () => {
-    const { root, original } = fixture();
+    const { parent, root, original } = fixture();
     const linked = path.join(root, "linked.txt");
     try {
       try {
@@ -389,7 +395,7 @@ describe("descriptor-bound material traversal", () => {
       }
       expect(() => readMaterialFilesSafely(root)).toThrow(/unsafe backup material link/);
     } finally {
-      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(parent, { recursive: true, force: true });
     }
   });
 
@@ -535,7 +541,7 @@ describe("descriptor-bound material traversal", () => {
   });
 
   it("rejects a path swap before open", () => {
-    const { root, original } = fixture();
+    const { parent, root, original } = fixture();
     const held = path.join(root, "held.txt");
     try {
       expect(() =>
@@ -548,12 +554,12 @@ describe("descriptor-bound material traversal", () => {
         }),
       ).toThrow(/changed before read/);
     } finally {
-      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(parent, { recursive: true, force: true });
     }
   });
 
   it("reads only the original verified descriptor, then rejects an after-open path swap", () => {
-    const { root, original } = fixture();
+    const { parent, root, original } = fixture();
     const held = path.join(root, "held.txt");
     let descriptorBytes = "";
     try {
@@ -573,7 +579,7 @@ describe("descriptor-bound material traversal", () => {
       ).toThrow(/changed during read/);
       expect(descriptorBytes).toBe("ORIGINAL-DESCRIPTOR-BYTES");
     } finally {
-      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(parent, { recursive: true, force: true });
     }
   });
 });

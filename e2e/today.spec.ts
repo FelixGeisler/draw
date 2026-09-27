@@ -52,8 +52,17 @@ async function seedGoal(page: Page, data: object) {
   return goal;
 }
 
-async function utcDates(page: Page) {
-  const response = await page.request.get("/api/daily-overview?timezone=UTC");
+async function controlledDates(page: Page) {
+  // Keep the effective local time around noon for the whole scenario. A run
+  // may cross UTC midnight, but this fixed-offset zone remains on one local D
+  // with more than eleven hours of margin on either side.
+  const utcHour = new Date().getUTCHours();
+  const offsetHours = 12 - utcHour;
+  const timezone = offsetHours === 0
+    ? "UTC"
+    : `Etc/GMT${offsetHours > 0 ? `-${offsetHours}` : `+${-offsetHours}`}`;
+  await page.route("**/api/push/status", (route) => fulfillJson(route, pushStatus(timezone)));
+  const response = await page.request.get(`/api/daily-overview?timezone=${encodeURIComponent(timezone)}`);
   expect(response.ok()).toBeTruthy();
   const today = (await response.json() as { localDate: string }).localDate;
   const add = (days: number) => {
@@ -202,8 +211,17 @@ test("Draw action and direct route show stable mixed sections and canonical link
   for (const group of ["overdue", "today", "tomorrow"]) {
     await expect(page.locator(`[data-overview-group="${group}"]`).getByRole("heading")).toBeVisible();
   }
-  await expect(page.getByRole("link", { name: "Late task" })).toHaveAttribute("href", "/tasks?focus=7&showDone=1");
-  await expect(page.getByRole("link", { name: "Today goal" })).toHaveAttribute("href", "/goals?focus=9");
+  const lateTask = row(page, "Late task");
+  await expect(lateTask.locator(".today-type")).toHaveText("Task");
+  await expect(lateTask.locator("time")).toHaveText("2026-09-20");
+  await expect(lateTask.locator("time")).toHaveAttribute("datetime", "2026-09-20");
+  await expect(lateTask.getByRole("link", { name: "Late task" })).toHaveAttribute("href", "/tasks?focus=7&showDone=1");
+  const todayGoal = row(page, "Today goal");
+  await expect(todayGoal.locator(".today-type")).toHaveText("Goal");
+  await expect(todayGoal.locator("time")).toHaveText("2026-09-27");
+  await expect(todayGoal.locator("time")).toHaveAttribute("datetime", "2026-09-27");
+  await expect(todayGoal.getByRole("link", { name: "Today goal" })).toHaveAttribute("href", "/goals?focus=9");
+  await expect(page.locator('[data-overview-group="tomorrow"] .today-empty')).toHaveText("Nothing due tomorrow.");
   await expect(page.locator(".sidenav").getByRole("link", { name: "Today", exact: true })).toHaveCount(0);
   await page.goto("/today");
   await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
@@ -211,7 +229,7 @@ test("Draw action and direct route show stable mixed sections and canonical link
 
 test("all existing task and goal mutations refetch and honestly rebucket or remove rows", async ({ page }) => {
   const categories = await (await page.request.get("/api/categories")).json() as Array<{ id: number }>;
-  const dates = await utcDates(page);
+  const dates = await controlledDates(page);
   const tasks = {
     clear: await seedTask(page, { title: "Today clear task", categoryId: categories[0].id, dueDate: dates.today }),
     move: await seedTask(page, { title: "Today move task", categoryId: categories[0].id, dueDate: dates.today }),
@@ -272,7 +290,7 @@ test("all existing task and goal mutations refetch and honestly rebucket or remo
 
 test("a rejected mutation leaves the row visible with an error", async ({ page }) => {
   const categories = await (await page.request.get("/api/categories")).json() as Array<{ id: number }>;
-  const { today } = await utcDates(page);
+  const { today } = await controlledDates(page);
   const task = await seedTask(page, { title: "Today failed mutation", categoryId: categories[0].id, dueDate: today });
   await page.route(`**/api/tasks/${task.id}`, async (route) => {
     if (route.request().method() === "PATCH") await fulfillJson(route, { error: "synthetic mutation failure" }, 500);
@@ -286,7 +304,7 @@ test("a rejected mutation leaves the row visible with an error", async ({ page }
 
 test("archiving a parent keeps its qualifying child focusable in the visible ordinary all-status tree", async ({ page }) => {
   const categories = await (await page.request.get("/api/categories")).json() as Array<{ id: number }>;
-  const { today } = await utcDates(page);
+  const { today } = await controlledDates(page);
   const parent = await seedTask(page, { title: "Today archive parent", categoryId: categories[0].id, dueDate: today });
   const response = await page.request.post(`/api/tasks/${parent.id}/subtasks`, {
     data: { subtasks: [{ title: "Today archived-root child" }] },
@@ -321,10 +339,19 @@ test("focus waits when all-status tasks finish before held categories", async ({
     await held;
     await route.fulfill({ response });
   });
+  const allTasksResponse = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return response.request().method() === "GET" && url.pathname === "/api/tasks" && url.searchParams.get("status") === "all";
+  });
   await page.goto(`/tasks?focus=${task.id}&showDone=1`);
   await expect(page).toHaveURL("/tasks");
   await expect(page.getByRole("checkbox", { name: "show done" })).toBeChecked();
+  const completed = await allTasksResponse;
+  expect(completed.ok()).toBeTruthy();
+  expect(await completed.finished()).toBeNull();
+  expect(await completed.json()).toEqual(expect.arrayContaining([expect.objectContaining({ id: task.id })]));
   await expect(taskTree(page).locator(`[data-task-id="${task.id}"]`)).toHaveCount(0);
+  await expect(page.locator(".palette-flash")).toHaveCount(0);
   release();
   const ordinary = taskTree(page).locator(`[data-task-id="${task.id}"]`);
   await expect(ordinary).toBeVisible();

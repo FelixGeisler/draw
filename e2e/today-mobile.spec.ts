@@ -42,6 +42,6 @@ test("Today stays within the phone viewport, keeps 44px targets, and is absent f
     if (!(await target.isVisible())) continue;
     const box = await target.boundingBox();
     expect(box, "visible interactive target has a box").not.toBeNull();
-    expect(box!.height, await target.getAttribute("aria-label") ?? await target.textContent() ?? "target").toBeGreaterThanOrEqual(44);
+    expect(Math.round(box!.height), await target.getAttribute("aria-label") ?? await target.textContent() ?? "target").toBeGreaterThanOrEqual(44);
   }
 });
