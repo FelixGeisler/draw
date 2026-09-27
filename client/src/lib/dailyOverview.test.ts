@@ -11,7 +11,6 @@ function status(timezone: unknown) {
     maxDevices: 16,
     preferences: {
       hideDetails: false,
-      leadDays: 1,
       sendTime: "09:00",
       timezone,
       quietStart: null,

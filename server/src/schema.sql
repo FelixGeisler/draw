@@ -301,15 +301,12 @@ CREATE TABLE push_subscriptions (
   last_seen_at TEXT NOT NULL
 );
 
--- Stage 2A deadline-reminder occurrence claims (#345, ADR-72). Stage 2B will
--- claim rows before provider I/O; this foundation creates no producer.
-CREATE TABLE deadline_reminder_claims (
+-- Daily digest once-per-device/local-date claims (#355, ADR-73). Claims are
+-- retained for the subscription lifetime and contain no user content/result.
+CREATE TABLE daily_digest_claims (
   device_id TEXT NOT NULL REFERENCES push_subscriptions(id) ON DELETE CASCADE,
-  item_type TEXT NOT NULL CHECK (item_type IN ('task', 'goal')),
-  item_id INTEGER NOT NULL,
-  item_created_at TEXT NOT NULL,
-  deadline TEXT NOT NULL,
-  PRIMARY KEY (device_id, item_type, item_id, item_created_at, deadline)
+  local_date TEXT NOT NULL,
+  PRIMARY KEY (device_id, local_date)
 );
 
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);
@@ -325,7 +322,6 @@ INSERT INTO settings (key, value) VALUES
   ('daily_goal_completions', '1'),
   ('warmup_every_hours', '8'),
   ('push_hide_details', '0'),
-  ('push_lead_days', '1'),
   ('push_send_time', '09:00'),
   ('push_timezone', NULL),
   ('push_quiet_start', NULL),

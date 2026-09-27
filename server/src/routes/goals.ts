@@ -136,15 +136,7 @@ goalsRouter.patch("/:id", (req, res) => {
 
 goalsRouter.delete("/:id", (req, res) => {
   const id = Number(req.params.id);
-  const r = db.transaction(() => {
-    const deleted = db.prepare("DELETE FROM goals WHERE id = ?").run(id);
-    if (deleted.changes > 0) {
-      db.prepare(
-        "DELETE FROM deadline_reminder_claims WHERE item_type = 'goal' AND item_id = ?",
-      ).run(id);
-    }
-    return deleted;
-  })();
+  const r = db.prepare("DELETE FROM goals WHERE id = ?").run(id);
   if (r.changes === 0) return res.status(404).json({ error: "goal not found" });
   res.json({ ok: true });
 });

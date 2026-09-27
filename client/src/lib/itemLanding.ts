@@ -57,10 +57,10 @@ function withoutOwnedState(state: unknown, keys: readonly string[]): unknown {
 }
 
 /**
- * Consumes the Push-owned URL/state fields without normalising unrelated query
+ * Consumes item-focus URL/state fields without normalising unrelated query
  * bytes. Encoded keys are owned and removed, but never qualify as canonical.
  */
-export function consumePushLanding(location: LandingLocation, kind: "task" | "goal"): LandingResult {
+export function consumeItemLanding(location: LandingLocation, kind: "task" | "goal"): LandingResult {
   const parsed = entries(location.search);
   const ownedKeys = kind === "task" ? new Set(["focus", "showDone"]) : new Set(["focus"]);
   const focus = parsed.filter((entry) => entry.key === "focus");

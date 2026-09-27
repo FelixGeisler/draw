@@ -15,6 +15,7 @@ import {
 import { validateV18Contract } from "../schemaV18.js";
 import { validateV19Contract } from "../schemaV19.js";
 import { validateV20Contract } from "../schemaV20.js";
+import { validateV21Contract } from "../schemaV21.js";
 import { disabledPushDependency, type PushDependency } from "../push/authority.js";
 
 // Backup archive layout (#61, ADR-26): one zip holding a `VACUUM INTO`
@@ -173,6 +174,10 @@ function scrubCredentialRows(handle: Database.Database, removeApiKey: boolean): 
     // Claims are privacy-sensitive delivery history. Delete them explicitly
     // even when foreign_keys is disabled on a standalone sanitizer handle;
     // deleting subscriptions afterwards also proves the production cascade.
+    if (tableExists(handle, "daily_digest_claims")) {
+      handle.prepare("DELETE FROM daily_digest_claims").run();
+    }
+    // Historical v20 archives are scrubbed before migration as well.
     if (tableExists(handle, "deadline_reminder_claims")) {
       handle.prepare("DELETE FROM deadline_reminder_claims").run();
     }
@@ -747,9 +752,10 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
       // must never be sent through v19's non-null settings validator.
       if (version === 19) validateV19Contract(staged);
       if (version === 20) validateV20Contract(staged);
+      if (version === 21) validateV21Contract(staged);
       migrateDatabase(staged);
       validateV18Contract(staged);
-      validateV20Contract(staged);
+      validateV21Contract(staged);
       scrubCredentialRows(staged, false);
       if (staged.pragma("integrity_check", { simple: true }) !== "ok") {
         throw new Error("integrity_check failed after migration");
@@ -757,7 +763,7 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
     } catch (error) {
       throw new BackupError(
         400,
-        `the backup database does not satisfy the schema v18 contract, schema v19 contract, or schema v20 contract: ${
+        `the backup database does not satisfy the schema v18 contract, schema v19 contract, schema v20 contract, or schema v21 contract: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

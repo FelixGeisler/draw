@@ -12,7 +12,7 @@ import { TaskForm } from "../components/TaskForm";
 import { VictoryOverlay } from "../components/VictoryOverlay";
 import { daysUntil, feasibility, type Feasibility } from "../lib/feasibility";
 import { bossBar } from "../lib/bossBar";
-import { consumePushLanding } from "../lib/pushLanding";
+import { consumeItemLanding } from "../lib/itemLanding";
 import { BossBar } from "../components/BossBar";
 
 const VERDICT_STYLE = {
@@ -346,13 +346,13 @@ export function GoalsPage() {
   const [victory, setVictory] = useState<Goal | null>(null);
   const [missedNotice, setMissedNotice] = useState<string | null>(null);
 
-  // Palette and durable Push landing (#246/#343). The URL takes precedence,
+  // Palette and durable item landing (#246/#343/#353). The URL takes precedence,
   // owns only focus on this page, and preserves unrelated query/hash/state.
   const location = useLocation();
   const navigate = useNavigate();
   const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
   useEffect(() => {
-    const landing = consumePushLanding(location, "goal");
+    const landing = consumeItemLanding(location, "goal");
     if (!landing.consumed) return;
     setPendingFocusId(landing.focusId);
     navigate(landing.destination, { replace: true, state: landing.state });

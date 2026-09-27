@@ -24,7 +24,7 @@ import { PushLifecycle } from "./push/authority.js";
 import { PushService, type PushServiceOptions } from "./push/service.js";
 import { createNodePushTransport, type PushTransport } from "./push/transport.js";
 import type { ResolverFactory } from "./push/resolver.js";
-import { startDeadlineScheduler, type DeadlineScheduler, type DeadlineTimer } from "./push/deadlineScheduler.js";
+import { startDigestScheduler, type DigestScheduler, type DigestTimer } from "./push/digestScheduler.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -42,17 +42,17 @@ export interface ProductionAssemblyOptions {
   /** Test-only CA seam for an isolated temporary Push TLS provider. */
   pushTransportCa?: string | Buffer;
   pushTransport?: PushTransport;
-  deadlineNow?: () => Date;
-  deadlineTimer?: DeadlineTimer;
+  digestNow?: () => Date;
+  digestTimer?: DigestTimer;
   generateRequestDetails?: PushServiceOptions["generateRequestDetails"];
-  observeDeadlinePayload?: (payload: Buffer) => void;
+  observeDigestPayload?: (payload: Buffer) => void;
   startSchedulers?: boolean;
 }
 
 export interface ProductionAssembly {
   server: Server;
   push: PushService;
-  deadlineScheduler: DeadlineScheduler | null;
+  digestScheduler: DigestScheduler | null;
   resolved: { host: string; port: number; password?: string; trustProxy: boolean | number | string };
 }
 
@@ -111,22 +111,22 @@ export function startProduction(options: ProductionAssemblyOptions = {}): Produc
     transport,
     ...(options.resolverFactory ? { resolverFactory: options.resolverFactory } : {}),
     ...(options.generateRequestDetails ? { generateRequestDetails: options.generateRequestDetails } : {}),
-    ...(options.observeDeadlinePayload ? { observeDeadlinePayload: options.observeDeadlinePayload } : {}),
+    ...(options.observeDigestPayload ? { observeDigestPayload: options.observeDigestPayload } : {}),
   });
   const state = push.snapshot();
   if (!state.available) console.error(`[push] unavailable (${state.reason})`);
 
   server = startServer(port, { clientDir, host, password, trustProxy }, { push });
 
-  let deadlineScheduler: DeadlineScheduler | null = null;
+  let digestScheduler: DigestScheduler | null = null;
   if (options.startSchedulers !== false) {
-    deadlineScheduler = startDeadlineScheduler({
+    digestScheduler = startDigestScheduler({
       database,
       push,
-      ...(options.deadlineNow ? { now: options.deadlineNow } : {}),
-      ...(options.deadlineTimer ? { timer: options.deadlineTimer } : {}),
+      ...(options.digestNow ? { now: options.digestNow } : {}),
+      ...(options.digestTimer ? { timer: options.digestTimer } : {}),
     });
-    server.once("close", () => deadlineScheduler?.stop());
+    server.once("close", () => digestScheduler?.stop());
     const backupIntervalHours = resolveBackupIntervalHours(env);
     const backupRetention = resolveBackupRetention(env);
     if (backupIntervalHours > 0) {
@@ -145,7 +145,7 @@ export function startProduction(options: ProductionAssemblyOptions = {}): Produc
       startUpdateScheduler(updateIntervalHours);
     }
   }
-  return { server, push, deadlineScheduler, resolved: { host, port, password, trustProxy } };
+  return { server, push, digestScheduler, resolved: { host, port, password, trustProxy } };
 }
 
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);

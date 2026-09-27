@@ -7,19 +7,12 @@ import { DEADLINE_REMINDER_CLAIMS_SQL, validateV20Contract } from "../../src/sch
 
 const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
 const currentSchema = fs.readFileSync(schemaPath, "utf8");
-const v19Schema = currentSchema
+const v20Schema = currentSchema
   .replace(
-    /-- Stage 2A deadline-reminder[\s\S]*?CREATE TABLE deadline_reminder_claims[\s\S]*?\);\r?\n\r?\n/,
-    "",
+    /-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/,
+    `${DEADLINE_REMINDER_CLAIMS_SQL};\n\n`,
   )
-  .replace(
-    "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);",
-    "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
-  )
-  .replace(
-    /,\r?\n  \('push_lead_days', '1'\)[\s\S]*?\('push_quiet_end', NULL\)/,
-    "",
-  );
+  .replace("  ('push_hide_details', '0'),", "  ('push_hide_details', '0'),\n  ('push_lead_days', '1'),");
 
 function file(name: string): string {
   return path.join(process.env.DATA_DIR!, `${name}.db`);
@@ -27,7 +20,7 @@ function file(name: string): string {
 
 function canonicalV20(name: string): Database.Database {
   const database = new Database(file(name));
-  database.exec(currentSchema);
+  database.exec(v20Schema);
   database.pragma("user_version = 20");
   return database;
 }
@@ -52,36 +45,17 @@ function contractSnapshot(database: Database.Database) {
 }
 
 describe("schema v20 deadline foundation", () => {
-  it("makes fresh and real v19→v20 databases contract-equal while preserving ordinary settings", async () => {
-    const { migrateDatabase } = await import("../../src/db.js");
-    const fresh = new Database(file("fresh-v20"));
-    const migrated = new Database(file("migrated-v20"));
+  it("retains an exact independently valid historical v20 fixture", () => {
+    const database = canonicalV20("canonical-v20");
     try {
-      migrateDatabase(fresh);
-      migrated.exec(v19Schema);
-      migrated.prepare("INSERT INTO settings (key, value) VALUES ('ordinary_fixture', 'byte-for-byte')").run();
-      migrated.prepare("UPDATE settings SET value = '1' WHERE key = 'push_hide_details'").run();
-      migrated.pragma("user_version = 19");
-      migrateDatabase(migrated);
-
-      expect(fresh.pragma("user_version", { simple: true })).toBe(20);
-      expect(migrated.pragma("user_version", { simple: true })).toBe(20);
-      expect(() => validateV20Contract(fresh)).not.toThrow();
-      expect(() => validateV20Contract(migrated)).not.toThrow();
-
-      const freshContract = contractSnapshot(fresh);
-      const migratedContract = contractSnapshot(migrated);
-      expect(migratedContract.settings).toEqual(freshContract.settings);
-      expect(migratedContract.claims).toEqual(freshContract.claims);
-      expect(
-        migrated.prepare("SELECT value FROM settings WHERE key = 'ordinary_fixture'").get(),
-      ).toEqual({ value: "byte-for-byte" });
-      expect(migrated.prepare("SELECT value FROM settings WHERE key = 'push_hide_details'").get()).toEqual({
-        value: "1",
-      });
+      database.prepare("INSERT INTO settings (key, value) VALUES ('ordinary_fixture', 'byte-for-byte')").run();
+      database.prepare("UPDATE settings SET value='1' WHERE key='push_hide_details'").run();
+      expect(() => validateV20Contract(database)).not.toThrow();
+      expect(contractSnapshot(database).claims.sql).toContain("deadline_reminder_claims");
+      expect(database.prepare("SELECT value FROM settings WHERE key='ordinary_fixture'").get())
+        .toEqual({ value: "byte-for-byte" });
     } finally {
-      fresh.close();
-      migrated.close();
+      database.close();
     }
   });
 

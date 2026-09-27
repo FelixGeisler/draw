@@ -259,3 +259,17 @@ Central semantics: completing a *recurring* task keeps it `open` and pushes
 out of the deck until it arrives (ADR-6 amendment, #205); completing a normal
 task sets `status='done'`. Both insert a
 `completions` row — the single source for XP, streaks, trophy deck, and history.
+
+== 5.5 Daily digest boundary
+
+`dailyOverviewService` owns the single overdue/today/tomorrow classifier used by
+both `/today` and notifications. Its digest projection aggregates complete
+counts in SQL and performs a separate ordered `LIMIT 5` title query from the
+same eligible relation; Push code never calls the HTTP route or reimplements
+eligibility. `digestEvaluator` owns saved-IANA-zone wall time, quiet hours,
+window and remaining TTL. `digestScheduler` owns one production recursive tick,
+permit-before-claim and the `(device_id,local_date)` claim. `PushService` retains
+authority, DNS, transport, exact-fingerprint deletion and final synchronous
+race checks, then reads the projection and constructs one closed v2 payload.
+The worker owns fixed presentation and only `/today` or `/settings` click data.
+Default/development app assembly injects disabled Push and creates no scheduler.

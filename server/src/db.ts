@@ -10,6 +10,7 @@ import {
   V20_SETTINGS_SQL,
   V20_TIMING_DEFAULTS,
 } from "./schemaV20.js";
+import { DAILY_DIGEST_CLAIMS_SQL, validateV21Contract } from "./schemaV21.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
@@ -36,7 +37,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 20;
+export const CURRENT_VERSION = 21;
 
 export function migrateDatabase(database: Database.Database = db) {
   const version = database.pragma("user_version", { simple: true }) as number;
@@ -397,10 +398,8 @@ export function migrateDatabase(database: Database.Database = db) {
       })();
     }
     if (version < 20) {
-      // Deadline-reminder persistence foundation (#345, ADR-72). Validate the
-      // complete v19 input before any rebuild, then make settings nullability,
-      // typed defaults, claims DDL, validation and the stamp one transaction.
-      // A collision or contract failure therefore leaves a valid stamped v19.
+      // Historical v20 deadline foundation (#345, ADR-72). This exact step is
+      // retained so older archives cross and validate the supported boundary.
       validateV19Contract(database);
       database.transaction(() => {
         database.exec("ALTER TABLE settings RENAME TO settings_v19");
@@ -414,14 +413,27 @@ export function migrateDatabase(database: Database.Database = db) {
         database.pragma("user_version = 20");
       })();
     }
+    if (version < 21) {
+      // Atomic digest replacement (#355, ADR-73): validate v20 before any
+      // mutation, discard old claims/lead policy, create the v21 claim table,
+      // validate the complete target, and stamp last in one transaction.
+      validateV20Contract(database);
+      database.transaction(() => {
+        database.exec("DROP TABLE deadline_reminder_claims");
+        database.prepare("DELETE FROM settings WHERE key='push_lead_days'").run();
+        database.exec(DAILY_DIGEST_CLAIMS_SQL);
+        validateV21Contract(database);
+        database.pragma("user_version = 21");
+      })();
+    }
   }
   if (version < 1) database.pragma(`user_version = ${CURRENT_VERSION}`);
 
   // Startup, fresh creation, every migration, and a reopened restore all use
-  // the same final runtime contract. The v20 validator inherits v19's exact
-  // Push/persistent-code checks; v18 remains independently complete.
+  // the same complete v21 runtime contract. Historical validators remain
+  // independent input boundaries only.
   validateV18Contract(database);
-  validateV20Contract(database);
+  validateV21Contract(database);
 }
 
 migrateDatabase();

@@ -12,7 +12,7 @@ test("Today stays within the phone viewport, keeps 44px targets, and is absent f
       mutationReason: "secure-transport-required",
       vapidPublicKey: null,
       maxDevices: 16,
-      preferences: { hideDetails: false, leadDays: 1, sendTime: "09:00", timezone: "UTC", quietStart: null, quietEnd: null },
+      preferences: { hideDetails: false, sendTime: "09:00", timezone: "UTC", quietStart: null, quietEnd: null },
       devices: [],
     }),
   }));

@@ -941,14 +941,15 @@ aborts with a 409 before the first destructive step rather than deleting a
 WAL that connection is still writing into and swapping a different file
 underneath it.
 
-*Amendment (#337 schema v19; #345 schema v20 / ADR-72):* Draw-created manual
-and scheduled archives, imported live databases, and `app.db.bak` are physically
-free of Web Push device credentials and deadline occurrence claims. Export takes
-the ordinary WAL-consistent snapshot, deletes `push_subscriptions` and
-`deadline_reminder_claims` from that copy, then performs a second `VACUUM INTO`;
-only the rewrite is packaged.
-Import migrates and validates in staging, deletes those rows, and performs the
-same second rewrite before swap. The credential-bearing first copies and every
+*Amendment (#337 schema v19; #345 schema v20 / ADR-72; #355 schema v21 /
+ADR-73):* Draw-created manual and scheduled archives, imported live databases,
+and `app.db.bak` are physically free of Web Push device credentials and current
+or historical delivery claims. Export takes the ordinary WAL-consistent
+snapshot, deletes `push_subscriptions` and `daily_digest_claims` (or the legacy
+`deadline_reminder_claims` when present) from that copy, then performs a second
+`VACUUM INTO`; only the rewrite is packaged. Import migrates and validates in
+staging, deletes the v21 rows, and performs the same second rewrite before
+swap. The credential-bearing first copies and every
 `-wal`, `-shm`, or `-journal` sidecar are deleted before publication. Preferences
 remain. Material traversal reads each singly linked regular file through one
 pre/post-verified descriptor, rejects links, identity/containment changes and
@@ -2923,11 +2924,11 @@ Capacitor shell is still unnecessary: standards Web Push is now the approved
 PWA path (ADR-72), including desktop and feature-detected iPhone support.
 ADR-72 Stage 1A authority/schema/recovery/backup foundations, Stage 1B status,
 registration, preferences, deletion, revoke, and bounded synthetic sender APIs,
-and Stage 1C staged browser enrollment, closed worker receive/click behavior,
-and durable landings are implemented but not field-verified. All Stage 1 is
-complete. Stage 2A's foundation and Stage 2B typed timing, deterministic
-eligibility/claims, bounded sending, and production scheduling are implemented
-but not field-verified. iOS remains progressive
+and Stage 1C staged browser enrollment and closed worker behavior are
+implemented but not field-verified. ADR-73 atomically supersedes the per-item
+stage with schema v21, the closed v2 worker contract, typed digest timing,
+shared daily-overview projection, per-device/date claims, bounded sending and
+one production scheduler. It is implemented but not field-verified. iOS remains progressive
 enhancement and never gates Android-first delivery.
 * *Adaptation, not redesign.* The card face's own language — full-bleed art under
 its legibility scrim, the category pill, the effort chip, the impact stars, the
@@ -3030,8 +3031,10 @@ shell. Production-serving checks also decode the fixed Push icon and badge as
 transparent-border geometry.
 
 *Out of scope:* offline-first data sync and a native/Capacitor app. Web Push is
-no longer native-required or out of scope; its implemented and planned stages
-are governed by ADR-72.
+no longer native-required or out of scope. ADR-72 remains the historical and
+retained foundation for authority, subscription lifecycle, topology, transport,
+manual tests, sanitation, and production assembly; ADR-73 is the normative
+replacement for automatic delivery, persistence, scheduling, and worker payloads.
 
 == ADR-55: TLS is delegated to Tailscale Serve, not a bundled reverse proxy — loopback-only port plus a one-hop TRUST_PROXY, and a request-derived Secure cookie
 
@@ -4307,3 +4310,98 @@ Automated Stage 2 evidence uses synthetic fakes for defaults/atomic validation; 
 
 Later owner-operated synthetic Android Chrome installed-PWA HTTPS/Tailscale smoke plus desktop is post-implementation field evidence, not merge/deploy/delivery guarantee. Until recorded: **implemented but not field-verified**. Agents may not deploy/enroll/access subscriptions/send real Push without explicit permission.
 ....
+
+== ADR-73: One bounded morning digest atomically replaces automatic per-item reminders
+
+*Context:* #355 replaces ADR-72's implemented automatic per-item deadline
+stage after #353 established `/today` and a neutral daily-overview domain
+service. Running both pipelines, preserving a dormant reminder mode, or
+splitting persistence/protocol removal from activation would create duplicate
+notification behavior and an invalid intermediate contract. Enrollment remains
+the per-device switch; ntfy remains independent under ADR-67.
+
+*Decision:* schema v21 has exactly one delivery-history table,
+`daily_digest_claims(device_id,local_date)`, with that composite primary key and
+`ON DELETE CASCADE` to `push_subscriptions`. Claims retain no item, content,
+counts, timezone, result, or retry state and live for the subscription lifetime.
+The v20 validator/schema fixture remains an exact historical import boundary,
+but v20→v21 first validates v20 and then, in one transaction, drops its deadline
+claims, deletes `push_lead_days`, creates the v21 table, validates v21, and
+stamps 21 last. Old claims are never translated. Manual/scheduled export,
+imported live data, and a newly written `app.db.bak` delete subscription and
+v21 claim rows and physically rewrite the file; sanitation also recognizes the
+legacy v20 table. Valid stamped v19, v20, and v21 inputs are dispatched through
+their own validators before migration/swap. Restored users re-enroll.
+
+`dailyOverviewService` is the sole classifier for open tasks and active goals
+with valid overdue/today/tomorrow dates. Its digest projection computes complete
+counts in SQL and reads at most five title rows in SQL from the same eligible
+relation. Order is group overdue/today/tomorrow, date ascending, literal type
+`goal`/`task`, numeric id, then creation identity. No descriptions, notes,
+outcomes, category/project names, materials, attachments, URLs, or other entity
+fields enter the digest. The existing complete `/today` response remains
+compatible. Zero items still follows the ordinary claim/send path.
+
+One production-only recursive unref'd 60-second digest scheduler considers at
+most one date for each of at most 16 unexpired enrolled devices and shares the
+existing four physical Push permits. It acquires a permit before a short claim
+transaction. That transaction rechecks authority/work context, the exact
+subscription and expiry, timing/privacy, saved-zone date/window/quiet state,
+and claim absence, then uses `INSERT OR IGNORE`; it performs no DNS, HTTPS, or
+content read. Busy work remains unclaimed. A retained claim permits no
+application retry for cancellation, stop, process/DNS/query/payload/provider or
+timeout failure.
+
+For saved-zone date D, send wall time resolves a spring gap to the first later
+real wall minute and a fall overlap to its first occurrence. The half-open
+window is `[S,min(S+10800 elapsed seconds, first instant of the next local
+date))`. Quiet hours keep their half-open wall rule and may consume the whole
+window. Startup catches up only inside the same window. Immediately before
+content read/request creation, the sender synchronously rematches authority and
+signing/work generation, all seven subscription fields and expiry, send time,
+timezone, both quiet endpoints, Hide-details, local date/window/quiet state and
+positive `floor((E-N)/1000)` TTL. It then reads the shared projection and
+initiates without an intervening yield. Stop aborts only before initiation.
+Timezone changes affect unclaimed dates only; a claimed date stays suppressed,
+and a different local date may be sent in less than 24 elapsed hours.
+
+The closed worker/server protocol is v2 only. Test is exactly
+`{v:2,kind:"test"}`. Digest is generic counts or detailed counts plus at most
+five exact string titles and a remainder equal to total counts minus title
+length; all counts are non-negative safe integers and extra/unknown/v1/deadline/
+malformed/oversized/non-UTF-8 payloads show nothing. Event identity is the first
+16 SHA-256 bytes of UTF-8 `JSON.stringify(["digest",localDate])`, canonical
+base64url, used unchanged as Topic and in tag `draw-digest-<eventId>`. Title is
+`Good morning`; body is title lines, optional `…and N more`, then the fixed
+counts line, with the fixed zero-count sentence. Notification data is exactly
+`{v:2,route:"/today"}`; test routes `/settings`. The worker owns the unchanged
+icon/badge. Detailed clear/encrypted oversize or construction failure falls
+back once to generic; generic failure sends nothing. Digest urgency is normal
+and TTL is remaining window lifetime; manual test stays normal/TTL 0. No shell
+list change means no cache-name bump.
+
+Status exposes exactly Hide-details plus send time, saved timezone and two quiet
+endpoints. Timing PUT is exactly all four fields; Hide-details remains its own
+closed variant. There is no lead or enabled field, digest toggle, arbitrary
+schedule, retry, receipt, queue, backlog, or provider/OS exactly-once promise.
+Settings names the daily digest, explains one best-effort digest per enrolled
+device while Draw runs, saved-timezone requirement, and provider retention of
+at most three hours without crossing local midnight. Detection failure does not
+block enrollment or manual test.
+
+*Supersession:* this ADR supersedes ADR-72's no-digest decision and its
+per-item occurrence, lead-day, no-overdue, TTL-0 automatic send, deadline claim
+schema/evaluator/scheduler/payload/landing, five-field timing, and deadline
+Settings clauses. ADR-72 remains authoritative for external authority,
+subscription enrollment/replacement/revocation and recovery, topology and
+origin policy, endpoint/DNS/IP validation, shared admission, transport bounds
+and redaction, exact-fingerprint 404/410 deletion, manual-test intent, portable
+sanitation boundary, and production-only assembly. ADR-6 recurrence, ADR-54
+PWA shell/branding, ADR-26/52 backup mechanics, ADR-67 ntfy isolation, and
+ADR-70 edge delivery remain unchanged.
+
+*Status:* implemented by #355 with fake clocks, DNS and transport, throwaway
+SQLite, closed-worker/browser tests, and a composed one-worker production seam.
+No real provider call, deployment, enrollment change, or field send is part of
+the implementation. It remains *not field-verified* until separate owner
+validation.

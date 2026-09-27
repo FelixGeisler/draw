@@ -204,7 +204,7 @@ describe("Push registration service", () => {
     });
     await expect(service.testDevice(deviceId)).resolves.toBeUndefined();
     expect(generated).toHaveLength(1);
-    expect(generated[0].payload.toString("utf8")).toBe('{"v":1,"kind":"test"}');
+    expect(generated[0].payload.toString("utf8")).toBe('{"v":2,"kind":"test"}');
     expect(generated[0].subscription).toEqual({ endpoint, keys: { p256dh: keys.publicKey, auth } });
     expect(generated[0].options).toMatchObject({
       contentEncoding: "aes128gcm", TTL: 0, urgency: "normal", topic: "draw-push-test",

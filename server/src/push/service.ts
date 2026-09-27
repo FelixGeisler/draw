@@ -8,7 +8,11 @@ import { PushAdmission } from "./admission.js";
 import { PushResolutionError, nodeResolverFactory, resolvePushEndpoint, type ResolverFactory } from "./resolver.js";
 import { evaluatePushTopology, type PushTopologyOptions, type TopologyResult } from "./topology.js";
 import { inertPushTransport, type PushTransport } from "./transport.js";
-import { validCalendarDate, type DeadlineTiming } from "./deadlineEvaluator.js";
+import { evaluateDigestEligibility, readDigestTiming, type DigestTiming } from "./digestEvaluator.js";
+import {
+  dailyDigestCountsForDate,
+  dailyDigestTitlesForDate,
+} from "../services/dailyOverviewService.js";
 
 export const MAX_PUSH_DEVICES = 16;
 export const MAX_ENDPOINT_BYTES = 2_048;
@@ -39,7 +43,7 @@ export interface PushDevice {
   lastSeenAt: string;
 }
 
-export interface PushPreferences extends DeadlineTiming {
+export interface PushPreferences extends DigestTiming {
   hideDetails: boolean;
 }
 
@@ -52,7 +56,7 @@ export interface PushStatus {
   devices: PushDevice[];
 }
 
-export type PushPreferenceResult = { hideDetails: boolean } | DeadlineTiming;
+export type PushPreferenceResult = { hideDetails: boolean } | DigestTiming;
 
 export interface PushServiceDependency extends PushLifecycleDependency {
   topology(req: Request, mutation: boolean): TopologyResult;
@@ -181,19 +185,17 @@ export interface PushServiceOptions {
     options: RequestOptions,
   ) => RequestDetails;
   /** Internal synthetic-evidence seam; receives clear bytes, never persists them. */
-  observeDeadlinePayload?: (payload: Buffer) => void;
+  observeDigestPayload?: (payload: Buffer) => void;
 }
 
-export interface DeadlineClaimedOccurrence {
+export interface DigestClaim {
   deviceId: string;
-  itemType: "task" | "goal";
-  itemId: number;
-  itemCreatedAt: string;
-  deadline: string;
+  localDate: string;
   eventId: string;
   subscription: SendRow;
   workGeneration: number;
   signing: { generation: string; publicKey: string; privateKey: string };
+  timing: DigestTiming & { timezone: string };
   hideDetails: string;
 }
 
@@ -264,12 +266,11 @@ export class PushService implements PushServiceDependency {
   private preferences(database: Database.Database = this.database): PushPreferences {
     const rows = database.prepare(
       `SELECT key, value FROM settings WHERE key IN
-       ('push_hide_details', 'push_lead_days', 'push_send_time', 'push_timezone', 'push_quiet_start', 'push_quiet_end')`,
+       ('push_hide_details', 'push_send_time', 'push_timezone', 'push_quiet_start', 'push_quiet_end')`,
     ).all() as { key: string; value: string | null }[];
     const values = new Map(rows.map((row) => [row.key, row.value]));
     return {
       hideDetails: values.get("push_hide_details") === "1",
-      leadDays: Number(values.get("push_lead_days")),
       sendTime: values.get("push_send_time")!,
       timezone: values.get("push_timezone") ?? null,
       quietStart: values.get("push_quiet_start") ?? null,
@@ -459,7 +460,7 @@ export class PushService implements PushServiceDependency {
         throw new PushResolutionError("aborted");
       }
 
-      const clearPayload = Buffer.from('{"v":1,"kind":"test"}', "utf8");
+      const clearPayload = Buffer.from('{"v":2,"kind":"test"}', "utf8");
       if (clearPayload.length > 3_072) throw new PushApiError(502, "push-delivery-failed");
       let details: RequestDetails;
       try {
@@ -520,11 +521,11 @@ export class PushService implements PushServiceDependency {
   }
 
   /** Shared physical admission for automatic attempts; intentionally bypasses API rate buckets. */
-  tryAcquireDeadline(): { release: () => void } | undefined {
+  tryAcquireDigest(): { release: () => void } | undefined {
     return this.admission.tryAcquireScheduled();
   }
 
-  deadlineClaimContext(): {
+  digestClaimContext(): {
     workGeneration: number;
     signing: { generation: string; publicKey: string; privateKey: string };
   } | null {
@@ -535,7 +536,7 @@ export class PushService implements PushServiceDependency {
       : null;
   }
 
-  async sendDeadline(occurrence: DeadlineClaimedOccurrence, stopSignal?: AbortSignal): Promise<void> {
+  async sendDigest(occurrence: DigestClaim, now: () => Date, stopSignal?: AbortSignal): Promise<void> {
     const attempt = new AbortController();
     let totalTimedOut = false;
     let initiated = false;
@@ -556,7 +557,7 @@ export class PushService implements PushServiceDependency {
             expirationTime: occurrence.subscription.expiration_time,
             keys: { p256dh: occurrence.subscription.p256dh, auth: occurrence.subscription.auth },
           },
-        }, this.wallNow());
+        }, now().valueOf());
       } catch { return; }
       if (validated.endpoint !== occurrence.subscription.endpoint) return;
 
@@ -571,55 +572,44 @@ export class PushService implements PushServiceDependency {
       } catch { return; }
       if (attempt.signal.aborted) return;
 
-      // Everything from this final read through transport invocation is one
-      // synchronous turn. No title/context is read before DNS.
+      // Everything from this final state read through transport invocation is
+      // one synchronous turn. No title or overview content is read before it.
+      const finalNow = now();
       const snapshot = this.snapshot();
       const signing = this.options.lifecycle.signingAuthority();
       const currentSubscription = this.row(occurrence.deviceId);
+      const currentTiming = readDigestTiming(this.database);
+      const eligibility = currentTiming?.timezone
+        ? evaluateDigestEligibility(currentTiming, finalNow)
+        : null;
+      const timingMatches = currentTiming !== null &&
+        currentTiming.sendTime === occurrence.timing.sendTime &&
+        currentTiming.timezone === occurrence.timing.timezone &&
+        currentTiming.quietStart === occurrence.timing.quietStart &&
+        currentTiming.quietEnd === occurrence.timing.quietEnd;
       if (!snapshot.available || !signing ||
         this.options.lifecycle.currentWorkGeneration() !== occurrence.workGeneration ||
         signing.generation !== occurrence.signing.generation ||
         signing.publicKey !== occurrence.signing.publicKey || signing.privateKey !== occurrence.signing.privateKey ||
         !currentSubscription || !this.sameRow(occurrence.subscription, currentSubscription) ||
-        this.hideDetails() !== occurrence.hideDetails || attempt.signal.aborted) return;
-      if (currentSubscription.expiration_time !== null && currentSubscription.expiration_time <= this.wallNow()) return;
+        this.hideDetails() !== occurrence.hideDetails || !timingMatches || !eligibility ||
+        eligibility.localDate !== occurrence.localDate || attempt.signal.aborted) return;
+      if (currentSubscription.expiration_time !== null && currentSubscription.expiration_time <= finalNow.valueOf()) return;
 
-      const sourceMetadata = occurrence.itemType === "task"
-        ? this.database.prepare(
-          "SELECT status, due_date AS deadline, created_at AS createdAt FROM tasks WHERE id = ?",
-        ).get(occurrence.itemId) as { status: string; deadline: string | null; createdAt: string } | undefined
-        : this.database.prepare(
-          "SELECT status, target_date AS deadline, created_at AS createdAt FROM goals WHERE id = ?",
-        ).get(occurrence.itemId) as { status: string; deadline: string | null; createdAt: string } | undefined;
-      const expectedStatus = occurrence.itemType === "task" ? "open" : "active";
-      if (!sourceMetadata || sourceMetadata.status !== expectedStatus || sourceMetadata.deadline !== occurrence.deadline ||
-        sourceMetadata.createdAt !== occurrence.itemCreatedAt || !validCalendarDate(sourceMetadata.deadline)) return;
-
-      // Plaintext user content is read only after every cancellation field above
-      // matched, and remains memory-only for immediate payload construction.
-      const source = occurrence.itemType === "task"
-        ? this.database.prepare(
-          `SELECT t.title, c.name AS context FROM tasks t
-           LEFT JOIN categories c ON c.id = t.category_id WHERE t.id = ?`,
-        ).get(occurrence.itemId) as { title: string; context: string | null }
-        : this.database.prepare("SELECT title, NULL AS context FROM goals WHERE id = ?")
-          .get(occurrence.itemId) as { title: string; context: null };
-
+      // Hide-details is a counts-only privacy boundary: after the final policy
+      // recheck it neither dereferences titles nor constructs a detailed object.
+      const counts = dailyDigestCountsForDate(occurrence.localDate, this.database);
+      const total = counts.todayCount + counts.tomorrowCount + counts.overdueCount;
+      if (!Number.isSafeInteger(total)) return;
       const identity = {
-        v: 1 as const,
-        kind: "deadline" as const,
-        itemType: occurrence.itemType,
-        itemId: occurrence.itemId,
+        v: 2 as const,
+        kind: "digest" as const,
         eventId: occurrence.eventId,
+        todayCount: counts.todayCount,
+        tomorrowCount: counts.tomorrowCount,
+        overdueCount: counts.overdueCount,
       };
       const generic = { ...identity, detail: "generic" as const };
-      const detailed = {
-        ...identity,
-        detail: "detailed" as const,
-        itemTitle: source.title,
-        context: occurrence.itemType === "task" ? source.context : null,
-        deadline: occurrence.deadline,
-      };
       const build = (payload: object): { clear: Buffer; details: RequestDetails } | null => {
         let clear: Buffer;
         try { clear = Buffer.from(JSON.stringify(payload), "utf8"); } catch { return null; }
@@ -630,7 +620,7 @@ export class PushService implements PushServiceDependency {
             clear,
             {
               contentEncoding: "aes128gcm",
-              TTL: 0,
+              TTL: eligibility.ttl,
               urgency: "normal",
               topic: occurrence.eventId,
               vapidDetails: {
@@ -645,9 +635,22 @@ export class PushService implements PushServiceDependency {
           return { clear, details };
         } catch { return null; }
       };
-      const request = occurrence.hideDetails === "1" ? build(generic) : build(detailed) ?? build(generic);
+      let request: { clear: Buffer; details: RequestDetails } | null;
+      if (occurrence.hideDetails === "1") {
+        request = build(generic);
+      } else {
+        const titles = dailyDigestTitlesForDate(occurrence.localDate, this.database);
+        if (titles.length > total) return;
+        const detailed = {
+          ...identity,
+          detail: "detailed" as const,
+          titles,
+          remainingCount: total - titles.length,
+        };
+        request = build(detailed) ?? build(generic);
+      }
       if (!request) return;
-      this.options.observeDeadlinePayload?.(Buffer.from(request.clear));
+      this.options.observeDigestPayload?.(Buffer.from(request.clear));
       initiated = true;
       stopSignal?.removeEventListener("abort", onStop);
       let outcome: Awaited<ReturnType<PushTransport["send"]>>;
@@ -696,9 +699,8 @@ export class PushService implements PushServiceDependency {
       return { hideDetails: record.hideDetails };
     }
 
-    const keys = ["leadDays", "sendTime", "timezone", "quietStart", "quietEnd"] as const;
+    const keys = ["sendTime", "timezone", "quietStart", "quietEnd"] as const;
     if (!exactKeys(record, keys)) throw new PushApiError(400, "invalid-push-request");
-    const leadDays = record.leadDays;
     const sendTime = record.sendTime;
     const timezone = record.timezone;
     const quietStart = record.quietStart;
@@ -711,12 +713,10 @@ export class PushService implements PushServiceDependency {
       })();
     const quietValid = quietStart === null && quietEnd === null ||
       quarterHour(quietStart) && quarterHour(quietEnd) && quietStart !== quietEnd;
-    if (!Number.isInteger(leadDays) || !new Set([0, 1, 2, 3, 7, 14, 30]).has(leadDays as number) ||
-      !quarterHour(sendTime) || !timezoneValid || !quietValid) {
+    if (!quarterHour(sendTime) || !timezoneValid || !quietValid) {
       throw new PushApiError(400, "invalid-push-request");
     }
-    const result: DeadlineTiming = {
-      leadDays: leadDays as number,
+    const result: DigestTiming & { timezone: string } = {
       sendTime,
       timezone,
       quietStart: quietStart as string | null,
@@ -725,7 +725,6 @@ export class PushService implements PushServiceDependency {
     const database = this.database;
     database.transaction(() => {
       const update = database.prepare("UPDATE settings SET value = ? WHERE key = ?");
-      update.run(String(result.leadDays), "push_lead_days");
       update.run(result.sendTime, "push_send_time");
       update.run(result.timezone, "push_timezone");
       update.run(result.quietStart, "push_quiet_start");
@@ -744,7 +743,7 @@ export const disabledPushService: PushServiceDependency = Object.freeze({
   status: () => ({
     available: false, reason: "not-production" as const, vapidPublicKey: null, maxDevices: 16 as const,
     preferences: {
-      hideDetails: false, leadDays: 1, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
+      hideDetails: false, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
     }, devices: [],
   }),
   register: async () => { throw new PushApiError(503, "push-unavailable"); },

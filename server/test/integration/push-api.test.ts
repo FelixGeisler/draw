@@ -66,7 +66,7 @@ describe("Push registration HTTP API", () => {
       available: true, reason: null, mutationAllowed: true, mutationReason: null,
       vapidPublicKey: push.snapshot().publicVapidKey, maxDevices: 16,
       preferences: {
-        hideDetails: false, leadDays: 1, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
+        hideDetails: false, sendTime: "09:00", timezone: null, quietStart: null, quietEnd: null,
       }, devices: [],
     });
 
@@ -85,7 +85,7 @@ describe("Push registration HTTP API", () => {
 
   it("round-trips the strict atomic timing variant and rejects mixed, partial, and invalid values", async () => {
     const app = createApp({}, { push: service() });
-    const accepted = { leadDays: 7, sendTime: "23:45", timezone: "Europe/Berlin", quietStart: "22:00", quietEnd: "08:00" };
+    const accepted = { sendTime: "23:45", timezone: "Europe/Berlin", quietStart: "22:00", quietEnd: "08:00" };
     const response = await direct(request(app).put("/api/push/preferences")).send(accepted);
     expect(response).toMatchObject({ status: 200, body: accepted });
     expect((await request(app).get("/api/push/status").set("Host", "localhost:1234")).body.preferences)
@@ -96,8 +96,8 @@ describe("Push registration HTTP API", () => {
     ).all();
     for (const invalid of [
       { ...accepted, hideDetails: true },
-      { leadDays: 1 },
-      { ...accepted, leadDays: 4 },
+      { sendTime: "09:00" },
+      { ...accepted, leadDays: 1 },
       { ...accepted, sendTime: "09:01" },
       { ...accepted, timezone: " Europe/Berlin" },
       { ...accepted, timezone: "No/Such_Zone" },
