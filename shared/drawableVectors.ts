@@ -65,6 +65,8 @@ export interface DrawableVector {
    * it with `?? hasOpenChildren`.
    */
   hasNonArchivedChildren?: 0 | 1;
+  /** Fixed-time tasks are pre-placed and never enter Draw. */
+  hasFixedSlot?: boolean;
   blocked: boolean;
   deferredUntil: string | null;
   /**
@@ -93,6 +95,39 @@ export interface DrawableVector {
 }
 
 export const DRAWABLE_VECTORS: DrawableVector[] = [
+  {
+    name: "a fixed-time leaf is scheduled for its whole slot lifetime",
+    hasOpenChildren: 0,
+    hasFixedSlot: true,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "scheduled",
+  },
+  {
+    name: "container precedence wins over a fixed slot",
+    hasOpenChildren: 1,
+    hasFixedSlot: true,
+    blocked: false,
+    deferredUntil: null,
+    heldBack: 0,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "container",
+  },
+  {
+    name: "fixed time wins over snooze and queue precedence",
+    hasOpenChildren: 0,
+    hasFixedSlot: true,
+    blocked: true,
+    deferredUntil: null,
+    heldBack: 1,
+    effortMinutes: 10,
+    maxEffort: 30,
+    expected: "scheduled",
+  },
   {
     name: "estimated open leaf within the limit is ready",
     hasOpenChildren: 0,

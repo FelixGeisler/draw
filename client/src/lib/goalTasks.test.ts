@@ -20,6 +20,8 @@ function task(overrides: Partial<Task> = {}): Task {
     effortMinutes: 20,
     dueDate: null,
     recurEveryDays: null,
+    hasFixedSlot: false,
+    fixedSlot: null,
     status: "open",
     createdAt: "2026-07-14T00:00:00Z",
     completedAt: null,

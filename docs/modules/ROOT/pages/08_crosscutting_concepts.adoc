@@ -290,7 +290,19 @@ counts its real tokens, so the estimate and the 180K guard stay honest.
 
 == 8.6 Time handling
 
-Timestamps stored as ISO 8601 UTC strings. Date-only values (due dates) are
+Actual-work timestamps and fixed-slot instants are stored as ISO 8601 UTC strings.
+Fixed slots additionally retain the exact canonical IANA entry-zone identifier:
+strict `YYYY-MM-DDTHH:mm` wall inputs resolve independently, spring gaps reject,
+fall folds choose the earlier instant, and both UTC results must remain in years
+`0001`–`9999` before comparison or serialization. The checked-in canonical Zone
+registry is frozen from tzdb 2026b; aliases, abbreviations, numeric offsets,
+`Etc/GMT±N`, spelling/whitespace variants and unknown names reject. Runtime
+startup proves every registry identifier is available in deployed Node/ICU.
+Changing a viewer zone never floats an existing appointment; editing reconstructs
+its wall values in the stored entry zone. This schedule policy is separate from
+ADR-73's saved Push-zone policy.
+
+Date-only values (due dates) are
 compared as strings, which makes their format load-bearing — the write paths
 reject anything that is not a real `YYYY-MM-DD` day, because an unpadded
 `2026-7-4` sorts after `2026-07-26`. Date-range *arithmetic* happens in UTC
@@ -344,10 +356,15 @@ settings, five timing rows and composite per-item claims. Version 21 validates
 that full v20 contract before one transaction drops the old table, deletes the
 lead row, creates `daily_digest_claims(device_id,local_date)`, validates the
 complete v21 contract, and stamps 21 last. A failed target step rolls back to a
-valid stamped v20 file; old claims are not translated. Backup import dispatches
-stamped v19, v20 and v21 files to their own validators before migration and
-validates final v21 before swap. The final validator proves exact DDL, columns,
-PK index, FK, retained Push shape, persistent trigger/no-view allowlist,
+valid stamped v20 file; old claims are not translated. Version 22 first validates
+that immutable v21 boundary, then atomically adds `task_fixed_slots` and the
+four approved range/date indexes, validates the complete target, and stamps 22
+last. Its validator proves exact DDL/columns/index/FK/cascade, four-digit
+canonical instants, order, frozen-zone membership, wall/instant round trips and
+absence beside recurrence. Backup import dispatches stamped v19–v22 files to
+their own validators before migration and validates final v22 before swap. The
+inherited validator still proves exact DDL, columns, PK index, FK, retained Push
+shape, persistent trigger/no-view allowlist,
 Hide-details, and all four timing domains/nullability. Unapproved executable
 schema is rejected before sanitation. Registration still upserts at most 16
 rows, Hide-details is closed `0|1`, and exact-fingerprint 404/410 removal
@@ -383,15 +400,19 @@ Safety nets, both inside `DATA_DIR`:
   (overwritten on the next import),
 - the previous material files as `files.bak`.
 
-Every rejected import (foreign zip, corrupt or newer-than-v21 database,
-unsafe paths) is a `400` with the live data untouched. Versions through v21
+Every rejected import (foreign zip, corrupt or newer-than-v22 database,
+unsafe paths) is a `400` with the live data untouched. Versions through v22
 are accepted; older snapshots migrate in staging. The staged database must
 then match the complete runtime v18 contract: both owner columns, exact
 Gold/opening definitions and CHECK/unique/AUTOINCREMENT rules, all six
 immutable triggers (definition and rollback-only behavior), and the
 XP-ledger reason index; it must also match v21's exact nullable-settings,
 four-field timing domain, digest-claims index/FK, inherited Push shape, and
-persistent-schema allowlist. Only that validated, row-scrubbed, physically rewritten file reaches
+persistent-schema allowlist, plus v22's complete fixed-slot relation, registry,
+instant and recurrence contract. Fixed slots and entry zones are portable user
+data and survive manual/scheduled archives, restore, and sanitized `app.db.bak`;
+Push credentials/claims remain physically absent. Only that validated,
+row-scrubbed, physically rewritten file reaches
 the atomic swap. A round trip therefore preserves append-only
 rows, opening order and `sqlite_sequence`, not merely table names. #266 relies
 on that unchanged whole-database format: refs/payments/rarities/bonuses/

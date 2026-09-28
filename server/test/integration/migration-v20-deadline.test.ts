@@ -4,9 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEADLINE_REMINDER_CLAIMS_SQL, validateV20Contract } from "../../src/schemaV20.js";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-const currentSchema = fs.readFileSync(schemaPath, "utf8");
+const currentSchema = stripV22Schema(fs.readFileSync(schemaPath, "utf8"));
 const v20Schema = currentSchema
   .replace(
     /-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/,

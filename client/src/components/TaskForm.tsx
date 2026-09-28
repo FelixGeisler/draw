@@ -4,6 +4,7 @@ import { useEstimationBias } from "../hooks/useEstimationBias";
 import { estimateHint, hintText } from "../lib/estimationCoach";
 import { resolveSubmittedImpact } from "../lib/impact";
 import { StarPicker } from "./StarPicker";
+import { SCHEDULE_TIME_ZONE_SET, SCHEDULE_TIME_ZONES } from "../../../shared/scheduleTimezones";
 
 interface Props {
   categories: Category[];
@@ -51,6 +52,14 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
   const [effort, setEffort] = useState<string>(initial?.effortMinutes?.toString() ?? "");
   const [dueDate, setDueDate] = useState<string>(initial?.dueDate ?? "");
   const [recur, setRecur] = useState<string>(initial?.recurEveryDays?.toString() ?? "");
+  const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const [fixedOpen, setFixedOpen] = useState(initial?.fixedSlot != null);
+  const [fixedStart, setFixedStart] = useState(initial?.fixedSlot?.startLocal ?? "");
+  const [fixedEnd, setFixedEnd] = useState(initial?.fixedSlot?.endLocal ?? "");
+  const [fixedZone, setFixedZone] = useState(
+    initial?.fixedSlot?.entryTimezone ??
+      (SCHEDULE_TIME_ZONE_SET.has(browserZone) ? browserZone : ""),
+  );
   // Availability window (#33) — tucked behind a toggle so quick capture stays
   // lean. Enabling seeds a sensible Mon–Fri office window to edit from.
   const [windowOpen, setWindowOpen] = useState(initial?.windowDays != null);
@@ -84,6 +93,10 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
     e.preventDefault();
     if (!title.trim()) return;
     setError(null);
+    if (fixedOpen && (!fixedStart || !fixedEnd || !fixedZone)) {
+      setError("Fixed start, fixed end, and entry timezone are all required.");
+      return;
+    }
     try {
       await onSubmit({
         title: title.trim(),
@@ -93,6 +106,13 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
         effortMinutes: effort ? Number(effort) : null,
         dueDate: dueDate || null,
         recurEveryDays: recur ? Number(recur) : null,
+        ...((initial || fixedOpen)
+          ? {
+              fixedSlot: fixedOpen
+                ? { startLocal: fixedStart, endLocal: fixedEnd, entryTimezone: fixedZone }
+                : null,
+            }
+          : {}),
         windowDays: windowSet ? windowDays : null,
         windowStart: windowSet ? windowStart : null,
         windowEnd: windowSet ? windowEnd : null,
@@ -109,6 +129,10 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
       setEffort("");
       setDueDate("");
       setRecur("");
+      setFixedOpen(false);
+      setFixedStart("");
+      setFixedEnd("");
+      setFixedZone(SCHEDULE_TIME_ZONE_SET.has(browserZone) ? browserZone : "");
       setWindowOpen(false);
       setWindowDays([1, 2, 3, 4, 5]);
       setWindowStart("09:00");
@@ -182,6 +206,15 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
       )}
       <button
         type="button"
+        title={fixedOpen ? "Remove fixed time" : "Add fixed time"}
+        aria-pressed={fixedOpen}
+        onClick={() => setFixedOpen((open) => !open)}
+        style={fixedOpen ? undefined : { opacity: 0.7 }}
+      >
+        {fixedOpen ? "Remove fixed time" : "Add fixed time"}
+      </button>
+      <button
+        type="button"
         title="Availability window — only draw this task on certain weekdays and times"
         aria-pressed={windowOpen}
         onClick={() => setWindowOpen((o) => !o)}
@@ -196,6 +229,63 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
+      )}
+      {fixedOpen && (
+        <fieldset
+          style={{
+            flexBasis: "100%",
+            minWidth: 0,
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <legend>Fixed time</legend>
+          <label>
+            Start
+            <input
+              type="datetime-local"
+              aria-label="Fixed start"
+              value={fixedStart}
+              onChange={(e) => setFixedStart(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            End
+            <input
+              type="datetime-local"
+              aria-label="Fixed end"
+              value={fixedEnd}
+              onChange={(e) => setFixedEnd(e.target.value)}
+              required
+            />
+          </label>
+          <label>
+            Entry timezone
+            <select
+              aria-label="Entry timezone"
+              value={fixedZone}
+              onChange={(e) => setFixedZone(e.target.value)}
+              required
+            >
+              <option value="" disabled>
+                Select a supported timezone
+              </option>
+              {SCHEDULE_TIME_ZONES.map((zone) => (
+                <option key={zone} value={zone}>
+                  {zone}
+                </option>
+              ))}
+            </select>
+          </label>
+          {initial?.fixedSlot && (
+            <span style={{ color: "var(--text-dim)", fontSize: 12 }}>
+              Saved as {initial.fixedSlot.startsAt}–{initial.fixedSlot.endsAt}
+            </span>
+          )}
+        </fieldset>
       )}
       {windowOpen && (
         <div

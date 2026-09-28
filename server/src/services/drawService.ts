@@ -9,6 +9,7 @@ import {
   WARMUP_LAST_DEALT_SETTING,
 } from "../db.js";
 import { isAwaitingNextOccurrence } from "./recurrence.js";
+import { fixedSlotFromStored } from "./fixedSlots.js";
 
 export interface Candidate {
   id: number;
@@ -247,6 +248,10 @@ export function queryCandidates(
     // estimate is display/draw-inert; only archived-out children (split
     // leftovers) or children moved away revive it as a drawable leaf.
     LEAF_CONDITION,
+    // Fixed-time work is already placed and stays outside Draw for the whole
+    // lifetime of its slot (#357, ADR-74), regardless of whether its interval
+    // is future, current, or passed.
+    "NOT EXISTS(SELECT 1 FROM task_fixed_slots fs WHERE fs.task_id = t.id)",
     `NOT ${heldBackSql("t")}`,
     ...filter.conditions,
   ];
@@ -341,6 +346,7 @@ export function emptyPoolReason(
        WHERE t.status = 'open'
          AND ${SNOOZE_CONDITION}
          AND ${LEAF_CONDITION}
+         AND NOT EXISTS(SELECT 1 FROM task_fixed_slots fs WHERE fs.task_id = t.id)
          AND NOT ${heldBackSql("t")}
          ${filter.conditions.map((c) => `AND ${c}`).join(" ")}`,
     )
@@ -381,6 +387,10 @@ export function dealtTaskRow(id: number): Record<string, unknown> {
               t.subtask_order_mode AS subtaskOrderMode,
               t.window_days AS windowDays, t.window_start AS windowStart, t.window_end AS windowEnd,
               0 AS hasOpenChildren, 0 AS hasNonArchivedChildren, 0 AS heldBack,
+              EXISTS(SELECT 1 FROM task_fixed_slots fs WHERE fs.task_id = t.id) AS hasFixedSlot,
+              (SELECT starts_at FROM task_fixed_slots fs WHERE fs.task_id = t.id) AS fixedStartsAt,
+              (SELECT ends_at FROM task_fixed_slots fs WHERE fs.task_id = t.id) AS fixedEndsAt,
+              (SELECT entry_timezone FROM task_fixed_slots fs WHERE fs.task_id = t.id) AS fixedEntryTimezone,
               ${TRACKED_MINUTES_SQL} AS trackedMinutes
        FROM tasks t WHERE t.id = ?`,
     )
@@ -447,6 +457,15 @@ export function drawTask(filters: DrawFilters): DrawResult {
 export function toTaskPayload(task: Record<string, unknown>): Record<string, unknown> {
   task.blocked = Boolean(task.blocked);
   task.windowDays = parseWindowDays(task.windowDays);
+  task.hasFixedSlot = Boolean(task.hasFixedSlot);
+  task.fixedSlot = fixedSlotFromStored(
+    task.fixedStartsAt,
+    task.fixedEndsAt,
+    task.fixedEntryTimezone,
+  );
+  delete task.fixedStartsAt;
+  delete task.fixedEndsAt;
+  delete task.fixedEntryTimezone;
   return task;
 }
 
@@ -467,6 +486,8 @@ export interface RestorableTask {
   blocked: number | boolean;
   deferredUntil: string | null;
   heldBack: number | boolean;
+  /** A fixed slot is pre-placed work and never restorable into Draw. */
+  hasFixedSlot?: number | boolean;
   /**
    * Recurrence schedule (#205): `due_date` is the next occurrence, and a
    * recurring card sleeps until it arrives. Optional, like the fields above:
@@ -499,6 +520,7 @@ export function isRestorable(task: RestorableTask, maxEffort: number, now: Date)
     !task.hasNonArchivedChildren &&
     !task.blocked &&
     (task.deferredUntil == null || new Date(task.deferredUntil) <= now) &&
+    !task.hasFixedSlot &&
     !task.heldBack &&
     isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, now) &&
     !isAwaitingNextOccurrence(task.recurEveryDays, task.dueDate, now) &&
@@ -564,6 +586,10 @@ export function taskWithDeckState(id: number): Record<string, unknown> | undefin
               EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status = 'open') AS hasOpenChildren,
               EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = t.id AND c.status != 'archived') AS hasNonArchivedChildren,
               ${heldBackSql("t")} AS heldBack,
+              EXISTS(SELECT 1 FROM task_fixed_slots fs WHERE fs.task_id = t.id) AS hasFixedSlot,
+              (SELECT starts_at FROM task_fixed_slots fs WHERE fs.task_id = t.id) AS fixedStartsAt,
+              (SELECT ends_at FROM task_fixed_slots fs WHERE fs.task_id = t.id) AS fixedEndsAt,
+              (SELECT entry_timezone FROM task_fixed_slots fs WHERE fs.task_id = t.id) AS fixedEntryTimezone,
               ${TRACKED_MINUTES_SQL} AS trackedMinutes
        FROM tasks t WHERE t.id = ?`,
     )

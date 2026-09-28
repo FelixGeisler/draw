@@ -66,7 +66,7 @@ export function isAwaitingNextOccurrence(
 /**
  * Mirrors the server's pool predicate (`drawService.ts`), pinned by the shared
  * vectors in `shared/drawableVectors.ts`. Precedence:
- * container → snoozed → queued → scheduled → needs-estimate → too-big → ready.
+ * container → fixed-time scheduled → snoozed → queued → scheduled → needs-estimate → too-big → ready.
  * Snoozed outranks queued: an explicit user action (snooze/block) is more
  * informative than the derived queue position, and it keeps the Wake
  * affordance visible — on wake the task simply re-classifies as queued.
@@ -78,6 +78,7 @@ export function classifyTask(task: Task, maxDrawEffort: number, now: Date = new 
   // breakdown exists — even all-done — the parent's own estimate is inert.
   // hasOpenChildren stays as the fallback for payloads without the field.
   if (task.hasOpenChildren || task.hasNonArchivedChildren) return "container";
+  if (task.hasFixedSlot) return "scheduled";
   if (isSnoozed(task, now)) return "snoozed";
   if (task.heldBack) return "queued";
   if (!isWithinWindow(task.windowDays, task.windowStart, task.windowEnd, now)) return "scheduled";

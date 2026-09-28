@@ -1,5 +1,11 @@
 import { db } from "../db.js";
 import { undoLatestCompletion } from "./gamificationService.js";
+import {
+  FIXED_RECURRENCE_ERROR,
+  applyFixedSlot,
+  parseFixedSlotInput,
+  taskHasFixedRecurrenceConflict,
+} from "./fixedSlots.js";
 
 /**
  * Task-creation cores, extracted verbatim from routes/tasks.ts (#31): the
@@ -122,6 +128,11 @@ export function isCalendarDate(value: unknown): value is string {
  * PATCH's sparse bodies pass untouched fields through.
  */
 export function fieldShapeError(body: Record<string, unknown>): string | null {
+  for (const key of ["startsAt", "endsAt", "startOffsetSeconds", "endOffsetSeconds"]) {
+    if (key in body) {
+      return `${key} is server-resolved output and is not accepted as task input`;
+    }
+  }
   if ("title" in body && (typeof body.title !== "string" || !body.title.trim())) {
     return "title must be a non-empty string";
   }
@@ -292,6 +303,15 @@ export function createTaskWrite(body: Record<string, unknown>): WriteError | { i
   const recurError = normalizeRecurInput(body);
   if (recurError) return { status: 400, error: recurError };
   const recurEveryDays = body.recurEveryDays as number | null | undefined;
+  let fixedSlot;
+  try {
+    fixedSlot = parseFixedSlotInput(body);
+  } catch (error) {
+    return { status: 400, error: error instanceof Error ? error.message : String(error) };
+  }
+  if (fixedSlot.present && fixedSlot.value !== null && recurEveryDays != null) {
+    return { status: 400, error: FIXED_RECURRENCE_ERROR };
+  }
 
   let parent:
     | {
@@ -410,6 +430,12 @@ export function createTaskWrite(body: Record<string, unknown>): WriteError | { i
     // A new open subtask under a DONE parent reopens it (#111, ADR-32) — same
     // rule as the batch endpoint, so no creation path can leave an open child
     // under a done parent.
+    applyFixedSlot(db, Number(r.lastInsertRowid), fixedSlot);
+    // The actual stored final state is checked inside the same transaction;
+    // every REST/MCP/assistant creation path delegates here.
+    if (taskHasFixedRecurrenceConflict(db, Number(r.lastInsertRowid))) {
+      throw new Error(FIXED_RECURRENCE_ERROR);
+    }
     if (parent?.status === "done") reopenDoneParent(parentId as number);
     return r;
   })();

@@ -3,9 +3,10 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-const currentSchema = fs.readFileSync(schemaPath, "utf-8");
+const currentSchema = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"));
 const v17Schema = currentSchema
   .replace(/-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/, "")
   .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
@@ -78,7 +79,7 @@ afterAll(() => {
 describe("v17 → v18 migration", () => {
   it("is the exact complete schema contract and applies owner defaults without rewrites", async () => {
     const { validateV18Contract } = await import("../../src/schemaV18.js");
-    expect(database.pragma("user_version", { simple: true })).toBe(21);
+    expect(database.pragma("user_version", { simple: true })).toBe(22);
     expect(() => validateV18Contract(database)).not.toThrow();
     expect(
       database
@@ -197,7 +198,7 @@ describe("fresh v18 schema", () => {
       const { migrateDatabase } = await import("../../src/db.js");
       const { validateV18Contract } = await import("../../src/schemaV18.js");
       migrateDatabase(fresh);
-      expect(fresh.pragma("user_version", { simple: true })).toBe(21);
+      expect(fresh.pragma("user_version", { simple: true })).toBe(22);
       expect(() => validateV18Contract(fresh)).not.toThrow();
       expect(
         fresh

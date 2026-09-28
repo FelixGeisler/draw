@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 // Migration chain on EXISTING databases (fresh ones get the current
 // schema.sql — every other integration file covers that path):
@@ -47,7 +48,7 @@ beforeAll(async () => {
   // Reconstruct the v2 schema: today's schema.sql minus the v3/v4/v5 columns
   // and the v6 card_art table.
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-  const current = fs.readFileSync(schemaPath, "utf-8");
+  const current = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"));
   const v2Schema = current
     .replace(/-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/, "")
     .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
@@ -306,7 +307,7 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
 describe("migration v2 → v21 (including Push and daily digest)", () => {
   it("bumps user_version to 21", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(21);
+    expect(db.pragma("user_version", { simple: true })).toBe(22);
   });
 
   it("creates the xp_ledger table, empty (#230, ADR-62)", async () => {

@@ -27,6 +27,8 @@ function task(overrides: Partial<Task> = {}): Task {
     effortMinutes: 20,
     dueDate: null,
     recurEveryDays: null,
+    hasFixedSlot: false,
+    fixedSlot: null,
     status: "open",
     createdAt: "2026-07-14T00:00:00Z",
     completedAt: null,
@@ -75,6 +77,7 @@ describe("classifyTask", () => {
           // #111: absent in a vector means "same as hasOpenChildren" — an
           // open child is non-archived by definition.
           hasNonArchivedChildren: v.hasNonArchivedChildren ?? v.hasOpenChildren,
+          hasFixedSlot: v.hasFixedSlot ?? false,
           blocked: v.blocked,
           deferredUntil: v.deferredUntil,
           heldBack: v.heldBack,

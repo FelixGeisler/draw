@@ -11,6 +11,7 @@ import {
   V20_TIMING_DEFAULTS,
 } from "./schemaV20.js";
 import { DAILY_DIGEST_CLAIMS_SQL, validateV21Contract } from "./schemaV21.js";
+import { TASK_FIXED_SLOTS_SQL, V22_INDEX_SQL, validateV22Contract } from "./schemaV22.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
@@ -37,7 +38,7 @@ function openDatabase(): Database.Database {
 // whole swap runs in one synchronous block: no request can interleave).
 export let db = openDatabase();
 
-export const CURRENT_VERSION = 21;
+export const CURRENT_VERSION = 22;
 
 export function migrateDatabase(database: Database.Database = db) {
   const version = database.pragma("user_version", { simple: true }) as number;
@@ -426,14 +427,27 @@ export function migrateDatabase(database: Database.Database = db) {
         database.pragma("user_version = 21");
       })();
     }
+    if (version < 22) {
+      // Fixed task slots (#357, ADR-74): v21 is validated before mutation;
+      // all portable relation/index additions, complete target validation,
+      // and the final stamp share one transaction. A collision or injected
+      // failure therefore leaves the valid stamped v21 file unchanged.
+      validateV21Contract(database);
+      database.transaction(() => {
+        database.exec(TASK_FIXED_SLOTS_SQL);
+        for (const statement of V22_INDEX_SQL) database.exec(statement);
+        validateV22Contract(database);
+        database.pragma("user_version = 22");
+      })();
+    }
   }
   if (version < 1) database.pragma(`user_version = ${CURRENT_VERSION}`);
 
   // Startup, fresh creation, every migration, and a reopened restore all use
-  // the same complete v21 runtime contract. Historical validators remain
+  // the same complete v22 runtime contract. Historical validators remain
   // independent input boundaries only.
   validateV18Contract(database);
-  validateV21Contract(database);
+  validateV22Contract(database);
 }
 
 migrateDatabase();

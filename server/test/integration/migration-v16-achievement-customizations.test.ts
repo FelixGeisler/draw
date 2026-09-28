@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { freshApp, testDb } from "../helpers.js";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 // User-customizable achievement display metadata (#177, ADR-44) lands in
 // migration v16 on a seeded pre-v16 (v15) database: one NEW table,
@@ -18,7 +19,7 @@ import { freshApp, testDb } from "../helpers.js";
 //   * fresh-schema parity — a schema.sql database carries the same table.
 
 const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-const currentSchema = fs.readFileSync(schemaPath, "utf-8");
+const currentSchema = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"));
 
 // The v15 schema: today's schema.sql minus only the v16
 // achievement_customizations table (ADDED by the v16 migration).
@@ -54,7 +55,7 @@ beforeAll(async () => {
 describe("migration v15 → v16 adds achievement_customizations (#177, ADR-44)", () => {
   it("bumps user_version through the current v21 chain", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(21);
+    expect(db.pragma("user_version", { simple: true })).toBe(22);
   });
 
   it("creates achievement_customizations with the display-override shape", async () => {

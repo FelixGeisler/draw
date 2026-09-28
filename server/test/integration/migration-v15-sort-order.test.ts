@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 // Stored sibling positions (#157, ADR-43) land in migration v15 on a seeded
 // pre-v15 (v14) database: one REAL column, sort_order, backfilled to a
@@ -24,7 +25,7 @@ import { freshApp, testDb } from "../helpers.js";
 //     column and the same stamping trigger as the migrated one.
 
 const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-const currentSchema = fs.readFileSync(schemaPath, "utf-8");
+const currentSchema = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"));
 
 // The v14 schema: today's schema.sql minus only the v15 sort_order column and
 // its stamp trigger (both ADDED by the v15 migration).
@@ -115,7 +116,7 @@ beforeAll(async () => {
 describe("migration v14 → v15 adds tasks.sort_order (#157, ADR-43)", () => {
   it("runs the forward chain through schema v21", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(21);
+    expect(db.pragma("user_version", { simple: true })).toBe(22);
   });
 
   it("adds sort_order as REAL NOT NULL DEFAULT 0", async () => {

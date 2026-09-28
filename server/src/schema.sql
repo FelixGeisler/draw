@@ -22,6 +22,8 @@ CREATE TABLE goals (
   resolved_at TEXT
 );
 
+CREATE INDEX idx_goals_target_date ON goals(target_date, id);
+
 CREATE TABLE tasks (
   id INTEGER PRIMARY KEY,
   title TEXT NOT NULL,
@@ -68,6 +70,7 @@ CREATE TABLE tasks (
 
 CREATE INDEX idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX idx_tasks_status ON tasks(status);
+CREATE INDEX idx_tasks_due_date ON tasks(due_date, id);
 
 -- Stamp sort_order (#157, ADR-43) on an unstamped insert as the GLOBAL
 -- MAX(sort_order)+1 — one monotonic-by-creation sequence across all tasks
@@ -86,6 +89,21 @@ BEGIN
   WHERE id = NEW.id;
 END;
 
+-- Fixed task appointments (#357, ADR-74): portable planned time is a
+-- separate fact from date-only deadlines and actual-work time entries. One
+-- optional child row per task; canonical instants remain anchored to the
+-- entry timezone used to resolve the submitted wall minutes.
+CREATE TABLE task_fixed_slots (
+  task_id INTEGER PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+  starts_at TEXT NOT NULL,
+  ends_at TEXT NOT NULL,
+  entry_timezone TEXT NOT NULL,
+  CHECK (ends_at > starts_at)
+);
+
+CREATE INDEX idx_task_fixed_slots_range
+  ON task_fixed_slots(starts_at, ends_at, task_id);
+
 CREATE TABLE time_entries (
   id INTEGER PRIMARY KEY,
   task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -94,6 +112,7 @@ CREATE TABLE time_entries (
 );
 
 CREATE INDEX idx_time_entries_task ON time_entries(task_id);
+CREATE INDEX idx_time_entries_range ON time_entries(started_at, ended_at, id);
 
 CREATE TABLE completions (
   id INTEGER PRIMARY KEY,

@@ -38,6 +38,7 @@ package "server/ — Express 5" {
   component "routes/ — HTTP layer\ntasks, draw, timer, goals, stats,\nactivity, gamification, shop, ai, backup" as routes
   package "services/ — domain logic" {
     component "drawService\ndrawability, weights,\nwarm-up, current draw" as drawSvc
+    component "fixedSlots\nwall-time resolution,\nset/replace/clear" as fixedSvc
     component "gamificationService\ncompleteTask(): XP,\nstreaks, achievements" as gamSvc
     component "shopService + packCatalog\natomic opening/replay + derived snapshot\npure catalog/probability rules" as shopSvc
     component "statsService\nactivityService" as statsSvc
@@ -59,17 +60,20 @@ apiClient --> routes : "JSON REST /api/*"
 mcpClient --> mcpAdapter : stdio
 mcpAdapter --> routes : "HTTP 127.0.0.1:3001"
 routes --> drawSvc
+routes --> fixedSvc
 routes --> gamSvc
 routes --> shopSvc
 routes --> statsSvc
 routes --> aiSvc
 routes --> backupSvc
-drawSvc -[hidden]-> gamSvc
+drawSvc -[hidden]-> fixedSvc
+fixedSvc -[hidden]-> gamSvc
 gamSvc -[hidden]-> shopSvc
 shopSvc -[hidden]-> statsSvc
 statsSvc -[hidden]-> aiSvc
 aiSvc -[hidden]-> backupSvc
 drawSvc --> dbmod
+fixedSvc --> dbmod
 gamSvc --> dbmod
 statsSvc --> dbmod
 aiSvc --> dbmod
@@ -118,6 +122,7 @@ server/src/
 │   └── ai.ts                status, key, estimate, breakdown, plan-goal, generate-tasks
 └── services/                Domain logic
     ├── drawService.ts       drawable predicate + weight formula + roulette selection + current draw
+    ├── fixedSlots.ts        strict local-minute/zone resolution and the one set/replace/clear service
     ├── localDay.ts          the server's local calendar day (streaks): pure
     ├── statsService.ts      SQL aggregations (minutes by impact/category/goal), estimation
     │                        accuracy + per-category bias (coaching input, ADR-27)
@@ -143,7 +148,11 @@ server/src/
 
 |`drawService`
 |Candidate selection + weighting
-|Drawability is computed, never stored
+|Drawability is computed, never stored; a `task_fixed_slots` row excludes its task from candidates and current-card restore
+
+|`fixedSlots`
+|Validate the frozen schedule-zone identifier policy, resolve local wall minutes, and atomically set/replace/clear one slot
+|Gap minutes reject; folds choose the earlier instant; UTC years stay `0001`–`9999`; final fixed-slot plus recurrence state is forbidden
 
 |`gamificationService`
 |Completion side-effects
@@ -248,11 +257,17 @@ other state management.
 
 ....
 categories 1─n tasks n─1 goals 1─n materials
+                │ 0─1 task_fixed_slots
                 │ 1─n time_entries
                 │ 1─n completions        achievements (unlocked keys)
                 └─ self-reference: parent_id (breakdown tree, depth 1)
                                          settings (key/value)
 ....
+
+`task_fixed_slots` stores one optional planned interval as canonical UTC start/end
+plus the exact accepted entry timezone. It is independent from `due_date` and
+`time_entries`; its presence is exposed as `hasFixedSlot`/`fixedSlot` and excludes
+the task from Draw for the row's whole lifetime.
 
 Central semantics: completing a *recurring* task keeps it `open` and pushes
 `due_date` forward — that date is the task's *next occurrence*, so the card is
