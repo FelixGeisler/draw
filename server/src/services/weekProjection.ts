@@ -543,5 +543,5 @@ export function projectWeek(
   // Re-read our own exact wire through the shared closed decoder before it can
   // cross the HTTP boundary. Any source/invariant fault therefore becomes one
   // closed 500 rather than a partial projection.
-  return decodeWeekResponse(response);
+  return decodeWeekResponse(response, isScheduleTimeZone);
 }

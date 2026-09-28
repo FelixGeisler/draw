@@ -1,5 +1,3 @@
-import { SCHEDULE_TIME_ZONE_SET } from "./scheduleTimezones.js";
-
 export const WEEK_PAGE_RECORD_LIMIT = 100;
 export const WEEK_IDENTITY_LOOKAHEAD_LIMIT = 101;
 export const WEEK_JSON_BYTE_LIMIT = 131_072;
@@ -142,13 +140,18 @@ function validRecord(value: unknown): value is WeekRecord {
   return false;
 }
 
-/** Closed runtime decoder shared by the API and the Phase 2B client. */
-export function decodeWeekResponse(value: unknown): WeekResponse {
+/** Closed runtime decoder shared by the API and the Phase 2B client.
+ * The caller supplies the one frozen-registry predicate, keeping this wire
+ * module dependency-free for browser, Node ESM and Playwright module loaders. */
+export function decodeWeekResponse(
+  value: unknown,
+  isSupportedScheduleTimezone: (value: string) => boolean,
+): WeekResponse {
   if (!object(value)
     || !exactKeys(value, ["weekStart", "timezone", "requestNow", "records", "nextCursor"])
     || !isCanonicalWeekDate(value.weekStart)
     || typeof value.timezone !== "string"
-    || !SCHEDULE_TIME_ZONE_SET.has(value.timezone)
+    || !isSupportedScheduleTimezone(value.timezone)
     || !isCanonicalWeekInstant(value.requestNow)
     || !Array.isArray(value.records)
     || value.records.length > WEEK_PAGE_RECORD_LIMIT

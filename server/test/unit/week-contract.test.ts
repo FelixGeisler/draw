@@ -4,7 +4,10 @@ import {
   decodeWeekResponse,
   type WeekResponse,
 } from "../../../shared/weekContract.js";
+import { SCHEDULE_TIME_ZONE_SET } from "../../../shared/scheduleTimezones.js";
 import { encodeWeekCursor } from "../../src/services/weekProjection.js";
+
+const scheduleTimezone = (value: string) => SCHEDULE_TIME_ZONE_SET.has(value);
 
 const response: WeekResponse = {
   weekStart: "2026-10-26",
@@ -39,7 +42,7 @@ function clone(): Record<string, unknown> {
 
 describe("closed Week wire contract", () => {
   it("accepts the exact envelope and all record variants", () => {
-    expect(decodeWeekResponse(response)).toEqual(response);
+    expect(decodeWeekResponse(response, scheduleTimezone)).toEqual(response);
   });
 
   it("rejects missing, extra, wrongly typed and invariant-breaking values as a whole", () => {
@@ -72,7 +75,9 @@ describe("closed Week wire contract", () => {
       mutate(value);
       invalid.push(value);
     }
-    for (const value of invalid) expect(() => decodeWeekResponse(value)).toThrow("invalid Week response");
+    for (const value of invalid) {
+      expect(() => decodeWeekResponse(value, scheduleTimezone)).toThrow("invalid Week response");
+    }
   });
 
   it("derives the exact maximal 248-byte / 331-character cursor policy fixture", () => {
