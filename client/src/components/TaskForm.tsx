@@ -234,7 +234,10 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
         <fieldset
           style={{
             flexBasis: "100%",
+            width: "100%",
+            maxWidth: "100%",
             minWidth: 0,
+            boxSizing: "border-box",
             display: "flex",
             gap: 8,
             flexWrap: "wrap",
@@ -242,7 +245,7 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
           }}
         >
           <legend>Fixed time</legend>
-          <label>
+          <label style={{ flex: "1 1 180px", minWidth: 0 }}>
             Start
             <input
               type="datetime-local"
@@ -250,9 +253,10 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
               value={fixedStart}
               onChange={(e) => setFixedStart(e.target.value)}
               required
+              style={{ width: "100%", minWidth: 0, boxSizing: "border-box" }}
             />
           </label>
-          <label>
+          <label style={{ flex: "1 1 180px", minWidth: 0 }}>
             End
             <input
               type="datetime-local"
@@ -260,15 +264,17 @@ export function TaskForm({ categories, goals, initial, autoFocus, submitLabel, h
               value={fixedEnd}
               onChange={(e) => setFixedEnd(e.target.value)}
               required
+              style={{ width: "100%", minWidth: 0, boxSizing: "border-box" }}
             />
           </label>
-          <label>
+          <label style={{ flex: "1 1 220px", minWidth: 0 }}>
             Entry timezone
             <select
               aria-label="Entry timezone"
               value={fixedZone}
               onChange={(e) => setFixedZone(e.target.value)}
               required
+              style={{ width: "100%", minWidth: 0 }}
             >
               <option value="" disabled>
                 Select a supported timezone
