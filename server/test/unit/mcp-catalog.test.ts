@@ -10,6 +10,7 @@ import {
   type ApiClient,
   type ApiResponse,
 } from "../../src/tools/catalog.js";
+import { supportedAutomationSlotVectors } from "../fixedSlotVectors.js";
 
 // Pure catalog tests: no MCP SDK, no network, no database.
 
@@ -106,6 +107,14 @@ describe("create_task input schema", () => {
       expect(schema.safeParse({ ...base, dueDate }).success).toBe(false);
     }
   });
+
+  it("accepts only the exact non-null nested fixedSlot input shape", () => {
+    const slot = supportedAutomationSlotVectors[0].slot;
+    expect(schema.safeParse({ ...base, fixedSlot: slot }).success).toBe(true);
+    expect(schema.safeParse({ ...base, fixedSlot: null }).success).toBe(false);
+    expect(schema.safeParse({ ...base, fixedSlot: { ...slot, startsAt: "forged" } }).success).toBe(false);
+    expect(schema.safeParse({ ...base, fixedSlot: { startLocal: slot.startLocal } }).success).toBe(false);
+  });
 });
 
 describe("update_task input schema", () => {
@@ -131,6 +140,14 @@ describe("update_task input schema", () => {
     expect(description).toContain("promotes");
     expect(description).toContain("ADR-23");
     expect(description).toContain("inherits");
+  });
+
+  it("accepts omitted/non-null/null fixedSlot and rejects derived child fields", () => {
+    const slot = supportedAutomationSlotVectors[0].slot;
+    expect(schema.safeParse({ id: 1 }).success).toBe(true);
+    expect(schema.safeParse({ id: 1, fixedSlot: slot }).success).toBe(true);
+    expect(schema.safeParse({ id: 1, fixedSlot: null }).success).toBe(true);
+    expect(schema.safeParse({ id: 1, fixedSlot: { ...slot, startOffsetSeconds: 0 } }).success).toBe(false);
   });
 
   it("accepts pause fields only as nullable-string and boolean inputs", () => {
@@ -172,6 +189,46 @@ describe("update_task input schema", () => {
     const blocked = (definition.inputSchema.blocked as z.ZodType).description ?? "";
     expect(blocked).toContain("pauses indefinitely");
     expect(blocked).toContain("wins over a timed pause");
+  });
+});
+
+describe("fixedSlot passthrough", () => {
+  it("forwards the approved nested object once without resolving or flattening it", async () => {
+    const fixedSlot = supportedAutomationSlotVectors[1].slot;
+    const { api, calls } = stubApi((method, path) =>
+      method === "POST" && path === "/api/tasks"
+        ? { status: 201, body: { id: 7, fixedSlot: { ...fixedSlot, startsAt: "resolved" } } }
+        : undefined,
+    );
+
+    const outcome = await executeTool("create_task", api, {
+      title: "Appointment",
+      categoryId: 1,
+      fixedSlot,
+    });
+
+    expect(outcome.isError).toBeUndefined();
+    expect(calls).toEqual([
+      { method: "POST", path: "/api/tasks", body: { title: "Appointment", categoryId: 1, fixedSlot } },
+    ]);
+  });
+
+  it("forwards update null clear and rejects top-level resolved values before HTTP", async () => {
+    const { api, calls } = stubApi((method, path) =>
+      method === "PATCH" && path === "/api/tasks/7"
+        ? { status: 200, body: { task: { id: 7, fixedSlot: null } } }
+        : undefined,
+    );
+    expect((await executeTool("update_task", api, { id: 7, fixedSlot: null })).isError).toBeUndefined();
+    expect(calls).toEqual([{ method: "PATCH", path: "/api/tasks/7", body: { fixedSlot: null } }]);
+
+    const rejected = await executeTool("update_task", api, {
+      id: 7,
+      startsAt: "2026-10-20T10:00:00.000Z",
+    });
+    expect(rejected.isError).toBe(true);
+    expect(rejected.text).toContain("Unrecognized key");
+    expect(calls).toHaveLength(1);
   });
 });
 

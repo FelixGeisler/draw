@@ -1,3 +1,42 @@
+export const supportedAutomationSlotVectors = [
+  {
+    name: "UTC",
+    slot: {
+      startLocal: "2026-10-20T10:00",
+      endLocal: "2026-10-20T11:00",
+      entryTimezone: "UTC",
+    },
+    startsAt: "2026-10-20T10:00:00.000Z",
+    endsAt: "2026-10-20T11:00:00.000Z",
+    startOffsetSeconds: 0,
+    endOffsetSeconds: 0,
+  },
+  {
+    name: "Berlin earlier fold",
+    slot: {
+      startLocal: "2026-10-25T02:30",
+      endLocal: "2026-10-25T03:30",
+      entryTimezone: "Europe/Berlin",
+    },
+    startsAt: "2026-10-25T00:30:00.000Z",
+    endsAt: "2026-10-25T02:30:00.000Z",
+    startOffsetSeconds: 7200,
+    endOffsetSeconds: 3600,
+  },
+  {
+    name: "New York earlier fold",
+    slot: {
+      startLocal: "2026-11-01T01:30",
+      endLocal: "2026-11-01T02:30",
+      entryTimezone: "America/New_York",
+    },
+    startsAt: "2026-11-01T05:30:00.000Z",
+    endsAt: "2026-11-01T07:30:00.000Z",
+    startOffsetSeconds: -14400,
+    endOffsetSeconds: -18000,
+  },
+] as const;
+
 export const validUtcBoundarySlots = [
   {
     name: "lower UTC boundary",

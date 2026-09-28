@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { testDb } from "../helpers.js";
+import { supportedAutomationSlotVectors } from "../fixedSlotVectors.js";
 
 // Invariant parity for the MCP surface (issue #36): the real HTTP API on an
 // ephemeral port + temp DATA_DIR (test/setup.ts), an MCP client bound over
@@ -126,6 +127,20 @@ describe("MCP tool surface (tools/list)", () => {
     expect((createTask.inputSchema as { required?: string[] }).required).toEqual(
       expect.arrayContaining(["title", "categoryId"]),
     );
+    const createFixedSlot = props.fixedSlot as {
+      type?: string;
+      additionalProperties?: boolean;
+      required?: string[];
+      properties?: Record<string, unknown>;
+    };
+    expect(createFixedSlot.type).toBe("object");
+    expect(createFixedSlot.additionalProperties).toBe(false);
+    expect(createFixedSlot.required).toEqual(["startLocal", "endLocal", "entryTimezone"]);
+    expect(Object.keys(createFixedSlot.properties ?? {})).toEqual([
+      "startLocal",
+      "endLocal",
+      "entryTimezone",
+    ]);
 
     const createGoal = tools.find((t) => t.name === "create_goal")!;
     expect(createGoal.description).toBe(
@@ -165,6 +180,9 @@ describe("MCP tool surface (tools/list)", () => {
       expect.arrayContaining(["string", "null"]),
     );
     expect(updateSchema.properties.blocked.type).toBe("boolean");
+    expect(updateSchema.properties.fixedSlot.anyOf?.map((part) => part.type)).toEqual(
+      expect.arrayContaining(["object", "null"]),
+    );
     expect(updateTask.description).toContain(
       "{ id, deferredUntil: <future ISO datetime>, blocked: false }",
     );
@@ -785,6 +803,59 @@ describe("stats, goals, materials", () => {
     // The default (active) listing keeps it out.
     const active = (await callTool("list_goals")).json<Array<{ id: number }>>();
     expect(active.map((g) => g.id)).not.toContain(missedGoal.id);
+  });
+});
+
+describe("fixed-slot MCP adapter", () => {
+  it("sets, replaces and clears through the registered SDK tool without adapter-side resolution", async () => {
+    const berlin = supportedAutomationSlotVectors[1];
+    const created = await callTool("create_task", {
+      title: "MCP SDK appointment",
+      categoryId: 1,
+      dueDate: "2026-12-24",
+      fixedSlot: berlin.slot,
+    });
+    expect(created.isError).toBe(false);
+    const task = created.json<TaskJson & { fixedSlot: Record<string, unknown> }>();
+    expect(task.fixedSlot).toMatchObject({
+      ...berlin.slot,
+      startsAt: berlin.startsAt,
+      endsAt: berlin.endsAt,
+      startOffsetSeconds: berlin.startOffsetSeconds,
+      endOffsetSeconds: berlin.endOffsetSeconds,
+    });
+
+    const newYork = supportedAutomationSlotVectors[2];
+    const replaced = await callTool("update_task", { id: task.id, fixedSlot: newYork.slot });
+    expect(replaced.isError).toBe(false);
+    expect(replaced.json<{ task: { dueDate: string; fixedSlot: Record<string, unknown> } }>().task).toMatchObject({
+      dueDate: "2026-12-24",
+      fixedSlot: { ...newYork.slot, startsAt: newYork.startsAt, endsAt: newYork.endsAt },
+    });
+
+    const cleared = await callTool("update_task", { id: task.id, fixedSlot: null });
+    expect(cleared.isError).toBe(false);
+    expect(cleared.json<{ task: { fixedSlot: null; hasFixedSlot: boolean } }>().task).toMatchObject({
+      fixedSlot: null,
+      hasFixedSlot: false,
+    });
+  });
+
+  it("rejects create null and caller-supplied resolved values at the MCP boundary", async () => {
+    const nullCreate = await callTool("create_task", {
+      title: "MCP null create",
+      categoryId: 1,
+      fixedSlot: null,
+    });
+    expect(nullCreate.isError).toBe(true);
+
+    const resolved = await callTool("create_task", {
+      title: "MCP forged instant",
+      categoryId: 1,
+      fixedSlot: { ...supportedAutomationSlotVectors[0].slot, startsAt: "2026-10-20T10:00:00.000Z" },
+    });
+    expect(resolved.isError).toBe(true);
+    expect(resolved.text).toMatch(/startsAt|Unrecognized/);
   });
 });
 

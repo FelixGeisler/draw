@@ -2,6 +2,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import type express from "express";
 import { COUNT_TOKENS_FILE_SOURCE_ERROR, findFileSource, freshApp } from "../helpers.js";
+import {
+  namedZoneBoundaryFailures,
+  supportedAutomationSlotVectors,
+  validUtcBoundarySlots,
+} from "../fixedSlotVectors.js";
 
 // The assistant's message loop and apply step (#31, ADR-37), tested at the
 // #136 convention: the Anthropic SDK is mocked at the stream()/finalMessage()
@@ -155,6 +160,57 @@ describe("the agent message loop", () => {
       draftId: "draft-1",
       task: { title: "Read chapter 1", effortMinutes: 25 },
     });
+  });
+
+  it("stages a resolved fixed-slot creation without writing and returns invalid slots as tool errors", async () => {
+    const before = await taskCount();
+    const berlin = supportedAutomationSlotVectors[1];
+    mocks.turn(
+      [
+        {
+          type: "tool_use",
+          id: "slot-ok",
+          name: "create_task",
+          input: { title: "Berlin appointment", categoryId: 1, fixedSlot: berlin.slot },
+        },
+      ],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "I staged the appointment." }]);
+    const valid = await request(app).post("/api/ai/agent/message").send({ message: "add it" }).expect(200);
+    expect(await taskCount()).toBe(before);
+    expect(valid.body.changeset.ops).toEqual([
+      expect.objectContaining({
+        kind: "create_task",
+        task: expect.objectContaining({ fixedSlot: berlin.slot }),
+      }),
+    ]);
+
+    mocks.turn(
+      [
+        {
+          type: "tool_use",
+          id: "slot-gap",
+          name: "create_task",
+          input: {
+            title: "Gap appointment",
+            categoryId: 1,
+            fixedSlot: {
+              startLocal: "2026-03-29T02:30",
+              endLocal: "2026-03-29T03:30",
+              entryTimezone: "Europe/Berlin",
+            },
+          },
+        },
+      ],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "That wall time is invalid." }]);
+    const invalid = await request(app).post("/api/ai/agent/message").send({ message: "add gap" }).expect(200);
+    expect(invalid.body.changeset.ops).toHaveLength(0);
+    expect(findToolResult(streamParams(3))).toMatchObject({ is_error: true });
+    expect(findToolResult(streamParams(3)).content).toMatch(/nonexistent wall minute/);
+    expect(await taskCount()).toBe(before);
   });
 
   it("pins the streamed request shape: model, adaptive thinking, staged-tool vocabulary (ADR-36)", async () => {
@@ -365,6 +421,76 @@ describe("the apply step", () => {
     // Subtasks inherit the parent's goal — the route core's rule, untouched.
     expect(parent.subtasks[0].goalId).toBe(goalId);
     expect(parent.subtasks[0].impact).toBe(4);
+  });
+
+  it("applies shared fixed-slot vectors, including both valid UTC-year controls", async () => {
+    const vectors = [...supportedAutomationSlotVectors, ...validUtcBoundarySlots];
+    const res = await request(app)
+      .post("/api/ai/agent/apply")
+      .send({
+        operations: vectors.map((vector, index) => ({
+          kind: "create_task",
+          draftId: `draft-${index + 1}`,
+          task: { title: `Assistant ${vector.name}`, categoryId: 1, fixedSlot: vector.slot },
+        })),
+      })
+      .expect(201);
+    expect(res.body.created).toHaveLength(vectors.length);
+
+    const tasks = (await request(app).get("/api/tasks?status=all").expect(200)).body;
+    for (const vector of vectors) {
+      expect(tasks.find((task: { title: string }) => task.title === `Assistant ${vector.name}`)).toMatchObject({
+        fixedSlot: { ...vector.slot, startsAt: vector.startsAt, endsAt: vector.endsAt },
+      });
+    }
+  });
+
+  it("revalidates a reviewed slot at apply, rolls back the whole changeset, and leaves it consumable", async () => {
+    const validSlot = supportedAutomationSlotVectors[0].slot;
+    mocks.turn(
+      [
+        {
+          type: "tool_use",
+          id: "slot-stage",
+          name: "create_task",
+          input: { title: "Reviewed slot", categoryId: 1, fixedSlot: validSlot },
+        },
+      ],
+      "tool_use",
+    );
+    mocks.turn([{ type: "text", text: "staged" }]);
+    const turn = await request(app).post("/api/ai/agent/message").send({ message: "stage slot" }).expect(200);
+    const before = await taskCount();
+    const edited = structuredClone(turn.body.changeset.ops);
+    edited[0].task.fixedSlot = namedZoneBoundaryFailures[0].slot;
+    edited.push({
+      kind: "create_task",
+      draftId: "draft-2",
+      task: { title: "Must roll back with slot", categoryId: 1 },
+    });
+
+    const failed = await request(app)
+      .post("/api/ai/agent/apply")
+      .send({ sessionId: turn.body.sessionId, changesetVersion: 1, operations: edited })
+      .expect(400);
+    expect(failed.body.error).toMatch(/outside supported UTC years/);
+    expect(await taskCount()).toBe(before);
+
+    const body = {
+      sessionId: turn.body.sessionId,
+      changesetVersion: 1,
+      operations: turn.body.changeset.ops,
+    };
+    const applied = await request(app).post("/api/ai/agent/apply").send(body).expect(201);
+    expect(await taskCount()).toBe(before + 1);
+    const retry = await request(app).post("/api/ai/agent/apply").send(body).expect(409);
+    expect(retry.body.created).toEqual(applied.body.created);
+    expect(await taskCount()).toBe(before + 1);
+    const createdId = applied.body.created[0].taskIds[0];
+    const task = (await request(app).get("/api/tasks?status=all").expect(200)).body.find(
+      (candidate: { id: number }) => candidate.id === createdId,
+    );
+    expect(task.fixedSlot).toMatchObject(validSlot);
   });
 
   it("is atomic: an invalid categoryId in a later op rolls back the WHOLE changeset", async () => {

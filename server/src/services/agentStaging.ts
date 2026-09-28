@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { evenSplit, MAX_PARTS_PER_ITEM } from "./aiPostprocess.js";
+import {
+  FIXED_RECURRENCE_ERROR,
+  fixedSlotInputSchema,
+  parseFixedSlotInput,
+} from "./fixedSlots.js";
 
 /**
  * The assistant's staging engine (#31, ADR-37) — PURE: no DB, no SDK, no
@@ -48,6 +53,7 @@ export const stagedTaskInputSchema = z.object({
   effortMinutes: z.number().int().positive().optional(),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   recurEveryDays: z.number().int().positive().optional(),
+  fixedSlot: fixedSlotInputSchema.optional(),
   windowDays: z.array(z.number().int().min(0).max(6)).min(1).optional(),
   windowStart: z.string().optional(),
   windowEnd: z.string().optional(),
@@ -198,6 +204,17 @@ export function stageCreateTask(
     const refError = parentRefError(cs, args.parentId, ctx);
     if (refError) return { isError: true, text: refError };
   }
+  // Give the model immediate feedback through the SAME resolver apply will
+  // invoke via createTaskWrite. Apply repeats this authoritatively because a
+  // reviewer may edit the operation after staging.
+  if (args.fixedSlot != null) {
+    try {
+      parseFixedSlotInput({ fixedSlot: args.fixedSlot });
+    } catch (error) {
+      return { isError: true, text: error instanceof Error ? error.message : String(error) };
+    }
+    if (args.recurEveryDays != null) return { isError: true, text: FIXED_RECURRENCE_ERROR };
+  }
   // ADR-4 pre-check so the model corrects course now instead of the user
   // hitting the 400 at apply. The apply step re-runs the authoritative gate.
   if (args.impact != null && args.impact !== 3 && args.goalId == null && args.parentId == null) {
@@ -215,7 +232,12 @@ export function stageCreateTask(
   // part rows under the same parent, preserving the stated total. A ROOT
   // task is never split — an oversized root is a legal container-to-be
   // (warned below, pointing at create_subtasks).
-  if (args.parentId != null && args.effortMinutes != null && args.effortMinutes > ctx.maxDrawEffort) {
+  if (
+    args.fixedSlot == null &&
+    args.parentId != null &&
+    args.effortMinutes != null &&
+    args.effortMinutes > ctx.maxDrawEffort
+  ) {
     const { rows } = expandOversizedSubtasks([args], ctx.maxDrawEffort);
     const parts = rows.map(({ splitFrom: _s, ...task }) => {
       const draftId = mintDraftId(cs);
@@ -240,7 +262,10 @@ export function stageCreateTask(
   const draftId = mintDraftId(cs);
   cs.ops.push({ kind: "create_task", draftId, task: args });
   const warnings: string[] = [];
-  if (args.effortMinutes != null && args.effortMinutes > ctx.maxDrawEffort) {
+  // A fixed appointment is intentionally outside Draw, so the drawable-size
+  // warning/split policy does not apply and must never copy one slot into
+  // several staged tasks.
+  if (args.fixedSlot == null && args.effortMinutes != null && args.effortMinutes > ctx.maxDrawEffort) {
     warnings.push(
       `effortMinutes ${args.effortMinutes} exceeds max_draw_effort (${ctx.maxDrawEffort}): the task ` +
         "will not be drawable as-is. Stage create_subtasks under this draft id to break it down — " +

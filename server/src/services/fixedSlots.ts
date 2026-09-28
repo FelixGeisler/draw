@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { z } from "zod";
 import {
   SCHEDULE_TIME_ZONE_SET,
   SCHEDULE_TIME_ZONES,
@@ -17,6 +18,30 @@ export interface FixedSlotProjection extends FixedSlotInput {
   startOffsetSeconds: number;
   endOffsetSeconds: number;
 }
+
+/**
+ * The one caller-input shape shared by REST's resolver, MCP create/update and
+ * the reviewed assistant's staged create. The schema deliberately validates
+ * only the closed wire shape: the resolver below remains authoritative for
+ * Gregorian validity, the frozen zone registry, gaps/folds, UTC-year bounds
+ * and instant ordering.
+ */
+export const fixedSlotInputSchema = z
+  .object({
+    startLocal: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "must be YYYY-MM-DDTHH:mm")
+      .describe("Exact local wall minute, YYYY-MM-DDTHH:mm, resolved in entryTimezone"),
+    endLocal: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "must be YYYY-MM-DDTHH:mm")
+      .describe("Exact local wall minute, YYYY-MM-DDTHH:mm, resolved in entryTimezone"),
+    entryTimezone: z
+      .string()
+      .describe("Exact canonical schedule timezone from Draw's frozen IANA registry, or UTC"),
+  })
+  .strict()
+  .describe("One fixed task slot; resolved instants and offsets are server output only");
 
 export type ParsedFixedSlot =
   | { present: false }

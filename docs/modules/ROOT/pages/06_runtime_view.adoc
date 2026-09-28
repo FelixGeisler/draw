@@ -370,9 +370,10 @@ work. Every terminal result retains the claim; only an exact-fingerprint
 provider 404/410 also removes the subscription. A later tick therefore retries
 neither a failed initiation nor a process/DNS/payload/provider failure.
 
-== 6.8 Setting or clearing a fixed slot (Phase 1A)
+== 6.8 Setting or clearing a fixed slot (Phases 1A–1B)
 
-The task form or REST caller sends strict `startLocal`, `endLocal`, and
+The task form, REST caller, or existing MCP create/update tool sends strict
+`startLocal`, `endLocal`, and
 `entryTimezone`. `fixedSlots` checks the checked-in tzdb-2026b canonical-name
 registry, resolves each wall minute independently, rejects a gap, chooses the
 earlier instant in a fold, checks both resolved UTC years before serialization,
@@ -388,9 +389,12 @@ container, fixed-time scheduled, then snooze/queue/window/recurrence/estimate.
 Completion, reopen, archive, reparent, breakdown and timers never move or copy
 the slot; split-in-place rejects until it is cleared; delete cascades it.
 
-Phase 1A intentionally leaves MCP and reviewed-assistant slot inputs closed:
-their strict schemas reject slot and resolved-value keys. Their existing ordinary
-writes still reach the REST/domain invariant, preserve a slot on omission, and
-cannot enable recurrence on a slotted task. Phase 1B alone adds the approved
-bounded automation inputs. Week, `/today`, daily digest and weekly Push do not
-consume fixed slots yet.
+Phase 1B exposes the same nested object on existing MCP `create_task` and
+`update_task`; update alone accepts `null` clear. The adapter remains a single
+HTTP pass-through and never resolves time or writes the slot table. The reviewed
+assistant exposes only non-null slots on its existing staged `create_task`:
+staging invokes the same resolver for feedback but writes nothing, while apply
+revalidates through `createTaskWrite` inside the existing atomic consumed,
+versioned changeset. It still has no existing-task update operation. Strict
+schemas reject flat/resolved values and unknown child keys. Week, `/today`,
+daily digest and weekly Push do not consume fixed slots yet.

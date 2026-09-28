@@ -17,6 +17,7 @@ import {
   forbiddenFixedSlotInput,
   namedZoneBoundaryFailures,
   rejectedScheduleZones,
+  supportedAutomationSlotVectors,
   validUtcBoundarySlots,
 } from "../fixedSlotVectors.js";
 
@@ -344,87 +345,171 @@ describe("fixed-slot REST contract", () => {
   });
 });
 
-describe("phase-1A automation boundaries", () => {
-  it("rejects MCP slot/resolved input while ordinary MCP edits preserve and enforce slots", async () => {
-    const task = await create("MCP preserves appointment", { fixedSlot: utcSlot });
-    const api: ApiClient = {
-      async request(method, url, body) {
-        const call = request(app)[method.toLowerCase() as "get" | "post" | "patch"](url);
-        const response = body === undefined ? await call : await call.send(body as string | object);
-        return { status: response.status, body: response.body };
-      },
-    };
+describe("phase-1B automation boundaries", () => {
+  const api: ApiClient = {
+    async request(method, url, body) {
+      const call = request(app)[method.toLowerCase() as "get" | "post" | "patch"](url);
+      const response = body === undefined ? await call : await call.send(body as string | object);
+      return { status: response.status, body: response.body };
+    },
+  };
 
-    const forbiddenEntries: Array<[string, unknown]> = [
-      ...Object.entries(forbiddenFixedSlotInput),
-      ["fixedSlot", null],
-    ];
-    for (const [key, value] of forbiddenEntries) {
-      const createRejected = await executeTool("create_task", api, {
-        title: `MCP forged create ${key}`,
+  it("uses the same MCP shape, resolver, fold and UTC-boundary vectors as REST", async () => {
+    const updateTarget = await create("MCP shared-vector update target");
+    for (const vector of [...supportedAutomationSlotVectors, ...validUtcBoundarySlots]) {
+      const outcome = await executeTool("create_task", api, {
+        title: `MCP ${vector.name}`,
         categoryId: 1,
-        [key]: value,
+        fixedSlot: vector.slot,
       });
-      expect(createRejected.isError, `create_task accepted ${key}`).toBe(true);
-      expect(createRejected.text).toContain("Unrecognized key");
-
-      const updateRejected = await executeTool("update_task", api, {
-        id: task.id,
-        [key]: value,
+      expect(outcome.isError, vector.name).toBeUndefined();
+      expect(JSON.parse(outcome.text)).toMatchObject({
+        fixedSlot: {
+          ...vector.slot,
+          startsAt: vector.startsAt,
+          endsAt: vector.endsAt,
+        },
       });
-      expect(updateRejected.isError, `update_task accepted ${key}`).toBe(true);
-      expect(updateRejected.text).toContain("Unrecognized key");
+      const updated = await executeTool("update_task", api, {
+        id: updateTarget.id,
+        fixedSlot: vector.slot,
+      });
+      expect(updated.isError, `${vector.name} update`).toBeUndefined();
+      expect(JSON.parse(updated.text).task.fixedSlot).toMatchObject({
+        ...vector.slot,
+        startsAt: vector.startsAt,
+        endsAt: vector.endsAt,
+      });
     }
 
-    const ordinary = await executeTool("update_task", api, {
-      id: task.id,
-      title: "MCP ordinary edit",
+    for (const [index, zone] of rejectedScheduleZones.entries()) {
+      const rejected = await executeTool("create_task", api, {
+        title: `MCP rejected zone ${index}`,
+        categoryId: 1,
+        fixedSlot: { ...utcSlot, entryTimezone: zone },
+      });
+      expect(rejected.isError, zone).toBe(true);
+      expect(rejected.text).toContain("supported canonical schedule timezone");
+      const rejectedUpdate = await executeTool("update_task", api, {
+        id: updateTarget.id,
+        fixedSlot: { ...utcSlot, entryTimezone: zone },
+      });
+      expect(rejectedUpdate.isError, `${zone} update`).toBe(true);
+      expect(rejectedUpdate.text).toContain("supported canonical schedule timezone");
+    }
+
+    const stable = await create("MCP boundary rollback", { fixedSlot: utcSlot });
+    for (const vector of namedZoneBoundaryFailures) {
+      const rejectedCreate = await executeTool("create_task", api, {
+        title: `MCP rejected ${vector.name}`,
+        categoryId: 1,
+        fixedSlot: vector.slot,
+      });
+      expect(rejectedCreate.isError).toBe(true);
+      expect(rejectedCreate.text).toContain("outside supported UTC years");
+
+      const rejectedUpdate = await executeTool("update_task", api, {
+        id: stable.id,
+        title: "must roll back",
+        fixedSlot: vector.slot,
+      });
+      expect(rejectedUpdate.isError).toBe(true);
+      expect(rejectedUpdate.text).toContain("outside supported UTC years");
+    }
+    const unchanged = (await request(app).get("/api/tasks").expect(200)).body.find(
+      (candidate: { id: number }) => candidate.id === stable.id,
+    );
+    expect(unchanged).toMatchObject({ title: "MCP boundary rollback", fixedSlot: utcSlot });
+  });
+
+  it("sets, replaces and clears atomically while preserving independent facts", async () => {
+    const task = await create("MCP independent facts", {
+      dueDate: "2026-12-24",
+      windowDays: [1, 3],
+      windowStart: "09:00",
+      windowEnd: "12:00",
     });
-    expect(ordinary.isError).not.toBe(true);
-    const conflict = await executeTool("update_task", api, {
+    await request(app).post(`/api/tasks/${task.id}/timer/start`).expect(200);
+
+    const set = await executeTool("update_task", api, {
       id: task.id,
-      title: "Must not commit",
-      recurEveryDays: 3,
+      fixedSlot: supportedAutomationSlotVectors[1].slot,
+    });
+    expect(set.isError).toBeUndefined();
+    expect(JSON.parse(set.text).task.fixedSlot).toMatchObject({
+      ...supportedAutomationSlotVectors[1].slot,
+      startsAt: supportedAutomationSlotVectors[1].startsAt,
+    });
+
+    const replace = await executeTool("update_task", api, {
+      id: task.id,
+      fixedSlot: supportedAutomationSlotVectors[2].slot,
+    });
+    expect(replace.isError).toBeUndefined();
+    const database = await testDb();
+    expect(database.prepare("SELECT due_date AS dueDate,window_days AS windowDays,window_start AS windowStart,window_end AS windowEnd FROM tasks WHERE id=?").get(task.id)).toEqual({
+      dueDate: "2026-12-24",
+      windowDays: "[1,3]",
+      windowStart: "09:00",
+      windowEnd: "12:00",
+    });
+    expect(database.prepare("SELECT COUNT(*) AS n FROM time_entries WHERE task_id=?").get(task.id)).toEqual({ n: 1 });
+
+    const clear = await executeTool("update_task", api, { id: task.id, fixedSlot: null });
+    expect(clear.isError).toBeUndefined();
+    expect(JSON.parse(clear.text).task).toMatchObject({ fixedSlot: null, hasFixedSlot: false });
+    expect((await executeTool("update_task", api, { id: task.id, fixedSlot: null })).isError).toBeUndefined();
+  });
+
+  it("supports atomic recurrence transitions, rollback, current-card invalidation and omission", async () => {
+    const recurring = await create("MCP transition from recurrence", { recurEveryDays: 3 });
+    const set = await executeTool("update_task", api, {
+      id: recurring.id,
+      recurEveryDays: null,
+      fixedSlot: utcSlot,
+    });
+    expect(set.isError).toBeUndefined();
+    expect(JSON.parse(set.text).task).toMatchObject({ recurEveryDays: null, fixedSlot: utcSlot });
+
+    const reverse = await executeTool("update_task", api, {
+      id: recurring.id,
+      fixedSlot: null,
+      recurEveryDays: 5,
+    });
+    expect(reverse.isError).toBeUndefined();
+    expect(JSON.parse(reverse.text).task).toMatchObject({ fixedSlot: null, recurEveryDays: 5 });
+
+    const before = (await testDb()).prepare("SELECT COUNT(*) AS n FROM tasks").get() as { n: number };
+    const conflict = await executeTool("create_task", api, {
+      title: "MCP conflict must roll back",
+      categoryId: 1,
+      recurEveryDays: 2,
+      fixedSlot: utcSlot,
     });
     expect(conflict.isError).toBe(true);
     expect(conflict.text).toContain("cannot have both");
+    expect((await testDb()).prepare("SELECT COUNT(*) AS n FROM tasks").get()).toEqual(before);
+    expect((await executeTool("update_task", api, { id: 999999, fixedSlot: utcSlot })).text).toContain("404");
 
-    const listed = (await request(app).get("/api/tasks").expect(200)).body.find(
-      (candidate: { id: number }) => candidate.id === task.id,
-    );
-    expect(listed).toMatchObject({
-      title: "MCP ordinary edit",
-      hasFixedSlot: true,
-      recurEveryDays: null,
-    });
+    const database = await testDb();
+    database.prepare("UPDATE tasks SET status='archived' WHERE status='open'").run();
+    database.prepare("DELETE FROM settings WHERE key IN ('current_draw_task_id','warmup_current_draw')").run();
+    const current = await create("MCP current-card invalidation");
+    expect((await request(app).post("/api/draw").send({}).expect(200)).body.task.id).toBe(current.id);
+    expect((await executeTool("update_task", api, { id: current.id, fixedSlot: utcSlot })).isError).toBeUndefined();
+    expect((await request(app).get("/api/draw/current").expect(200)).body).toBeNull();
+
+    const ordinary = await executeTool("update_task", api, { id: current.id, title: "MCP omitted slot" });
+    expect(ordinary.isError).toBeUndefined();
+    expect(JSON.parse(ordinary.text).task).toMatchObject({ title: "MCP omitted slot", fixedSlot: utcSlot });
   });
 
-  it("rejects every reviewed-assistant slot/resolved field at stage and apply boundaries", async () => {
-    const forbiddenEntries: Array<[string, unknown]> = [
-      ...Object.entries(forbiddenFixedSlotInput),
-      ["fixedSlot", null],
-    ];
-    for (const [index, [key, value]] of forbiddenEntries.entries()) {
-      const task = {
-        title: `Assistant forged ${key} ${index}`,
-        categoryId: 1,
-        [key]: value,
-      };
-      const staged = stagedTaskInputSchema.safeParse(task);
-      expect(staged.success, `stage accepted ${key}`).toBe(false);
-
-      const response = await request(app)
-        .post("/api/ai/agent/apply")
-        .send({
-          operations: [{ kind: "create_task", draftId: `draft-${index + 1}`, task }],
-        })
-        .expect(400);
-      expect(response.body.error).toMatch(new RegExp(`${key}|Unrecognized key`));
+  it("keeps both automation schemas closed around the approved intersection", () => {
+    expect(stagedTaskInputSchema.safeParse({ title: "slot", categoryId: 1, fixedSlot: utcSlot }).success).toBe(true);
+    expect(stagedTaskInputSchema.safeParse({ title: "clear", categoryId: 1, fixedSlot: null }).success).toBe(false);
+    for (const [key, value] of Object.entries(forbiddenFixedSlotInput).filter(([key]) => key !== "fixedSlot")) {
+      expect(stagedTaskInputSchema.safeParse({ title: key, categoryId: 1, [key]: value }).success).toBe(false);
     }
-    const database = await testDb();
-    expect(
-      database.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title LIKE 'Assistant forged %'").get(),
-    ).toEqual({ n: 0 });
   });
 });
 

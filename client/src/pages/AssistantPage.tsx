@@ -319,14 +319,29 @@ export function AssistantPage() {
               op.kind === "create_task" ? (
                 reviewRow(op.draftId, {
                   impact: op.task.impact,
-                  suffix:
-                    typeof op.task.parentId === "string" ? (
-                      <span className="chip" style={{ fontSize: 11 }}>
-                        under {draftTitles.get(op.task.parentId) ?? op.task.parentId}
-                      </span>
-                    ) : op.task.parentId != null ? (
-                      <span className="chip" style={{ fontSize: 11 }}>subtask of #{op.task.parentId}</span>
-                    ) : undefined,
+                  suffix: (
+                    <>
+                      {typeof op.task.parentId === "string" ? (
+                        <span className="chip" style={{ fontSize: 11 }}>
+                          under {draftTitles.get(op.task.parentId) ?? op.task.parentId}
+                        </span>
+                      ) : op.task.parentId != null ? (
+                        <span className="chip" style={{ fontSize: 11 }}>
+                          subtask of #{op.task.parentId}
+                        </span>
+                      ) : null}
+                      {op.task.fixedSlot && (
+                        <span
+                          className="chip"
+                          style={{ fontSize: 11 }}
+                          title="Fixed appointment staged for creation"
+                        >
+                          fixed {op.task.fixedSlot.startLocal}–{op.task.fixedSlot.endLocal}{" "}
+                          {op.task.fixedSlot.entryTimezone}
+                        </span>
+                      )}
+                    </>
+                  ),
                 })
               ) : (
                 <div key={op.draftId} style={{ display: "grid", gap: 4 }}>

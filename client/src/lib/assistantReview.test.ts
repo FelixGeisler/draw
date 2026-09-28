@@ -110,6 +110,24 @@ describe("buildOperations", () => {
     ]);
   });
 
+  it("preserves a staged fixed slot unchanged through review edits", () => {
+    const fixedSlot = {
+      startLocal: "2026-10-25T02:30",
+      endLocal: "2026-10-25T03:30",
+      entryTimezone: "Europe/Berlin",
+    };
+    const ops: StagedOp[] = [
+      { kind: "create_task", draftId: "draft-1", task: { title: "Appointment", categoryId: 1, fixedSlot } },
+    ];
+    const edits = seedEdits(ops, {});
+    edits["draft-1"] = { ...edits["draft-1"], title: "Reviewed appointment" };
+    expect(buildOperations(ops, edits)).toEqual([
+      expect.objectContaining({
+        task: expect.objectContaining({ title: "Reviewed appointment", fixedSlot }),
+      }),
+    ]);
+  });
+
   it("applies title edits trimmed and omits cleared minutes instead of sending 0 (#84)", () => {
     const edits = freshEdits();
     edits["draft-1"] = { ...edits["draft-1"], title: "  Renamed umbrella  " };
