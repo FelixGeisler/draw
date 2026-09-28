@@ -8,6 +8,12 @@ import {
   stageCreateTask,
   type StagingContext,
 } from "../../src/services/agentStaging.js";
+import {
+  namedZoneBoundaryFailures,
+  rejectedScheduleZones,
+  supportedAutomationSlotVectors,
+  validUtcBoundarySlots,
+} from "../fixedSlotVectors.js";
 
 // Pure staging-engine tests (#31, ADR-37): no DB, no SDK, no Express — the
 // lookup context is injected. This is the acceptance criterion "tool
@@ -74,6 +80,68 @@ describe("stageCreateTask", () => {
     expect(outcome.text).toMatch(/ADR-4/);
     // The neutral 3 passes, like the route.
     expect(stageCreateTask(cs, { title: "t", categoryId: 1, impact: 3 }, ctx()).isError).toBeUndefined();
+  });
+
+  it("resolves fixed slots at stage time, including folds and UTC boundaries", () => {
+    for (const vector of [...supportedAutomationSlotVectors, ...validUtcBoundarySlots]) {
+      const cs = createChangeset();
+      const outcome = stageCreateTask(
+        cs,
+        { title: vector.name, categoryId: 1, fixedSlot: vector.slot },
+        ctx(),
+      );
+      expect(outcome.isError, vector.name).toBeUndefined();
+      expect(cs.ops[0]).toMatchObject({ task: { fixedSlot: vector.slot } });
+    }
+  });
+
+  it("returns resolver and fixed-plus-recurrence errors without staging", () => {
+    for (const [index, zone] of rejectedScheduleZones.entries()) {
+      const cs = createChangeset();
+      const outcome = stageCreateTask(
+        cs,
+        {
+          title: `rejected zone ${index}`,
+          categoryId: 1,
+          fixedSlot: {
+            startLocal: "2026-06-01T10:00",
+            endLocal: "2026-06-01T11:00",
+            entryTimezone: zone,
+          },
+        },
+        ctx(),
+      );
+      expect(outcome.isError).toBe(true);
+      expect(outcome.text).toMatch(/supported canonical schedule timezone/);
+      expect(cs.ops).toHaveLength(0);
+    }
+
+    for (const vector of namedZoneBoundaryFailures) {
+      const cs = createChangeset();
+      const outcome = stageCreateTask(
+        cs,
+        { title: vector.name, categoryId: 1, fixedSlot: vector.slot },
+        ctx(),
+      );
+      expect(outcome.isError).toBe(true);
+      expect(outcome.text).toMatch(/outside supported UTC years/);
+      expect(cs.ops).toHaveLength(0);
+    }
+
+    const cs = createChangeset();
+    const conflict = stageCreateTask(
+      cs,
+      {
+        title: "conflict",
+        categoryId: 1,
+        fixedSlot: supportedAutomationSlotVectors[0].slot,
+        recurEveryDays: 2,
+      },
+      ctx(),
+    );
+    expect(conflict.isError).toBe(true);
+    expect(conflict.text).toMatch(/cannot have both/);
+    expect(cs.ops).toHaveLength(0);
   });
 
   it("accepts a draft parent that is a staged root, rejects a staged subtask parent (ADR-16)", () => {
@@ -158,6 +226,20 @@ describe("stageCreateTask", () => {
     }
     // The parts reference an earlier create_task op — apply's plan check passes.
     expect(applyPlanError(cs.ops)).toBeNull();
+  });
+
+  it("never copies a fixed slot when a parented appointment exceeds max draw effort", () => {
+    const cs = createChangeset();
+    const fixedSlot = supportedAutomationSlotVectors[0].slot;
+    const outcome = stageCreateTask(
+      cs,
+      { title: "Long appointment", categoryId: 1, parentId: 10, effortMinutes: 75, fixedSlot },
+      ctx(),
+    );
+    expect(outcome.isError).toBeUndefined();
+    expect(JSON.parse(outcome.text).parts).toBeUndefined();
+    expect(cs.ops).toHaveLength(1);
+    expect(cs.ops[0]).toMatchObject({ task: { effortMinutes: 75, fixedSlot } });
   });
 
   it("stages a parented create within the limit as one verbatim draft — no split", () => {

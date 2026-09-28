@@ -552,7 +552,14 @@ intelligence is the MCP client's. The `update_task` pause/wake binding follows
 this same boundary: MCP passes `deferredUntil` and `blocked` through one HTTP
 PATCH without its own clock, normalization, or pause state; ADR-17 remains the
 authoritative source for timed/indefinite pause, automatic expiry, retained wake
-timestamps, `blocked` precedence, and the manual-resume pair.
+timestamps, `blocked` precedence, and the manual-resume pair. Issue #357 Phase
+1B follows the same boundary: existing `create_task` accepts an optional
+non-null nested `fixedSlot`, and existing `update_task` accepts omission,
+non-null set/replace, or `null` clear. The adapter forwards the exact wall-time
+object once and returns the API's resolved instants/offsets and errors; it never
+opens or writes `task_fixed_slots`, resolves time, or submits derived values.
+ADR-74's service owns recurrence conflicts, current-card invalidation and
+atomic preservation of independent task facts.
 *Rationale:* Trade-off accepted: the dev server must be running —
 `ECONNREFUSED` maps to an actionable tool error naming `npm run dev`. In
 exchange, no invariant is duplicated, no second migration runner exists, and
@@ -1646,7 +1653,13 @@ construction (the ADR-19 argument) — with or without a public listener
 are absent from this surface: the draw is a commitment device (ADR-13/ADR-30,
 +#88+ removed re-rolls) and a chat assistant that draws on request would be a
 re-roll machine; update/complete staging (before→after diffs) is the issue's
-declared out-of-scope.
+declared out-of-scope. Issue #357 Phase 1B adds only an optional non-null
+`fixedSlot` to this existing staged `create_task`. Stage time calls ADR-74's
+wall-time resolver for immediate feedback; the reviewed operation retains the
+exact wall object, and apply calls the same creation core for authoritative
+revalidation and transaction-wide rollback. No generic or slot-only
+existing-task update is added to the assistant; UI/REST and MCP retain that
+authority.
 (b) `POST /api/ai/agent/apply` carries the REVIEWED operations in the body —
 included rows plus the user's title/effort edits, exactly what the review
 card shows (ADR-14: the review is authoritative, so its state must travel;
@@ -4408,7 +4421,7 @@ validation.
 
 == ADR-74: Fixed task slots are immutable instants entered as strict canonical-zone wall minutes
 
-*Status:* Accepted (2026-09-22) — issue #357 Phase 1A.
+*Status:* Implemented by issue #357 Phases 1A–1B (2026-09-22/2026-09-28).
 
 *Context:* Draw needs one real appointment interval on a task before Week or
 calendar surfaces can be built. A due date is a priority signal, an availability
@@ -4450,17 +4463,18 @@ wall values in the retained entry zone.
 
 The final prospective state is the invariant: recurrence and a fixed slot cannot
 coexist. Create/update evaluates simultaneous clear/set combinations and writes
-ordinary fields plus slot set/replace/clear in one SQLite transaction. Existing
-MCP and reviewed-assistant schemas stay strict in Phase 1A and reject slot or
-resolved-value keys rather than stripping them. Their ordinary writes still use
-the shared task-write/route invariant, preserve a slot on omission and cannot
-enable recurrence beside it. Phase 1B alone may add one approved optional nested
-`fixedSlot: {startLocal,endLocal,entryTimezone}` object to existing MCP
-`create_task`/`update_task` (omission preserves, update `null` clears) and to the
+ordinary fields plus slot set/replace/clear in one SQLite transaction. Phase 1B
+implements the one approved optional nested
+`fixedSlot: {startLocal,endLocal,entryTimezone}` object on existing MCP
+`create_task`/`update_task` (omission preserves, update `null` clears) and on the
 reviewed assistant's existing staged `create_task` (omitted or non-null only).
-It does not pre-authorize flat slot fields, resolved instant/offset input,
-assistant existing-task updates, broader automation, or recurring-slot
-combinations.
+MCP remains a thin HTTP adapter under ADR-19. Assistant stage time resolves for
+feedback, while apply revalidates through the same creation core inside the
+existing whole-changeset transaction/version/consumption/idempotency contract.
+All schemas remain strict: flat slot fields, resolved instant/offset input,
+assistant existing-task updates, broader automation and recurring-slot
+combinations reject rather than being stripped. Ordinary automation writes
+preserve a slot on omission and cannot enable recurrence beside it.
 
 A slotted task is never drawable for the entire row lifetime, even before or
 after the interval. Server candidate SQL, current-card restoration and client
@@ -4479,9 +4493,10 @@ new canonical zones or tzdb policy changes require an explicit migration and
 compatibility map together with the code/docs update; a host-runtime list change
 alone never changes accepted persisted identifiers. Historical rule changes that
 break the stored earlier-fold round trip fail closed at validation rather than
-silently moving appointments. Phase 1A excludes
-the Phase 1B automation inputs and every later Week, Push, calendar and digest
-behavior.
+silently moving appointments. Phase 1B completes the bounded MCP and
+reviewed-assistant creation inputs; Week, `/today`, daily/weekly Push, external
+calendar and digest projection behavior remain planned and out of this ADR's
+implemented write surface.
 
 *Cross-links:* ADR-2 keeps task source facts normalized; ADR-6 owns recurrence
 and is constrained by this final-state invariant; ADR-12 keeps actual-work/timer
@@ -4494,4 +4509,4 @@ the reviewed assistant's existing-task exclusion; ADR-39 keeps Draw single-card;
 ADR-40 owns the task form/list language; ADR-50 remains the complete API access
 gate; ADR-54 requires shared write invariants; ADR-57 keeps deck scope
 orthogonal; ADR-67 Push is not engaged; ADR-72/ADR-73 own Push timezone and
-delivery policies and do not consume fixed slots in Phase 1A.
+delivery policies and still do not consume fixed slots after Phase 1B.

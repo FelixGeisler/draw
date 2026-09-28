@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../api/client";
+import type { FixedSlotInput } from "../api/types";
 
 // The conversational assistant (#31, ADR-37). Server-state via mutations only
 // — a conversation is scratch state and deliberately not persisted anywhere
@@ -15,6 +16,8 @@ export interface StagedTaskInput {
   effortMinutes?: number;
   dueDate?: string;
   recurEveryDays?: number;
+  /** Optional on staged creation only; existing-task assistant updates remain absent (ADR-37). */
+  fixedSlot?: FixedSlotInput;
   windowDays?: number[];
   windowStart?: string;
   windowEnd?: string;

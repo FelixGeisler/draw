@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { fixedSlotInputSchema } from "../services/fixedSlots.js";
 
 /**
  * The domain-tool catalog: one vocabulary for every AI surface (issue #36,
@@ -216,7 +217,10 @@ const createTask = defineTool({
     "task open and sets dueDate = today + recurEveryDays, sleeping it until then. A dueDate on " +
     "a NON-recurring task never excludes it: doing something before it is due is the point. " +
     "windowDays + windowStart + windowEnd (all three together) give the task an availability " +
-    "window: outside it the card is excluded from the draw and shows as scheduled.",
+    "window: outside it the card is excluded from the draw and shows as scheduled. " +
+    "fixedSlot optionally anchors one non-recurring appointment using exact local wall minutes " +
+    "and a canonical schedule timezone; it is independent from dueDate and actual timer work, " +
+    "and the task stays out of Draw until the slot is cleared.",
   inputSchema: {
     title: z.string().min(1),
     categoryId: idSchema.describe("Required — list_categories shows the options"),
@@ -231,9 +235,15 @@ const createTask = defineTool({
       .positive()
       .optional()
       .describe(
-        "Repeat every N days. Not accepted together with a parentId whose breakdown is " +
-          "'do in order' — a recurring step never closes and would gate the steps behind it " +
-          "forever (the API rejects the combination, ADR-23)",
+        "Repeat every N days. Not accepted together with fixedSlot, or with a parentId whose " +
+          "breakdown is 'do in order' — a recurring step never closes and would gate the steps " +
+          "behind it forever (the API rejects the combinations, ADR-23/ADR-74)",
+      ),
+    fixedSlot: fixedSlotInputSchema
+      .optional()
+      .describe(
+        "Optional fixed appointment. Omit for no slot; create does not accept null. The API " +
+          "resolves it and returns canonical UTC instants plus signed offsets",
       ),
     windowDays: windowDaysSchema.optional(),
     windowStart: windowStartSchema.optional(),
@@ -287,7 +297,10 @@ const updateTask = defineTool({
     "{ id, deferredUntil: <future ISO datetime>, blocked: false }; indefinite pause = " +
     "{ id, blocked: true }; manual resume from either mode = " +
     "{ id, deferredUntil: <current ISO datetime>, blocked: false }. Timed pauses wake " +
-    "automatically after the instant passes; blocked: true wins over a timed pause.",
+    "automatically after the instant passes; blocked: true wins over a timed pause. " +
+    "fixedSlot sets or replaces one non-recurring appointment, null clears it, and omission " +
+    "preserves it; slot writes are atomic with the other supplied fields and clear the task " +
+    "from the current Draw without changing dueDate, availability, or timer facts.",
   inputSchema: {
     id: idSchema,
     title: z.string().min(1).optional(),
@@ -324,9 +337,16 @@ const updateTask = defineTool({
       .nullable()
       .optional()
       .describe(
-        "Repeat every N days; null clears. Rejected on a subtask of a 'do in order' " +
-          "breakdown — a recurring step never closes and would gate its siblings forever " +
-          "(ADR-23)",
+        "Repeat every N days; null clears. Rejected together with an effective fixed slot, or " +
+          "on a subtask of a 'do in order' breakdown — a recurring step never closes and would " +
+          "gate its siblings forever (ADR-23/ADR-74)",
+      ),
+    fixedSlot: fixedSlotInputSchema
+      .nullable()
+      .optional()
+      .describe(
+        "Set/replace one fixed appointment; null clears; omission preserves. The API resolves " +
+          "wall minutes and returns canonical UTC instants plus signed offsets",
       ),
     windowDays: windowDaysSchema
       .nullable()
@@ -693,9 +713,9 @@ export async function executeTool(
 ): Promise<ToolOutcome> {
   const def = TOOL_MAP.get(name);
   if (!def) return { isError: true, text: `unknown tool: ${name}` };
-  // Phase 1A deliberately keeps automation slot input closed. Strict parsing
-  // rejects fixedSlot and caller-supplied resolved values instead of Zod's
-  // default unknown-key stripping; Phase 1B will add only the approved fields.
+  // Strict parsing keeps the Phase 1B automation contract closed: only the
+  // approved nested fixedSlot reaches MCP create/update; flat or resolved
+  // values and unknown child keys reject instead of Zod's default stripping.
   const parsed = z.object(def.inputSchema).strict().safeParse(args ?? {});
   if (!parsed.success) {
     return { isError: true, text: `invalid arguments for ${name}: ${z.prettifyError(parsed.error)}` };
