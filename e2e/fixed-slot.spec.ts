@@ -1,5 +1,9 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 import { captureForm, drawFromGoal, taskTree } from "./helpers.js";
+import {
+  namedZoneBoundaryFailures,
+  validUtcBoundarySlots,
+} from "../server/test/fixedSlotVectors.js";
 
 test.describe.configure({ mode: "serial" });
 test.use({ timezoneId: "Europe/Berlin" });
@@ -9,6 +13,8 @@ const DRAW_TITLE = "E2E reveal then schedule fixed";
 const GOAL_TITLE = "E2E fixed-slot draw scope";
 let taskId: number;
 let drawTaskId: number;
+let viewerZoneTaskId: number;
+let boundaryTaskId: number;
 let goalId: number;
 
 function row(page: Page, title: string): Locator {
@@ -57,6 +63,111 @@ test("desktop form creates a strict fixed slot, preserves deadline, and renders 
   });
 });
 
+test("UI carries UTC year controls and rejects named-zone underflow/overflow without a partial save", async ({ page }) => {
+  await installClock(page);
+  await page.goto("/tasks");
+  const form = captureForm(page);
+  await form.getByPlaceholder("What needs doing?").fill("E2E UTC boundary control");
+  await form.getByTitle("Effort estimate in minutes").fill("10");
+  await form.getByRole("button", { name: "Add fixed time" }).click();
+  await form.getByLabel("Fixed start").fill(validUtcBoundarySlots[0].slot.startLocal);
+  await form.getByLabel("Fixed end").fill(validUtcBoundarySlots[0].slot.endLocal);
+  await form.getByLabel("Entry timezone").selectOption("UTC");
+  await form.getByRole("button", { name: "Add", exact: true }).click();
+
+  let stored = (await (await page.request.get("/api/tasks")).json()).find(
+    (candidate: { title: string }) => candidate.title === "E2E UTC boundary control",
+  );
+  boundaryTaskId = stored.id;
+  expect(stored.fixedSlot).toMatchObject({
+    startsAt: validUtcBoundarySlots[0].startsAt,
+    endsAt: validUtcBoundarySlots[0].endsAt,
+  });
+
+  await row(page, "E2E UTC boundary control").getByTitle("Edit", { exact: true }).click();
+  let editor = taskTree(page);
+  await editor.getByLabel("Fixed start").fill(validUtcBoundarySlots[1].slot.startLocal);
+  await editor.getByLabel("Fixed end").fill(validUtcBoundarySlots[1].slot.endLocal);
+  await editor.getByRole("button", { name: "Save", exact: true }).click();
+  stored = (await (await page.request.get("/api/tasks")).json()).find(
+    (candidate: { id: number }) => candidate.id === boundaryTaskId,
+  );
+  expect(stored.fixedSlot).toMatchObject({
+    startsAt: validUtcBoundarySlots[1].startsAt,
+    endsAt: validUtcBoundarySlots[1].endsAt,
+  });
+
+  for (const vector of namedZoneBoundaryFailures) {
+    await row(page, "E2E UTC boundary control").getByTitle("Edit", { exact: true }).click();
+    editor = taskTree(page);
+    await editor.getByLabel("Fixed start").fill(vector.slot.startLocal);
+    await editor.getByLabel("Fixed end").fill(vector.slot.endLocal);
+    await editor.getByLabel("Entry timezone").selectOption(vector.slot.entryTimezone);
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(editor.getByRole("alert")).toContainText("outside supported UTC years");
+    await editor.getByRole("button", { name: "Cancel" }).click();
+  }
+  stored = (await (await page.request.get("/api/tasks")).json()).find(
+    (candidate: { id: number }) => candidate.id === boundaryTaskId,
+  );
+  expect(stored.fixedSlot).toMatchObject({ startsAt: validUtcBoundarySlots[1].startsAt });
+});
+
+test("a changed viewer zone cannot float stored instants; only an explicit slot edit can", async ({ browser, page }) => {
+  await installClock(page);
+  const category = (await (await page.request.get("/api/categories")).json())[0];
+  const created = await (
+    await page.request.post("/api/tasks", {
+      data: {
+        title: "E2E viewer-zone stable slot",
+        categoryId: category.id,
+        effortMinutes: 10,
+        fixedSlot: {
+          startLocal: "2026-10-25T02:30",
+          endLocal: "2026-10-25T03:30",
+          entryTimezone: "Europe/Berlin",
+        },
+      },
+    })
+  ).json();
+  viewerZoneTaskId = created.id;
+  const original = {
+    startsAt: created.fixedSlot.startsAt,
+    endsAt: created.fixedSlot.endsAt,
+  };
+
+  const context = await browser.newContext({
+    baseURL: test.info().project.use.baseURL as string,
+    timezoneId: "America/New_York",
+  });
+  try {
+    const changedViewer = await context.newPage();
+    await installClock(changedViewer);
+    await changedViewer.goto("/tasks");
+    await row(changedViewer, "E2E viewer-zone stable slot").getByTitle("Edit", { exact: true }).click();
+    const editor = taskTree(changedViewer);
+    await expect(editor.getByLabel("Entry timezone")).toHaveValue("Europe/Berlin");
+    await expect(editor.getByLabel("Fixed start")).toHaveValue("2026-10-25T02:30");
+    await expect(editor.getByLabel("Fixed end")).toHaveValue("2026-10-25T03:30");
+
+    let stored = (await (await changedViewer.request.get("/api/tasks")).json()).find(
+      (candidate: { id: number }) => candidate.id === viewerZoneTaskId,
+    );
+    expect(stored.fixedSlot).toMatchObject(original);
+
+    await editor.getByLabel("Fixed start").fill("2026-10-25T03:30");
+    await editor.getByLabel("Fixed end").fill("2026-10-25T04:30");
+    await editor.getByRole("button", { name: "Save", exact: true }).click();
+    stored = (await (await changedViewer.request.get("/api/tasks")).json()).find(
+      (candidate: { id: number }) => candidate.id === viewerZoneTaskId,
+    );
+    expect(stored.fixedSlot.startsAt).not.toBe(original.startsAt);
+    expect(stored.fixedSlot.entryTimezone).toBe("Europe/Berlin");
+  } finally {
+    await context.close();
+  }
+});
+
 test("form keeps gap errors inline and edits in the stored entry zone", async ({ page }) => {
   await installClock(page);
   await page.goto("/tasks");
@@ -93,7 +204,33 @@ test("narrow keyboard path removes the slot without overflow", async ({ page }) 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/tasks");
   await row(page, TITLE).getByTitle("Edit", { exact: true }).click();
-  const remove = taskTree(page).getByRole("button", { name: "Remove fixed time" });
+  const editor = taskTree(page);
+  const fixedEditor = editor.getByRole("group", { name: "Fixed time" });
+  await expect(fixedEditor).toBeVisible();
+  await expect(editor.getByLabel("Fixed start")).toBeVisible();
+  await expect(editor.getByLabel("Fixed end")).toBeVisible();
+  await expect(editor.getByLabel("Entry timezone")).toBeVisible();
+  expect(
+    await fixedEditor.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.left >= 0 && rect.right <= window.innerWidth && el.scrollWidth <= el.clientWidth;
+    }),
+  ).toBe(true);
+  const tabTo = async (label: string) => {
+    for (let step = 0; step < 12; step++) {
+      await page.keyboard.press("Tab");
+      if (await page.evaluate((expected) => document.activeElement?.getAttribute("aria-label") === expected, label)) return;
+    }
+    throw new Error(`keyboard focus did not reach ${label}`);
+  };
+  await editor.getByLabel("Fixed start").focus();
+  await expect(editor.getByLabel("Fixed start")).toBeFocused();
+  await tabTo("Fixed end");
+  await expect(editor.getByLabel("Fixed end")).toBeFocused();
+  await tabTo("Entry timezone");
+  await expect(editor.getByLabel("Entry timezone")).toBeFocused();
+
+  const remove = editor.getByRole("button", { name: "Remove fixed time" });
   await remove.focus();
   await page.keyboard.press("Enter");
   await expect(taskTree(page).getByLabel("Fixed start")).not.toBeVisible();
@@ -154,7 +291,7 @@ test("UI scheduling a revealed card clears it; reveal itself creates no slot or 
 });
 
 test.afterAll(async ({ request }) => {
-  for (const id of [taskId, drawTaskId]) {
+  for (const id of [taskId, drawTaskId, viewerZoneTaskId, boundaryTaskId]) {
     if (id) await request.delete(`/api/tasks/${id}`);
   }
   if (goalId) await request.delete(`/api/goals/${goalId}`);

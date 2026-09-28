@@ -5,10 +5,20 @@ import AdmZip from "adm-zip";
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { Worker } from "node:worker_threads";
+import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 import { freshApp, testDb } from "../helpers.js";
 import { executeTool, type ApiClient } from "../../src/tools/catalog.js";
 import { createBackupArchive, runScheduledBackup } from "../../src/services/backupService.js";
 import { validateV22Contract } from "../../src/schemaV22.js";
+import { stagedTaskInputSchema } from "../../src/services/agentStaging.js";
+import {
+  forbiddenFixedSlotInput,
+  namedZoneBoundaryFailures,
+  rejectedScheduleZones,
+  validUtcBoundarySlots,
+} from "../fixedSlotVectors.js";
 
 let app: express.Express;
 beforeAll(async () => {
@@ -30,19 +40,122 @@ async function create(title: string, extra: Record<string, unknown> = {}) {
   ).body;
 }
 
+type CoordinatedRequest = {
+  method: "get" | "post" | "patch";
+  url: string;
+  body?: unknown;
+};
+type WorkerMessage = {
+  type: "ready" | "attempting" | "result" | "failure";
+  status?: number;
+  body?: unknown;
+  error?: string;
+};
+
+function waitForMessage(worker: Worker, type: WorkerMessage["type"]): Promise<WorkerMessage> {
+  return new Promise((resolve, reject) => {
+    const onExit = (code: number) => reject(new Error(`coordinated request worker exited ${code}`));
+    const onMessage = (message: WorkerMessage) => {
+      if (message.type === "failure") {
+        cleanup();
+        reject(new Error(message.error));
+      } else if (message.type === type) {
+        cleanup();
+        resolve(message);
+      }
+    };
+    const cleanup = () => {
+      worker.off("exit", onExit);
+      worker.off("message", onMessage);
+    };
+    worker.on("exit", onExit);
+    worker.on("message", onMessage);
+  });
+}
+
+/**
+ * Start independent real Express/SQLite worker connections, hold them behind
+ * one external IMMEDIATE lock, then release only after every request has crossed
+ * the explicit start barrier. This forces genuine connection contention and
+ * cannot collapse into Promise.all over synchronous in-process handlers.
+ */
+async function coordinatedRequests(commands: CoordinatedRequest[]) {
+  const worker = fileURLToPath(new URL("../helpers/concurrentRequestWorker.ts", import.meta.url));
+  const children = commands.map(() =>
+    new Worker(worker, {
+      env: { ...process.env },
+      execArgv: ["--import", "tsx"],
+      stdout: true,
+      stderr: true,
+    }),
+  );
+  const diagnostics = new Map<Worker, string>();
+  for (const child of children) {
+    diagnostics.set(child, "");
+    child.stderr.on("data", (chunk) => diagnostics.set(child, diagnostics.get(child)! + chunk));
+  }
+  let blocker: Database.Database | undefined;
+  try {
+    await Promise.all(children.map((child) => waitForMessage(child, "ready")));
+    blocker = new Database(path.join(process.env.DATA_DIR!, "app.db"));
+    blocker.pragma("busy_timeout=5000");
+    blocker.exec("BEGIN IMMEDIATE");
+
+    const attempts = children.map((child) => waitForMessage(child, "attempting"));
+    const results = children.map((child) => waitForMessage(child, "result"));
+    children.forEach((child, index) => child.postMessage({ type: "request", ...commands[index] }));
+    await Promise.all(attempts);
+    // Both independent handlers have left the barrier and are now queued at
+    // their real SQLite transaction boundaries behind this lock.
+    await delay(75);
+    blocker.exec("COMMIT");
+    blocker.close();
+    blocker = undefined;
+    return await Promise.all(results);
+  } catch (error) {
+    const stderr = children.map((child) => diagnostics.get(child)).filter(Boolean).join("\n");
+    throw new Error(`${error instanceof Error ? error.message : String(error)}${stderr ? `\n${stderr}` : ""}`);
+  } finally {
+    if (blocker) {
+      if (blocker.inTransaction) blocker.exec("ROLLBACK");
+      blocker.close();
+    }
+    await Promise.all(children.map((child) => child.terminate()));
+  }
+}
+
 describe("fixed-slot REST contract", () => {
-  it("creates, replaces and clears one slot without changing deadline, availability or work", async () => {
+  it("sets, moves, changes zone, replaces and clears without changing deadline, availability or work bytes", async () => {
     const task = await create("Anchored appointment", {
       dueDate: "2026-11-30",
       windowDays: [1, 2, 3, 4, 5],
       windowStart: "09:00",
       windowEnd: "17:00",
-      fixedSlot: utcSlot,
     });
-    expect(task).toMatchObject({
+    const database = await testDb();
+    database.prepare(
+      "INSERT INTO time_entries(task_id,started_at,ended_at) VALUES (?,?,?)",
+    ).run(task.id, "2026-10-19T08:00:00.123Z", "2026-10-19T08:45:59.987Z");
+    database.prepare(
+      "INSERT INTO time_entries(task_id,started_at,ended_at) VALUES (?,?,NULL)",
+    ).run(task.id, "2026-10-20T09:01:02.003Z");
+    const workBytes = () => database
+      .prepare("SELECT id,task_id,started_at,ended_at FROM time_entries WHERE task_id=? ORDER BY id")
+      .all(task.id);
+    const before = workBytes();
+
+    const assertIndependentFacts = (body: { task: Record<string, unknown> }) => {
+      expect(body.task).toMatchObject({
+        dueDate: "2026-11-30",
+        windowDays: [1, 2, 3, 4, 5],
+      });
+      expect(workBytes()).toEqual(before);
+    };
+
+    const set = await request(app).patch(`/api/tasks/${task.id}`).send({ fixedSlot: utcSlot }).expect(200);
+    assertIndependentFacts(set.body);
+    expect(set.body.task).toMatchObject({
       hasFixedSlot: true,
-      dueDate: "2026-11-30",
-      windowDays: [1, 2, 3, 4, 5],
       fixedSlot: {
         ...utcSlot,
         startsAt: "2026-10-20T10:00:00.000Z",
@@ -51,6 +164,24 @@ describe("fixed-slot REST contract", () => {
         endOffsetSeconds: 0,
       },
     });
+
+    const moved = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({ fixedSlot: { ...utcSlot, startLocal: "2026-10-21T10:00", endLocal: "2026-10-21T11:00" } })
+      .expect(200);
+    assertIndependentFacts(moved.body);
+
+    const zoneChanged = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({
+        fixedSlot: {
+          startLocal: "2026-10-21T10:00",
+          endLocal: "2026-10-21T11:00",
+          entryTimezone: "America/New_York",
+        },
+      })
+      .expect(200);
+    assertIndependentFacts(zoneChanged.body);
 
     const replaced = await request(app)
       .patch(`/api/tasks/${task.id}`)
@@ -63,10 +194,9 @@ describe("fixed-slot REST contract", () => {
         },
       })
       .expect(200);
+    assertIndependentFacts(replaced.body);
     expect(replaced.body.task).toMatchObject({
       title: "Anchored appointment moved",
-      dueDate: "2026-11-30",
-      windowDays: [1, 2, 3, 4, 5],
       fixedSlot: {
         startLocal: "2026-10-25T02:30",
         endLocal: "2026-10-25T03:30",
@@ -78,20 +208,11 @@ describe("fixed-slot REST contract", () => {
       },
     });
 
-    const database = await testDb();
-    expect(database.prepare("SELECT COUNT(*) AS n FROM time_entries WHERE task_id=?").get(task.id)).toEqual({ n: 0 });
-    const cleared = await request(app)
-      .patch(`/api/tasks/${task.id}`)
-      .send({ fixedSlot: null })
-      .expect(200);
-    expect(cleared.body.task).toMatchObject({
-      hasFixedSlot: false,
-      fixedSlot: null,
-      dueDate: "2026-11-30",
-      windowDays: [1, 2, 3, 4, 5],
-    });
-    // Clear is explicitly idempotent.
+    const cleared = await request(app).patch(`/api/tasks/${task.id}`).send({ fixedSlot: null }).expect(200);
+    assertIndependentFacts(cleared.body);
+    expect(cleared.body.task).toMatchObject({ hasFixedSlot: false, fixedSlot: null });
     await request(app).patch(`/api/tasks/${task.id}`).send({ fixedSlot: null }).expect(200);
+    expect(workBytes()).toEqual(before);
   });
 
   it("rejects malformed temporal input, output fields and missing tasks with no partial write", async () => {
@@ -103,8 +224,7 @@ describe("fixed-slot REST contract", () => {
       { ...utcSlot, extra: true },
       { ...utcSlot, startLocal: "2026-10-20T10:00:00" },
       { ...utcSlot, startLocal: "2026-10-20T10:00Z" },
-      { ...utcSlot, entryTimezone: "US/Eastern" },
-      { ...utcSlot, entryTimezone: "Etc/GMT+1" },
+      ...rejectedScheduleZones.map((entryTimezone) => ({ ...utcSlot, entryTimezone })),
       { ...utcSlot, startLocal: "2026-10-20T12:00" },
     ];
     for (const fixedSlot of badInputs) {
@@ -113,14 +233,52 @@ describe("fixed-slot REST contract", () => {
         .send({ title: "Must not exist", categoryId: 1, dueDate: "2026-12-01", fixedSlot })
         .expect(400);
     }
-    await request(app)
-      .post("/api/tasks")
-      .send({ title: "No forged instant", categoryId: 1, startsAt: "2026-01-01T00:00:00.000Z" })
-      .expect(400);
+    for (const [key, value] of Object.entries(forbiddenFixedSlotInput).filter(([key]) => key !== "fixedSlot")) {
+      await request(app)
+        .post("/api/tasks")
+        .send({ title: `No forged ${key}`, categoryId: 1, [key]: value })
+        .expect(400);
+    }
     await request(app).patch("/api/tasks/999999").send({ fixedSlot: utcSlot }).expect(404);
     const database = await testDb();
     expect(database.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title='Must not exist'").get()).toEqual({ n: 0 });
     expect(database.prepare("SELECT COUNT(*) AS n FROM task_fixed_slots").get()).toMatchObject({ n: expect.any(Number) });
+  });
+
+  it("carries shared UTC controls and named-zone underflow/overflow through REST writes", async () => {
+    const lower = await create("REST lower UTC control", { fixedSlot: validUtcBoundarySlots[0].slot });
+    expect(lower.fixedSlot).toMatchObject({
+      startsAt: validUtcBoundarySlots[0].startsAt,
+      endsAt: validUtcBoundarySlots[0].endsAt,
+    });
+    const upper = await request(app)
+      .patch(`/api/tasks/${lower.id}`)
+      .send({ fixedSlot: validUtcBoundarySlots[1].slot })
+      .expect(200);
+    expect(upper.body.task.fixedSlot).toMatchObject({
+      startsAt: validUtcBoundarySlots[1].startsAt,
+      endsAt: validUtcBoundarySlots[1].endsAt,
+    });
+
+    for (const vector of namedZoneBoundaryFailures) {
+      const title = `REST rejects ${vector.name}`;
+      const createResponse = await request(app)
+        .post("/api/tasks")
+        .send({ title, categoryId: 1, fixedSlot: vector.slot })
+        .expect(400);
+      expect(createResponse.body.error).toContain("outside supported UTC years");
+      const updateResponse = await request(app)
+        .patch(`/api/tasks/${lower.id}`)
+        .send({ title: "must roll back", fixedSlot: vector.slot })
+        .expect(400);
+      expect(updateResponse.body.error).toContain("outside supported UTC years");
+    }
+    const listed = (await request(app).get("/api/tasks?status=all").expect(200)).body;
+    expect(listed.some((task: { title: string }) => task.title.startsWith("REST rejects"))).toBe(false);
+    expect(listed.find((task: { id: number }) => task.id === lower.id)).toMatchObject({
+      title: "REST lower UTC control",
+      fixedSlot: { startsAt: validUtcBoundarySlots[1].startsAt },
+    });
   });
 
   it("enforces the final fixed-plus-recurrence state atomically", async () => {
@@ -197,15 +355,26 @@ describe("phase-1A automation boundaries", () => {
       },
     };
 
-    const unknown = await executeTool("update_task", api, { id: task.id, fixedSlot: null });
-    expect(unknown.isError).toBe(true);
-    expect(unknown.text).toContain("Unrecognized key");
-    const resolved = await executeTool("create_task", api, {
-      title: "Forged",
-      categoryId: 1,
-      startsAt: "2026-01-01T00:00:00.000Z",
-    });
-    expect(resolved.isError).toBe(true);
+    const forbiddenEntries: Array<[string, unknown]> = [
+      ...Object.entries(forbiddenFixedSlotInput),
+      ["fixedSlot", null],
+    ];
+    for (const [key, value] of forbiddenEntries) {
+      const createRejected = await executeTool("create_task", api, {
+        title: `MCP forged create ${key}`,
+        categoryId: 1,
+        [key]: value,
+      });
+      expect(createRejected.isError, `create_task accepted ${key}`).toBe(true);
+      expect(createRejected.text).toContain("Unrecognized key");
+
+      const updateRejected = await executeTool("update_task", api, {
+        id: task.id,
+        [key]: value,
+      });
+      expect(updateRejected.isError, `update_task accepted ${key}`).toBe(true);
+      expect(updateRejected.text).toContain("Unrecognized key");
+    }
 
     const ordinary = await executeTool("update_task", api, {
       id: task.id,
@@ -230,26 +399,32 @@ describe("phase-1A automation boundaries", () => {
     });
   });
 
-  it("rejects reviewed-assistant slot fields instead of stripping them", async () => {
-    const response = await request(app)
-      .post("/api/ai/agent/apply")
-      .send({
-        operations: [
-          {
-            kind: "create_task",
-            draftId: "draft-1",
-            task: {
-              title: "Assistant forged slot",
-              categoryId: 1,
-              fixedSlot: utcSlot,
-            },
-          },
-        ],
-      })
-      .expect(400);
-    expect(response.body.error).toMatch(/fixedSlot|Unrecognized key/);
+  it("rejects every reviewed-assistant slot/resolved field at stage and apply boundaries", async () => {
+    const forbiddenEntries: Array<[string, unknown]> = [
+      ...Object.entries(forbiddenFixedSlotInput),
+      ["fixedSlot", null],
+    ];
+    for (const [index, [key, value]] of forbiddenEntries.entries()) {
+      const task = {
+        title: `Assistant forged ${key} ${index}`,
+        categoryId: 1,
+        [key]: value,
+      };
+      const staged = stagedTaskInputSchema.safeParse(task);
+      expect(staged.success, `stage accepted ${key}`).toBe(false);
+
+      const response = await request(app)
+        .post("/api/ai/agent/apply")
+        .send({
+          operations: [{ kind: "create_task", draftId: `draft-${index + 1}`, task }],
+        })
+        .expect(400);
+      expect(response.body.error).toMatch(new RegExp(`${key}|Unrecognized key`));
+    }
     const database = await testDb();
-    expect(database.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title='Assistant forged slot'").get()).toEqual({ n: 0 });
+    expect(
+      database.prepare("SELECT COUNT(*) AS n FROM tasks WHERE title LIKE 'Assistant forged %'").get(),
+    ).toEqual({ n: 0 });
   });
 });
 
@@ -285,54 +460,60 @@ describe("fixed-slot Draw, timer and lifecycle behavior", () => {
     ]);
   });
 
-  it("serializes competing recurrence, slot, candidate and restore operations through the real service", async () => {
+  it("coordinates independent transaction contenders for recurrence, Draw selection, set and replace", async () => {
     const database = await testDb();
     database.prepare("UPDATE tasks SET status='archived' WHERE status='open'").run();
     database.prepare("DELETE FROM settings WHERE key IN ('current_draw_task_id','warmup_current_draw')").run();
-    const task = await create("Concurrent invariant contender");
 
-    const contenders = await Promise.all([
-      request(app).patch(`/api/tasks/${task.id}`).send({ fixedSlot: utcSlot }),
-      request(app).patch(`/api/tasks/${task.id}`).send({ recurEveryDays: 2 }),
+    const invariantTask = await create("Coordinated recurrence contender");
+    const recurrenceRace = await coordinatedRequests([
+      { method: "patch", url: `/api/tasks/${invariantTask.id}`, body: { fixedSlot: utcSlot } },
+      { method: "patch", url: `/api/tasks/${invariantTask.id}`, body: { recurEveryDays: 2 } },
     ]);
-    expect(contenders.map((response) => response.status).sort()).toEqual([200, 400]);
-    let stored = database
+    expect(recurrenceRace.map((response) => response.status).sort()).toEqual([200, 400]);
+    const invariantState = database
       .prepare(
         `SELECT t.recur_every_days AS recurrence,
                 EXISTS(SELECT 1 FROM task_fixed_slots s WHERE s.task_id=t.id) AS hasSlot
          FROM tasks t WHERE t.id=?`,
       )
-      .get(task.id) as { recurrence: number | null; hasSlot: number };
-    expect(Boolean(stored.recurrence) !== Boolean(stored.hasSlot)).toBe(true);
+      .get(invariantTask.id) as { recurrence: number | null; hasSlot: number };
+    expect(!((invariantState.recurrence != null) && Boolean(invariantState.hasSlot))).toBe(true);
+    database.prepare("UPDATE tasks SET status='archived' WHERE id=?").run(invariantTask.id);
 
-    if (!stored.hasSlot) {
-      await request(app)
-        .patch(`/api/tasks/${task.id}`)
-        .send({ recurEveryDays: null, fixedSlot: utcSlot })
-        .expect(200);
-    } else {
-      await request(app).patch(`/api/tasks/${task.id}`).send({ fixedSlot: null }).expect(200);
-    }
-    // Make the task drawable, deal it, then race restore/candidate reads with
-    // a slot set. Reads may linearize first, but the committed final state is
-    // never persisted/restored/candidate-visible.
-    await request(app).patch(`/api/tasks/${task.id}`).send({ recurEveryDays: null, fixedSlot: null }).expect(200);
-    expect((await request(app).post("/api/draw").send({}).expect(200)).body.task.id).toBe(task.id);
-    await Promise.all([
-      request(app).get("/api/draw/current").expect(200),
-      request(app).get("/api/draw/pool").expect(200),
-      request(app).patch(`/api/tasks/${task.id}`).send({ fixedSlot: utcSlot }).expect(200),
+    const drawTask = await create("Coordinated Draw contender");
+    const setRace = await coordinatedRequests([
+      { method: "post", url: "/api/draw", body: {} },
+      { method: "patch", url: `/api/tasks/${drawTask.id}`, body: { fixedSlot: utcSlot } },
     ]);
+    expect(setRace.map((response) => response.status)).toEqual([200, 200]);
+    const drawOutcome = setRace[0].body as { task: { id: number } | null };
+    expect(drawOutcome.task === null || drawOutcome.task.id === drawTask.id).toBe(true);
     expect((await request(app).get("/api/draw/current").expect(200)).body).toBeNull();
     expect((await request(app).get("/api/draw/pool").expect(200)).body.candidates).toEqual([]);
-    stored = database
-      .prepare(
-        `SELECT t.recur_every_days AS recurrence,
-                EXISTS(SELECT 1 FROM task_fixed_slots s WHERE s.task_id=t.id) AS hasSlot
-         FROM tasks t WHERE t.id=?`,
-      )
-      .get(task.id) as { recurrence: number | null; hasSlot: number };
-    expect(stored).toEqual({ recurrence: null, hasSlot: 1 });
+
+    // A deliberately stale pointer makes current-card restoration contend
+    // with a real slot replacement. Both linearizations are valid, but no
+    // committed result may restore/persist the slotted card.
+    database.prepare(
+      "INSERT OR REPLACE INTO settings(key,value) VALUES ('current_draw_task_id',?)",
+    ).run(String(drawTask.id));
+    const replacement = {
+      startLocal: "2026-10-21T10:00",
+      endLocal: "2026-10-21T11:00",
+      entryTimezone: "UTC",
+    };
+    const replaceRace = await coordinatedRequests([
+      { method: "get", url: "/api/draw/current" },
+      { method: "get", url: "/api/draw/pool" },
+      { method: "patch", url: `/api/tasks/${drawTask.id}`, body: { fixedSlot: replacement } },
+    ]);
+    expect(replaceRace.map((response) => response.status)).toEqual([200, 200, 200]);
+    expect(replaceRace[0].body).toBeNull();
+    expect((replaceRace[1].body as { candidates: unknown[] }).candidates).toEqual([]);
+    expect((replaceRace[2].body as { task: { fixedSlot: unknown } }).task.fixedSlot).toMatchObject(replacement);
+    expect((await request(app).get("/api/draw/current").expect(200)).body).toBeNull();
+    expect(database.prepare("SELECT value FROM settings WHERE key='current_draw_task_id'").get()).toBeUndefined();
   });
 
   it("keeps due-only backlog and recurring laundry behavior independent from slots", async () => {
@@ -381,9 +562,11 @@ describe("fixed-slot Draw, timer and lifecycle behavior", () => {
       .send({ fixedSlot: { ...utcSlot, startLocal: "2026-10-20T09:30", endLocal: "2026-10-20T12:00" } })
       .expect(200);
     const database = await testDb();
-    expect(database.prepare("SELECT task_id AS taskId, ended_at AS endedAt FROM time_entries").all()).toEqual([
-      { taskId: first.id, endedAt: null },
-    ]);
+    expect(
+      database.prepare(
+        "SELECT task_id AS taskId,ended_at AS endedAt FROM time_entries WHERE task_id IN (?,?) ORDER BY id",
+      ).all(first.id, second.id),
+    ).toEqual([{ taskId: first.id, endedAt: null }]);
   });
 
   it("retains slots through completion, reopen, archive, unarchive, reparent and breakdown; delete cascades", async () => {
@@ -427,6 +610,13 @@ describe("fixed-slot Draw, timer and lifecycle behavior", () => {
       dueDate: "2026-12-24",
       fixedSlot: utcSlot,
     });
+    const boundaryTasks: Array<{ id: number }> = [];
+    for (const [index, vector] of validUtcBoundarySlots.entries()) {
+      boundaryTasks.push(await create(`Portable ${vector.name}`, {
+        dueDate: `2026-12-2${index}`,
+        fixedSlot: vector.slot,
+      }));
+    }
     const manualPath = createBackupArchive();
     const manualBytes = fs.readFileSync(manualPath);
     fs.rmSync(manualPath, { force: true });
@@ -441,6 +631,12 @@ describe("fixed-slot Draw, timer and lifecycle behavior", () => {
         expect(
           handle.prepare("SELECT starts_at AS startsAt,entry_timezone AS zone FROM task_fixed_slots WHERE task_id=?").get(portable.id),
         ).toEqual({ startsAt: "2026-10-20T10:00:00.000Z", zone: "UTC" });
+        for (const [index, vector] of validUtcBoundarySlots.entries()) {
+          expect(
+            handle.prepare("SELECT starts_at AS startsAt,ends_at AS endsAt,entry_timezone AS zone FROM task_fixed_slots WHERE task_id=?")
+              .get(boundaryTasks[index].id),
+          ).toEqual({ startsAt: vector.startsAt, endsAt: vector.endsAt, zone: "UTC" });
+        }
       } finally {
         handle.close();
         fs.rmSync(dbPath, { force: true });
@@ -449,24 +645,52 @@ describe("fixed-slot Draw, timer and lifecycle behavior", () => {
     inspectArchive(manualBytes, "inspect-manual.db");
     inspectArchive(fs.readFileSync(scheduled.path), "inspect-scheduled.db");
 
-    // Restore validates the stamped v22 rows with the frozen registry before
-    // swap; a host-recognized backward alias is still rejected.
-    const badZip = new AdmZip(manualBytes);
-    const badDbPath = path.join(process.env.DATA_DIR!, "tampered-v22-slot.db");
-    fs.writeFileSync(badDbPath, badZip.getEntry("app.db")!.getData());
-    const badDb = new Database(badDbPath);
-    try {
-      badDb.prepare("UPDATE task_fixed_slots SET entry_timezone='US/Eastern' WHERE task_id=?").run(portable.id);
-    } finally {
-      badDb.close();
-    }
-    badZip.deleteFile("app.db");
-    badZip.addFile("app.db", fs.readFileSync(badDbPath));
-    fs.rmSync(badDbPath, { force: true });
-    await request(app)
-      .post("/api/backup/import")
-      .attach("file", badZip.toBuffer(), "tampered-v22-slot.zip")
-      .expect(400);
+    // Restore validates stamped v22 rows with the frozen registry before
+    // swap. Exercise an alias and both named-zone year-edge projections, not
+    // merely direct validator calls.
+    const restoreTamper = async (
+      name: string,
+      startsAt: string,
+      endsAt: string,
+      zone: string,
+    ) => {
+      const badZip = new AdmZip(manualBytes);
+      const badDbPath = path.join(process.env.DATA_DIR!, `tampered-v22-${name}.db`);
+      fs.writeFileSync(badDbPath, badZip.getEntry("app.db")!.getData());
+      const badDb = new Database(badDbPath);
+      try {
+        badDb.prepare(
+          "UPDATE task_fixed_slots SET starts_at=?,ends_at=?,entry_timezone=? WHERE task_id=?",
+        ).run(startsAt, endsAt, zone, portable.id);
+      } finally {
+        badDb.close();
+      }
+      badZip.deleteFile("app.db");
+      badZip.addFile("app.db", fs.readFileSync(badDbPath));
+      fs.rmSync(badDbPath, { force: true });
+      await request(app)
+        .post("/api/backup/import")
+        .attach("file", badZip.toBuffer(), `tampered-v22-${name}.zip`)
+        .expect(400);
+    };
+    await restoreTamper(
+      "alias",
+      "2026-10-20T10:00:00.000Z",
+      "2026-10-20T11:00:00.000Z",
+      "US/Eastern",
+    );
+    await restoreTamper(
+      "named-underflow",
+      validUtcBoundarySlots[0].startsAt,
+      validUtcBoundarySlots[0].endsAt,
+      "America/New_York",
+    );
+    await restoreTamper(
+      "named-overflow",
+      validUtcBoundarySlots[1].startsAt,
+      validUtcBoundarySlots[1].endsAt,
+      "Europe/Berlin",
+    );
     expect(
       (await request(app).get("/api/tasks?status=all").expect(200)).body.find(
         (task: { id: number }) => task.id === portable.id,
@@ -490,6 +714,13 @@ describe("fixed-slot Draw, timer and lifecycle behavior", () => {
       dueDate: "2026-12-24",
       fixedSlot: { ...utcSlot, startsAt: "2026-10-20T10:00:00.000Z" },
     });
+    const restoredTasks = (await request(app).get("/api/tasks?status=all").expect(200)).body;
+    for (const [index, vector] of validUtcBoundarySlots.entries()) {
+      expect(restoredTasks.find((task: { id: number }) => task.id === boundaryTasks[index].id)).toMatchObject({
+        dueDate: `2026-12-2${index}`,
+        fixedSlot: { startsAt: vector.startsAt, endsAt: vector.endsAt, entryTimezone: "UTC" },
+      });
+    }
     const bak = new Database(path.join(process.env.DATA_DIR!, "app.db.bak"), { readonly: true });
     try {
       expect(() => validateV22Contract(bak)).not.toThrow();

@@ -6,6 +6,11 @@ import {
   resolveWallMinute,
 } from "../../src/services/fixedSlots.js";
 import { SCHEDULE_TZDB_RELEASE, SCHEDULE_TIME_ZONES } from "../../../shared/scheduleTimezones.js";
+import {
+  namedZoneBoundaryFailures,
+  rejectedScheduleZones,
+  validUtcBoundarySlots,
+} from "../fixedSlotVectors.js";
 
 function parse(startLocal: string, endLocal: string, entryTimezone: string) {
   return parseFixedSlotInput({ fixedSlot: { startLocal, endLocal, entryTimezone } });
@@ -20,19 +25,7 @@ describe("frozen schedule timezone registry", () => {
     expect(() => assertScheduleTimeZoneRuntime()).not.toThrow();
   });
 
-  it.each([
-    "UTC+01:00",
-    "+01:00",
-    "CET",
-    "Etc/GMT+1",
-    "US/Eastern",
-    "europe/Berlin",
-    " Europe/Berlin",
-    "Europe/Berlin ",
-    "Europe/Bérlin",
-    "x".repeat(129),
-    "Mars/Olympus_Mons",
-  ])("rejects non-canonical schedule identifier %s", (zone) => {
+  it.each(rejectedScheduleZones)("rejects non-canonical schedule identifier %s", (zone) => {
     expect(isScheduleTimeZone(zone)).toBe(false);
     expect(() => parse("2026-06-01T10:00", "2026-06-01T11:00", zone)).toThrow(
       /supported canonical schedule timezone/,
@@ -106,18 +99,16 @@ describe("strict wall-minute resolution", () => {
     });
   });
 
-  it("checks UTC year bounds before serialization while valid UTC controls pass", () => {
-    expect(parse("0001-01-01T00:00", "0001-01-01T00:01", "UTC")).toMatchObject({
-      value: { startsAt: "0001-01-01T00:00:00.000Z" },
-    });
-    expect(parse("9999-12-31T23:58", "9999-12-31T23:59", "UTC")).toMatchObject({
-      value: { endsAt: "9999-12-31T23:59:00.000Z" },
-    });
-    expect(() => parse("0001-01-01T00:00", "0001-01-01T00:01", "Europe/Berlin")).toThrow(
-      /outside supported UTC years/,
-    );
-    expect(() =>
-      parse("9999-12-31T23:58", "9999-12-31T23:59", "America/New_York"),
-    ).toThrow(/outside supported UTC years/);
+  it("checks UTC year bounds before serialization while shared valid UTC controls pass", () => {
+    for (const vector of validUtcBoundarySlots) {
+      expect(parse(vector.slot.startLocal, vector.slot.endLocal, vector.slot.entryTimezone)).toMatchObject({
+        value: { startsAt: vector.startsAt, endsAt: vector.endsAt },
+      });
+    }
+    for (const vector of namedZoneBoundaryFailures) {
+      expect(() =>
+        parse(vector.slot.startLocal, vector.slot.endLocal, vector.slot.entryTimezone),
+      ).toThrow(/outside supported UTC years/);
+    }
   });
 });

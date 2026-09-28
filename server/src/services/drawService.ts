@@ -397,7 +397,7 @@ export function dealtTaskRow(id: number): Record<string, unknown> {
     .get(id) as Record<string, unknown>;
 }
 
-export function drawTask(filters: DrawFilters): DrawResult {
+function drawTaskTransaction(filters: DrawFilters): DrawResult {
   const maxEffort = getSetting("max_draw_effort", 30);
   const cooldown = getSetting("draw_cooldown_minutes", 60);
   const now = new Date();
@@ -447,6 +447,14 @@ export function drawTask(filters: DrawFilters): DrawResult {
     poolSize: candidates.length,
     probability: weights[picked] / total,
   };
+}
+
+export function drawTask(filters: DrawFilters): DrawResult {
+  // Candidate selection and every deal side effect share one IMMEDIATE
+  // transaction. Across multiple server connections this gives a slot set a
+  // strict order with the deal: slot-first excludes the row; draw-first may
+  // reveal it, then the slot transaction atomically clears that pointer.
+  return db.transaction(() => drawTaskTransaction(filters)).immediate();
 }
 
 /**
@@ -712,7 +720,7 @@ export function pickWarmup<T extends Candidate>(
  * lazy validation GET /api/draw/current uses): no valid current draw exists —
  * the warm-up is only ever offered on the idle deck (#88).
  */
-export function warmupDraw(filters: DrawFilters): DrawResult {
+function warmupDrawTransaction(filters: DrawFilters): DrawResult {
   const now = new Date();
   const availability = warmupAvailability(now);
   if (!availability.available) {
@@ -766,4 +774,10 @@ export function warmupDraw(filters: DrawFilters): DrawResult {
     task: toTaskPayload(dealtTaskRow(chosen.id)),
     warmup: marker,
   };
+}
+
+export function warmupDraw(filters: DrawFilters): DrawResult {
+  // Keep the deterministic candidate read, deal, pointer, and allowance in
+  // the same ordering boundary as a fixed-slot write (see drawTask).
+  return db.transaction(() => warmupDrawTransaction(filters)).immediate();
 }

@@ -8,6 +8,7 @@ import { validateV21Contract } from "../../src/schemaV21.js";
 import { schemaSqlTokens } from "../../src/schemaV18.js";
 import { validateV22Contract } from "../../src/schemaV22.js";
 import { stripV22Schema } from "../schemaFixtures.js";
+import { validUtcBoundarySlots } from "../fixedSlotVectors.js";
 
 const schema = fs.readFileSync(
   fileURLToPath(new URL("../../src/schema.sql", import.meta.url)),
@@ -39,19 +40,49 @@ function v22Objects(database: Database.Database) {
 }
 
 describe("schema v22 fixed-slot migration and complete validator", () => {
-  it("makes fresh and real v21→v22 artifacts exact equivalents", () => {
+  it("makes fresh and reopened real v21→v22 artifacts exact equivalents with UTC boundary rows", () => {
     const fresh = open("fresh-v22", schema, 22);
-    const migrated = open("migrated-v22", v21, 21);
+    const migratedPath = path.join(process.env.DATA_DIR!, "migrated-v22.db");
+    let migrated: Database.Database | undefined = open("migrated-v22", v21, 21);
     try {
-      expect(() => validateV21Contract(migrated)).not.toThrow();
-      migrateDatabase(migrated);
-      expect(migrated.pragma("user_version", { simple: true })).toBe(22);
-      expect(v22Objects(migrated)).toEqual(v22Objects(fresh));
+      expect(() => validateV21Contract(migrated!)).not.toThrow();
+      migrateDatabase(migrated!);
+      expect(migrated!.pragma("user_version", { simple: true })).toBe(22);
+      expect(v22Objects(migrated!)).toEqual(v22Objects(fresh));
+      for (const [index, vector] of validUtcBoundarySlots.entries()) {
+        const id = Number(migrated!.prepare(
+          "INSERT INTO tasks(title,category_id,created_at) VALUES (?,?,?)",
+        ).run(`migrated ${vector.name}`, 1, `created-${index}`).lastInsertRowid);
+        migrated!.prepare(
+          "INSERT INTO task_fixed_slots(task_id,starts_at,ends_at,entry_timezone) VALUES (?,?,?,'UTC')",
+        ).run(id, vector.startsAt, vector.endsAt);
+      }
+      expect(() => validateV22Contract(migrated!)).not.toThrow();
+      migrated!.close();
+      migrated = undefined;
+
+      const reopened = new Database(migratedPath);
+      reopened.pragma("foreign_keys=ON");
+      try {
+        expect(reopened.pragma("user_version", { simple: true })).toBe(22);
+        expect(v22Objects(reopened)).toEqual(v22Objects(fresh));
+        expect(() => validateV22Contract(reopened)).not.toThrow();
+        expect(
+          reopened.prepare(
+            "SELECT starts_at AS startsAt,ends_at AS endsAt,entry_timezone AS zone FROM task_fixed_slots ORDER BY task_id",
+          ).all(),
+        ).toEqual(validUtcBoundarySlots.map((vector) => ({
+          startsAt: vector.startsAt,
+          endsAt: vector.endsAt,
+          zone: "UTC",
+        })));
+      } finally {
+        reopened.close();
+      }
       expect(() => validateV22Contract(fresh)).not.toThrow();
-      expect(() => validateV22Contract(migrated)).not.toThrow();
     } finally {
       fresh.close();
-      migrated.close();
+      migrated?.close();
     }
   });
 
@@ -136,6 +167,15 @@ describe("schema v22 fixed-slot migration and complete validator", () => {
       database.prepare("DELETE FROM task_fixed_slots").run();
       insert.run(id, "9999-12-31T23:58:00.000Z", "9999-12-31T23:59:00.000Z", "UTC");
       expect(() => validateV22Contract(database)).not.toThrow();
+
+      database.prepare(
+        "UPDATE task_fixed_slots SET starts_at=?,ends_at=?,entry_timezone='America/New_York'",
+      ).run(validUtcBoundarySlots[0].startsAt, validUtcBoundarySlots[0].endsAt);
+      expect(() => validateV22Contract(database)).toThrow(/stored fixed slot|wall|year|syntax/);
+      database.prepare(
+        "UPDATE task_fixed_slots SET starts_at=?,ends_at=?,entry_timezone='Europe/Berlin'",
+      ).run(validUtcBoundarySlots[1].startsAt, validUtcBoundarySlots[1].endsAt);
+      expect(() => validateV22Contract(database)).toThrow(/stored fixed slot|wall|year|syntax/);
 
       database.prepare("UPDATE task_fixed_slots SET entry_timezone='US/Eastern'").run();
       expect(() => validateV22Contract(database)).toThrow(/stored fixed slot|row/);

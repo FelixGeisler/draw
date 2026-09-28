@@ -133,6 +133,37 @@ describe("automatic daily digest scheduler", () => {
       .toEqual([{ device_id: deviceId, local_date: "2026-09-20" }]);
   });
 
+  it("keeps a fixed-only task out of the actual v2 digest evaluation and serialized payload", async () => {
+    database.prepare(
+      `INSERT INTO tasks(id,title,category_id,due_date,status,created_at)
+       VALUES (41,'FIXED ONLY DIGEST CANARY',1,NULL,'open','fixed-created')`,
+    ).run();
+    database.prepare(
+      `INSERT INTO task_fixed_slots(task_id,starts_at,ends_at,entry_timezone)
+       VALUES (41,'2026-09-20T09:15:00.000Z','2026-09-20T10:00:00.000Z','UTC')`,
+    ).run();
+    const payloads: Record<string, unknown>[] = [];
+    const run = scheduler(service({
+      observeDigestPayload: (payload) => payloads.push(JSON.parse(payload.toString("utf8"))),
+    }));
+    await run.runNow();
+    run.stop();
+
+    expect(payloads).toEqual([expect.objectContaining({
+      v: 2,
+      kind: "digest",
+      detail: "detailed",
+      todayCount: 0,
+      tomorrowCount: 0,
+      overdueCount: 0,
+      titles: [],
+      remainingCount: 0,
+    })]);
+    const serialized = JSON.stringify(payloads[0]);
+    expect(serialized).not.toContain("FIXED ONLY DIGEST CANARY");
+    expect(serialized).not.toContain("09:15");
+  });
+
   it("uses complete SQL counts and at most five deterministic title rows", async () => {
     goal(2, "old goal", "2026-09-17");
     task(2, "old task", "2026-09-17");
