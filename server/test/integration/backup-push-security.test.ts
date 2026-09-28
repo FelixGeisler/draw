@@ -31,6 +31,13 @@ const LEGACY_DEADLINE_CANARY = "LEGACY-DEADLINE-CANARY-355";
 const dataDir = () => process.env.DATA_DIR!;
 const filesDir = () => path.join(dataDir(), "files");
 
+function dropV22Objects(database: Database.Database) {
+  database.exec("DROP TABLE task_fixed_slots");
+  database.exec("DROP INDEX idx_time_entries_range");
+  database.exec("DROP INDEX idx_tasks_due_date");
+  database.exec("DROP INDEX idx_goals_target_date");
+}
+
 function insertPushRow(database: Database.Database, suffix = "") {
   database
     .prepare(
@@ -314,6 +321,7 @@ describe("credential-free backup artifacts", () => {
         `INSERT INTO deadline_reminder_claims
          (device_id,item_type,item_id,item_created_at,deadline) VALUES (?,?,?,?,?)`,
       ).run("device-v20-import", "task", 355, LEGACY_CREATED_CANARY, LEGACY_DEADLINE_CANARY);
+      dropV22Objects(handle);
       handle.pragma("user_version = 20");
     });
     await request(app).post("/api/backup/import").attach("file", v20Bytes, "canonical-v20.zip").expect(200);
@@ -375,7 +383,7 @@ describe("credential-free backup artifacts", () => {
       .attach("file", v18Bytes, "canonical-v18.zip")
       .expect(200);
     const migrated = await testDb();
-    expect(migrated.pragma("user_version", { simple: true })).toBe(21);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(22);
     expect(() => validateV21Contract(migrated)).not.toThrow();
   });
 

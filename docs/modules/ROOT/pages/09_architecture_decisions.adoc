@@ -233,14 +233,14 @@ now derived server-side (current draw, or `last_drawn_at` within 6h as the
 generous fallback); the client `wasDrawn` flag was removed.
 *Rationale:* A settings row rather than a tasks column because the current
 draw is app-level session state, not a task fact; lazy validation at restore
-instead of eager clearing on every task mutation keeps the write paths simple
-(one line each on complete/delete) and cannot drift — the same reasoning as
-ADR-2. The delete path is the one deliberate exception: `tasks.id` has no
-`AUTOINCREMENT`, so a freed id can be re-bound to the next captured task
-before any restore validation runs — deletes therefore clear the pointer
-eagerly whenever its row is gone, not only on an exact id match. Deriving the
-bonus server-side removes a client-trust quirk and makes the bonus
-reload-proof.
+instead of eager clearing on every task mutation keeps ordinary write paths
+simple and cannot drift — the same reasoning as ADR-2. There are two deliberate
+eager exceptions. Delete clears whenever the pointed row is gone because
+`tasks.id` has no `AUTOINCREMENT`: a freed id could otherwise be rebound before
+restore validation. ADR-74 fixed-slot set/replace also clears an exact matching
+current draw atomically because a slotted task is pre-placed work and must not
+remain persisted or later restore into Draw. Deriving the bonus server-side
+removes a client-trust quirk and makes the bonus reload-proof.
 *Amendment (#88):* the DrawPage no longer offers "Draw again" — the draw is a
 commitment, and the persisted pointer makes it reload-proof. A revealed card
 is resolved (completed, snoozed/blocked, deleted), never re-rolled; only the
@@ -4405,3 +4405,93 @@ SQLite, closed-worker/browser tests, and a composed one-worker production seam.
 No real provider call, deployment, enrollment change, or field send is part of
 the implementation. It remains *not field-verified* until separate owner
 validation.
+
+== ADR-74: Fixed task slots are immutable instants entered as strict canonical-zone wall minutes
+
+*Status:* Accepted (2026-09-22) — issue #357 Phase 1A.
+
+*Context:* Draw needs one real appointment interval on a task before Week or
+calendar surfaces can be built. A due date is a priority signal, an availability
+window is a recurring eligibility rule, and time entries are actual work; none
+is an appointment. Local civil input is ambiguous at DST folds, nonexistent in
+gaps, and host tzdb aliases can silently change accepted identifiers. Storing
+only wall text would let an appointment move when a viewer zone or rules change;
+storing only UTC would lose the user's editing context. The feature also crosses
+Draw, recurrence, restore and automation write paths, so partial enforcement
+would permit corrupt states. This Phase deliberately provides the durable core
+without exposing Week, `/today`, digest or calendar behavior.
+
+*Decision:* schema v22 adds exactly one optional child row per task:
+`task_fixed_slots(task_id PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, entry_timezone TEXT NOT NULL,
+CHECK(ends_at > starts_at))`, plus range indexes on fixed slots and time entries
+and date indexes on tasks and goals. The instants are exact four-digit-year UTC
+ISO strings; the zone is the exact accepted canonical IANA identifier. The
+v21→v22 migration validates v21 before mutation, creates the relation/indexes,
+validates the complete v22 contract and stamps last in one transaction. Startup
+and backup import reject DDL/index/FK/cascade drift, non-canonical or unordered
+instants, a non-registry zone, a failed wall/instant round trip, or a task that
+also recurs. Valid fixed slots and entry zones are portable application data;
+Push credentials/claims remain scrubbed under ADR-26.
+
+REST create/update accepts only `fixedSlot: {startLocal,endLocal,entryTimezone}`
+or `fixedSlot: null`; omission preserves the row, non-null set/replaces it, and
+null clears it. The object is exact-shape and each local value is exact
+`YYYY-MM-DDTHH:mm`. Clients never supply resolved values. The response returns
+`hasFixedSlot` plus the canonical slot projection, including local values, zone,
+UTC instants and resolved offsets. A checked-in registry frozen from IANA tzdb
+2026b accepts only canonical schedule identifiers (or `UTC`) and rejects aliases,
+abbreviations, offsets, case/space variants, unknown identifiers and
+`Etc/GMT±N`; startup proves deployed Node/ICU covers every listed identifier.
+Each endpoint resolves independently: a gap rejects, a fold chooses the earlier
+instant, both UTC years must remain `0001`–`9999`, and end must be later than
+start. Viewer-zone changes never float the stored appointment; edits reconstruct
+wall values in the retained entry zone.
+
+The final prospective state is the invariant: recurrence and a fixed slot cannot
+coexist. Create/update evaluates simultaneous clear/set combinations and writes
+ordinary fields plus slot set/replace/clear in one SQLite transaction. Existing
+MCP and reviewed-assistant schemas stay strict in Phase 1A and reject slot or
+resolved-value keys rather than stripping them. Their ordinary writes still use
+the shared task-write/route invariant, preserve a slot on omission and cannot
+enable recurrence beside it. Phase 1B alone may add one approved optional nested
+`fixedSlot: {startLocal,endLocal,entryTimezone}` object to existing MCP
+`create_task`/`update_task` (omission preserves, update `null` clears) and to the
+reviewed assistant's existing staged `create_task` (omitted or non-null only).
+It does not pre-authorize flat slot fields, resolved instant/offset input,
+assistant existing-task updates, broader automation, or recurring-slot
+combinations.
+
+A slotted task is never drawable for the entire row lifetime, even before or
+after the interval. Server candidate SQL, current-card restoration and client
+classification use the same fact and precedence: container, fixed-time
+scheduled, snooze, queue, availability, recurrence, estimate. Setting/replacing
+a slot on the current card clears current and warm-up state in that transaction;
+clearing never auto-deals. Completion, reopen, archive, reparent, breakdown and
+timer writes preserve the row; split-in-place rejects until it is cleared;
+delete cascades. The UI exposes set/replace/clear, narrow keyboard removal and a
+fixed-time badge without adding Week/calendar surfaces.
+
+*Consequences:* appointment identity is deterministic and backup-safe, while
+range queries required by later phases are indexed without inventing their
+semantics. The canonical registry is intentionally a release-managed snapshot:
+new canonical zones or tzdb policy changes require an explicit migration and
+compatibility map together with the code/docs update; a host-runtime list change
+alone never changes accepted persisted identifiers. Historical rule changes that
+break the stored earlier-fold round trip fail closed at validation rather than
+silently moving appointments. Phase 1A excludes
+the Phase 1B automation inputs and every later Week, Push, calendar and digest
+behavior.
+
+*Cross-links:* ADR-2 keeps task source facts normalized; ADR-6 owns recurrence
+and is constrained by this final-state invariant; ADR-12 keeps actual-work/timer
+facts separate; ADR-13 owns persisted current-card restoration; ADR-16 constrains
+breakdown depth; ADR-19 keeps MCP a thin HTTP adapter; ADR-20 availability
+windows remain a separate repeating Draw rule; ADR-21 keeps split-in-place
+explicit; ADR-26 owns migration/backup validation and sanitation; ADR-30 owns
+warm-up/candidate behavior; ADR-32 owns parent completion/reopen; ADR-37 retains
+the reviewed assistant's existing-task exclusion; ADR-39 keeps Draw single-card;
+ADR-40 owns the task form/list language; ADR-50 remains the complete API access
+gate; ADR-54 requires shared write invariants; ADR-57 keeps deck scope
+orthogonal; ADR-67 Push is not engaged; ADR-72/ADR-73 own Push timezone and
+delivery policies and do not consume fixed slots in Phase 1A.

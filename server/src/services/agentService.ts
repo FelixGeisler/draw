@@ -193,8 +193,8 @@ export function bindAgentToolApi(api: ApiClient): void {
   toolApi = api;
 }
 
-const stagedCreateTaskArgs = z.object(stagedCreateTaskShape);
-const stagedCreateSubtasksArgs = z.object(stagedCreateSubtasksShape);
+const stagedCreateTaskArgs = z.object(stagedCreateTaskShape).strict();
+const stagedCreateSubtasksArgs = z.object(stagedCreateSubtasksShape).strict();
 
 async function runAgentTool(
   session: AgentSession,

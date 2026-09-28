@@ -693,7 +693,10 @@ export async function executeTool(
 ): Promise<ToolOutcome> {
   const def = TOOL_MAP.get(name);
   if (!def) return { isError: true, text: `unknown tool: ${name}` };
-  const parsed = z.object(def.inputSchema).safeParse(args ?? {});
+  // Phase 1A deliberately keeps automation slot input closed. Strict parsing
+  // rejects fixedSlot and caller-supplied resolved values instead of Zod's
+  // default unknown-key stripping; Phase 1B will add only the approved fields.
+  const parsed = z.object(def.inputSchema).strict().safeParse(args ?? {});
   if (!parsed.success) {
     return { isError: true, text: `invalid arguments for ${name}: ${z.prettifyError(parsed.error)}` };
   }

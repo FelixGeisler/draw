@@ -6,6 +6,23 @@ on:
     branches: [main]
 
 jobs:
+  schedule-timezone-runtime:
+    name: Schedule timezone registry (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Frozen tzdb registry and UTC boundary gate
+        run: npm run test -w server -- --run test/unit/fixed-slots.test.ts
+
   test:
     runs-on: ubuntu-latest
     steps:

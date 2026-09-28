@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 // v6 → v7 re-parenting vs. the recurring × sequential ban (#80 × #66, ADR-24).
 //
@@ -48,8 +49,7 @@ beforeAll(async () => {
   // but not the v8 streak_freezes table (#58), so strip that block before
   // seeding and stamp user_version = 6.
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-  const schema = fs
-    .readFileSync(schemaPath, "utf-8")
+  const schema = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"))
     .replace(/-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/, "")
     .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
     .replace(/,\r?\n  \('push_send_time', '09:00'\)[\s\S]*?\('push_quiet_end', NULL\)/, "")

@@ -3,6 +3,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 // v7 hoist on a corrupt parent_id cycle (#80, ADR-24): no code path the app
 // ever shipped can write one (parent_id is INSERT-only at the API layer),
@@ -15,7 +16,7 @@ import { fileURLToPath } from "node:url";
 beforeAll(() => {
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
   const legacy = new Database(path.join(process.env.DATA_DIR!, "app.db"));
-  legacy.exec(fs.readFileSync(schemaPath, "utf-8"));
+  legacy.exec(stripV22Schema(fs.readFileSync(schemaPath, "utf-8")));
 
   // Two-row cycle: insert both (FK targets exist), then point A back at B.
   const insert = legacy.prepare(

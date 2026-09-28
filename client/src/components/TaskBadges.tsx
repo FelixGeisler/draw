@@ -88,6 +88,15 @@ export function TaskBadges({
           {task.dueDate}
         </span>
       )}
+      {task.fixedSlot && (
+        <span
+          className="chip"
+          title={`Fixed slot: ${task.fixedSlot.startsAt} to ${task.fixedSlot.endsAt} (${task.fixedSlot.startOffsetSeconds >= 0 ? "+" : ""}${task.fixedSlot.startOffsetSeconds / 3600}h start offset)`}
+          style={{ borderColor: "var(--warn)", color: "var(--warn)" }}
+        >
+          fixed {task.fixedSlot.startLocal}–{task.fixedSlot.endLocal} {task.fixedSlot.entryTimezone}
+        </span>
+      )}
       {task.recurEveryDays != null && (
         <span className="chip" title={`Repeats every ${task.recurEveryDays} days`}>
           ↻ {task.recurEveryDays}d

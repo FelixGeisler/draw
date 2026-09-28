@@ -22,6 +22,8 @@ function task(over: Partial<Task> = {}): Task {
     effortMinutes: null,
     dueDate: "2026-07-15",
     recurEveryDays: null,
+    hasFixedSlot: false,
+    fixedSlot: null,
     status: "open",
     createdAt: "2026-07-01T00:00:00.000Z",
     completedAt: null,

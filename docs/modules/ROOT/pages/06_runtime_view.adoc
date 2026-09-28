@@ -369,3 +369,28 @@ fake-or-real transport is invoked. From that point stop cannot recall provider
 work. Every terminal result retains the claim; only an exact-fingerprint
 provider 404/410 also removes the subscription. A later tick therefore retries
 neither a failed initiation nor a process/DNS/payload/provider failure.
+
+== 6.8 Setting or clearing a fixed slot (Phase 1A)
+
+The task form or REST caller sends strict `startLocal`, `endLocal`, and
+`entryTimezone`. `fixedSlots` checks the checked-in tzdb-2026b canonical-name
+registry, resolves each wall minute independently, rejects a gap, chooses the
+earlier instant in a fold, checks both resolved UTC years before serialization,
+and rejects `end <= start`. The task route then computes the effective final
+recurrence and slot state before writing.
+
+Set/replace/clear and ordinary task fields share one SQLite transaction. A
+non-null slot upserts `task_fixed_slots`; null deletes it; omission preserves it.
+Setting or replacing on the current card clears `current_draw_task_id` and its
+warm-up marker in that same transaction. Candidate SQL and current-card restore
+both use slot absence, while the client classifier mirrors the same precedence:
+container, fixed-time scheduled, then snooze/queue/window/recurrence/estimate.
+Completion, reopen, archive, reparent, breakdown and timers never move or copy
+the slot; split-in-place rejects until it is cleared; delete cascades it.
+
+Phase 1A intentionally leaves MCP and reviewed-assistant slot inputs closed:
+their strict schemas reject slot and resolved-value keys. Their existing ordinary
+writes still reach the REST/domain invariant, preserve a slot on omission, and
+cannot enable recurrence on a slotted task. Phase 1B alone adds the approved
+bounded automation inputs. Week, `/today`, daily digest and weekly Push do not
+consume fixed slots yet.

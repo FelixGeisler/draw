@@ -39,6 +39,13 @@ import {
   reopenDoneParent,
 } from "../services/taskWrites.js";
 import { startTimer } from "./timer.js";
+import {
+  FIXED_RECURRENCE_ERROR,
+  applyFixedSlot,
+  finalHasFixedSlot,
+  parseFixedSlotInput,
+  taskHasFixedRecurrenceConflict,
+} from "../services/fixedSlots.js";
 
 export const tasksRouter = Router();
 
@@ -62,6 +69,10 @@ const TASK_SELECT = `
          EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open') AS hasOpenChildren,
          EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status != 'archived') AS hasNonArchivedChildren,
          ${heldBackSql("tasks")} AS heldBack,
+         EXISTS(SELECT 1 FROM task_fixed_slots fs WHERE fs.task_id = tasks.id) AS hasFixedSlot,
+         (SELECT starts_at FROM task_fixed_slots fs WHERE fs.task_id = tasks.id) AS fixedStartsAt,
+         (SELECT ends_at FROM task_fixed_slots fs WHERE fs.task_id = tasks.id) AS fixedEndsAt,
+         (SELECT entry_timezone FROM task_fixed_slots fs WHERE fs.task_id = tasks.id) AS fixedEntryTimezone,
          CASE
            WHEN EXISTS(SELECT 1 FROM tasks c WHERE c.parent_id = tasks.id AND c.status != 'archived')
              THEN (SELECT SUM(c.effort_minutes) FROM tasks c WHERE c.parent_id = tasks.id AND c.status = 'open')
@@ -263,7 +274,11 @@ tasksRouter.post("/:id/subtasks", (req, res) => {
 // undecomposable.
 tasksRouter.post("/:id/split", (req, res) => {
   const id = Number(req.params.id);
-  const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
+  const raw = db.prepare(
+    `SELECT tasks.*,
+            EXISTS(SELECT 1 FROM task_fixed_slots fs WHERE fs.task_id = tasks.id) AS has_fixed_slot
+     FROM tasks WHERE id = ?`,
+  ).get(id) as
     | {
         id: number;
         parent_id: number | null;
@@ -276,6 +291,7 @@ tasksRouter.post("/:id/split", (req, res) => {
         window_end: string | null;
         created_at: string;
         sort_order: number;
+        has_fixed_slot: number;
       }
     | undefined;
   if (!raw) return res.status(404).json({ error: "task not found" });
@@ -289,6 +305,13 @@ tasksRouter.post("/:id/split", (req, res) => {
     return res
       .status(400)
       .json({ error: "only an open subtask can be split — a done or archived row has nothing to split" });
+  }
+  // A fixed appointment cannot be silently archived and replaced by
+  // unscheduled parts; clear the slot explicitly before splitting.
+  if (raw.has_fixed_slot) {
+    return res.status(400).json({
+      error: "a fixed-time task cannot be split in place — clear its fixed slot first",
+    });
   }
   // Recurring × split is incoherent: parts are one-shot rows, and "which part
   // recurs?" has no answer. Same repair as ADR-23's: drop the recurrence
@@ -467,12 +490,16 @@ tasksRouter.post("/:id/reorder", (req, res) => {
 
 tasksRouter.patch("/:id", (req, res) => {
   const id = Number(req.params.id);
-  const raw = db.prepare("SELECT * FROM tasks WHERE id = ?").get(id) as
-    | (TaskRow & { goal_id: number | null; parent_id: number | null; subtask_order_mode: string })
+  const raw = db.prepare(
+    `SELECT tasks.*,
+            EXISTS(SELECT 1 FROM task_fixed_slots fs WHERE fs.task_id = tasks.id) AS has_fixed_slot
+     FROM tasks WHERE id = ?`,
+  ).get(id) as
+    | (TaskRow & { goal_id: number | null; parent_id: number | null; subtask_order_mode: string; has_fixed_slot: number })
     | undefined;
   if (!raw) return res.status(404).json({ error: "task not found" });
 
-  const body = req.body ?? {};
+  const body = (req.body ?? {}) as Record<string, unknown>;
 
   // Request-shape 400s (#84) run before every write path — including the
   // completion/reopen branches below, which ignore extra fields rather than
@@ -483,6 +510,28 @@ tasksRouter.patch("/:id", (req, res) => {
   if (shapeError) return res.status(400).json({ error: shapeError });
   const recurError = normalizeRecurInput(body);
   if (recurError) return res.status(400).json({ error: recurError });
+  let fixedSlot;
+  try {
+    fixedSlot = parseFixedSlotInput(body);
+  } catch (error) {
+    return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+  // Completion/reopen use dedicated branches that intentionally ignore other
+  // fields. Never let a fixed-slot intent disappear through one of them.
+  if (
+    fixedSlot.present &&
+    ((body.status === "done" && raw.status === "open") ||
+      (body.status === "open" && raw.status === "done"))
+  ) {
+    return res.status(400).json({
+      error: "fixedSlot cannot be combined with completion or reopen; perform the status transition separately",
+    });
+  }
+  const recurrenceAfter =
+    "recurEveryDays" in body ? (body.recurEveryDays as number | null) : raw.recur_every_days;
+  if (finalHasFixedSlot(Boolean(raw.has_fixed_slot), fixedSlot) && recurrenceAfter != null) {
+    return res.status(400).json({ error: FIXED_RECURRENCE_ERROR });
+  }
   if ("categoryId" in body) {
     const cError = categoryIdError(body.categoryId);
     if (cError) return res.status(400).json({ error: cError });
@@ -824,7 +873,9 @@ tasksRouter.patch("/:id", (req, res) => {
       params.push(body[key]);
     }
   }
-  if (sets.length === 0) return res.status(400).json({ error: "nothing to update" });
+  if (sets.length === 0 && !fixedSlot.present) {
+    return res.status(400).json({ error: "nothing to update" });
+  }
 
   // Parent-lifecycle hooks on the generic write path (#111, ADR-32). The
   // parent judged is the row's CURRENT parent after this write — the adoption
@@ -835,8 +886,33 @@ tasksRouter.patch("/:id", (req, res) => {
   const statusAfter = ("status" in body ? body.status : raw.status) as string;
   const parentAfter = (reparenting ? (body.parentId as number | null) : raw.parent_id) ?? null;
 
-  const parentCompletion = db.transaction((): CompletionResult | null => {
-    db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+  const writeTask = db.transaction(():
+    | { error: string }
+    | { parentCompletion: CompletionResult | null } => {
+    // Recompute the effective fixed-plus-recurrence state under the write
+    // transaction's lock. The earlier check gives callers a fast 400; this
+    // one is authoritative for every REST/UI/MCP route path.
+    const currentState = db
+      .prepare(
+        `SELECT t.recur_every_days AS recurrence,
+                EXISTS(SELECT 1 FROM task_fixed_slots s WHERE s.task_id=t.id) AS hasSlot
+         FROM tasks t WHERE t.id=?`,
+      )
+      .get(id) as { recurrence: number | null; hasSlot: number };
+    const transactionalRecurrence =
+      "recurEveryDays" in body ? (body.recurEveryDays as number | null) : currentState.recurrence;
+    if (finalHasFixedSlot(Boolean(currentState.hasSlot), fixedSlot) && transactionalRecurrence != null) {
+      return { error: FIXED_RECURRENCE_ERROR };
+    }
+
+    if (sets.length > 0) {
+      db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
+    }
+    applyFixedSlot(db, id, fixedSlot);
+    // Scheduling a revealed card invalidates the persisted draw atomically
+    // with the slot write. Replacing repeats the harmless clear; clearing
+    // never fabricates a draw.
+    if (fixedSlot.present && fixedSlot.value !== null) clearCurrentDraw(id);
     let completion: CompletionResult | null = null;
     if (parentAfter != null) {
       if (statusAfter === "open" && (reparenting || raw.status === "archived")) {
@@ -882,8 +958,16 @@ tasksRouter.patch("/:id", (req, res) => {
         id,
       );
     }
-    return completion;
-  })();
+    if (taskHasFixedRecurrenceConflict(db, id)) {
+      // A programming-path regression must roll back rather than commit an
+      // invalid state. Normal caller conflicts return the 400 above.
+      throw new Error(FIXED_RECURRENCE_ERROR);
+    }
+    return { parentCompletion: completion };
+  });
+  const writeResult = writeTask.immediate();
+  if ("error" in writeResult) return res.status(400).json({ error: writeResult.error });
+  const { parentCompletion } = writeResult;
 
   if (parentCompletion?.challengePayout) {
     notifyChallengeCompleted(parentCompletion.challengePayout);
@@ -916,7 +1000,8 @@ tasksRouter.patch("/:id", (req, res) => {
       "blocked" in body ||
       "parentId" in body ||
       "dueDate" in body ||
-      "recurEveryDays" in body) &&
+      "recurEveryDays" in body ||
+      (fixedSlot.present && fixedSlot.value !== null)) &&
     !isRestorable(task as unknown as RestorableTask, getSetting("max_draw_effort", 30), new Date())
   ) {
     clearCurrentDraw(id);

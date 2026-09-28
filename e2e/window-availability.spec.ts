@@ -40,7 +40,7 @@ test("a task windowed to another weekday is scheduled, not drawable", async ({ p
   }
   // …and select only tomorrow (re-selecting if it was a weekday default).
   await form.getByRole("checkbox", { name: tomorrow, exact: true }).click();
-  await form.getByRole("button", { name: "Add" }).click();
+  await form.getByRole("button", { name: "Add", exact: true }).click();
 
   // Scheduled is a badge, not a triage verdict (#151): the row sits in its
   // category group wearing the warn-styled 🕒 chip naming the window, and
@@ -80,7 +80,7 @@ test("a rejected night window surfaces the server's message instead of failing s
   await form.getByRole("button", { name: "🕒 availability" }).click();
   await form.getByLabel("Window start").fill("20:00");
   await form.getByLabel("Window end").fill("08:00");
-  await form.getByRole("button", { name: "Add" }).click();
+  await form.getByRole("button", { name: "Add", exact: true }).click();
 
   // The server's message is shown, the task is NOT created, and the form
   // keeps its fields for correction instead of resetting.
@@ -94,7 +94,7 @@ test("a rejected night window surfaces the server's message instead of failing s
   // an estimate, outside it classifies scheduled (passive, not in the strip)
   // — so only the always-true category-tree row is pinned.
   await form.getByLabel("Window end").fill("22:00");
-  await form.getByRole("button", { name: "Add" }).click();
+  await form.getByRole("button", { name: "Add", exact: true }).click();
   await expect(taskTree(page).getByText(NIGHT_TITLE)).toBeVisible();
   await expect(form.getByRole("alert")).toHaveCount(0);
 

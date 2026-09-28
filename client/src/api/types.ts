@@ -42,6 +42,19 @@ export interface CategoryBias {
   ratio: number;
 }
 
+export interface FixedSlotInput {
+  startLocal: string;
+  endLocal: string;
+  entryTimezone: string;
+}
+
+export interface FixedSlot extends FixedSlotInput {
+  startsAt: string;
+  endsAt: string;
+  startOffsetSeconds: number;
+  endOffsetSeconds: number;
+}
+
 export interface Task {
   id: number;
   title: string;
@@ -59,6 +72,9 @@ export interface Task {
    * after. A non-recurring task's due date never keeps it out of the deck.
    */
   recurEveryDays: number | null;
+  /** One anchored appointment; independent from dueDate and actual work. */
+  hasFixedSlot: boolean;
+  fixedSlot: FixedSlot | null;
   status: "open" | "done" | "archived";
   createdAt: string;
   completedAt: string | null;
@@ -158,6 +174,8 @@ export interface NewTask {
   effortMinutes?: number | null;
   dueDate?: string | null;
   recurEveryDays?: number | null;
+  /** Omitted = unchanged on update; null = clear; object = set/replace. */
+  fixedSlot?: FixedSlotInput | null;
   /** Availability window (#33): all three together, or all null/absent. */
   windowDays?: number[] | null;
   windowStart?: string | null;

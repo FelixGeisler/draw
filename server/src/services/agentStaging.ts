@@ -52,7 +52,7 @@ export const stagedTaskInputSchema = z.object({
   windowStart: z.string().optional(),
   windowEnd: z.string().optional(),
   parentId: parentRefSchema.optional(),
-});
+}).strict();
 
 export const stagedSubtaskSchema = z.object({
   draftId: draftIdSchema,
@@ -60,20 +60,20 @@ export const stagedSubtaskSchema = z.object({
   description: z.string().optional(),
   effortMinutes: z.number().int().positive().optional(),
   impact: impactSchema.optional(),
-});
+}).strict();
 
 export const createTaskOpSchema = z.object({
   kind: z.literal("create_task"),
   draftId: draftIdSchema,
   task: stagedTaskInputSchema,
-});
+}).strict();
 
 export const createSubtasksOpSchema = z.object({
   kind: z.literal("create_subtasks"),
   draftId: draftIdSchema,
   parentId: parentRefSchema,
   subtasks: z.array(stagedSubtaskSchema).min(1),
-});
+}).strict();
 
 export const stagedOpSchema = z.discriminatedUnion("kind", [
   createTaskOpSchema,
@@ -93,7 +93,7 @@ export const applyBodySchema = z.object({
    */
   changesetVersion: z.number().int().positive().optional(),
   operations: z.array(stagedOpSchema).min(1),
-});
+}).strict();
 
 export type StagedTaskInput = z.output<typeof stagedTaskInputSchema>;
 export type StagedSubtask = z.output<typeof stagedSubtaskSchema>;

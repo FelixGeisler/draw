@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
+import { stripV22Schema } from "../schemaFixtures.js";
 import { CURRENT_VERSION } from "../../src/db.js";
 import { localDate } from "../../src/services/localDay.js";
 import { createBackupArchive, MANIFEST_APP } from "../../src/services/backupService.js";
@@ -606,7 +607,7 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
     // Reconstruct the v2 schema the same way migration.test.ts does: today's
     // schema.sql minus the columns/tables later migrations added.
     const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-    const current = fs.readFileSync(schemaPath, "utf-8");
+    const current = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"));
     const v2Schema = current
       .replace(/-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/, "")
       .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
@@ -726,7 +727,7 @@ describe("POST /api/backup/import — older-schema backup is migrated forward", 
 describe("POST /api/backup/import — v17 compatibility cutover", () => {
   it("migrates and validates a seeded v17 database in staging before swap", async () => {
     const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-    const current = fs.readFileSync(schemaPath, "utf-8");
+    const current = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"));
     const v17 = current
       .replace(/-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/, "")
       .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")

@@ -3,9 +3,10 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-const currentSchema = fs.readFileSync(schemaPath, "utf8");
+const currentSchema = stripV22Schema(fs.readFileSync(schemaPath, "utf8"));
 const v19Schema = currentSchema
   .replace(
     /-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/,
@@ -63,7 +64,7 @@ describe("schema v19 Push persistence remains an exact migration boundary", () =
       const { validateV21Contract } = await import("../../src/schemaV21.js");
       expect(() => validateV19Contract(handle)).not.toThrow();
       migrateDatabase(handle);
-      expect(handle.pragma("user_version", { simple: true })).toBe(21);
+      expect(handle.pragma("user_version", { simple: true })).toBe(22);
       expect(() => validateV21Contract(handle)).not.toThrow();
     } finally {
       handle.close();

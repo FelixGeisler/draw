@@ -6,8 +6,11 @@ import { fileURLToPath } from "node:url";
 import { migrateDatabase } from "../../src/db.js";
 import { DEADLINE_REMINDER_CLAIMS_SQL } from "../../src/schemaV20.js";
 import { DAILY_DIGEST_CLAIMS_SQL, validateV21Contract } from "../../src/schemaV21.js";
+import { stripV22Schema } from "../schemaFixtures.js";
 
-const current = fs.readFileSync(fileURLToPath(new URL("../../src/schema.sql", import.meta.url)), "utf8");
+const current = stripV22Schema(
+  fs.readFileSync(fileURLToPath(new URL("../../src/schema.sql", import.meta.url)), "utf8"),
+);
 const v20 = current
   .replace(
     /-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/,
@@ -51,8 +54,8 @@ describe("schema v21 atomic digest replacement", () => {
       migrated.prepare("UPDATE settings SET value='Europe/Berlin' WHERE key='push_timezone'").run();
       migrateDatabase(migrated);
 
-      expect(fresh.pragma("user_version", { simple: true })).toBe(21);
-      expect(migrated.pragma("user_version", { simple: true })).toBe(21);
+      expect(fresh.pragma("user_version", { simple: true })).toBe(22);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(22);
       expect(() => validateV21Contract(fresh)).not.toThrow();
       expect(() => validateV21Contract(migrated)).not.toThrow();
       expect(snapshot(migrated)).toEqual({

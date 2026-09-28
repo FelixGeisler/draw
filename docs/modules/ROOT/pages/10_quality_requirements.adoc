@@ -78,9 +78,21 @@ AI degradation > data integrity > cost transparency > responsiveness.
 |Q17
 |A digest window crosses DST, quiet hours, or local midnight, or Hide-details is enabled
 |Saved-IANA-zone evaluation uses the approved gap/fold and half-open rules; TTL is only the positive whole-second lifetime remaining up to three hours and never crosses local midnight; Hide-details constructs counts only
+
+|Q18
+|The same valid fixed local minute and entry zone reach two supported hosts, including a fall fold
+|The checked-in tzdb-2026b canonical-zone policy resolves the same instant; a fold chooses the earlier instant, a gap or UTC year outside `0001`–`9999` rejects without mutation
+
+|Q19
+|A current or candidate task gains a fixed slot
+|It immediately leaves Draw, current and warm-up state clear atomically, and clear never auto-deals; client and server classification agree
+
+|Q20
+|A valid or tampered v22 fixed-slot database is restarted, exported or restored
+|Valid slot/zone data survives; malformed relation/index/zone/instant/order/round-trip/recurrence state rejects before live swap
 |===
 
-Q1, Q3 (guardrail), Q6–Q10 and Q13–Q17 are covered by the automated test suites (unit /
+Q1, Q3 (guardrail), Q6–Q10 and Q13–Q20 are covered by the automated test suites (unit /
 integration / E2E — see xref:08_crosscutting_concepts.adoc[8.7]) and run in CI on every
 PR. Q2 and Q4 need a live API key and are verified manually; Q5 is covered by the
 E2E timer journey; Q11/Q12 are properties of SQLite WAL and prebuilt binaries.

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { freshApp, testDb } from "../helpers.js";
+import { stripV22Schema } from "../schemaFixtures.js";
 
 // Achievement chains + claim-for-XP (#156, ADR-42) land in migration v14 on a
 // seeded pre-v14 (v13) database: a NEW append-only draws table, plus two
@@ -21,7 +22,7 @@ beforeAll(async () => {
   // Reconstruct the v13 schema: today's schema.sql minus only the v14 draws
   // table and the achievements claim columns.
   const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
-  const current = fs.readFileSync(schemaPath, "utf-8");
+  const current = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"));
   const v13Schema = current
     .replace(/-- Daily digest once-per-device[\s\S]*?CREATE TABLE daily_digest_claims[\s\S]*?\);\r?\n\r?\n/, "")
     .replace("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT);", "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
@@ -70,7 +71,7 @@ beforeAll(async () => {
 describe("migration v13 → v14 (#156, ADR-42)", () => {
   it("runs the chain through the current v21 schema", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(21);
+    expect(db.pragma("user_version", { simple: true })).toBe(22);
   });
 
   it("creates the draws log with the append-only shape", async () => {

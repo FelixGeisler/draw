@@ -8,7 +8,7 @@
 |The set of currently drawable tasks
 
 |*Drawable*
-|Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks, not snoozed/blocked, not held back, inside its availability window if it has one, and — if it recurs — not still waiting for its next occurrence; a derived predicate, never stored
+|Open task, effort estimated and ≤ the max-draw-effort setting (default 30 min), with no open subtasks, no fixed slot, not snoozed/blocked, not held back, inside its availability window if it has one, and — if it recurs — not still waiting for its next occurrence; a derived predicate, never stored
 
 |*Quick capture*
 |The always-focused TaskForm pinned on top of the Tasks page (ADR-40): title-only Enter submit, fields reset, focus retained — thought to card in one keystroke
@@ -20,7 +20,31 @@
 |Optional per-task weekdays (`window_days`, JS `getDay()` numbers) plus a daily `[window_start, window_end)` range, local wall clock; outside it the card leaves the deck and returns on its own (ADR-20)
 
 |*Scheduled*
-|An open task the calendar has taken out of the deck for now, returning on its own: currently outside its availability window (🕒 chip), or a recurring task waiting for its next occurrence (`next <date>` chip, ADR-6 amendment). Derived at query time — never a snooze, which is the user's own "not now"
+|A task outside its availability window, waiting for its next recurring occurrence,
+or carrying a fixed slot. The first two states are derived and return to the deck
+on their own; a fixed slot excludes the task for the row's whole lifetime and
+returns it only when explicitly cleared. Never a snooze, which means "not now".
+
+|*Fixed slot*
+|One optional immutable planned interval for a task, stored as canonical UTC
+start/end plus the exact canonical IANA zone used to enter it. It is independent
+of due date and actual time entries, cannot coexist with recurrence, and excludes
+the task from Draw.
+
+|*Entry timezone*
+|The fixed slot's retained canonical IANA zone identifier. Edit reconstructs wall
+minutes in this zone; a viewer's browser zone changes display only, never the
+stored instant or entry zone.
+
+|*Gap / fold*
+|A DST gap is a local wall minute that never occurs and is rejected. A fold is a
+wall minute that occurs twice; fixed-slot entry deterministically chooses the
+earlier instant.
+
+|*Canonical schedule timezone registry*
+|The checked-in tzdb-2026b list accepted for fixed-slot entry: canonical names
+only, excluding aliases, abbreviations, numeric offsets and `Etc/GMT±N`. It is
+distinct from the saved Push-timezone policy.
 
 |*Recurring task*
 |A task with `recur_every_days`: it never closes. Its `due_date` is its *next occurrence* — the first one as entered, every later one set to `completion date + interval` — and the card is out of the deck until that day (ADR-6, #205). Without a due date it has no schedule to wait for and is always drawable
