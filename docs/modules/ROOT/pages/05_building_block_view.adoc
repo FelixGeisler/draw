@@ -112,6 +112,7 @@ server/src/
 │   ├── stats.ts             GET /api/stats (UTC date-range handling),
 │   │                        GET /api/stats/estimation-bias (all-history, ADR-27)
 │   ├── activity.ts          GET /api/activity (per-local-day history, ADR-21)
+│   ├── calendar.ts          bounded GET /api/calendar/week planning projection
 │   ├── gamification.ts      GET /api/gamification
 │   ├── shop.ts              exact Gold/Ticket pack HTTP contract + collection snapshot;
 │   │                        validates before the atomic shop service (#266)
@@ -127,6 +128,7 @@ server/src/
     ├── statsService.ts      SQL aggregations (minutes by impact/category/goal), estimation
     │                        accuracy + per-category bias (coaching input, ADR-27)
     ├── activityService.ts   per-day card derivation for the Stats History calendar (pure core + SQL fetch)
+    ├── weekProjection.ts    guarded fixed/deadline/tracked identities, keyset paging and byte bounds
     ├── gamificationService.ts  completion transaction, XP/levels/streaks, achievements
     ├── streak.ts            pure streak fold: rest days, freeze tokens (ADR-28)
     ├── shopService.ts       per-request immediate pack transaction, replay, derived snapshot,
@@ -165,6 +167,10 @@ server/src/
 |`activityService`
 |Per-day history card derivation (History calendar)
 |Derived read-side from `time_entries` + `completions`, bucketed by *local* day; a worked-but-uncompleted day stays face-down forever
+
+|`weekProjection`
+|Read-only Monday–Sunday planning projection for `GET /api/calendar/week`
+|One planning identity carries qualifying fixed/deadline facets; each timer row remains separate; 101 title-free identities, 100 records and 131,072 final JSON bytes are hard bounds
 
 |`shopService` + `packCatalog`
 |Atomic pack purchase/replay, derived shop state and settings-owned collection, over pure catalog/probability calculations

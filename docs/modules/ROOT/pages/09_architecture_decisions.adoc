@@ -4402,6 +4402,27 @@ device while Draw runs, saved-timezone requirement, and provider retention of
 at most three hours without crossing local midnight. Detection failure does not
 block enrollment or manual test.
 
+*Planning/weekly amendment (issue #360 Phase 2A):* one shared read-side planning
+model now exists for the bounded `GET /api/calendar/week` projection. A task is
+one planning identity carrying whichever fixed and literal-deadline facets
+qualify; an active goal carries one literal deadline; each canonical overlapping
+timer row remains a separate Tracked identity. Week bounds are independently
+resolved frozen-zone local midnights, open timers end at one captured request
+instant for display only, and ordering is visible anchor, kind rank, positive
+safe source id. The endpoint is keyset-paged with at most 101 title-free
+identities read, 100 records emitted and 131,072 final JSON bytes. Titles are
+read only after selection through a bounded BLOB prefix; only a record too large
+to fit alone may be code-point-safely truncated in the response. Restored fixed
+and timer timestamps fail closed behind lazy type/24-byte/canonical guards. The
+projection performs no write, cache population, Push evaluation/send or external
+request and remains behind ADR-50.
+
+This amendment implements only the shared projection and Week API. The Week
+client/navigation, `/today` integration, changes to the morning digest,
+weekly worker/producer and Sunday notification remain planned. ADR-73's current
+daily classifier, claim, schedule, payload, worker and delivery behavior above
+are unchanged; ADR-74 remains the fixed-slot and frozen-zone authority.
+
 *Supersession:* this ADR supersedes ADR-72's no-digest decision and its
 per-item occurrence, lead-day, no-overdue, TTL-0 automatic send, deadline claim
 schema/evaluator/scheduler/payload/landing, five-field timing, and deadline

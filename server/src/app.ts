@@ -27,6 +27,7 @@ import { disabledPushService, type PushServiceDependency } from "./push/service.
 import { disabledPushDependency, type PushDependency } from "./push/authority.js";
 import { createPushRouter } from "./routes/push.js";
 import { dailyOverviewRouter } from "./routes/dailyOverview.js";
+import { calendarRouter } from "./routes/calendar.js";
 
 export interface AppOptions {
   /**
@@ -111,6 +112,7 @@ export function createApp(options: AppOptions = {}, dependencies: AppDependencie
 
   app.use("/api/push", createPushRouter(push));
   app.use("/api/daily-overview", dailyOverviewRouter);
+  app.use("/api/calendar", calendarRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/categories", categoriesRouter);
   app.use("/api/settings", settingsRouter);

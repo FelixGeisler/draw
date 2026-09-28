@@ -42,9 +42,13 @@ wall minute that occurs twice; fixed-slot entry deterministically chooses the
 earlier instant.
 
 |*Canonical schedule timezone registry*
-|The checked-in tzdb-2026b list accepted for fixed-slot entry: canonical names
-only, excluding aliases, abbreviations, numeric offsets and `Etc/GMT±N`. It is
-distinct from the saved Push-timezone policy.
+|The checked-in tzdb-2026b list accepted for fixed-slot entry and Week projection: canonical names only, excluding aliases, abbreviations, numeric offsets and `Etc/GMT±N`. It is distinct from the saved Push-timezone policy.
+
+|*Week planning projection*
+|The authenticated read-only `GET /api/calendar/week` contract for one frozen-zone Monday–Sunday: one task/goal planning identity carries its qualifying fixed/deadline facets, while each actual timer session remains a separate Tracked identity. It is bounded and keyset-paged; the Week screen itself remains planned until Phase 2B.
+
+|*Visible anchor*
+|The clipped Week-local ordering instant used only for deterministic keyset order: a planning identity's primary qualifying fixed/deadline facet (fixed wins when both are on the same local date), or a Tracked session's clipped start, then kind rank and source id. It never rewrites a source instant or converts a literal deadline into stored time.
 
 |*Recurring task*
 |A task with `recur_every_days`: it never closes. Its `due_date` is its *next occurrence* — the first one as entered, every later one set to `completion date + interval` — and the card is out of the deck until that day (ADR-6, #205). Without a due date it has no schedule to wait for and is always drawable

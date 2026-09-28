@@ -300,7 +300,10 @@ registry is frozen from tzdb 2026b; aliases, abbreviations, numeric offsets,
 startup proves every registry identifier is available in deployed Node/ICU.
 Changing a viewer zone never floats an existing appointment; editing reconstructs
 its wall values in the stored entry zone. This schedule policy is separate from
-ADR-73's saved Push-zone policy.
+ADR-73's saved Push-zone policy. The Week API is the first read-side consumer:
+it resolves the selected frozen-zone Monday and exclusive next Monday separately,
+so DST Weeks may be 167 or 169 hours, places fixed/session instants by overlap,
+and never timezone-shifts a literal deadline.
 
 Date-only values (due dates) are
 compared as strings, which makes their format load-bearing — the write paths
@@ -339,7 +342,10 @@ Three levels, all mandatory per PR (enforced by CI):
 |===
 
 Design rules: tests never touch `server/data/`; journey E2E tests run serially
-without retries (shared DB state); integration tests encode the domain invariants
+without retries (shared DB state). Week projection tests additionally pin
+four-digit/DST bounds, closed wire variants, guarded restored data, stable
+keysets, 99/100/101 identities, 131,071/131,072/131,073 JSON bytes, bounded
+UTF-8 title reads and read-only authentication/error behavior. Integration tests encode the domain invariants
 (breakdown 409, one running timer, recurrence reset, XP-farming protection,
 AI degraded mode).
 

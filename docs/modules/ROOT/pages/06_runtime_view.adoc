@@ -396,5 +396,30 @@ assistant exposes only non-null slots on its existing staged `create_task`:
 staging invokes the same resolver for feedback but writes nothing, while apply
 revalidates through `createTaskWrite` inside the existing atomic consumed,
 versioned changeset. It still has no existing-task update operation. Strict
-schemas reject flat/resolved values and unknown child keys. Week, `/today`,
-daily digest and weekly Push do not consume fixed slots yet.
+schemas reject flat/resolved values and unknown child keys. `/today`, the daily
+digest and weekly Push still do not consume fixed slots.
+
+== 6.9 Reading one bounded Week projection (Phase 2A)
+
+After the existing ADR-50 gate, `GET /api/calendar/week` validates an exact
+Monday, one frozen ADR-74 schedule zone, and an optional canonical keyset
+cursor. Seven zoned local midnights define `[Monday,next Monday)`; this is a
+calendar Week, not 168 hours. Date-only deadlines remain literal. Page one
+captures `requestNow`; continuation cursors carry it unchanged, so an open
+timer is projected without being stopped or updated.
+
+The service first derives and orders at most 101 title-free identities. A task
+has one identity with its qualifying fixed and/or deadline facets, a goal has
+one active deadline identity, and each overlapping `time_entries` row is a
+separate Tracked identity. Fixed and tracked intervals use clipped starts only
+for ordering; returned source instants are unchanged. Restored timestamp text
+reaches the canonical parser only after lazy type/exact-24-byte SQL guards.
+Titles are dereferenced only for selected identities through a bounded BLOB
+prefix. A page emits at most 100 records and 131,072 UTF-8 JSON bytes; an intact
+record that fits alone moves to the next page, while only a record too large
+alone receives a code-point-safe title prefix.
+
+The route performs no write, schema migration, cache population, Push work or
+external request. Request/cursor failures return the closed 400; database or
+projection-invariant failures return the closed no-partial 500. The Week client,
+route navigation, `/today`, daily digest and weekly producer remain planned.
