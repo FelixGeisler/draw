@@ -361,8 +361,10 @@ function sameMonthEditDay(): string {
   const today = new Date(`${TODAY}T12:00:00`);
   const candidate = new Date(today);
   candidate.setDate(today.getDate() + 1);
-  if (candidate.getMonth() !== today.getMonth())
+  if (candidate.getMonth() !== today.getMonth()) {
+    candidate.setTime(today.getTime());
     candidate.setDate(today.getDate() - 1);
+  }
   return localDay(candidate);
 }
 

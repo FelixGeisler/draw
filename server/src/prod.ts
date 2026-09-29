@@ -2,7 +2,7 @@ import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type Database from "better-sqlite3";
+import type { SafeDatabase } from "./safeDatabase.js";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
@@ -31,7 +31,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export interface ProductionAssemblyOptions {
   /** Test-only production assembly seam; ordinary startup passes nothing. */
   env?: NodeJS.ProcessEnv;
-  database?: Database.Database;
+  database?: SafeDatabase;
   dataDir?: string;
   clientDir?: string;
   host?: string;

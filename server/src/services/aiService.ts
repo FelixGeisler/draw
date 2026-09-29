@@ -213,7 +213,7 @@ export async function materialBlocks(materialIds: number[], goalId: number | nul
   const placeholders = materialIds.map(() => "?").join(",");
   const rows = db
     .prepare(`SELECT * FROM materials WHERE id IN (${placeholders})`)
-    .all(...materialIds) as MaterialRow[];
+    .all(...materialIds) as unknown as MaterialRow[];
 
   // One uploader for the whole assembly; null without a key. Degraded mode
   // therefore assembles exactly the blocks it did before #92 (base64), and

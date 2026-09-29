@@ -12,6 +12,8 @@ import {
 } from "./schemaV20.js";
 import { DAILY_DIGEST_CLAIMS_SQL, validateV21Contract } from "./schemaV21.js";
 import { TASK_FIXED_SLOTS_SQL, V22_INDEX_SQL, validateV22Contract } from "./schemaV22.js";
+import { createSafeDatabase } from "./safeDatabase.js";
+export type { SafeDatabase, SafeStatement, SafeTransaction } from "./safeDatabase.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
@@ -19,28 +21,27 @@ export const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.resolve(here, "../data");
 export const filesDir = path.join(dataDir, "files");
-export const dbPath = path.join(dataDir, "app.db");
+const dbPath = path.join(dataDir, "app.db");
 
 fs.mkdirSync(filesDir, { recursive: true });
 
 function openDatabase(): Database.Database {
   const handle = new Database(dbPath);
+  handle.unsafeMode(false);
   handle.pragma("journal_mode = WAL");
   handle.pragma("foreign_keys = ON");
+  handle.pragma("trusted_schema = OFF");
   return handle;
 }
 
-// `let`, not `const`: backup import (#61, ADR-26) swaps the database file on
-// disk and reopens the handle. ESM live bindings mean every module that
-// imports { db } sees the new handle on its next access — no code in this
-// repo caches prepared statements or transactions across requests, so a
-// reopen is safe between requests (better-sqlite3 is synchronous, and the
-// whole swap runs in one synchronous block: no request can interleave).
-export let db = openDatabase();
+// The native handle never leaves this module. The one exported facade is
+// stable across restore: each operation resolves this variable at call time.
+let nativeDatabase = openDatabase();
+export const db = createSafeDatabase(() => nativeDatabase);
 
 export const CURRENT_VERSION = 22;
 
-export function migrateDatabase(database: Database.Database = db) {
+export function migrateDatabase(database: Database.Database = nativeDatabase) {
   const version = database.pragma("user_version", { simple: true }) as number;
   if (version < 1) {
     // Fresh database — schema.sql is always the CURRENT schema.
@@ -458,10 +459,39 @@ migrateDatabase();
  * after it has swapped a restored snapshot into place — the snapshot may come
  * from an older schema version, so migrate() must run exactly like on boot.
  */
-export function reopenDatabase() {
-  if (db.open) db.close();
-  db = openDatabase();
+export function reopenDatabase(): void {
+  if (nativeDatabase.open) nativeDatabase.close();
+  nativeDatabase = openDatabase();
   migrateDatabase();
+}
+
+function requireBackupOwnedDestination(destination: string): string {
+  const resolved = path.resolve(destination);
+  const name = path.basename(resolved);
+  if (
+    path.dirname(resolved) !== dataDir ||
+    !/^backup-(?:export|import)-.+\.db(?:\.sanitized)?$/.test(name)
+  ) {
+    throw new Error("backup database destination is outside the owned path policy");
+  }
+  try {
+    fs.lstatSync(resolved);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return resolved;
+    throw error;
+  }
+  throw new Error("backup database destination already exists");
+}
+
+/** Semantic live capability: create one physical snapshot at an owned new path. */
+export function vacuumLiveDatabaseInto(destination: string): void {
+  nativeDatabase.prepare("VACUUM INTO ?").run(requireBackupOwnedDestination(destination));
+}
+
+/** Semantic live capability used only immediately before the restore swap. */
+export function checkpointAndCloseLiveDatabaseForSwap(): void {
+  nativeDatabase.pragma("wal_checkpoint(TRUNCATE)");
+  nativeDatabase.close();
 }
 
 // Settings key for the Claude API key. Stored plaintext in the local

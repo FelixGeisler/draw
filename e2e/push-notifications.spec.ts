@@ -789,7 +789,7 @@ test.describe("Daily digest composed production journey", () => {
     } finally {
       assembly.digestScheduler?.stop();
       await new Promise<void>((resolve) => assembly.server.close(() => resolve()));
-      database.close();
+      dbModule.checkpointAndCloseLiveDatabaseForSwap();
       if (previousDataDir === undefined) delete process.env.DATA_DIR;
       else process.env.DATA_DIR = previousDataDir;
       fs.rmSync(root, { recursive: true, force: true });

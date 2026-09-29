@@ -398,3 +398,27 @@ revalidates through `createTaskWrite` inside the existing atomic consumed,
 versioned changeset. It still has no existing-task update operation. Strict
 schemas reject flat/resolved values and unknown child keys. Week, `/today`,
 daily digest and weekly Push do not consume fixed slots yet.
+
+== 6.9 Schema-v22 database facade and staged-restore preflight
+
+An ordinary route or service calls the stable frozen `SafeDatabase`. `prepare`
+first tokenizes application-owned SQL, strips comments, enforces one
+`SELECT`/`WITH`/`INSERT`/`UPDATE`/`DELETE`/`REPLACE` statement, and rejects
+DDL, pragma, attachment, transaction control, path/introspection helpers and
+protected future `week_*` names in every SQLite identifier quoting form and in
+decoded single-quoted compatibility tokens. Only then is the current native
+statement prepared. Returned rows/results and statement/transaction callables
+are copied wrappers with no `.database`, iterator, path or native capability.
+A restore therefore changes the private handle without invalidating the facade.
+
+For import, the staged file is opened with `trusted_schema=OFF`. Its real
+`user_version` selects a compiled v1–v22 manifest. The first schema read returns
+only bounded type/name/owner/root-page, `typeof(sql)` and SQL byte length.
+Unknown, missing, virtual, view, trigger, deceptive-shadow or oversized objects
+reject before any SQL text, integrity check, migration, virtual-module access or
+source row is read. SQL is then fetched one known object at a time under its
+compiled per-object cap and token-normalized hash. Only an exact preflight may
+continue through the existing version validator/migration, credential/claim
+sanitation, second physical rewrite, files-first/database-last swap and reopen.
+Failure removes owned staging artifacts and leaves live database/material bytes
+unchanged (ADR-26/75).

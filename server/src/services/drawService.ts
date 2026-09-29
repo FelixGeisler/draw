@@ -265,7 +265,7 @@ export function queryCandidates(
               (SELECT MAX(completed_at) FROM completions WHERE task_id = t.id) AS lastCompletedAt
        FROM tasks t WHERE ${conditions.join(" AND ")}`,
     )
-    .all(maxEffort, now.toISOString(), ...filter.params) as PoolCandidate[];
+    .all(maxEffort, now.toISOString(), ...filter.params) as unknown as PoolCandidate[];
   const inWindow = rows.filter((r) =>
     isWithinWindow(parseWindowDays(r.windowDays), r.windowStart, r.windowEnd, now),
   );
