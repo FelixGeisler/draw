@@ -1,5 +1,4 @@
-import type Database from "better-sqlite3";
-import { db } from "../db.js";
+import { db, type SafeDatabase } from "../db.js";
 import { addCalendarDays, validCalendarDate } from "./localDay.js";
 
 export type DailyOverviewItemType = "goal" | "task";
@@ -83,7 +82,7 @@ export const DAILY_DIGEST_TITLES_SQL = `WITH ${DAILY_OVERVIEW_ELIGIBLE_SQL},
 /** Read complete `/today` rows for an explicit local date. */
 export function dailyOverviewForDate(
   localDate: string,
-  database: Database.Database = db,
+  database: SafeDatabase = db,
 ): DailyOverviewGroups {
   if (!validCalendarDate(localDate)) throw new Error("invalid local date");
   const tomorrowDate = addCalendarDays(localDate, 1);
@@ -98,7 +97,7 @@ export function dailyOverviewForDate(
       date
     FROM eligible
     WHERE date <= ?
-    ORDER BY date ASC,type ASC,id ASC,created_at ASC`).all(upper) as DailyOverviewItem[];
+    ORDER BY date ASC,type ASC,id ASC,created_at ASC`).all(upper) as unknown as DailyOverviewItem[];
   for (const row of rows) {
     const group: DailyOverviewGroup | null = row.date < localDate
       ? "overdue"
@@ -113,14 +112,14 @@ export function dailyOverviewForDate(
 /** Complete title-free counts for a digest local date. */
 export function dailyDigestCountsForDate(
   localDate: string,
-  database: Database.Database = db,
+  database: SafeDatabase = db,
 ): DailyDigestCounts {
   if (!validCalendarDate(localDate)) throw new Error("invalid local date");
   const tomorrow = addCalendarDays(localDate, 1);
   const upper = tomorrow ?? localDate;
   const counts = database.prepare(DAILY_DIGEST_COUNTS_SQL).get(
     localDate, localDate, tomorrow, tomorrow, upper,
-  ) as DailyDigestCounts;
+  ) as unknown as DailyDigestCounts;
   for (const count of [counts.overdueCount, counts.todayCount, counts.tomorrowCount]) {
     if (!Number.isSafeInteger(count) || count < 0) throw new Error("invalid digest count");
   }
@@ -130,7 +129,7 @@ export function dailyDigestCountsForDate(
 /** Dereference no more than five titles after bounded identity selection. */
 export function dailyDigestTitlesForDate(
   localDate: string,
-  database: Database.Database = db,
+  database: SafeDatabase = db,
 ): string[] {
   if (!validCalendarDate(localDate)) throw new Error("invalid local date");
   const upper = addCalendarDays(localDate, 1) ?? localDate;
@@ -142,7 +141,7 @@ export function dailyDigestTitlesForDate(
 /** Complete counts plus the independently bounded title projection. */
 export function dailyDigestForDate(
   localDate: string,
-  database: Database.Database = db,
+  database: SafeDatabase = db,
 ): DailyDigestProjection {
   return {
     ...dailyDigestCountsForDate(localDate, database),

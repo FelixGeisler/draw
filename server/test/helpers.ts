@@ -1,5 +1,6 @@
 import type express from "express";
 import type { AppDependencies } from "../src/app.js";
+import { createFixtureDatabase } from "./databaseFixture.js";
 
 /**
  * The temp DATA_DIR is set by test/setup.ts before any import touches
@@ -24,10 +25,9 @@ export async function freshApp(dependencies: AppDependencies = {}): Promise<expr
   return app;
 }
 
-/** Direct DB access for seeding/asserting (same instance the app uses). */
+/** Direct fixture access through a separate, non-exported native connection. */
 export async function testDb() {
-  const { db } = await import("../src/db.js");
-  return db;
+  return createFixtureDatabase();
 }
 
 // ---------------------------------------------------------------------------

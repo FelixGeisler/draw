@@ -79,7 +79,7 @@ searchRouter.get("/", (req, res) => {
        ORDER BY CASE t.status WHEN 'open' THEN 0 ELSE 1 END,
                 t.created_at DESC, t.id DESC`,
     )
-    .all() as TaskHit[];
+    .all() as unknown as TaskHit[];
   const tasks = taskRows.filter((t) => fold(t.title).includes(needle)).slice(0, TASK_CAP);
 
   // Goals of ANY status are searchable — a dropped ambition is still a thing
@@ -93,7 +93,7 @@ searchRouter.get("/", (req, res) => {
        FROM goals g
        ORDER BY g.created_at DESC`,
     )
-    .all() as GoalHit[];
+    .all() as unknown as GoalHit[];
   const goals = goalRows.filter((g) => fold(g.title).includes(needle)).slice(0, GOAL_CAP);
 
   res.json({ tasks, goals });

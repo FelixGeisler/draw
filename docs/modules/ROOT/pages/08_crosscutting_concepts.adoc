@@ -402,7 +402,13 @@ Safety nets, both inside `DATA_DIR`:
 
 Every rejected import (foreign zip, corrupt or newer-than-v22 database,
 unsafe paths) is a `400` with the live data untouched. Versions through v22
-are accepted; older snapshots migrate in staging. The staged database must
+are accepted; older snapshots migrate in staging. Before integrity checking,
+migration, virtual-module access or source-data reads, a bounded scalar
+`sqlite_schema` pass selects the exact compiled inventory for the stamped
+version. Unknown/missing/oversized executable objects, views, triggers, virtual
+objects and deceptive shadows reject without fetching their SQL. Each known
+SQL definition is fetched only below its compiled byte cap and must match its
+token-normalized hash; imported SQL is never executed. The staged database must
 then match the complete runtime v18 contract: both owner columns, exact
 Gold/opening definitions and CHECK/unique/AUTOINCREMENT rules, all six
 immutable triggers (definition and rollback-only behavior), and the
@@ -469,3 +475,23 @@ A whole-`DATA_DIR` or volume copy is instead a privileged full-state snapshot:
 it may contain reusable Push authority, recovery markers, or credentials and
 is not equivalent to a Draw-created application backup. Use the application
 backup when credential-free portability is required (ADR-72).
+
+== 8.10 SQLite capability boundary
+
+Only `db.ts` runtime-imports the native binding for the live database. It owns
+the path and current handle and exports one frozen `SafeDatabase` with copied
+`run/get/all` values and wrapped deferred/immediate/exclusive transactions.
+The SQL lexical gate excludes schema mutation, pragma, attachment, explicit
+transaction control, file helpers, native introspection and the reserved
+schema-v23 Week projection namespace. Request values remain bound parameters;
+dynamic sort/column fragments remain closed internal allowlists. Production
+assembly, Push, digest, daily overview, fixed-slot and ordinary route/service
+seams consume this facade, not a native type.
+
+`backupService` is the sole second runtime binding importer. It may open only
+identity-checked, non-live staged/snapshot/rewrite files and receives semantic
+live capabilities for a new-path `VACUUM INTO`, checkpoint-and-close and
+reopen. Migration/schema validators remain private native consumers. This
+implements ADR-75 Phase 1 while `CURRENT_VERSION` remains 22: there is no
+schema-v23 object, interval projection/maintenance, Week route/client/worker or
+Push behavior in this phase.

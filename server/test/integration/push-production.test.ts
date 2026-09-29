@@ -163,15 +163,15 @@ describe("real production Push assembly", () => {
     expect(onlyScheduler).not.toBeNull();
     expect(callbacks).toHaveLength(1);
     expect(assembly.push.snapshot().available).toBe(false);
-    const prepare = vi.spyOn(db, "prepare");
+    // The production facade is intentionally frozen, so unavailable-path
+    // evidence is behavioral rather than a method spy: no claim can appear.
     await onlyScheduler!.runNow();
-    expect(prepare).not.toHaveBeenCalled();
-    prepare.mockRestore();
+    expect(db.prepare("SELECT COUNT(*) AS n FROM daily_digest_claims").get()).toEqual({ n: 0 });
 
     assembly.push.beginRestore();
-    const closedHandle = db;
+    const stableFacade = db;
     reopenDatabase();
-    expect(closedHandle.open).toBe(false);
+    expect(db).toBe(stableFacade);
     assembly.push.completeRestore();
     expect(assembly.push.snapshot().available).toBe(true);
     expect(assembly.digestScheduler).toBe(onlyScheduler);

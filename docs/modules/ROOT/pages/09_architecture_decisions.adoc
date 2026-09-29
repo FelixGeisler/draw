@@ -4510,3 +4510,65 @@ ADR-40 owns the task form/list language; ADR-50 remains the complete API access
 gate; ADR-54 requires shared write invariants; ADR-57 keeps deck scope
 orthogonal; ADR-67 Push is not engaged; ADR-72/ADR-73 own Push timezone and
 delivery policies and still do not consume fixed slots after Phase 1B.
+
+== ADR-75: Compact Week interval access foundation behind a safe SQLite capability boundary
+
+*Status:* Phase 1 implemented by issue #363; Phase 2 (schema v23 interval
+projection) is planned and is not present in this revision.
+
+*Context:* A later Week read needs complete historical interval access without a
+lifetime cutoff. The selected compact design uses a rebuildable RTree projection,
+but activating it before ordinary SQL and restore boundaries are hardened would
+let application code remove its integrity triggers, recover native/path
+capabilities, or let crafted staged schema execute before admission. The accepted
+issue therefore orders two independently deployable phases. This record reports
+that boundary; it does not redefine ADR-26 restore atomicity, ADR-50 optional
+authentication, ADR-73 digest behavior or ADR-74 fixed-slot behavior.
+
+*Phase 1 decision:* `db.ts` exclusively owns the live native handle and exports
+one stable frozen `SafeDatabase`: `prepare().run/get/all` and wrapped
+transactions only. Returned records and wrappers are newly created; no native
+statement/transaction/database object, `.database`, iterator, path, pragma,
+`exec`, registration, extension, close or reopen capability crosses the closure.
+Each operation resolves the current handle after restore. A deterministic SQL
+gate allows one application-owned `SELECT`, `WITH`, `INSERT`, `UPDATE`, `DELETE`
+or `REPLACE` statement, with request data still bound. It rejects DDL, pragma,
+attach/detach, vacuum, transaction-control SQL, introspection/file/UDF helpers,
+and protected future Week table/RTree/shadow names across unquoted, double,
+backtick, bracket and SQLite-compatible decoded single-quoted spellings. Ordinary
+nonprotected literals remain valid.
+
+Backup code receives closed semantic live operations for a new owned-path
+`VACUUM INTO`, checkpoint/close and reopen. Its own native opener rejects the
+live path or identity. Before any staged integrity check, migration,
+virtual-module operation or source read, it reads bounded scalar schema metadata
+for the real stamped v1–v22 version. Unknown/missing objects and every unapproved
+view, trigger, virtual/shadow or oversized definition reject before SQL fetch.
+Known SQL is fetched individually below its generated LF/CRLF byte cap and must
+match one of the token-normalized hashes generated from checked-in fresh,
+supported legacy and compiled migration definitions. Imported SQL is never
+executed. Exact input validators, migrations, Push/API-key sanitation, second
+physical rewrite, last-connection proof and files-first/database-last swap then
+remain ADR-26's existing path.
+
+*Phase 1 consequences:* `CURRENT_VERSION` remains 22 and public auth, backup,
+export/restore, task/goal/Draw/fixed-slot/timer/recurrence, `/today`, digest and
+Push contracts do not change. Production runtime imports of `better-sqlite3`
+are limited to `db.ts` and staged backup code; explicit production/Push/digest/
+daily-overview/fixed-slot seams use `SafeDatabase`. Tests provide a separate
+fixture adapter and Windows/Linux lexical/native canaries. Rejections preserve
+live/source bytes and owned stage cleanup.
+
+*Planned Phase 2:* Starting only from merged Phase 1, schema v23 will add the
+accepted exact `week_access_state`, `week_interval_access` and `rtree_i32`
+objects, source/companion triggers, semantic maintenance, rebuild and v23 restore
+integration. Until then there is no `week_*` schema object, parser, projection,
+route, client, worker, cursor or notification consumer. A later ADR-75 update
+will mark only that access foundation implemented; Week API/client/worker work
+remains separately governed.
+
+*Cross-links:* ADR-26 owns physical backup/restore and swap atomicity; ADR-50
+keeps optional authentication/passwordless behavior unchanged; ADR-73 keeps the
+existing daily digest and Push claims unchanged; ADR-74 remains authoritative
+for fixed-slot facts and lifecycle; arc42 sections 5, 6, 8, 10 and 12 record the
+implemented Phase 1 boundary and evidence.

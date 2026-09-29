@@ -214,7 +214,7 @@ export function computeActivity(from: string, to: string): ActivityDay[] {
       `SELECT e.task_id AS taskId, e.started_at AS startedAt, ${MINUTES_EXPR} AS minutes
        FROM time_entries e WHERE e.started_at >= ? AND e.started_at < ?`,
     )
-    .all(lo, hi) as ActivityEntryRow[];
+    .all(lo, hi) as unknown as ActivityEntryRow[];
 
   // Drawn-ness reads was_drawn AND NOT was_warmup, matching the gamification
   // surface (ADR-30): a warm-up deal earns no History-calendar rarity or 🃏 either.
@@ -225,7 +225,7 @@ export function computeActivity(from: string, to: string): ActivityDay[] {
               (co.was_drawn AND NOT co.was_warmup) AS wasDrawn
        FROM completions co WHERE co.completed_at >= ? AND co.completed_at < ?`,
     )
-    .all(lo, hi) as ActivityCompletionRow[];
+    .all(lo, hi) as unknown as ActivityCompletionRow[];
 
   const tasks = db
     .prepare(
@@ -238,7 +238,7 @@ export function computeActivity(from: string, to: string): ActivityDay[] {
          SELECT task_id FROM completions WHERE completed_at >= ? AND completed_at < ?
        )`,
     )
-    .all(lo, hi, lo, hi) as ActivityTaskMeta[];
+    .all(lo, hi, lo, hi) as unknown as ActivityTaskMeta[];
 
   return buildActivityDays(entries, completions, tasks, from, to);
 }

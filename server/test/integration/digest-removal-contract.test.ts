@@ -35,6 +35,7 @@ describe("atomic deadline-to-digest removal contract", () => {
   it("limits legacy persistence names to migration validation and sanitation boundaries", () => {
     expect(filesContaining(runtime, /deadline_reminder_claims/)).toEqual([
       "server/src/db.ts",
+      "server/src/restoreSchemaManifest.ts",
       "server/src/schemaV20.ts",
       "server/src/schemaV21.ts",
       "server/src/services/backupService.ts",

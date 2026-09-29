@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { SafeDatabase } from "../safeDatabase.js";
 import { z } from "zod";
 import {
   SCHEDULE_TIME_ZONE_SET,
@@ -325,7 +325,7 @@ export function validateStoredFixedSlot(
 }
 
 export function applyFixedSlot(
-  database: Database.Database,
+  database: SafeDatabase,
   taskId: number,
   parsed: ParsedFixedSlot,
 ): void {
@@ -355,7 +355,7 @@ export function finalHasFixedSlot(current: boolean, parsed: ParsedFixedSlot): bo
 
 /** Authoritative stored-state invariant check, called before transaction commit. */
 export function taskHasFixedRecurrenceConflict(
-  database: Database.Database,
+  database: SafeDatabase,
   taskId: number,
 ): boolean {
   return Boolean(

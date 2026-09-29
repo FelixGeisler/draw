@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { stripV22Schema } from "../schemaFixtures.js";
+import { createFixtureDatabase } from "../databaseFixture.js";
 
 const schemaPath = fileURLToPath(new URL("../../src/schema.sql", import.meta.url));
 const currentSchema = stripV22Schema(fs.readFileSync(schemaPath, "utf-8"));
@@ -69,12 +70,11 @@ beforeAll(async () => {
   legacy.pragma("user_version = 17");
   legacy.close();
 
-  ({ db: database } = await import("../../src/db.js"));
+  await import("../../src/db.js");
+  database = createFixtureDatabase();
 });
 
-afterAll(() => {
-  // Imported module owns the main test handle; Vitest tears it down with the process.
-});
+afterAll(() => database.close());
 
 describe("v17 → v18 migration", () => {
   it("is the exact complete schema contract and applies owner defaults without rewrites", async () => {

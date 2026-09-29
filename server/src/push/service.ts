@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import net from "node:net";
-import type Database from "better-sqlite3";
+import type { SafeDatabase } from "../safeDatabase.js";
 import type { Request } from "express";
 import webPush, { type RequestDetails, type RequestOptions, type PushSubscription } from "web-push";
 import { VAPID_SUBJECT, type PushDependency as PushLifecycleDependency, type PushLifecycle, type PushSnapshot } from "./authority.js";
@@ -169,7 +169,7 @@ function unavailable(snapshot: PushSnapshot): PushApiError {
 }
 
 export interface PushServiceOptions {
-  database: Database.Database | (() => Database.Database);
+  database: SafeDatabase | (() => SafeDatabase);
   lifecycle: PushLifecycle;
   topology: PushTopologyOptions;
   admission?: PushAdmission;
@@ -230,7 +230,7 @@ export class PushService implements PushServiceDependency {
       webPush.generateRequestDetails(subscription, payload, requestOptions));
   }
 
-  private get database(): Database.Database {
+  private get database(): SafeDatabase {
     return typeof this.options.database === "function" ? this.options.database() : this.options.database;
   }
 
@@ -252,7 +252,7 @@ export class PushService implements PushServiceDependency {
     const preferences = this.preferences(database);
     const rows = database.prepare(
       "SELECT id, created_at, last_seen_at FROM push_subscriptions ORDER BY created_at, id",
-    ).all() as DeviceRow[];
+    ).all() as unknown as DeviceRow[];
     return {
       available: snapshot.available,
       reason: snapshot.reason,
@@ -263,7 +263,7 @@ export class PushService implements PushServiceDependency {
     };
   }
 
-  private preferences(database: Database.Database = this.database): PushPreferences {
+  private preferences(database: SafeDatabase = this.database): PushPreferences {
     const rows = database.prepare(
       `SELECT key, value FROM settings WHERE key IN
        ('push_hide_details', 'push_send_time', 'push_timezone', 'push_quiet_start', 'push_quiet_end')`,

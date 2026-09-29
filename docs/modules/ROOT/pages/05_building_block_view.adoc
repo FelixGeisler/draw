@@ -154,6 +154,14 @@ server/src/
 |Validate the frozen schedule-zone identifier policy, resolve local wall minutes, and atomically set/replace/clear one slot
 |Gap minutes reject; folds choose the earlier instant; UTC years stay `0001`–`9999`; final fixed-slot plus recurrence state is forbidden
 
+|`db` + `SafeDatabase`
+|Own the live native SQLite handle and expose only copied `prepare().run/get/all` values plus wrapped transactions
+|Ordinary production code cannot recover a native handle/path, run DDL/pragma/attachment/transaction SQL, or access protected future projection/introspection names; wrappers resolve the current handle after restore
+
+|`backupService` + restore preflight
+|Own staged SQLite handles and semantic live snapshot/checkpoint/close/reopen capabilities
+|A bounded exact v1–v22 `sqlite_schema` inventory precedes integrity checks, migration, virtual-module access and source reads; imported SQL is never executed
+
 |`gamificationService`
 |Completion side-effects
 |XP/level/streak always derived from `completions`; freeze tokens are an append-only earn log, consumption derived at read time (ADR-28)
