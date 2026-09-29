@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import zlib from "node:zlib";
 
 /** Checked-in real fresh schema boundaries used by staged-restore tests. */
@@ -5,6 +7,9 @@ const ARCHIVE = "H4sIAAAAAAAACu1d63IbN5p9FaxcWyJrSF0t27HWqaKltq2JLGkkOXF2VcUBu0E
 const SCHEMAS = JSON.parse(zlib.gunzipSync(Buffer.from(ARCHIVE, "base64")).toString("utf8")) as Record<string, string>;
 
 export function historicalSchema(version: number): string {
+  if (version === 23) {
+    return fs.readFileSync(fileURLToPath(new URL("../src/schema.sql", import.meta.url)), "utf8");
+  }
   const sql = SCHEMAS[String(version)];
   if (!sql) throw new Error(`missing historical schema v${version}`);
   return sql;

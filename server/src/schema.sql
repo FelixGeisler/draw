@@ -345,3 +345,119 @@ INSERT INTO settings (key, value) VALUES
   ('push_timezone', NULL),
   ('push_quiet_start', NULL),
   ('push_quiet_end', NULL);
+
+-- Compact Week interval-access foundation (#363, ADR-75). Authoritative facts
+-- remain in task_fixed_slots/time_entries; this projection contains identifiers
+-- and interval numbers only and has no public Week consumer in schema v23.
+CREATE TABLE week_access_state (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  projection_format INTEGER NOT NULL CHECK (projection_format = 1),
+  ready INTEGER NOT NULL CHECK (ready IN (0, 1)),
+  source_generation INTEGER NOT NULL CHECK (source_generation BETWEEN 0 AND 9007199254740991),
+  built_generation INTEGER NOT NULL CHECK (built_generation BETWEEN 0 AND 9007199254740991),
+  CHECK (built_generation <= source_generation),
+  CHECK (ready = 0 OR built_generation = source_generation)
+) WITHOUT ROWID;
+
+INSERT INTO week_access_state(singleton, projection_format, ready, source_generation, built_generation)
+VALUES (1, 1, 0, 0, 0);
+
+CREATE TABLE week_interval_access (
+  index_id INTEGER PRIMARY KEY CHECK (typeof(index_id) = 'integer' AND index_id BETWEEN 1 AND 9007199254740991),
+  source_kind INTEGER NOT NULL CHECK (source_kind IN (0, 2)),
+  source_id INTEGER NOT NULL CHECK (typeof(source_id) = 'integer' AND source_id BETWEEN 1 AND 9007199254740991),
+  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE
+    CHECK (typeof(task_id) = 'integer' AND task_id BETWEEN 1 AND 9007199254740991),
+  start_ms INTEGER NOT NULL
+    CHECK (typeof(start_ms) = 'integer' AND start_ms BETWEEN -62135596800000 AND 253402300799999),
+  end_ms INTEGER
+    CHECK (end_ms IS NULL OR (typeof(end_ms) = 'integer' AND end_ms BETWEEN -62135596800000 AND 253402300799999 AND end_ms > start_ms)),
+  start_day INTEGER NOT NULL
+    CHECK (typeof(start_day) = 'integer' AND start_day BETWEEN 0 AND 3652058),
+  end_day INTEGER NOT NULL
+    CHECK (typeof(end_day) = 'integer' AND end_day BETWEEN 0 AND 3652058),
+  CHECK ((source_kind = 0 AND source_id = task_id AND end_ms IS NOT NULL) OR source_kind = 2),
+  CHECK (start_day = (start_ms + 62135596800000) / 86400000),
+  CHECK ((end_ms IS NULL AND source_kind = 2 AND end_day = 3652058) OR
+         (end_ms IS NOT NULL AND end_day = (end_ms - 1 + 62135596800000) / 86400000)),
+  CHECK (end_day >= start_day)
+);
+
+CREATE UNIQUE INDEX week_interval_access_source_uq
+  ON week_interval_access(source_kind, source_id);
+
+CREATE VIRTUAL TABLE week_interval_rtree
+  USING rtree_i32(index_id, start_day, end_day);
+
+CREATE TRIGGER week_task_fixed_slots_ai_dirty
+AFTER INSERT ON task_fixed_slots
+BEGIN
+  UPDATE week_access_state
+  SET source_generation = source_generation + 1, ready = 0
+  WHERE singleton = 1;
+END;
+
+CREATE TRIGGER week_task_fixed_slots_au_dirty
+AFTER UPDATE OF task_id, starts_at, ends_at ON task_fixed_slots
+BEGIN
+  UPDATE week_access_state
+  SET source_generation = source_generation + 1, ready = 0
+  WHERE singleton = 1;
+END;
+
+CREATE TRIGGER week_task_fixed_slots_ad_dirty_delete
+AFTER DELETE ON task_fixed_slots
+BEGIN
+  UPDATE week_access_state
+  SET source_generation = source_generation + 1, ready = 0
+  WHERE singleton = 1;
+  DELETE FROM week_interval_access
+  WHERE source_kind = 0 AND source_id = OLD.task_id;
+END;
+
+CREATE TRIGGER week_time_entries_ai_dirty
+AFTER INSERT ON time_entries
+BEGIN
+  UPDATE week_access_state
+  SET source_generation = source_generation + 1, ready = 0
+  WHERE singleton = 1;
+END;
+
+CREATE TRIGGER week_time_entries_au_dirty
+AFTER UPDATE OF id, task_id, started_at, ended_at ON time_entries
+BEGIN
+  UPDATE week_access_state
+  SET source_generation = source_generation + 1, ready = 0
+  WHERE singleton = 1;
+END;
+
+CREATE TRIGGER week_time_entries_ad_dirty_delete
+AFTER DELETE ON time_entries
+BEGIN
+  UPDATE week_access_state
+  SET source_generation = source_generation + 1, ready = 0
+  WHERE singleton = 1;
+  DELETE FROM week_interval_access
+  WHERE source_kind = 2 AND source_id = OLD.id;
+END;
+
+CREATE TRIGGER week_interval_access_ai_rtree
+AFTER INSERT ON week_interval_access
+BEGIN
+  INSERT INTO week_interval_rtree(index_id, start_day, end_day)
+  VALUES (NEW.index_id, NEW.start_day, NEW.end_day);
+END;
+
+CREATE TRIGGER week_interval_access_au_rtree
+AFTER UPDATE OF index_id, start_day, end_day ON week_interval_access
+BEGIN
+  DELETE FROM week_interval_rtree WHERE index_id = OLD.index_id;
+  INSERT INTO week_interval_rtree(index_id, start_day, end_day)
+  VALUES (NEW.index_id, NEW.start_day, NEW.end_day);
+END;
+
+CREATE TRIGGER week_interval_access_ad_rtree
+AFTER DELETE ON week_interval_access
+BEGIN
+  DELETE FROM week_interval_rtree WHERE index_id = OLD.index_id;
+END;

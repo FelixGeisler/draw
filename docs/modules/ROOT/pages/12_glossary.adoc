@@ -170,10 +170,13 @@ distinct from the saved Push-timezone policy.
 |One derived objective per LOCAL day (#231/#264, ADR-63): the day string hashes into an append-only pool; progress derives from the day's rows (`localDayBounds`); completing it atomically pays same-ref +50 XP and +20 Gold with the triggering completion or timer stop, never by a GET. `paid` remains XP-row truth: XP-only is immutable legacy, both rows are paid, and Gold-only is displayed as inconsistent and aborts a payout attempt without repair
 
 |*SafeDatabase*
-|The stable frozen schema-v22 facade owned by `db.ts` (ADR-75 Phase 1): copied `prepare().run/get/all` values and wrapped transactions only. It resolves the current private native handle after restore and exposes no native statement/database, path, pragma/DDL/attachment, iterator, registration, close or reopen capability
+|The stable frozen database facade owned by `db.ts` (ADR-75 Phase 1): copied `prepare().run/get/all` values and wrapped transactions only. It resolves the current private native handle after restore and exposes no native statement/database, path, pragma/DDL/attachment, iterator, registration, close or reopen capability
+
+|*Week interval-access projection*
+|Schema v23's rebuildable, content-free companion: one `week_interval_access` numeric row and one `rtree_i32` row per eligible fixed slot or tracked interval, guarded by `week_access_state` generations/readiness and nine exact maintenance triggers. It has no public Week consumer yet (ADR-75 Phase 2)
 
 |*Staged restore preflight*
-|The bounded v1–v22 admission step before integrity checks, migration, virtual access or source reads: scalar `sqlite_schema` inventory first, then one known SQL definition below its compiled byte cap and token-normalized hash at a time. Unknown executable/view/virtual/shadow inventory and altered/missing/oversized definitions reject without executing imported SQL or swapping live data
+|The bounded v1–v23 admission step before integrity checks, migration, virtual access or source reads: scalar `sqlite_schema` inventory first, then one known SQL definition below its compiled byte cap and token-normalized hash at a time. Unknown executable/view/virtual/shadow inventory and altered/missing/oversized definitions reject without executing imported SQL or swapping live data
 
 |*Weekly run report*
 |The "This week" recap card atop Stats (#233, ADR-65): completions, minutes, XP, minted trophy rarities, best day, and deltas against the previous seven days — folded client-side (`lib/weeklyReport.ts`) from the activity payload over Monday-first LOCAL weeks; no new API, no stored aggregates, hidden when the week is empty

@@ -160,7 +160,7 @@ server/src/
 
 |`backupService` + restore preflight
 |Own staged SQLite handles and semantic live snapshot/checkpoint/close/reopen capabilities
-|A bounded exact v1–v22 `sqlite_schema` inventory precedes integrity checks, migration, virtual-module access and source reads; imported SQL is never executed
+|A bounded exact v1–v23 `sqlite_schema` inventory precedes integrity checks, migration, virtual-module access and source reads; imported SQL is never executed
 
 |`gamificationService`
 |Completion side-effects
@@ -269,13 +269,23 @@ categories 1─n tasks n─1 goals 1─n materials
                 │ 1─n time_entries
                 │ 1─n completions        achievements (unlocked keys)
                 └─ self-reference: parent_id (breakdown tree, depth 1)
-                                         settings (key/value)
+ task_fixed_slots ─┐                    settings (key/value)
+ time_entries ─────┴─> week_interval_access 1─1 week_interval_rtree
+                              │
+                              └─ readiness/generation: week_access_state
 ....
 
 `task_fixed_slots` stores one optional planned interval as canonical UTC start/end
 plus the exact accepted entry timezone. It is independent from `due_date` and
 `time_entries`; its presence is exposed as `hasFixedSlot`/`fixedSlot` and excludes
 the task from Draw for the row's whole lifetime.
+
+Schema v23's `week_interval_access` is a disposable numeric companion for every
+eligible fixed slot and tracked interval; `week_interval_rtree` indexes its
+inclusive UTC-day bounds and contains one row with the same `index_id`.
+`week_access_state` records source/built generations and readiness. The source
+tables remain authoritative, titles/descriptions never enter the projection,
+and no public Week reader consumes it yet (ADR-75).
 
 Central semantics: completing a *recurring* task keeps it `open` and pushes
 `due_date` forward — that date is the task's *next occurrence*, so the card is

@@ -57,7 +57,7 @@ function mutateCurrentArchive(name: string, mutate: (database: Database.Database
 }
 
 describe("bounded staged restore schema preflight", () => {
-  it("admits real fresh v1 and every checked-in historical boundary through v22", async () => {
+  it("admits real fresh v1 and every checked-in historical boundary through v23", async () => {
     for (let version = 1; version <= CURRENT_VERSION; version += 1) {
       const response = await request(app)
         .post("/api/backup/import")
@@ -70,6 +70,34 @@ describe("bounded staged restore schema preflight", () => {
     }
   }, 30_000);
 
+  it("rederives stale, missing, and moved v23 logical projection rows after exact schema admission", async () => {
+    const task = (await request(app).post("/api/tasks").send({ title: "restore projection", categoryId: 1 }).expect(201)).body;
+    await request(app).post(`/api/tasks/${task.id}/timer/start`).expect(200);
+    const cases: Array<[string, (database: Database.Database) => void]> = [
+      ["missing-derived", (database) => database.prepare("DELETE FROM week_interval_access").run()],
+      ["stale-derived", (database) => database.prepare("UPDATE week_interval_access SET start_ms=start_ms+1").run()],
+      ["moved-rtree", (database) => database.prepare("UPDATE week_interval_rtree SET start_day=start_day+1,end_day=end_day+1").run()],
+    ];
+    for (const [name, mutate] of cases) {
+      const response = await request(app)
+        .post("/api/backup/import")
+        .attach("file", mutateCurrentArchive(name, mutate), `${name}.zip`);
+      expect(response.status, `${name}: ${JSON.stringify(response.body)}`).toBe(200);
+      const database = await testDb();
+      const source = database.prepare("SELECT started_at AS startedAt FROM time_entries WHERE task_id=?").get(task.id) as { startedAt: string };
+      const derived = database.prepare(
+        "SELECT start_ms AS startMs FROM week_interval_access WHERE source_kind=2 AND task_id=?",
+      ).get(task.id) as { startMs: number };
+      expect(derived.startMs, name).toBe(Date.parse(source.startedAt));
+      expect(database.prepare(`SELECT COUNT(*) AS n FROM week_interval_access a
+        JOIN week_interval_rtree r ON r.index_id=a.index_id
+        WHERE a.start_day=r.start_day AND a.end_day=r.end_day`).get()).toEqual(
+        database.prepare("SELECT COUNT(*) AS n FROM week_interval_access").get(),
+      );
+      database.close();
+    }
+  });
+
   it("rejects unknown executable, virtual, shadow-like and altered known inventory without swapping live data", async () => {
     await request(app).post("/api/tasks").send({ title: "preflight live canary", categoryId: 1 }).expect(201);
     const cases: Array<[string, (database: Database.Database) => void]> = [
@@ -78,10 +106,22 @@ describe("bounded staged restore schema preflight", () => {
         "CREATE TRIGGER unknown_trigger AFTER INSERT ON tasks BEGIN DELETE FROM settings; END",
       )],
       ["virtual", (database) => database.exec("CREATE VIRTUAL TABLE unknown_rtree USING rtree(id,min,max)")],
-      ["deceptive-shadow", (database) => database.exec(
-        "CREATE TABLE week_interval_rtree_node(nodeno INTEGER PRIMARY KEY,data)",
-      )],
+      ["deceptive-shadow", (database) => {
+        database.exec("DROP TABLE week_interval_rtree");
+        database.exec("CREATE TABLE week_interval_rtree_node(nodeno INTEGER PRIMARY KEY,data)");
+      }],
       ["missing-trigger", (database) => database.exec("DROP TRIGGER tasks_stamp_sort_order")],
+      ["missing-week-trigger", (database) => database.exec("DROP TRIGGER week_time_entries_ai_dirty")],
+      ["altered-week-trigger", (database) => {
+        database.exec("DROP TRIGGER week_time_entries_ai_dirty");
+        database.exec(`CREATE TRIGGER week_time_entries_ai_dirty AFTER INSERT ON time_entries
+          BEGIN UPDATE week_access_state SET ready=0 WHERE singleton=1; END`);
+      }],
+      ["mismatched-rtree", (database) => {
+        database.exec("DROP TABLE week_interval_rtree");
+        database.exec("CREATE VIRTUAL TABLE week_interval_rtree USING rtree(index_id,start_day,end_day)");
+      }],
+      ["extra-shadow", (database) => database.exec("CREATE TABLE week_interval_rtree_extra_node(id INTEGER)")],
       ["oversized-known-trigger", (database) => {
         database.exec("DROP TRIGGER tasks_stamp_sort_order");
         database.exec(`CREATE TRIGGER tasks_stamp_sort_order AFTER INSERT ON tasks

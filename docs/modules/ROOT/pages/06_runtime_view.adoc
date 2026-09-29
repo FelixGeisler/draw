@@ -399,7 +399,7 @@ versioned changeset. It still has no existing-task update operation. Strict
 schemas reject flat/resolved values and unknown child keys. Week, `/today`,
 daily digest and weekly Push do not consume fixed slots yet.
 
-== 6.9 Schema-v22 database facade and staged-restore preflight
+== 6.9 Safe database facade and staged-restore preflight
 
 An ordinary route or service calls the stable frozen `SafeDatabase`. `prepare`
 first tokenizes application-owned SQL, strips comments, enforces one
@@ -412,7 +412,7 @@ are copied wrappers with no `.database`, iterator, path or native capability.
 A restore therefore changes the private handle without invalidating the facade.
 
 For import, the staged file is opened with `trusted_schema=OFF`. Its real
-`user_version` selects a compiled v1–v22 manifest. The first schema read returns
+`user_version` selects a compiled v1–v23 manifest. The first schema read returns
 only bounded type/name/owner/root-page, `typeof(sql)` and SQL byte length.
 Unknown, missing, virtual, view, trigger, deceptive-shadow or oversized objects
 reject before any SQL text, integrity check, migration, virtual-module access or
@@ -422,3 +422,24 @@ continue through the existing version validator/migration, credential/claim
 sanitation, second physical rewrite, files-first/database-last swap and reopen.
 Failure removes owned staging artifacts and leaves live database/material bytes
 unchanged (ADR-26/75).
+
+== 6.10 Maintaining and rebuilding schema-v23 Week access
+
+Six source triggers mark `week_access_state` dirty for every fixed-slot or timer
+insert/update/delete; deletes also remove the source identity's companion. Three
+companion triggers mirror insert/update/delete into the `rtree_i32` table. An
+owned write captures whether the projection was clean before source mutation,
+uses `UPDATE ... RETURNING id` for every affected timer identity, reprojects
+those fixed/tracked identities through the private interval capability, and
+only then equalizes generations. A dirty-at-entry transaction updates affected
+rows but cannot claim global readiness. Any failure rolls source, companion,
+RTree and state back together.
+
+Boot first proves exact v23 DDL/inventory, then marks dirty, increments the
+bounded generation, keyset-rebuilds from source and validates source/companion/
+RTree equivalence before ready. SQL storage-class and 24-byte guards run before
+any timestamp reaches the strict parser. A v23 import must first pass bounded
+exact schema admission; its derived objects/data are then discarded, recreated
+from compiled SQL and rebuilt before sanitation and the existing physical
+rewrite/swap. No Week route, worker, client, cursor, `/today`, digest or Push
+consumer is introduced.

@@ -12,6 +12,18 @@ import {
 } from "./schemaV20.js";
 import { DAILY_DIGEST_CLAIMS_SQL, validateV21Contract } from "./schemaV21.js";
 import { TASK_FIXED_SLOTS_SQL, V22_INDEX_SQL, validateV22Contract } from "./schemaV22.js";
+import {
+  beginWeekMutation,
+  buildWeekProjection,
+  createWeekSchema,
+  finishWeekMutation,
+  maintainWeekFixed,
+  maintainWeekTracked,
+  validateV23Contract,
+  validateV23Projection,
+  validateV23Structure,
+  type WeekMutationToken,
+} from "./schemaV23.js";
 import { createSafeDatabase } from "./safeDatabase.js";
 export type { SafeDatabase, SafeStatement, SafeTransaction } from "./safeDatabase.js";
 
@@ -39,14 +51,41 @@ function openDatabase(): Database.Database {
 let nativeDatabase = openDatabase();
 export const db = createSafeDatabase(() => nativeDatabase);
 
-export const CURRENT_VERSION = 22;
+export const CURRENT_VERSION = 23;
 
-export function migrateDatabase(database: Database.Database = nativeDatabase) {
+export type WeekMigrationStage = "create" | "build" | "validate" | "ready" | "stamp";
+export interface MigrationOptions {
+  /** Test-only deterministic fault point; a throw proves the enclosing migration rolls back. */
+  afterWeekStage?: (stage: WeekMigrationStage) => void;
+}
+
+export function migrateDatabase(
+  database: Database.Database = nativeDatabase,
+  options: MigrationOptions = {},
+) {
   const version = database.pragma("user_version", { simple: true }) as number;
+  let activatedV23 = false;
   if (version < 1) {
-    // Fresh database — schema.sql is always the CURRENT schema.
+    // Fresh database — schema.sql is always the CURRENT schema. Creation,
+    // projection validation/readiness, and the stamp are one transaction.
     const schema = fs.readFileSync(path.join(here, "schema.sql"), "utf-8");
-    database.exec(schema);
+    database.transaction(() => {
+      database.exec(schema);
+      options.afterWeekStage?.("create");
+      buildWeekProjection(database);
+      options.afterWeekStage?.("build");
+      validateV23Structure(database, false);
+      validateV23Projection(database, true);
+      options.afterWeekStage?.("validate");
+      database.prepare(
+        "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
+      ).run();
+      options.afterWeekStage?.("ready");
+      validateV23Contract(database, { requireVersion: false });
+      database.pragma("user_version = 23");
+      options.afterWeekStage?.("stamp");
+    })();
+    activatedV23 = true;
   } else {
     if (version < 2) {
       database.exec("ALTER TABLE materials ADD COLUMN stored_name TEXT");
@@ -441,14 +480,51 @@ export function migrateDatabase(database: Database.Database = nativeDatabase) {
         database.pragma("user_version = 22");
       })();
     }
+    if (version < 23) {
+      // Compact Week access (#363, ADR-75): validate v22 before mutation and
+      // stamp only after exact DDL, keyset build, full data checks and ready.
+      validateV22Contract(database);
+      database.transaction(() => {
+        createWeekSchema(database);
+        options.afterWeekStage?.("create");
+        buildWeekProjection(database);
+        options.afterWeekStage?.("build");
+        validateV23Structure(database, false);
+        validateV23Projection(database, true);
+        options.afterWeekStage?.("validate");
+        database.prepare(
+          "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
+        ).run();
+        options.afterWeekStage?.("ready");
+        validateV23Contract(database, { requireVersion: false });
+        database.pragma("user_version = 23");
+        options.afterWeekStage?.("stamp");
+      })();
+      activatedV23 = true;
+    }
   }
-  if (version < 1) database.pragma(`user_version = ${CURRENT_VERSION}`);
 
-  // Startup, fresh creation, every migration, and a reopened restore all use
-  // the same complete v22 runtime contract. Historical validators remain
-  // independent input boundaries only.
+  // A normal v23 boot distrusts logical derived rows. Exact schema is proved
+  // first; then one owned transaction marks dirty, advances generation,
+  // keyset-rebuilds, validates, and declares readiness. Fresh/migrated files
+  // already completed that sequence above and must retain generation zero.
+  if (!activatedV23) {
+    validateV23Structure(database);
+    database.transaction(() => {
+      database.prepare(
+        "UPDATE week_access_state SET source_generation=source_generation+1,ready=0 WHERE singleton=1",
+      ).run();
+      buildWeekProjection(database);
+      validateV23Projection(database, true);
+      database.prepare(
+        "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
+      ).run();
+      validateV23Contract(database);
+    })();
+  }
+
   validateV18Contract(database);
-  validateV22Contract(database);
+  validateV23Contract(database);
 }
 
 migrateDatabase();
@@ -492,6 +568,23 @@ export function vacuumLiveDatabaseInto(destination: string): void {
 export function checkpointAndCloseLiveDatabaseForSwap(): void {
   nativeDatabase.pragma("wal_checkpoint(TRUNCATE)");
   nativeDatabase.close();
+}
+
+/** Opaque semantic capability for one owned source-write transaction. */
+export function beginWeekIntervalMutation(): WeekMutationToken {
+  return beginWeekMutation(nativeDatabase);
+}
+export function maintainFixedIntervalWrite(taskId: number, write: () => void): void {
+  const token = beginWeekMutation(nativeDatabase);
+  write();
+  maintainWeekFixed(nativeDatabase, token, taskId);
+  finishWeekMutation(nativeDatabase, token);
+}
+export function reprojectTrackedIntervals(token: WeekMutationToken, entryIds: readonly number[]): void {
+  maintainWeekTracked(nativeDatabase, token, entryIds);
+}
+export function finalizeWeekIntervalMutation(token: WeekMutationToken): void {
+  finishWeekMutation(nativeDatabase, token);
 }
 
 // Settings key for the Claude API key. Stored plaintext in the local

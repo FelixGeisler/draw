@@ -491,7 +491,13 @@ seams consume this facade, not a native type.
 `backupService` is the sole second runtime binding importer. It may open only
 identity-checked, non-live staged/snapshot/rewrite files and receives semantic
 live capabilities for a new-path `VACUUM INTO`, checkpoint-and-close and
-reopen. Migration/schema validators remain private native consumers. This
-implements ADR-75 Phase 1 while `CURRENT_VERSION` remains 22: there is no
-schema-v23 object, interval projection/maintenance, Week route/client/worker or
-Push behavior in this phase.
+reopen. Migration/schema validators remain private native consumers. Schema v23 adds
+one allowlisted private interval capability: compiled state, companion and
+keyset-rebuild operations only, with lazy 24-byte-TEXT timestamp admission and
+no handle, SQL, UDF/table registration or extension exposed to callers.
+
+ADR-75 Phases 1 and 2 are now implemented: `CURRENT_VERSION` is 23, exact
+`week_access_state`, `week_interval_access`, `week_interval_rtree`/shadow DDL
+and nine triggers are validated, owned fixed/timer mutations maintain affected
+identities, and boot/restore rederive the disposable projection. There remains
+no Week route, query, client, worker, cursor, `/today`, digest or Push behavior.

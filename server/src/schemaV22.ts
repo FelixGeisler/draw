@@ -149,8 +149,26 @@ export function validateV22Contract(database: Database.Database): void {
     throw new Error("schema v22 contract mismatch: task_fixed_slots foreign key inventory");
   }
 
+  // Storage class and byte length are admitted lazily in SQL before either
+  // timestamp can cross into the strict JS parser. This remains load-bearing
+  // when v23 inherits the v22 source contract: huge TEXT/BLOB source is
+  // rejected without materializing it in application code.
+  const timestampGuard = `
+    CASE WHEN typeof(starts_at)='text'
+         THEN CASE WHEN octet_length(starts_at)=24 THEN 1 ELSE 0 END ELSE 0 END=1
+    AND CASE WHEN typeof(ends_at)='text'
+             THEN CASE WHEN octet_length(ends_at)=24 THEN 1 ELSE 0 END ELSE 0 END=1`;
+  const unsafeTimestamp = database
+    .prepare(`SELECT task_id FROM task_fixed_slots WHERE NOT (${timestampGuard}) LIMIT 1`)
+    .get() as { task_id: number } | undefined;
+  if (unsafeTimestamp) {
+    throw new Error(
+      `schema v22 contract mismatch: stored fixed slot row ${unsafeTimestamp.task_id}: timestamp storage or byte length`,
+    );
+  }
   const rows = database
-    .prepare("SELECT task_id, starts_at, ends_at, entry_timezone FROM task_fixed_slots")
+    .prepare(`SELECT task_id, starts_at, ends_at, entry_timezone
+              FROM task_fixed_slots WHERE ${timestampGuard}`)
     .all() as Array<{
     task_id: number;
     starts_at: string;

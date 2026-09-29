@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { payChallengeIfDue } from "../services/challengeService.js";
 import { notifyChallengeCompleted } from "../services/notifyService.js";
-import { db } from "../db.js";
+import {
+  beginWeekIntervalMutation,
+  db,
+  finalizeWeekIntervalMutation,
+  reprojectTrackedIntervals,
+} from "../db.js";
 
 export const timerRouter = Router();
 
@@ -21,13 +26,19 @@ export function startTimer(taskId: number): { error?: string; status?: number } 
   if (task.status !== "open") return { error: "task is not open", status: 409 };
 
   db.transaction(() => {
-    db.prepare("UPDATE time_entries SET ended_at = ? WHERE ended_at IS NULL").run(
-      new Date().toISOString(),
-    );
-    db.prepare("INSERT INTO time_entries (task_id, started_at) VALUES (?, ?)").run(
+    const weekMutation = beginWeekIntervalMutation();
+    const closed = db
+      .prepare("UPDATE time_entries SET ended_at = ? WHERE ended_at IS NULL RETURNING id")
+      .all(new Date().toISOString()) as Array<{ id: number }>;
+    const inserted = db.prepare("INSERT INTO time_entries (task_id, started_at) VALUES (?, ?)").run(
       taskId,
       new Date().toISOString(),
     );
+    reprojectTrackedIntervals(weekMutation, [
+      ...closed.map((row) => row.id),
+      Number(inserted.lastInsertRowid),
+    ]);
+    finalizeWeekIntervalMutation(weekMutation);
   })();
   return {};
 }
@@ -49,10 +60,12 @@ timerRouter.post("/stop", (_req, res) => {
   if (!entry) return res.status(404).json({ error: "no running timer" });
   const now = new Date();
   const outcome = db.transaction(() => {
-    db.prepare("UPDATE time_entries SET ended_at = ? WHERE id = ?").run(
-      now.toISOString(),
-      entry.id,
-    );
+    const weekMutation = beginWeekIntervalMutation();
+    const closed = db
+      .prepare("UPDATE time_entries SET ended_at = ? WHERE id = ? RETURNING id")
+      .all(now.toISOString(), entry.id) as Array<{ id: number }>;
+    reprojectTrackedIntervals(weekMutation, closed.map((row) => row.id));
+    finalizeWeekIntervalMutation(weekMutation);
     // Timer close and both challenge owners are one transaction. Any XP/Gold
     // failure (including a Gold-only anomaly) leaves the entry running.
     const challengePayout = payChallengeIfDue(now);

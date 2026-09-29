@@ -1,5 +1,12 @@
 import { Router } from "express";
-import { db, getSetting } from "../db.js";
+import {
+  beginWeekIntervalMutation,
+  db,
+  finalizeWeekIntervalMutation,
+  getSetting,
+  maintainFixedIntervalWrite,
+  reprojectTrackedIntervals,
+} from "../db.js";
 import {
   clearCurrentDraw,
   clearDanglingDraw,
@@ -392,10 +399,14 @@ tasksRouter.post("/:id/split", (req, res) => {
     // The work session on the original is over — close its running time entry
     // at split time, mirroring what completion does (ADR-12). Its minutes
     // stay attributed to the original, whose stats survive archiving.
-    db.prepare("UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL").run(
-      new Date().toISOString(),
-      id,
-    );
+    const weekMutation = beginWeekIntervalMutation();
+    const closedEntries = db
+      .prepare(
+        "UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL RETURNING id",
+      )
+      .all(new Date().toISOString(), id) as Array<{ id: number }>;
+    reprojectTrackedIntervals(weekMutation, closedEntries.map((row) => row.id));
+    finalizeWeekIntervalMutation(weekMutation);
     // The original can normally never BE the current draw (too big = not
     // drawable), but the endpoint has no size gate, so an API/MCP caller can
     // split the drawable-sized persisted draw. Archiving fails isRestorable
@@ -908,7 +919,7 @@ tasksRouter.patch("/:id", (req, res) => {
     if (sets.length > 0) {
       db.prepare(`UPDATE tasks SET ${sets.join(", ")} WHERE id = ?`).run(...params, id);
     }
-    applyFixedSlot(db, id, fixedSlot);
+    applyFixedSlot(db, id, fixedSlot, maintainFixedIntervalWrite);
     // Scheduling a revealed card invalidates the persisted draw atomically
     // with the slot write. Replacing repeats the harmless clear; clearing
     // never fabricates a draw.
@@ -1065,8 +1076,11 @@ tasksRouter.delete("/:id", (req, res) => {
   // revives as a leaf (PR #102), not as done. The reopen direction needs no
   // hook: a delete only ever removes children, never adds an open one.
   const parentCompletion = db.transaction((): CompletionResult | null => {
+    const weekMutation = beginWeekIntervalMutation();
     db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
-    return row.parentId != null ? maybeAutoCompleteParent(row.parentId) : null;
+    const completion = row.parentId != null ? maybeAutoCompleteParent(row.parentId) : null;
+    finalizeWeekIntervalMutation(weekMutation);
+    return completion;
   })();
   // A deleted card leaves the deck — whether it was deleted directly or
   // cascade-deleted with its parent. Cleared on row absence, not id match:

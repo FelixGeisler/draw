@@ -1,4 +1,11 @@
-import { db, getSetting, getSettingString } from "../db.js";
+import {
+  beginWeekIntervalMutation,
+  db,
+  finalizeWeekIntervalMutation,
+  getSetting,
+  getSettingString,
+  reprojectTrackedIntervals,
+} from "../db.js";
 import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys.js";
 import { claimGoldForKey, claimXpForKey } from "../../../shared/achievementTiers.js";
 import { clearCurrentDraw, getLastWarmupDeal, getWarmupMarker } from "./drawService.js";
@@ -183,10 +190,14 @@ export function completeTask(
   // completion time. A different task's running timer stays untouched. This
   // applies on the recurring path too — the task stays open, but XP was just
   // awarded for the session, so the entry is finished (ADR-12).
-  db.prepare("UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL").run(
-    now.toISOString(),
-    task.id,
-  );
+  const weekMutation = beginWeekIntervalMutation();
+  const closedEntries = db
+    .prepare(
+      "UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL RETURNING id",
+    )
+    .all(now.toISOString(), task.id) as Array<{ id: number }>;
+  reprojectTrackedIntervals(weekMutation, closedEntries.map((row) => row.id));
+  finalizeWeekIntervalMutation(weekMutation);
 
   // A recurring task never closes: completing it SCHEDULES the next
   // occurrence (ADR-6, amended by #205). due_date is that occurrence, and the

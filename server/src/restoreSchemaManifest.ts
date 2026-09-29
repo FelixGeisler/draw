@@ -1,6 +1,6 @@
 /**
  * Generated from every checked-in fresh schema, supported legacy fixture, and
- * the compiled v1→v22 migration chain. SQL hashes use schemaSqlTokens
+ * the compiled v1→v23 migration chain. SQL hashes use schemaSqlTokens
  * normalization; byte caps include LF and CRLF checkout forms. Keep this
  * manifest in lockstep with migrations and schema.sql.
  */
@@ -512,7 +512,23 @@ export const RESTORE_SCHEMA_OBJECTS = [
     1,
     223,
     "253cd20324f8c3c7e903018a0ea2d5d139d6f92fa2b4b5a007d8678ede4470ea"
-  ]
+  ],
+  ["index", "week_interval_access_source_uq", "week_interval_access", 1, 101, "20e2cfdf739bef214cf7e1480d1ba822ea23e50e4a973b586dbaf879d4d4dee0"],
+  ["table", "week_access_state", "week_access_state", 1, 526, "30a04644e99cb6d0e5cbe778e996c61749dca2049316d55ff12d2a1e911f161d"],
+  ["table", "week_interval_access", "week_interval_access", 1, 1331, "829fff0b8ab4bad8cb057538461bced8a9d4defd6c49760dfaf0f400c7e3bc43"],
+  ["table", "week_interval_rtree", "week_interval_rtree", 0, 89, "b6b87b3b2c17d440d43602a61aa9413edabaf367b0656dd8bb088e2c732ce948"],
+  ["table", "week_interval_rtree_node", "week_interval_rtree_node", 1, 72, "128f195317cf75b080391cd6a8d98e6b7dc0833a71b58d4a56cc7738ed4f9da0"],
+  ["table", "week_interval_rtree_parent", "week_interval_rtree_parent", 1, 80, "7a12d0389e3758b8d32800123cf4eb6f369cf14beb97435efe7857b84c74f8d0"],
+  ["table", "week_interval_rtree_rowid", "week_interval_rtree_rowid", 1, 74, "d7fa0a2e840ce632dac3a7d0057c1fc9a85dcb0ad9d987fc80a47ccaab6a14e8"],
+  ["trigger", "week_interval_access_ad_rtree", "week_interval_access", 0, 160, "ecf4b9c93ec35cb8dca0cfae019465441134c9dc1f34a32c64f4ef62fb3f3135"],
+  ["trigger", "week_interval_access_ai_rtree", "week_interval_access", 0, 213, "09cd7943512ad289efbd05ddd4fed32c52780a64ada854f6f818b2822f249108"],
+  ["trigger", "week_interval_access_au_rtree", "week_interval_access", 0, 311, "42a269789683939e2610f68b272d2486f4c7ea587b1b887e5a0a3a0659bc11d7"],
+  ["trigger", "week_task_fixed_slots_ad_dirty_delete", "task_fixed_slots", 0, 300, "c8f030cd0f6ff04ac3cf7d212a3472bd0dc2fa993448104cc5176e95af03e03d"],
+  ["trigger", "week_task_fixed_slots_ai_dirty", "task_fixed_slots", 0, 203, "fdb790ce1b81755f561c0d68e491d904d0915e03115fb641a72b6e94d33a100e"],
+  ["trigger", "week_task_fixed_slots_au_dirty", "task_fixed_slots", 0, 234, "83f887b773b5d626cf39fc693eae15b63dc568a594e7531585951875e62297dc"],
+  ["trigger", "week_time_entries_ad_dirty_delete", "time_entries", 0, 287, "e54531413c59eda2850f27faecaafd2cc3921f21b45f6bafd41b4728bc3abdb7"],
+  ["trigger", "week_time_entries_ai_dirty", "time_entries", 0, 195, "8df45525b1d59756615851de5dd42cd3d66c95a34c233ca51d9a055fa0403adf"],
+  ["trigger", "week_time_entries_au_dirty", "time_entries", 0, 232, "f7cd5af40e299196e0aae738396f447231fc7bc92fabfa351f9f7226f51fdeaa"]
 ] as const;
 
 export const RESTORE_SCHEMA_VERSIONS: Readonly<Record<number, readonly number[]>> = {
@@ -1017,51 +1033,14 @@ export const RESTORE_SCHEMA_VERSIONS: Readonly<Record<number, readonly number[]>
     29
   ],
   "22": [
-    0,
-    56,
-    57,
-    58,
-    1,
-    2,
-    59,
-    3,
-    35,
-    30,
-    4,
-    5,
-    54,
-    36,
-    37,
-    48,
-    49,
-    6,
-    21,
-    32,
-    31,
-    60,
-    20,
-    8,
-    61,
-    55,
-    27,
-    25,
-    40,
-    62,
-    41,
-    50,
-    53,
-    33,
-    22,
-    63,
-    28,
-    14,
-    34,
-    42,
-    43,
-    44,
-    45,
-    46,
-    47,
-    29
+    0, 56, 57, 58, 1, 2, 59, 3, 35, 30, 4, 5, 54, 36, 37, 48, 49, 6,
+    21, 32, 31, 60, 20, 8, 61, 55, 27, 25, 40, 62, 41, 50, 53, 33, 22, 63,
+    28, 14, 34, 42, 43, 44, 45, 46, 47, 29
+  ],
+  "23": [
+    0, 56, 57, 58, 1, 2, 59, 3, 35, 30, 4, 5, 54, 36, 37, 48, 49, 6,
+    21, 32, 31, 60, 20, 8, 61, 55, 27, 25, 40, 62, 41, 50, 53, 33, 22, 63,
+    28, 14, 34, 42, 43, 44, 45, 46, 47, 29,
+    64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79
   ]
 };
