@@ -237,8 +237,14 @@ export function createSafeDatabase(resolve: () => Database.Database): SafeDataba
     },
     transaction<A extends unknown[], R>(fn: (...args: A) => R): SafeTransaction<A, R> {
       const invoke = (mode: "default" | "deferred" | "immediate" | "exclusive", args: A): R => {
-        const transaction = resolve().transaction(fn);
-        return mode === "default" ? transaction(...args) : transaction[mode](...args);
+        // better-sqlite3 forwards the transaction function's invocation receiver
+        // to the callback. Its mode functions carry a `.database` reference, so
+        // neither the native callback nor any mode may be invoked as a method.
+        const transaction = resolve().transaction(
+          (...callbackArgs: A) => Reflect.apply(fn, undefined, callbackArgs),
+        );
+        const selected = mode === "default" ? transaction : transaction[mode];
+        return Reflect.apply(selected, undefined, args);
       };
       const wrapped = ((...args: A) => invoke("default", args)) as SafeTransaction<A, R>;
       Object.defineProperties(wrapped, {

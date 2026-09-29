@@ -129,6 +129,31 @@ describe("SafeDatabase lexical and capability boundary", () => {
     expect(transaction.immediate("two")).toBe("two");
   });
 
+  it("never forwards a transaction receiver through any invocation mode", () => {
+    const handle = memory();
+    const safe = createSafeDatabase(() => handle);
+    const receivers: unknown[] = [];
+    const transaction = safe.transaction(function (this: unknown, value: string) {
+      receivers.push(this);
+      safe.prepare("INSERT INTO ordinary(value) VALUES (?)").run(value);
+      return value;
+    });
+
+    const variants = [
+      transaction,
+      transaction.deferred,
+      transaction.immediate,
+      transaction.exclusive,
+    ];
+    for (const [index, variant] of variants.entries()) {
+      expect(Reflect.apply(variant, { database: handle }, [`mode-${index}`])).toBe(`mode-${index}`);
+    }
+
+    expect(receivers).toEqual([undefined, undefined, undefined, undefined]);
+    expect(handle.prepare("SELECT COUNT(*) AS n FROM ordinary").get()).toEqual({ n: 4 });
+    for (const variant of variants) expect("database" in variant).toBe(false);
+  });
+
   it("resolves the current handle even for wrappers created before a restore-style replacement", () => {
     const first = memory();
     const second = memory();
