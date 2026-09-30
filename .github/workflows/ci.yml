@@ -23,7 +23,7 @@ jobs:
       - name: Frozen tzdb registry and UTC boundary gate
         run: npm run test -w server -- --run test/unit/fixed-slots.test.ts
       - name: Safe database native boundary
-        run: npm run test -w server -- --run test/unit/safe-database.test.ts
+        run: npm run test -w server -- --run test/unit/safe-database.test.ts test/unit/week-native-canary.test.ts
 
   test:
     runs-on: ubuntu-latest

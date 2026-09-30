@@ -4513,8 +4513,9 @@ delivery policies and still do not consume fixed slots after Phase 1B.
 
 == ADR-75: Compact Week interval access foundation behind a safe SQLite capability boundary
 
-*Status:* Phase 1 implemented by issue #363; Phase 2 (schema v23 interval
-projection) is planned and is not present in this revision.
+*Status:* Accepted and implemented by issue #363: Phase 1 safe facade/preflight
+and Phase 2 schema-v23 interval-access activation. The Week API/client/worker
+remains planned separately.
 
 *Context:* A later Week read needs complete historical interval access without a
 lifetime cutoff. The selected compact design uses a rebuildable RTree projection,
@@ -4542,7 +4543,7 @@ Backup code receives closed semantic live operations for a new owned-path
 `VACUUM INTO`, checkpoint/close and reopen. Its own native opener rejects the
 live path or identity. Before any staged integrity check, migration,
 virtual-module operation or source read, it reads bounded scalar schema metadata
-for the real stamped v1–v22 version. Unknown/missing objects and every unapproved
+for the real stamped v1–v23 version. Unknown/missing objects and every unapproved
 view, trigger, virtual/shadow or oversized definition reject before SQL fetch.
 Known SQL is fetched individually below its generated LF/CRLF byte cap and must
 match one of the token-normalized hashes generated from checked-in fresh,
@@ -4551,24 +4552,42 @@ executed. Exact input validators, migrations, Push/API-key sanitation, second
 physical rewrite, last-connection proof and files-first/database-last swap then
 remain ADR-26's existing path.
 
-*Phase 1 consequences:* `CURRENT_VERSION` remains 22 and public auth, backup,
-export/restore, task/goal/Draw/fixed-slot/timer/recurrence, `/today`, digest and
-Push contracts do not change. Production runtime imports of `better-sqlite3`
-are limited to `db.ts` and staged backup code; explicit production/Push/digest/
+*Phase 1 consequences:* Production runtime imports of `better-sqlite3` are
+limited to `db.ts` and staged backup code; explicit production/Push/digest/
 daily-overview/fixed-slot seams use `SafeDatabase`. Tests provide a separate
 fixture adapter and Windows/Linux lexical/native canaries. Rejections preserve
 live/source bytes and owned stage cleanup.
 
-*Planned Phase 2:* Starting only from merged Phase 1, schema v23 will add the
-accepted exact `week_access_state`, `week_interval_access` and `rtree_i32`
-objects, source/companion triggers, semantic maintenance, rebuild and v23 restore
-integration. Until then there is no `week_*` schema object, parser, projection,
-route, client, worker, cursor or notification consumer. A later ADR-75 update
-will mark only that access foundation implemented; Week API/client/worker work
-remains separately governed.
+*Phase 2 decision and consequences:* `CURRENT_VERSION` is 23. Exact compiled
+DDL creates singleton generation/readiness state, one numeric companion per
+eligible fixed (`source_kind=0`) or tracked (`2`) interval, an `rtree_i32` row
+with inclusive UTC-day bounds, six source dirty/delete triggers and three
+companion/RTree triggers. IDs and timestamps are admitted only inside the
+approved numeric/year domains. SQL nested storage-class and 24-byte guards run
+before strict parsing; malformed, unsafe or orphan source never enters the
+projection and no title/note/description is selected or stored.
+
+The v22→v23 create, keyset build, validation, ready transition and stamp-last
+share one transaction. Rebuild streams each bounded keyset batch directly into
+the companion, and validation compares each expected source row by indexed
+identity plus scalar counts/anti-joins; neither retains all historical intervals
+in JavaScript. This is a resource bound, not a latency, throughput or storage
+SLA. Owned fixed set/replace/clear and timer start/stop,
+split, completion, delete/cascade paths reproject every returned affected
+identity; clean-at-entry writes equalize generations, while dirty-at-entry
+writes remain dirty. Boot proves exact structure and transactionally increments,
+rebuilds and checks source/companion/RTree equivalence. Imported v23 schema must
+pass exact bounded preflight before its disposable derived objects/data are
+recreated and rebuilt; v1–v22 continue through the compiled migration chain.
+Manual, scheduled and safety-copy backup behavior and API-key/Push sanitation
+remain ADR-26/72 behavior.
+
+This activation is access foundation only. There is still no Week endpoint,
+interval read/query policy, worker, client, cursor, `/today` change, digest
+change or Push behavior. Those consumers remain separately governed.
 
 *Cross-links:* ADR-26 owns physical backup/restore and swap atomicity; ADR-50
 keeps optional authentication/passwordless behavior unchanged; ADR-73 keeps the
 existing daily digest and Push claims unchanged; ADR-74 remains authoritative
 for fixed-slot facts and lifecycle; arc42 sections 5, 6, 8, 10 and 12 record the
-implemented Phase 1 boundary and evidence.
+implemented facade, restore and compact interval-access boundaries and evidence.

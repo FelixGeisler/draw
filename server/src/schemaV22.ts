@@ -1,4 +1,5 @@
 import type Database from "better-sqlite3";
+import { SCHEDULE_TIME_ZONES } from "../../shared/scheduleTimezones.js";
 import { schemaSqlTokens } from "./schemaV18.js";
 import { validateV21Contract } from "./schemaV21.js";
 import {
@@ -100,8 +101,17 @@ function foreignKeys(database: Database.Database, table: string): unknown[][] {
   ]);
 }
 
+export const V22_FIXED_SLOT_VALIDATION_BATCH_SIZE = 256;
+
+export type V22ValidationHooks = Readonly<{
+  fixedSlotBatch?: (batch: Readonly<{ rowCount: number }>) => void;
+}>;
+
 /** Independent complete schema-v22 validator; v21 remains immutable. */
-export function validateV22Contract(database: Database.Database): void {
+export function validateV22Contract(
+  database: Database.Database,
+  hooks: V22ValidationHooks = {},
+): void {
   validateV21Contract(database);
   assertScheduleTimeZoneRuntime();
   exactSql(database, "table", "task_fixed_slots", TASK_FIXED_SLOTS_SQL);
@@ -149,23 +159,74 @@ export function validateV22Contract(database: Database.Database): void {
     throw new Error("schema v22 contract mismatch: task_fixed_slots foreign key inventory");
   }
 
-  const rows = database
-    .prepare("SELECT task_id, starts_at, ends_at, entry_timezone FROM task_fixed_slots")
-    .all() as Array<{
-    task_id: number;
-    starts_at: string;
-    ends_at: string;
-    entry_timezone: string;
-  }>;
-  for (const row of rows) {
-    try {
-      validateStoredFixedSlot(row.starts_at, row.ends_at, row.entry_timezone);
-    } catch (error) {
-      throw new Error(
-        `schema v22 contract mismatch: task_fixed_slots row ${row.task_id}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+  // Storage class and byte length are admitted lazily in SQL before either
+  // timestamp can cross into the strict JS parser. This remains load-bearing
+  // when v23 inherits the v22 source contract: huge TEXT/BLOB source is
+  // rejected without materializing it in application code.
+  const timestampGuard = `
+    CASE WHEN typeof(starts_at)='text'
+         THEN CASE WHEN octet_length(starts_at)=24 THEN 1 ELSE 0 END ELSE 0 END=1
+    AND CASE WHEN typeof(ends_at)='text'
+             THEN CASE WHEN octet_length(ends_at)=24 THEN 1 ELSE 0 END ELSE 0 END=1`;
+  const unsafeTimestamp = database
+    .prepare(`SELECT task_id FROM task_fixed_slots WHERE NOT (${timestampGuard}) LIMIT 1`)
+    .get() as { task_id: number } | undefined;
+  if (unsafeTimestamp) {
+    throw new Error(
+      `schema v22 contract mismatch: stored fixed slot row ${unsafeTimestamp.task_id}: timestamp storage or byte length`,
+    );
+  }
+  // entry_timezone acceptance is exactly the existing checked-in registry.
+  // Prove membership in SQLite before selecting a value so a crafted
+  // unrestricted TEXT/BLOB cannot cross into JavaScript. The finite keyset is
+  // mechanically derived from that registry; no separate byte threshold or
+  // compatibility policy is introduced here.
+  const zonePlaceholders = SCHEDULE_TIME_ZONES.map(() => "?").join(",");
+  const timezoneGuard = `CASE WHEN typeof(entry_timezone)='text'
+    THEN CASE WHEN entry_timezone IN (${zonePlaceholders}) THEN 1 ELSE 0 END ELSE 0 END=1`;
+  const unsafeTimezone = database
+    .prepare(`SELECT task_id FROM task_fixed_slots WHERE NOT (${timezoneGuard}) LIMIT 1`)
+    .get(...SCHEDULE_TIME_ZONES) as { task_id: number } | undefined;
+  if (unsafeTimezone) {
+    throw new Error(
+      `schema v22 contract mismatch: stored fixed slot row ${unsafeTimezone.task_id}: entry_timezone`,
+    );
+  }
+
+  const fixedSlots = database.prepare(`SELECT task_id, CAST(task_id AS TEXT) AS task_id_key,
+      starts_at, ends_at, entry_timezone
+    FROM task_fixed_slots
+    WHERE (? IS NULL OR task_id > CAST(? AS INTEGER)) AND ${timestampGuard} AND ${timezoneGuard}
+    ORDER BY task_id LIMIT ?`);
+  // The decimal key preserves every signed 64-bit INTEGER PRIMARY KEY exactly
+  // even when the native binding's default numeric row mode cannot.
+  let afterTaskId: string | null = null;
+  for (;;) {
+    const rows = fixedSlots.all(
+      afterTaskId,
+      afterTaskId,
+      ...SCHEDULE_TIME_ZONES,
+      V22_FIXED_SLOT_VALIDATION_BATCH_SIZE,
+    ) as Array<{
+      task_id: number;
+      task_id_key: string;
+      starts_at: string;
+      ends_at: string;
+      entry_timezone: string;
+    }>;
+    if (rows.length === 0) break;
+    hooks.fixedSlotBatch?.(Object.freeze({ rowCount: rows.length }));
+    for (const row of rows) {
+      afterTaskId = row.task_id_key;
+      try {
+        validateStoredFixedSlot(row.starts_at, row.ends_at, row.entry_timezone);
+      } catch (error) {
+        throw new Error(
+          `schema v22 contract mismatch: task_fixed_slots row ${row.task_id}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
   }
   const recurring = database

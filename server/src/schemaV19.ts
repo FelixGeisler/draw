@@ -160,7 +160,19 @@ function validatePersistentSchemaCode(database: Database.Database): void {
   if (objects.some((object) => object.type === "view")) {
     throw new Error("schema v19 contract mismatch: unapproved persistent view");
   }
-  for (const object of objects) {
+  const v23Names = new Set([
+    "week_task_fixed_slots_ai_dirty", "week_task_fixed_slots_au_dirty",
+    "week_task_fixed_slots_ad_dirty_delete", "week_time_entries_ai_dirty",
+    "week_time_entries_au_dirty", "week_time_entries_ad_dirty_delete",
+    "week_interval_access_ai_rtree", "week_interval_access_au_rtree",
+    "week_interval_access_ad_rtree",
+  ]);
+  const hasV23 = Boolean(
+    database.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='week_access_state'").get(),
+  );
+  const inherited = objects.filter((object) => !hasV23 || !v23Names.has(object.name));
+  const v23 = objects.filter((object) => hasV23 && v23Names.has(object.name));
+  for (const object of inherited) {
     const expected = EXPECTED_PERSISTENT_SCHEMA_CODE.get(object.name);
     if (
       !expected ||
@@ -170,7 +182,9 @@ function validatePersistentSchemaCode(database: Database.Database): void {
       throw new Error(`schema v19 contract mismatch: persistent trigger ${object.name}`);
     }
   }
-  if (objects.length !== EXPECTED_PERSISTENT_SCHEMA_CODE.size) {
+  // The v23 validator checks the nine compiled definitions immediately after
+  // this inherited boundary. Here only their exact names/count may coexist.
+  if (inherited.length !== EXPECTED_PERSISTENT_SCHEMA_CODE.size || (hasV23 && v23.length !== v23Names.size)) {
     throw new Error("schema v19 contract mismatch: missing persistent trigger");
   }
 }

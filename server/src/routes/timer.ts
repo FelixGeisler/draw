@@ -1,7 +1,14 @@
 import { Router } from "express";
 import { payChallengeIfDue } from "../services/challengeService.js";
 import { notifyChallengeCompleted } from "../services/notifyService.js";
-import { db } from "../db.js";
+import {
+  beginWeekIntervalMutation,
+  closeAllOpenTrackedIntervals,
+  closeOpenTrackedIntervalById,
+  db,
+  finalizeWeekIntervalMutation,
+  reprojectTrackedIntervals,
+} from "../db.js";
 
 export const timerRouter = Router();
 
@@ -21,13 +28,14 @@ export function startTimer(taskId: number): { error?: string; status?: number } 
   if (task.status !== "open") return { error: "task is not open", status: 409 };
 
   db.transaction(() => {
-    db.prepare("UPDATE time_entries SET ended_at = ? WHERE ended_at IS NULL").run(
-      new Date().toISOString(),
-    );
-    db.prepare("INSERT INTO time_entries (task_id, started_at) VALUES (?, ?)").run(
+    const weekMutation = beginWeekIntervalMutation();
+    closeAllOpenTrackedIntervals(weekMutation, new Date().toISOString());
+    const inserted = db.prepare("INSERT INTO time_entries (task_id, started_at) VALUES (?, ?)").run(
       taskId,
       new Date().toISOString(),
     );
+    reprojectTrackedIntervals(weekMutation, [Number(inserted.lastInsertRowid)]);
+    finalizeWeekIntervalMutation(weekMutation);
   })();
   return {};
 }
@@ -49,10 +57,9 @@ timerRouter.post("/stop", (_req, res) => {
   if (!entry) return res.status(404).json({ error: "no running timer" });
   const now = new Date();
   const outcome = db.transaction(() => {
-    db.prepare("UPDATE time_entries SET ended_at = ? WHERE id = ?").run(
-      now.toISOString(),
-      entry.id,
-    );
+    const weekMutation = beginWeekIntervalMutation();
+    closeOpenTrackedIntervalById(weekMutation, now.toISOString(), entry.id);
+    finalizeWeekIntervalMutation(weekMutation);
     // Timer close and both challenge owners are one transaction. Any XP/Gold
     // failure (including a Gold-only anomaly) leaves the entry running.
     const challengePayout = payChallengeIfDue(now);

@@ -1,10 +1,14 @@
+/** Remove schema-v23 projection DDL from today's fresh schema. */
+export function stripV23Schema(sql: string): string {
+  return sql.replace(/-- Compact Week interval-access foundation \(#363, ADR-75\)\.[\s\S]*$/, "");
+}
+
 /**
- * Remove schema-v22 additions from today's schema.sql when a migration test
- * reconstructs an older stamped database. Keeping this one exact helper
- * prevents every historical fixture from accidentally carrying future DDL.
+ * Remove schema-v22 and newer additions from today's schema.sql when a
+ * migration test reconstructs an older stamped database.
  */
 export function stripV22Schema(sql: string): string {
-  return sql
+  return stripV23Schema(sql)
     .replace(/CREATE INDEX idx_goals_target_date ON goals\(target_date, id\);\r?\n\r?\n/, "")
     .replace(/CREATE INDEX idx_tasks_due_date ON tasks\(due_date, id\);\r?\n/, "")
     .replace(

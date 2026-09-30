@@ -1,4 +1,4 @@
-import { db } from "../db.js";
+import { db, maintainFixedIntervalWrite } from "../db.js";
 import { undoLatestCompletion } from "./gamificationService.js";
 import {
   FIXED_RECURRENCE_ERROR,
@@ -430,7 +430,7 @@ export function createTaskWrite(body: Record<string, unknown>): WriteError | { i
     // A new open subtask under a DONE parent reopens it (#111, ADR-32) — same
     // rule as the batch endpoint, so no creation path can leave an open child
     // under a done parent.
-    applyFixedSlot(db, Number(r.lastInsertRowid), fixedSlot);
+    applyFixedSlot(db, Number(r.lastInsertRowid), fixedSlot, maintainFixedIntervalWrite);
     // The actual stored final state is checked inside the same transaction;
     // every REST/MCP/assistant creation path delegates here.
     if (taskHasFixedRecurrenceConflict(db, Number(r.lastInsertRowid))) {

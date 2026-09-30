@@ -361,9 +361,14 @@ that immutable v21 boundary, then atomically adds `task_fixed_slots` and the
 four approved range/date indexes, validates the complete target, and stamps 22
 last. Its validator proves exact DDL/columns/index/FK/cascade, four-digit
 canonical instants, order, frozen-zone membership, wall/instant round trips and
-absence beside recurrence. Backup import dispatches stamped v19–v22 files to
-their own validators before migration and validates final v22 before swap. The
-inherited validator still proves exact DDL, columns, PK index, FK, retained Push
+absence beside recurrence. Version 23 validates that complete v22 source
+contract, then atomically creates the exact compact Week interval state,
+companion, RTree and trigger inventory, keyset-rebuilds the disposable
+projection, proves source/companion/RTree equivalence and stamps 23 last. Normal
+v23 boot repeats the exact structure check and a transactional keyset rebuild;
+there is still no Week consumer. Backup import dispatches stamped v19–v23 files
+to their own validators before migration and validates final v23 before swap.
+The inherited validator still proves exact DDL, columns, PK index, FK, retained Push
 shape, persistent trigger/no-view allowlist,
 Hide-details, and all four timing domains/nullability. Unapproved executable
 schema is rejected before sanitation. Registration still upserts at most 16
@@ -400,8 +405,8 @@ Safety nets, both inside `DATA_DIR`:
   (overwritten on the next import),
 - the previous material files as `files.bak`.
 
-Every rejected import (foreign zip, corrupt or newer-than-v22 database,
-unsafe paths) is a `400` with the live data untouched. Versions through v22
+Every rejected import (foreign zip, corrupt or newer-than-v23 database,
+unsafe paths) is a `400` with the live data untouched. Versions through v23
 are accepted; older snapshots migrate in staging. Before integrity checking,
 migration, virtual-module access or source-data reads, a bounded scalar
 `sqlite_schema` pass selects the exact compiled inventory for the stamped
@@ -415,7 +420,10 @@ immutable triggers (definition and rollback-only behavior), and the
 XP-ledger reason index; it must also match v21's exact nullable-settings,
 four-field timing domain, digest-claims index/FK, inherited Push shape, and
 persistent-schema allowlist, plus v22's complete fixed-slot relation, registry,
-instant and recurrence contract. Fixed slots and entry zones are portable user
+instant and recurrence contract. Exact admitted v23 archives additionally have
+their known derived objects discarded and recreated from compiled DDL; the
+projection is rebuilt and fully validated from authoritative source before the
+second physical rewrite and swap. Fixed slots and entry zones are portable user
 data and survive manual/scheduled archives, restore, and sanitized `app.db.bak`;
 Push credentials/claims remain physically absent. Only that validated,
 row-scrubbed, physically rewritten file reaches
@@ -491,7 +499,15 @@ seams consume this facade, not a native type.
 `backupService` is the sole second runtime binding importer. It may open only
 identity-checked, non-live staged/snapshot/rewrite files and receives semantic
 live capabilities for a new-path `VACUUM INTO`, checkpoint-and-close and
-reopen. Migration/schema validators remain private native consumers. This
-implements ADR-75 Phase 1 while `CURRENT_VERSION` remains 22: there is no
-schema-v23 object, interval projection/maintenance, Week route/client/worker or
-Push behavior in this phase.
+reopen. Migration/schema validators remain private native consumers. Schema v23 adds
+one allowlisted private interval capability: compiled state, companion and
+bounded keyset-streaming rebuild/validation operations only, with lazy
+24-byte-TEXT timestamp admission and no all-history JavaScript array, handle,
+SQL, UDF/table registration or extension exposed to callers. The batch bound is
+a resource guard, not a latency, throughput or storage SLA.
+
+ADR-75 Phases 1 and 2 are now implemented: `CURRENT_VERSION` is 23, exact
+`week_access_state`, `week_interval_access`, `week_interval_rtree`/shadow DDL
+and nine triggers are validated, owned fixed/timer mutations maintain affected
+identities, and boot/restore rederive the disposable projection. There remains
+no Week route, query, client, worker, cursor, `/today`, digest or Push behavior.
