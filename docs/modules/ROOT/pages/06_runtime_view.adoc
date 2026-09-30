@@ -436,8 +436,11 @@ rows but cannot claim global readiness. Any failure rolls source, companion,
 RTree and state back together.
 
 Boot first proves exact v23 DDL/inventory, then marks dirty, increments the
-bounded generation, keyset-rebuilds from source and validates source/companion/
-RTree equivalence before ready. SQL storage-class and 24-byte guards run before
+bounded generation, streams bounded source keyset batches directly into the
+companion, and validates source/companion/RTree equivalence with the same bounded
+scan plus indexed identity comparisons, scalar counts and anti-joins before
+ready. No full-history JavaScript array is built. This memory property is a
+resource bound, not a numeric performance SLA. SQL storage-class and 24-byte guards run before
 any timestamp reaches the strict parser. A v23 import must first pass bounded
 exact schema admission; its derived objects/data are then discarded, recreated
 from compiled SQL and rebuilt before sanitation and the existing physical

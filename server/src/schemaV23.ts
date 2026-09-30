@@ -10,6 +10,7 @@ export const WEEK_MAX_SAFE_ID = 9_007_199_254_740_991;
 export const WEEK_PROJECTION_FORMAT = 1;
 export const WEEK_FIXED_KIND = 0;
 export const WEEK_TRACKED_KIND = 2;
+export const WEEK_PROJECTION_BATCH_SIZE = 256;
 
 export const WEEK_STATE_SQL = `CREATE TABLE week_access_state (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -184,6 +185,14 @@ export type WeekProjectionRow = {
 };
 
 export type WeekTimestampObserver = (value: unknown, field: string) => void;
+export type WeekProjectionBatchObserver = (batch: Readonly<{
+  sourceKind: 0 | 2;
+  rowCount: number;
+}>) => void;
+export type WeekProjectionScanHooks = Readonly<{
+  timestamp?: WeekTimestampObserver;
+  batch?: WeekProjectionBatchObserver;
+}>;
 
 export function parseWeekTimestamp(
   value: unknown,
@@ -259,26 +268,32 @@ function projectCandidate(
   };
 }
 
-export function collectWeekProjection(
+function scanWeekProjection(
   database: Database.Database,
-  observer?: WeekTimestampObserver,
-): WeekProjectionRow[] {
-  const result: WeekProjectionRow[] = [];
-  const collect = (kind: 0 | 2, sql: string) => {
+  visit: (row: WeekProjectionRow) => void,
+  hooks: WeekProjectionScanHooks = {},
+): number {
+  let projectedCount = 0;
+  const scan = (kind: 0 | 2, sql: string) => {
+    const statement = database.prepare(sql);
     let after = 0;
     for (;;) {
-      const rows = database.prepare(sql).all(after, 256) as Candidate[];
+      const rows = statement.all(after, WEEK_PROJECTION_BATCH_SIZE) as Candidate[];
       if (rows.length === 0) break;
+      hooks.batch?.(Object.freeze({ sourceKind: kind, rowCount: rows.length }));
       for (const row of rows) {
         after = row.sourceId;
-        const projected = projectCandidate(kind, row, observer);
-        if (projected) result.push(projected);
+        const projected = projectCandidate(kind, row, hooks.timestamp);
+        if (projected) {
+          visit(projected);
+          projectedCount += 1;
+        }
       }
     }
   };
-  collect(WEEK_FIXED_KIND, FIXED_CANDIDATE_SQL);
-  collect(WEEK_TRACKED_KIND, TRACKED_CANDIDATE_SQL);
-  return result;
+  scan(WEEK_FIXED_KIND, FIXED_CANDIDATE_SQL);
+  scan(WEEK_TRACKED_KIND, TRACKED_CANDIDATE_SQL);
+  return projectedCount;
 }
 
 const UPSERT_SQL = `INSERT INTO week_interval_access
@@ -310,9 +325,12 @@ export function reprojectWeekIdentity(database: Database.Database, kind: 0 | 2, 
   else database.prepare("DELETE FROM week_interval_access WHERE source_kind=? AND source_id=?").run(kind, id);
 }
 
-export function buildWeekProjection(database: Database.Database): void {
+export function buildWeekProjection(
+  database: Database.Database,
+  hooks: WeekProjectionScanHooks = {},
+): void {
   database.prepare("DELETE FROM week_interval_access").run();
-  for (const row of collectWeekProjection(database)) upsertProjection(database, row);
+  scanWeekProjection(database, (row) => upsertProjection(database, row), hooks);
 }
 
 export function createWeekSchema(database: Database.Database): void {
@@ -410,7 +428,11 @@ export function validateV23Structure(database: Database.Database, requireVersion
   ]);
 }
 
-export function validateV23Projection(database: Database.Database, allowUnready = false): void {
+export function validateV23Projection(
+  database: Database.Database,
+  allowUnready = false,
+  hooks: WeekProjectionScanHooks = {},
+): void {
   const states = database.prepare("SELECT * FROM week_access_state").all() as Array<Record<string, unknown>>;
   if (states.length !== 1) throw new Error("schema v23 contract mismatch: state row count");
   const state = states[0] as { singleton: number; projection_format: number; ready: number; source_generation: number; built_generation: number };
@@ -422,16 +444,31 @@ export function validateV23Projection(database: Database.Database, allowUnready 
       (state.ready === 1 && state.built_generation !== state.source_generation)) {
     throw new Error("schema v23 contract mismatch: state row");
   }
-  const expected = collectWeekProjection(database).map((row) => [row.sourceKind,row.sourceId,row.taskId,row.startMs,row.endMs,row.startDay,row.endDay]);
-  const actual = (database.prepare(`SELECT source_kind,source_id,task_id,start_ms,end_ms,start_day,end_day
-    FROM week_interval_access ORDER BY source_kind,source_id`).all() as Array<Record<string, unknown>>)
-    .map((row) => [row.source_kind,row.source_id,row.task_id,row.start_ms,row.end_ms,row.start_day,row.end_day]);
-  equal("source and companion equality", actual, expected);
-  const companion = (database.prepare("SELECT index_id,start_day,end_day FROM week_interval_access ORDER BY index_id").all() as Array<Record<string, unknown>>)
-    .map((row) => [row.index_id,row.start_day,row.end_day]);
-  const rtree = (database.prepare("SELECT index_id,start_day,end_day FROM week_interval_rtree ORDER BY index_id").all() as Array<Record<string, unknown>>)
-    .map((row) => [row.index_id,row.start_day,row.end_day]);
-  equal("companion and RTree equality", rtree, companion);
+
+  const companionBySource = database.prepare(`SELECT source_kind AS sourceKind,source_id AS sourceId,
+    task_id AS taskId,start_ms AS startMs,end_ms AS endMs,start_day AS startDay,end_day AS endDay
+    FROM week_interval_access WHERE source_kind=? AND source_id=?`);
+  const expectedCount = scanWeekProjection(database, (expected) => {
+    const actual = companionBySource.get(expected.sourceKind, expected.sourceId);
+    if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+      throw new Error("schema v23 contract mismatch: source and companion equality");
+    }
+  }, hooks);
+  const companionCount = database.prepare("SELECT COUNT(*) AS count FROM week_interval_access").get() as { count: number };
+  if (companionCount.count !== expectedCount) {
+    throw new Error("schema v23 contract mismatch: source and companion equality");
+  }
+
+  const companionMismatch = database.prepare(`SELECT 1
+    FROM week_interval_access a LEFT JOIN week_interval_rtree r ON r.index_id=a.index_id
+    WHERE r.index_id IS NULL OR r.start_day<>a.start_day OR r.end_day<>a.end_day LIMIT 1`).get();
+  const rtreeMismatch = database.prepare(`SELECT 1
+    FROM week_interval_rtree r LEFT JOIN week_interval_access a ON a.index_id=r.index_id
+    WHERE a.index_id IS NULL OR a.start_day<>r.start_day OR a.end_day<>r.end_day LIMIT 1`).get();
+  const rtreeCount = database.prepare("SELECT COUNT(*) AS count FROM week_interval_rtree").get() as { count: number };
+  if (companionMismatch || rtreeMismatch || rtreeCount.count !== companionCount.count) {
+    throw new Error("schema v23 contract mismatch: companion and RTree equality");
+  }
   if ((database.pragma("foreign_key_check") as unknown[]).length !== 0) throw new Error("schema v23 contract mismatch: foreign keys");
   if (database.pragma("integrity_check", { simple: true }) !== "ok") throw new Error("schema v23 contract mismatch: integrity");
   const checked = database.prepare("SELECT rtreecheck('week_interval_rtree') AS result").get() as { result: string };

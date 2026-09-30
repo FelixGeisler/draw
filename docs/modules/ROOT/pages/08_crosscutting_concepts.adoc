@@ -493,8 +493,10 @@ identity-checked, non-live staged/snapshot/rewrite files and receives semantic
 live capabilities for a new-path `VACUUM INTO`, checkpoint-and-close and
 reopen. Migration/schema validators remain private native consumers. Schema v23 adds
 one allowlisted private interval capability: compiled state, companion and
-keyset-rebuild operations only, with lazy 24-byte-TEXT timestamp admission and
-no handle, SQL, UDF/table registration or extension exposed to callers.
+bounded keyset-streaming rebuild/validation operations only, with lazy
+24-byte-TEXT timestamp admission and no all-history JavaScript array, handle,
+SQL, UDF/table registration or extension exposed to callers. The batch bound is
+a resource guard, not a latency, throughput or storage SLA.
 
 ADR-75 Phases 1 and 2 are now implemented: `CURRENT_VERSION` is 23, exact
 `week_access_state`, `week_interval_access`, `week_interval_rtree`/shadow DDL

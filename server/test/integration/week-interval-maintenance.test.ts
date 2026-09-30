@@ -70,6 +70,35 @@ describe("owned schema-v23 interval maintenance", () => {
     expect(state().ready).toBe(1);
   });
 
+  it("timer start closes exactly one existing open entry and synchronizes both interval rows", async () => {
+    const first = await createTask({ title: "one-open first", effortMinutes: 5 });
+    const second = await createTask({ title: "one-open second", effortMinutes: 5 });
+    await request(app).post(`/api/tasks/${first.id}/timer/start`).expect(200);
+    const existing = database.prepare(
+      "SELECT id FROM time_entries WHERE task_id=? AND ended_at IS NULL",
+    ).get(first.id) as { id: number };
+    expect(database.prepare("SELECT COUNT(*) AS count FROM time_entries WHERE ended_at IS NULL").get()).toEqual({ count: 1 });
+
+    await request(app).post(`/api/tasks/${second.id}/timer/start`).expect(200);
+    const entries = database.prepare(
+      "SELECT id,task_id AS taskId,ended_at AS endedAt FROM time_entries ORDER BY id",
+    ).all() as Array<{ id: number; taskId: number; endedAt: string | null }>;
+    const replacement = entries.find((entry) => entry.endedAt === null)!;
+    expect(entries.find((entry) => entry.id === existing.id)?.endedAt).not.toBeNull();
+    expect(replacement.taskId).toBe(second.id);
+    expect(entries.filter((entry) => entry.endedAt === null)).toHaveLength(1);
+    expect(interval(2, existing.id)?.endMs).not.toBeNull();
+    expect(interval(2, replacement.id)).toMatchObject({ taskId: second.id, endMs: null });
+    for (const entry of entries) {
+      const companion = interval(2, entry.id)!;
+      expect(database.prepare(
+        "SELECT start_day AS startDay,end_day AS endDay FROM week_interval_rtree WHERE index_id=?",
+      ).get(companion.indexId)).toEqual({ startDay: companion.startDay, endDay: companion.endDay });
+    }
+    expect(state().ready).toBe(1);
+    expect(state().builtGeneration).toBe(state().sourceGeneration);
+  });
+
   it("maintains timer start close-all/insert, stop, split, completion, direct delete and cascades", async () => {
     const first = await createTask({ title: "timer first", effortMinutes: 5 });
     const second = await createTask({ title: "timer second", effortMinutes: 5 });

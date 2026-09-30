@@ -4568,7 +4568,11 @@ before strict parsing; malformed, unsafe or orphan source never enters the
 projection and no title/note/description is selected or stored.
 
 The v22→v23 create, keyset build, validation, ready transition and stamp-last
-share one transaction. Owned fixed set/replace/clear and timer start/stop,
+share one transaction. Rebuild streams each bounded keyset batch directly into
+the companion, and validation compares each expected source row by indexed
+identity plus scalar counts/anti-joins; neither retains all historical intervals
+in JavaScript. This is a resource bound, not a latency, throughput or storage
+SLA. Owned fixed set/replace/clear and timer start/stop,
 split, completion, delete/cascade paths reproject every returned affected
 identity; clean-at-entry writes equalize generations, while dirty-at-entry
 writes remain dirty. Boot proves exact structure and transactionally increments,

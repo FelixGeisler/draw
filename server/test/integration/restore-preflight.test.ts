@@ -8,7 +8,12 @@ import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
 import { historicalSchema } from "../historicalRestoreSchemas.js";
 import { CURRENT_VERSION } from "../../src/db.js";
-import { MANIFEST_APP, createBackupArchive } from "../../src/services/backupService.js";
+import {
+  MANIFEST_APP,
+  createBackupArchive,
+  runScheduledBackup,
+} from "../../src/services/backupService.js";
+import { validateV23Contract } from "../../src/schemaV23.js";
 
 let app: express.Express;
 const dataDir = () => process.env.DATA_DIR!;
@@ -38,10 +43,12 @@ function historicalArchive(version: number): Buffer {
   return archiveForDatabase(bytes, version);
 }
 
-function mutateCurrentArchive(name: string, mutate: (database: Database.Database) => void): Buffer {
-  const cleanPath = createBackupArchive();
-  const zip = new AdmZip(cleanPath);
-  fs.rmSync(cleanPath, { force: true });
+function mutateArchive(
+  archive: Buffer | string,
+  name: string,
+  mutate: (database: Database.Database) => void,
+): Buffer {
+  const zip = new AdmZip(archive);
   const databasePath = path.join(dataDir(), `preflight-${name}.db`);
   fs.writeFileSync(databasePath, zip.getEntry("app.db")!.getData());
   const database = new Database(databasePath);
@@ -54,6 +61,15 @@ function mutateCurrentArchive(name: string, mutate: (database: Database.Database
   zip.addFile("app.db", fs.readFileSync(databasePath));
   fs.rmSync(databasePath, { force: true });
   return zip.toBuffer();
+}
+
+function mutateCurrentArchive(name: string, mutate: (database: Database.Database) => void): Buffer {
+  const cleanPath = createBackupArchive();
+  try {
+    return mutateArchive(cleanPath, name, mutate);
+  } finally {
+    fs.rmSync(cleanPath, { force: true });
+  }
 }
 
 describe("bounded staged restore schema preflight", () => {
@@ -96,6 +112,60 @@ describe("bounded staged restore schema preflight", () => {
       );
       database.close();
     }
+  });
+
+  it("rederives projections from manual, scheduled, and app.db.bak-origin archives", async () => {
+    const task = (await request(app).post("/api/tasks").send({
+      title: "all backup paths projection",
+      categoryId: 1,
+    }).expect(201)).body as { id: number };
+    await request(app).post(`/api/tasks/${task.id}/timer/start`).expect(200);
+    const live = await testDb();
+    const source = live.prepare(
+      "SELECT id,started_at AS startedAt FROM time_entries WHERE task_id=? AND ended_at IS NULL",
+    ).get(task.id) as { id: number; startedAt: string };
+    live.close();
+
+    const manualPath = createBackupArchive();
+    const manualBytes = fs.readFileSync(manualPath);
+    fs.rmSync(manualPath, { force: true });
+    const scheduled = runScheduledBackup(3, new Date("2026-10-02T12:00:00.000Z"));
+    const scheduledBytes = fs.readFileSync(scheduled.path);
+
+    const restorePoisoned = async (bytes: Buffer, label: string) => {
+      const poisoned = mutateArchive(bytes, `rederive-${label}`, (database) => {
+        expect(database.prepare(
+          "SELECT started_at AS startedAt FROM time_entries WHERE id=?",
+        ).get(source.id)).toEqual({ startedAt: source.startedAt });
+        expect(database.prepare(
+          "SELECT COUNT(*) AS count FROM week_interval_access WHERE source_kind=2 AND source_id=?",
+        ).get(source.id)).toEqual({ count: 1 });
+        database.prepare(
+          "UPDATE week_interval_access SET start_ms=start_ms+1 WHERE source_kind=2 AND source_id=?",
+        ).run(source.id);
+      });
+      await request(app).post("/api/backup/import").attach("file", poisoned, `${label}.zip`).expect(200);
+      const restored = await testDb();
+      try {
+        expect(restored.prepare(
+          "SELECT started_at AS startedAt FROM time_entries WHERE id=?",
+        ).get(source.id)).toEqual({ startedAt: source.startedAt });
+        expect(restored.prepare(
+          "SELECT start_ms AS startMs FROM week_interval_access WHERE source_kind=2 AND source_id=?",
+        ).get(source.id)).toEqual({ startMs: Date.parse(source.startedAt) });
+        expect(() => validateV23Contract(restored)).not.toThrow();
+      } finally {
+        restored.close();
+      }
+    };
+
+    await restorePoisoned(manualBytes, "manual");
+    await restorePoisoned(scheduledBytes, "scheduled");
+
+    const bakArchive = new AdmZip(manualBytes);
+    bakArchive.deleteFile("app.db");
+    bakArchive.addFile("app.db", fs.readFileSync(path.join(dataDir(), "app.db.bak")));
+    await restorePoisoned(bakArchive.toBuffer(), "app-db-bak");
   });
 
   it("rejects unknown executable, virtual, shadow-like and altered known inventory without swapping live data", async () => {

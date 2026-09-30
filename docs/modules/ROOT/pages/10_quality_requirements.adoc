@@ -97,7 +97,7 @@ AI degradation > data integrity > cost transparency > responsiveness.
 
 |Q22
 |Schema v23 sees historical, boundary, open, malformed or drifting fixed/tracked interval source, or an owned mutation fails mid-transaction
-|Lazy guards admit only canonical 24-byte TEXT timestamps; the numeric companion and RTree are complete for eligible source, dirty/rebuild is explicit, and source/companion/RTree/state roll back together without a history cutoff or user-content projection
+|Lazy guards admit only canonical 24-byte TEXT timestamps; bounded keyset rebuild/validation retains no full-history JavaScript array; the numeric companion and RTree are complete for eligible source, dirty/rebuild is explicit, and source/companion/RTree/state roll back together without a history cutoff, numeric performance SLA or user-content projection
 |===
 
 Q1, Q3 (guardrail), Q6–Q10 and Q13–Q22 are covered by the automated test suites (unit /
