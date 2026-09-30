@@ -1,6 +1,10 @@
 import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decodeWeekResponse } from "../../../shared/weekContract.js";
+import { SCHEDULE_TIME_ZONE_SET } from "../../../shared/scheduleTimezones.js";
+import {
+  decodeWeekResponse as decodeWeekResponseWithRegistry,
+  type WeekValidationContext,
+} from "../../../shared/weekContract.js";
 import {
   WEEK_CURSOR_MAX_CHARS,
   WEEK_SEMANTIC_CURSOR_MAX_CHARS,
@@ -8,6 +12,10 @@ import {
 } from "../../src/weekCursor.js";
 import { parseWeekQueryTarget } from "../../src/routes/calendar.js";
 import { contextDateForInstant, resolveWeek } from "../../src/weekTime.js";
+
+function decodeWeekResponse(value: unknown, context: WeekValidationContext) {
+  return decodeWeekResponseWithRegistry(value, context, SCHEDULE_TIME_ZONE_SET);
+}
 
 function durationHours(weekStart: string, timezone: string): number {
   const week = resolveWeek(weekStart, timezone);

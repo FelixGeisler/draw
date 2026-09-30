@@ -1,5 +1,3 @@
-import { SCHEDULE_TIME_ZONE_SET } from "./scheduleTimezones.js";
-
 export const WEEK_PAGE_SIZE = 100;
 export const WEEK_BODY_MAX_BYTES = 131_072;
 export const WEEK_CURSOR_RESERVE_CHARS = 375;
@@ -227,8 +225,8 @@ function addUtcDate(value: string, days: number): string | null {
   return `${String(year).padStart(4, "0")}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 }
 
-function validateContext(context: WeekValidationContext): void {
-  if (!isCanonicalDate(context.weekStart) || !SCHEDULE_TIME_ZONE_SET.has(context.timezone) ||
+function validateContext(context: WeekValidationContext, scheduleTimeZones: ReadonlySet<string>): void {
+  if (!isCanonicalDate(context.weekStart) || !scheduleTimeZones.has(context.timezone) ||
       context.dates.length !== 7 || context.midnightInstants.length !== 8 ||
       context.dates.some((value, index) => value !== addUtcDate(context.weekStart, index)) ||
       context.rangeStart !== context.midnightInstants[0] || context.rangeEnd !== context.midnightInstants[7] ||
@@ -376,8 +374,12 @@ function tupleAfter(
  * the Phase 2B browser. Browser inspection validates cursor binding and shape;
  * only the server's cursor codec authenticates its MAC.
  */
-export function decodeWeekResponse(value: unknown, context: WeekValidationContext): WeekResponse {
-  validateContext(context);
+export function decodeWeekResponse(
+  value: unknown,
+  context: WeekValidationContext,
+  scheduleTimeZones: ReadonlySet<string>,
+): WeekResponse {
+  validateContext(context, scheduleTimeZones);
   const envelope = object(
     value,
     ["weekStart", "timezone", "requestNow", "records", "nextCursor"],
@@ -435,6 +437,10 @@ export function decodeWeekResponse(value: unknown, context: WeekValidationContex
   return { weekStart, timezone, requestNow, records, nextCursor };
 }
 
-export function parseWeekResponseJson(json: string, context: WeekValidationContext): WeekResponse {
-  return decodeWeekResponse(JSON.parse(json) as unknown, context);
+export function parseWeekResponseJson(
+  json: string,
+  context: WeekValidationContext,
+  scheduleTimeZones: ReadonlySet<string>,
+): WeekResponse {
+  return decodeWeekResponse(JSON.parse(json) as unknown, context, scheduleTimeZones);
 }

@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads";
+import { SCHEDULE_TIME_ZONE_SET } from "../../shared/scheduleTimezones.js";
 import {
   WEEK_BODY_MAX_BYTES,
   decodeWeekResponse,
@@ -232,7 +233,7 @@ export class WeekProjectionService {
       };
       const encoded = JSON.stringify(response);
       if (Buffer.byteLength(encoded, "utf8") > WEEK_BODY_MAX_BYTES) throw serviceError("failed");
-      const validated = decodeWeekResponse(JSON.parse(encoded) as unknown, week);
+      const validated = decodeWeekResponse(JSON.parse(encoded) as unknown, week, SCHEDULE_TIME_ZONE_SET);
       if (nextCursor) {
         const rebound = this.#cursor.decode(nextCursor, week);
         if (
