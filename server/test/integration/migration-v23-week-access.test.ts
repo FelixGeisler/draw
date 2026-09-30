@@ -12,7 +12,6 @@ import {
   finishWeekMutation,
   maintainWeekTracked,
   validateV23Contract,
-  validateV23Projection,
 } from "../../src/schemaV23.js";
 import { validateV22Contract } from "../../src/schemaV22.js";
 import { stripV23Schema } from "../schemaFixtures.js";
@@ -259,16 +258,27 @@ describe("schema v23 compact Week interval projection", () => {
     }
   }, 30_000);
 
-  it("keeps production rebuild and validation scans to bounded keyset batches", () => {
+  it("keeps full v23 source validation and projection work in bounded keyset batches", () => {
     const database = open("v23-bounded-batches", schema, 23);
     try {
-      const task = insertTask(database, "bounded batch source");
-      const insert = database.prepare(
+      const trackedTask = insertTask(database, "bounded tracked source");
+      const insertTracked = database.prepare(
         "INSERT INTO time_entries(task_id,started_at,ended_at) VALUES (?,'2026-01-01T00:00:00.000Z','2026-01-01T00:00:00.001Z')",
       );
+      const insertFixedTask = database.prepare(
+        "INSERT INTO tasks(title,category_id,created_at) VALUES (?,1,'created')",
+      );
+      const insertFixed = database.prepare(
+        `INSERT INTO task_fixed_slots(task_id,starts_at,ends_at,entry_timezone)
+         VALUES (?,'2026-01-02T00:00:00.000Z','2026-01-02T00:01:00.000Z','UTC')`,
+      );
+      const trackedCount = WEEK_PROJECTION_BATCH_SIZE * 2 + 17;
+      const fixedCount = WEEK_PROJECTION_BATCH_SIZE * 2 + 19;
       database.transaction(() => {
-        for (let index = 0; index < WEEK_PROJECTION_BATCH_SIZE * 2 + 17; index += 1) {
-          insert.run(task);
+        for (let index = 0; index < trackedCount; index += 1) insertTracked.run(trackedTask);
+        for (let index = 0; index < fixedCount; index += 1) {
+          const task = insertFixedTask.run(`bounded fixed ${index}`);
+          insertFixed.run(task.lastInsertRowid);
         }
       })();
 
@@ -277,21 +287,48 @@ describe("schema v23 compact Week interval projection", () => {
       database.prepare(
         "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
       ).run();
-      const validationBatches: number[] = [];
-      validateV23Projection(database, false, {
-        batch: ({ rowCount }) => validationBatches.push(rowCount),
+      const sourceContractBatches: number[] = [];
+      const projectionBatches: number[] = [];
+      validateV23Contract(database, {
+        hooks: {
+          batch: ({ phase, rowCount }) => {
+            (phase === "source-contract" ? sourceContractBatches : projectionBatches).push(rowCount);
+          },
+        },
       });
 
-      for (const batches of [buildBatches, validationBatches]) {
-        expect(batches.length).toBeGreaterThan(2);
+      for (const batches of [buildBatches, sourceContractBatches, projectionBatches]) {
         expect(Math.max(...batches)).toBeLessThanOrEqual(WEEK_PROJECTION_BATCH_SIZE);
-        expect(batches.reduce((total, count) => total + count, 0)).toBe(
-          WEEK_PROJECTION_BATCH_SIZE * 2 + 17,
-        );
       }
+      expect(buildBatches.length).toBeGreaterThan(4);
+      expect(buildBatches.reduce((total, count) => total + count, 0)).toBe(
+        trackedCount + fixedCount,
+      );
+      expect(sourceContractBatches.length).toBeGreaterThan(2);
+      expect(sourceContractBatches.reduce((total, count) => total + count, 0)).toBe(fixedCount);
+      expect(projectionBatches.length).toBeGreaterThan(4);
+      expect(projectionBatches.reduce((total, count) => total + count, 0)).toBe(
+        trackedCount + fixedCount,
+      );
       expect(database.prepare("SELECT COUNT(*) AS count FROM week_interval_access").get()).toEqual({
-        count: WEEK_PROJECTION_BATCH_SIZE * 2 + 17,
+        count: trackedCount + fixedCount,
       });
+    } finally {
+      database.close();
+    }
+  });
+
+  it("rejects a foreign-key violation with the existence-only v23 probe", () => {
+    const database = open("v23-foreign-key-invalid", schema, 23);
+    try {
+      database.pragma("foreign_keys=OFF");
+      database.prepare(
+        "INSERT INTO time_entries(task_id,started_at) VALUES (999999,'2026-01-01T00:00:00.000Z')",
+      ).run();
+      database.prepare(
+        "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
+      ).run();
+      expect(() => validateV23Contract(database)).toThrow(/foreign keys/);
     } finally {
       database.close();
     }

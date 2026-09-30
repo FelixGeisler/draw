@@ -15,6 +15,7 @@ import { TASK_FIXED_SLOTS_SQL, V22_INDEX_SQL, validateV22Contract } from "./sche
 import {
   beginWeekMutation,
   buildWeekProjection,
+  closeOpenTrackedIntervals,
   createWeekSchema,
   finishWeekMutation,
   maintainWeekFixed,
@@ -23,6 +24,7 @@ import {
   validateV23Projection,
   validateV23Structure,
   type WeekMutationToken,
+  type WeekTrackedCloseHooks,
 } from "./schemaV23.js";
 import { createSafeDatabase } from "./safeDatabase.js";
 export type { SafeDatabase, SafeStatement, SafeTransaction } from "./safeDatabase.js";
@@ -582,6 +584,27 @@ export function maintainFixedIntervalWrite(taskId: number, write: () => void): v
 }
 export function reprojectTrackedIntervals(token: WeekMutationToken, entryIds: readonly number[]): void {
   maintainWeekTracked(nativeDatabase, token, entryIds);
+}
+export function closeAllOpenTrackedIntervals(
+  token: WeekMutationToken,
+  endedAt: string,
+  hooks: WeekTrackedCloseHooks = {},
+): void {
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "all" }, hooks);
+}
+export function closeOpenTrackedIntervalsForTask(
+  token: WeekMutationToken,
+  endedAt: string,
+  taskId: number,
+): void {
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "task", taskId });
+}
+export function closeOpenTrackedIntervalById(
+  token: WeekMutationToken,
+  endedAt: string,
+  entryId: number,
+): void {
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "identity", entryId });
 }
 export function finalizeWeekIntervalMutation(token: WeekMutationToken): void {
   finishWeekMutation(nativeDatabase, token);

@@ -186,6 +186,7 @@ export type WeekProjectionRow = {
 
 export type WeekTimestampObserver = (value: unknown, field: string) => void;
 export type WeekProjectionBatchObserver = (batch: Readonly<{
+  phase: "source-contract" | "projection";
   sourceKind: 0 | 2;
   rowCount: number;
 }>) => void;
@@ -280,7 +281,11 @@ function scanWeekProjection(
     for (;;) {
       const rows = statement.all(after, WEEK_PROJECTION_BATCH_SIZE) as Candidate[];
       if (rows.length === 0) break;
-      hooks.batch?.(Object.freeze({ sourceKind: kind, rowCount: rows.length }));
+      hooks.batch?.(Object.freeze({
+        phase: "projection",
+        sourceKind: kind,
+        rowCount: rows.length,
+      }));
       for (const row of rows) {
         after = row.sourceId;
         const projected = projectCandidate(kind, row, hooks.timestamp);
@@ -384,8 +389,18 @@ function equal(label: string, actual: unknown, expected: unknown): void {
   }
 }
 
-export function validateV23Structure(database: Database.Database, requireVersion = true): void {
-  validateV22Contract(database);
+export function validateV23Structure(
+  database: Database.Database,
+  requireVersion = true,
+  hooks: WeekProjectionScanHooks = {},
+): void {
+  validateV22Contract(database, {
+    fixedSlotBatch: ({ rowCount }) => hooks.batch?.(Object.freeze({
+      phase: "source-contract",
+      sourceKind: WEEK_FIXED_KIND,
+      rowCount,
+    })),
+  });
   if (requireVersion && database.pragma("user_version", { simple: true }) !== 23) {
     throw new Error("schema v23 contract mismatch: user_version");
   }
@@ -469,7 +484,11 @@ export function validateV23Projection(
   if (companionMismatch || rtreeMismatch || rtreeCount.count !== companionCount.count) {
     throw new Error("schema v23 contract mismatch: companion and RTree equality");
   }
-  if ((database.pragma("foreign_key_check") as unknown[]).length !== 0) throw new Error("schema v23 contract mismatch: foreign keys");
+  // Only existence matters. Do not retain the complete violation set from a
+  // crafted staged database in JavaScript.
+  if (database.prepare("PRAGMA foreign_key_check").get()) {
+    throw new Error("schema v23 contract mismatch: foreign keys");
+  }
   if (database.pragma("integrity_check", { simple: true }) !== "ok") throw new Error("schema v23 contract mismatch: integrity");
   const checked = database.prepare("SELECT rtreecheck('week_interval_rtree') AS result").get() as { result: string };
   if (checked.result !== "ok") throw new Error("schema v23 contract mismatch: RTree integrity");
@@ -477,10 +496,14 @@ export function validateV23Projection(
 
 export function validateV23Contract(
   database: Database.Database,
-  options: { requireVersion?: boolean; allowUnready?: boolean } = {},
+  options: {
+    requireVersion?: boolean;
+    allowUnready?: boolean;
+    hooks?: WeekProjectionScanHooks;
+  } = {},
 ): void {
-  validateV23Structure(database, options.requireVersion ?? true);
-  validateV23Projection(database, options.allowUnready ?? false);
+  validateV23Structure(database, options.requireVersion ?? true, options.hooks);
+  validateV23Projection(database, options.allowUnready ?? false, options.hooks);
 }
 
 export interface WeekMutationToken { readonly weekMutation: unique symbol }
@@ -509,6 +532,63 @@ export function maintainWeekFixed(database: Database.Database, token: WeekMutati
 export function maintainWeekTracked(database: Database.Database, token: WeekMutationToken, entryIds: readonly number[]): void {
   assertToken(token);
   for (const id of new Set(entryIds)) reprojectWeekIdentity(database, WEEK_TRACKED_KIND, id);
+}
+
+export type WeekTrackedCloseScope =
+  | Readonly<{ kind: "all" }>
+  | Readonly<{ kind: "task"; taskId: number }>
+  | Readonly<{ kind: "identity"; entryId: number }>;
+
+export type WeekTrackedCloseHooks = Readonly<{
+  identityBatch?: (batch: Readonly<{ rowCount: number; retainedIdentityCount: number }>) => void;
+}>;
+
+/**
+ * Private native interval capability for the three owned timer-close writes.
+ * Each exact UPDATE ... RETURNING statement is consumed through native
+ * iteration inside this module. Returned identities are retained for only one
+ * bounded batch, then every identity is reprojected before the next batch.
+ * The caller's transaction preserves close/reprojection/finalization atomicity.
+ */
+export function closeOpenTrackedIntervals(
+  database: Database.Database,
+  token: WeekMutationToken,
+  endedAt: string,
+  scope: WeekTrackedCloseScope,
+  hooks: WeekTrackedCloseHooks = {},
+): void {
+  assertToken(token);
+  const predicate = scope.kind === "all"
+    ? "ended_at IS NULL"
+    : scope.kind === "task"
+      ? "ended_at IS NULL AND task_id = ?"
+      : "ended_at IS NULL AND id = ?";
+  const scopeBindings = scope.kind === "all"
+    ? []
+    : [scope.kind === "task" ? scope.taskId : scope.entryId];
+  const close = database.prepare(`UPDATE time_entries SET ended_at = ?
+    WHERE id IN (
+      SELECT id FROM time_entries WHERE ${predicate}
+      ORDER BY id LIMIT ?
+    )
+    RETURNING id`);
+
+  for (;;) {
+    const returnedIds: number[] = [];
+    const rows = close.iterate(
+      endedAt,
+      ...scopeBindings,
+      WEEK_PROJECTION_BATCH_SIZE,
+    ) as Iterable<{ id: number }>;
+    for (const row of rows) returnedIds.push(row.id);
+    if (returnedIds.length === 0) break;
+    hooks.identityBatch?.(Object.freeze({
+      rowCount: returnedIds.length,
+      retainedIdentityCount: returnedIds.length,
+    }));
+    maintainWeekTracked(database, token, returnedIds);
+    if (scope.kind === "identity") break;
+  }
 }
 
 export function finishWeekMutation(database: Database.Database, token: WeekMutationToken): void {

@@ -3,6 +3,8 @@ import { payChallengeIfDue } from "../services/challengeService.js";
 import { notifyChallengeCompleted } from "../services/notifyService.js";
 import {
   beginWeekIntervalMutation,
+  closeAllOpenTrackedIntervals,
+  closeOpenTrackedIntervalById,
   db,
   finalizeWeekIntervalMutation,
   reprojectTrackedIntervals,
@@ -27,17 +29,12 @@ export function startTimer(taskId: number): { error?: string; status?: number } 
 
   db.transaction(() => {
     const weekMutation = beginWeekIntervalMutation();
-    const closed = db
-      .prepare("UPDATE time_entries SET ended_at = ? WHERE ended_at IS NULL RETURNING id")
-      .all(new Date().toISOString()) as Array<{ id: number }>;
+    closeAllOpenTrackedIntervals(weekMutation, new Date().toISOString());
     const inserted = db.prepare("INSERT INTO time_entries (task_id, started_at) VALUES (?, ?)").run(
       taskId,
       new Date().toISOString(),
     );
-    reprojectTrackedIntervals(weekMutation, [
-      ...closed.map((row) => row.id),
-      Number(inserted.lastInsertRowid),
-    ]);
+    reprojectTrackedIntervals(weekMutation, [Number(inserted.lastInsertRowid)]);
     finalizeWeekIntervalMutation(weekMutation);
   })();
   return {};
@@ -61,10 +58,7 @@ timerRouter.post("/stop", (_req, res) => {
   const now = new Date();
   const outcome = db.transaction(() => {
     const weekMutation = beginWeekIntervalMutation();
-    const closed = db
-      .prepare("UPDATE time_entries SET ended_at = ? WHERE id = ? RETURNING id")
-      .all(now.toISOString(), entry.id) as Array<{ id: number }>;
-    reprojectTrackedIntervals(weekMutation, closed.map((row) => row.id));
+    closeOpenTrackedIntervalById(weekMutation, now.toISOString(), entry.id);
     finalizeWeekIntervalMutation(weekMutation);
     // Timer close and both challenge owners are one transaction. Any XP/Gold
     // failure (including a Gold-only anomaly) leaves the entry running.

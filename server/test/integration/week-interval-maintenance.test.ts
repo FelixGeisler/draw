@@ -2,7 +2,12 @@ import { beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import type express from "express";
 import type Database from "better-sqlite3";
-import { buildWeekProjection } from "../../src/schemaV23.js";
+import {
+  beginWeekIntervalMutation,
+  closeAllOpenTrackedIntervals,
+  finalizeWeekIntervalMutation,
+} from "../../src/db.js";
+import { WEEK_PROJECTION_BATCH_SIZE, buildWeekProjection } from "../../src/schemaV23.js";
 import { freshApp, testDb } from "../helpers.js";
 
 let app: express.Express;
@@ -158,6 +163,62 @@ describe("owned schema-v23 interval maintenance", () => {
     await request(app).delete(`/api/tasks/${doomed.id}`).expect(200);
     expect(database.prepare("SELECT COUNT(*) AS n FROM week_interval_access WHERE task_id=?").get(doomed.id)).toEqual({ n: 0 });
     expect(state().ready).toBe(1);
+  });
+
+  it("closes many open entries through bounded returned-identity batches atomically", async () => {
+    const task = await createTask({ title: "many open entries" });
+    const insert = database.prepare(
+      "INSERT INTO time_entries(task_id,started_at) VALUES (?,'2026-08-01T00:00:00.000Z')",
+    );
+    const ids: number[] = [];
+    const openCount = WEEK_PROJECTION_BATCH_SIZE * 2 + 17;
+    database.transaction(() => {
+      for (let index = 0; index < openCount; index += 1) {
+        ids.push(Number(insert.run(task.id).lastInsertRowid));
+      }
+    })();
+    forceReady();
+    const before = state();
+
+    database.exec(`CREATE TEMP TRIGGER fail_many_open_projection
+      BEFORE UPDATE ON week_interval_access
+      BEGIN SELECT RAISE(ABORT,'injected many-open projection failure'); END`);
+    try {
+      expect(() => database.transaction(() => {
+        const token = beginWeekIntervalMutation();
+        closeAllOpenTrackedIntervals(token, "2026-08-01T01:00:00.000Z");
+        finalizeWeekIntervalMutation(token);
+      })()).toThrow(/injected many-open projection failure/);
+    } finally {
+      database.exec("DROP TRIGGER fail_many_open_projection");
+    }
+    expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM time_entries WHERE ended_at IS NULL",
+    ).get()).toEqual({ count: openCount });
+    expect(state()).toEqual(before);
+
+    const batches: Array<{ rowCount: number; retainedIdentityCount: number }> = [];
+    database.transaction(() => {
+      const token = beginWeekIntervalMutation();
+      closeAllOpenTrackedIntervals(
+        token,
+        "2026-08-01T01:00:00.000Z",
+        { identityBatch: (batch) => batches.push(batch) },
+      );
+      finalizeWeekIntervalMutation(token);
+    })();
+
+    expect(batches.length).toBeGreaterThan(2);
+    expect(Math.max(...batches.map((batch) => batch.retainedIdentityCount))).toBeLessThanOrEqual(
+      WEEK_PROJECTION_BATCH_SIZE,
+    );
+    expect(batches.reduce((total, batch) => total + batch.rowCount, 0)).toBe(openCount);
+    expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM time_entries WHERE ended_at IS NULL",
+    ).get()).toEqual({ count: 0 });
+    for (const id of ids) expect(interval(2, id)?.endMs).not.toBeNull();
+    expect(state().ready).toBe(1);
+    expect(state().builtGeneration).toBe(state().sourceGeneration);
   });
 
   it("rolls source, companion, RTree and state back together on projection failure", async () => {

@@ -1,10 +1,10 @@
 import {
   beginWeekIntervalMutation,
+  closeOpenTrackedIntervalsForTask,
   db,
   finalizeWeekIntervalMutation,
   getSetting,
   getSettingString,
-  reprojectTrackedIntervals,
 } from "../db.js";
 import { ACHIEVEMENT_KEYS, type AchievementKey } from "../../../shared/achievementKeys.js";
 import { claimGoldForKey, claimXpForKey } from "../../../shared/achievementTiers.js";
@@ -191,12 +191,7 @@ export function completeTask(
   // applies on the recurring path too — the task stays open, but XP was just
   // awarded for the session, so the entry is finished (ADR-12).
   const weekMutation = beginWeekIntervalMutation();
-  const closedEntries = db
-    .prepare(
-      "UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL RETURNING id",
-    )
-    .all(now.toISOString(), task.id) as Array<{ id: number }>;
-  reprojectTrackedIntervals(weekMutation, closedEntries.map((row) => row.id));
+  closeOpenTrackedIntervalsForTask(weekMutation, now.toISOString(), task.id);
   finalizeWeekIntervalMutation(weekMutation);
 
   // A recurring task never closes: completing it SCHEDULES the next

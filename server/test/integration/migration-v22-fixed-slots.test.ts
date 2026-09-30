@@ -180,6 +180,20 @@ describe("schema v22 fixed-slot migration and complete validator", () => {
 
       database.prepare("UPDATE task_fixed_slots SET entry_timezone='US/Eastern'").run();
       expect(() => validateV22Contract(database)).toThrow(/stored fixed slot|row/);
+
+      const hugeTimezoneText = "x".repeat(1_000_000);
+      database.prepare("UPDATE task_fixed_slots SET entry_timezone=?").run(hugeTimezoneText);
+      expect(() => validateV22Contract(database)).toThrow(/entry_timezone/);
+      expect(database.prepare(
+        "SELECT typeof(entry_timezone) AS type,octet_length(entry_timezone) AS bytes FROM task_fixed_slots",
+      ).get()).toEqual({ type: "text", bytes: hugeTimezoneText.length });
+      const hugeTimezoneBlob = Buffer.alloc(1_000_000, 65);
+      database.prepare("UPDATE task_fixed_slots SET entry_timezone=?").run(hugeTimezoneBlob);
+      expect(() => validateV22Contract(database)).toThrow(/entry_timezone/);
+      expect(database.prepare(
+        "SELECT typeof(entry_timezone) AS type,octet_length(entry_timezone) AS bytes FROM task_fixed_slots",
+      ).get()).toEqual({ type: "blob", bytes: hugeTimezoneBlob.length });
+
       database.prepare("UPDATE task_fixed_slots SET entry_timezone='UTC', starts_at='2026-01-01T10:00:00Z'").run();
       expect(() => validateV22Contract(database)).toThrow(/canonical|stored fixed slot/);
 

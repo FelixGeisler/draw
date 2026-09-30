@@ -1,11 +1,11 @@
 import { Router } from "express";
 import {
   beginWeekIntervalMutation,
+  closeOpenTrackedIntervalsForTask,
   db,
   finalizeWeekIntervalMutation,
   getSetting,
   maintainFixedIntervalWrite,
-  reprojectTrackedIntervals,
 } from "../db.js";
 import {
   clearCurrentDraw,
@@ -400,12 +400,7 @@ tasksRouter.post("/:id/split", (req, res) => {
     // at split time, mirroring what completion does (ADR-12). Its minutes
     // stay attributed to the original, whose stats survive archiving.
     const weekMutation = beginWeekIntervalMutation();
-    const closedEntries = db
-      .prepare(
-        "UPDATE time_entries SET ended_at = ? WHERE task_id = ? AND ended_at IS NULL RETURNING id",
-      )
-      .all(new Date().toISOString(), id) as Array<{ id: number }>;
-    reprojectTrackedIntervals(weekMutation, closedEntries.map((row) => row.id));
+    closeOpenTrackedIntervalsForTask(weekMutation, new Date().toISOString(), id);
     finalizeWeekIntervalMutation(weekMutation);
     // The original can normally never BE the current draw (too big = not
     // drawable), but the endpoint has no size gate, so an API/MCP caller can

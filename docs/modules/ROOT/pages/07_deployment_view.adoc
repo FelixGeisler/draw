@@ -152,7 +152,7 @@ node "Host (PC, or the #191 container — see 7.3)" as host {
   }
   artifact "client/dist\n(vite build, gitignored)" as dist
   folder "server/data/" as data {
-    database "app.db\nschema v22" as db
+    database "app.db\nschema v23" as db
     artifact "push-authority.json\nreset/restore/revoke markers\n(production only)" as pushstate
   }
 }
@@ -373,12 +373,15 @@ if a migration ran in between — restore a backup from before the update
 (xref:09_architecture_decisions.adoc[ADR-26]; the backup importer refuses
 newer-versioned archives, so restoring an older backup into an older image
 is the supported direction). Current images accept backups through schema
-v22: stamped v19–v22 inputs receive their own exact validation before migration.
+v23: stamped v19–v23 inputs receive their own exact validation before migration.
 v20 retains its historical nullable settings, lead and per-item claim contract;
 v21 requires the four timing fields, no lead row, and the exact device/date
 digest table; v22 adds the exact fixed-slot relation, indexes and value
-invariants. Older files migrate through each boundary. Complete
-v18 validation also runs before the live
+invariants; v23 adds the exact compact Week interval projection. Imported v23
+projection rows are disposable: after exact schema admission they are dropped,
+recreated from compiled DDL and rebuilt from authoritative fixed-slot/time-entry
+source before the sanitized rewrite and swap. Older files migrate through each
+boundary. Complete v18 validation also runs before the live
 database moves; a missing or weakened contract leaves the live deployment
 untouched. *Bare-npm path:* `git pull`, `npm ci`,
 `npm run build`, restart `npm start` — release discovery and the minimal status
