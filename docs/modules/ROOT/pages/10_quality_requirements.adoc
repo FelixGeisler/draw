@@ -98,9 +98,17 @@ AI degradation > data integrity > cost transparency > responsiveness.
 |Q22
 |Schema v23 sees historical, boundary, open, malformed or drifting fixed/tracked interval source, or an owned mutation fails mid-transaction
 |Lazy guards admit only canonical 24-byte TEXT timestamps; bounded keyset rebuild/validation retains no full-history JavaScript array; the numeric companion and RTree are complete for eligible source, dirty/rebuild is explicit, and source/companion/RTree/state roll back together without a history cutoff, numeric performance SLA or user-content projection
+
+|Q23
+|A Week request covers dense history, a DST/boundary Week, concurrent access, stale/tampered cursor, or a restore
+|The ready-v23 RTree/index query returns one coherent ordered page of at most 100 records; all JavaScript/IPC/wire data are bounded, a second request is busy, cursor failure reaches no SQL, and restore proves worker closure and rotates the key only after commit
+
+|Q24
+|A selected source title is arbitrarily large or has a UTF-8 boundary/error
+|Only the page-budget prefix plus four bytes enters JavaScript; intact records defer and lone oversized records truncate code-point-safely under 131,072 bytes. Invalid fetched bytes fail the page. SQLite-native title materialization, OOM and process survival remain explicitly unbounded residual risk (issue #360)
 |===
 
-Q1, Q3 (guardrail), Q6–Q10 and Q13–Q22 are covered by the automated test suites (unit /
+Q1, Q3 (guardrail), Q6–Q10 and Q13–Q24 are covered by the automated test suites (unit /
 integration / E2E — see xref:08_crosscutting_concepts.adoc[8.7]) and run in CI on every
 PR. Q2 and Q4 need a live API key and are verified manually; Q5 is covered by the
 E2E timer journey; Q11/Q12 are properties of SQLite WAL and prebuilt binaries.

@@ -156,7 +156,11 @@ server/src/
 
 |`db` + `SafeDatabase`
 |Own the live native SQLite handle and expose only copied `prepare().run/get/all` values plus wrapped transactions
-|Ordinary production code cannot recover a native handle/path, run DDL/pragma/attachment/transaction SQL, or access protected future projection/introspection names; wrappers resolve the current handle after restore
+|Ordinary production code cannot recover a native handle/path, run DDL/pragma/attachment/transaction SQL, or access protected projection/introspection names; wrappers resolve the current handle after restore
+
+|`weekService` + private `weekWorker`
+|Authenticate cursor v2 in the main process, admit one Week computation, and read one bounded coherent v23 page on a lazy read-only Worker Thread
+|Routes receive no path/handle/key; at most 101 title-free identities and 100 prefix-bounded titles are processed; Worker Thread isolation does not contain native OOM or abort
 
 |`backupService` + restore preflight
 |Own staged SQLite handles and semantic live snapshot/checkpoint/close/reopen capabilities
@@ -284,8 +288,9 @@ Schema v23's `week_interval_access` is a disposable numeric companion for every
 eligible fixed slot and tracked interval; `week_interval_rtree` indexes its
 inclusive UTC-day bounds and contains one row with the same `index_id`.
 `week_access_state` records source/built generations and readiness. The source
-tables remain authoritative, titles/descriptions never enter the projection,
-and no public Week reader consumes it yet (ADR-75).
+tables remain authoritative and titles/descriptions never enter the projection.
+The Phase 2A Week worker now consumes it through the RTree-first bounded query;
+the Week client remains planned (ADR-75).
 
 Central semantics: completing a *recurring* task keeps it `open` and pushes
 `due_date` forward — that date is the task's *next occurrence*, so the card is

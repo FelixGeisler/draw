@@ -366,7 +366,8 @@ contract, then atomically creates the exact compact Week interval state,
 companion, RTree and trigger inventory, keyset-rebuilds the disposable
 projection, proves source/companion/RTree equivalence and stamps 23 last. Normal
 v23 boot repeats the exact structure check and a transactional keyset rebuild;
-there is still no Week consumer. Backup import dispatches stamped v19–v23 files
+the Phase 2A worker consumes only a ready equal-generation snapshot. Backup
+import dispatches stamped v19–v23 files
 to their own validators before migration and validates final v23 before swap.
 The inherited validator still proves exact DDL, columns, PK index, FK, retained Push
 shape, persistent trigger/no-view allowlist,
@@ -486,7 +487,7 @@ backup when credential-free portability is required (ADR-72).
 
 == 8.10 SQLite capability boundary
 
-Only `db.ts` runtime-imports the native binding for the live database. It owns
+`db.ts` is the only runtime importer that owns the live read/write handle. It owns
 the path and current handle and exports one frozen `SafeDatabase` with copied
 `run/get/all` values and wrapped deferred/immediate/exclusive transactions.
 The SQL lexical gate excludes schema mutation, pragma, attachment, explicit
@@ -496,7 +497,7 @@ dynamic sort/column fragments remain closed internal allowlists. Production
 assembly, Push, digest, daily overview, fixed-slot and ordinary route/service
 seams consume this facade, not a native type.
 
-`backupService` is the sole second runtime binding importer. It may open only
+`backupService` is the second runtime binding importer. It may open only
 identity-checked, non-live staged/snapshot/rewrite files and receives semantic
 live capabilities for a new-path `VACUUM INTO`, checkpoint-and-close and
 reopen. Migration/schema validators remain private native consumers. Schema v23 adds
@@ -506,8 +507,16 @@ bounded keyset-streaming rebuild/validation operations only, with lazy
 SQL, UDF/table registration or extension exposed to callers. The batch bound is
 a resource guard, not a latency, throughput or storage SLA.
 
+The private `weekWorker.ts` entry is the sole third runtime importer. `db.ts`
+passes the path only as worker bootstrap data and exports application-level
+request/close/restore operations; no route receives it. One defensive read-only,
+query-only connection is reused sequentially and is closed before restore and
+shutdown. Cursor HMAC keys remain in the main process and never cross to SQLite,
+the worker, backup or logs.
+
 ADR-75 Phases 1 and 2 are now implemented: `CURRENT_VERSION` is 23, exact
 `week_access_state`, `week_interval_access`, `week_interval_rtree`/shadow DDL
 and nine triggers are validated, owned fixed/timer mutations maintain affected
-identities, and boot/restore rederive the disposable projection. There remains
-no Week route, query, client, worker, cursor, `/today`, digest or Push behavior.
+identities, and boot/restore rederive the disposable projection. Phase 2A adds
+the authenticated bounded Week route, v2 cursor and worker reader. The Week
+client, navigation, `/today`, digest and Push behavior remain planned and unchanged.
