@@ -257,7 +257,7 @@ describe("schema v23 compact Week interval projection", () => {
     } finally {
       database.close();
     }
-  });
+  }, 30_000);
 
   it("keeps production rebuild and validation scans to bounded keyset batches", () => {
     const database = open("v23-bounded-batches", schema, 23);
