@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
 import { createSafeDatabase } from "../../src/safeDatabase.js";
@@ -42,6 +44,46 @@ describe("pinned SQLite RTree/native capability canary", () => {
     } finally {
       native.close();
     }
+  });
+
+  it("runs the exact readonly/file-must-exist/query-only/pragmas connection contract", async () => {
+    await import("../../src/db.js");
+    const workerSource = fs.readFileSync(path.join(process.cwd(), "src/weekWorker.ts"), "utf8");
+    expect(workerSource.match(/new Database\(/g)).toHaveLength(1);
+    expect(workerSource).toContain("{ readonly: true, fileMustExist: true }");
+
+    const databasePath = path.join(process.env.DATA_DIR!, "app.db");
+    const reader = new Database(databasePath, { readonly: true, fileMustExist: true });
+    try {
+      reader.unsafeMode(false);
+      reader.pragma("trusted_schema = OFF");
+      reader.pragma("query_only = ON");
+      reader.pragma("cache_size = -2048");
+      reader.pragma("temp_store = FILE");
+      expect(reader.pragma("query_only", { simple: true })).toBe(1);
+      expect(reader.pragma("trusted_schema", { simple: true })).toBe(0);
+      expect(reader.pragma("cache_size", { simple: true })).toBe(-2048);
+      expect(reader.pragma("temp_store", { simple: true })).toBe(1);
+      expect(() => reader.prepare("UPDATE tasks SET title=title WHERE id=1").run()).toThrow(/readonly|read-only/i);
+      expect(() => reader.exec("CREATE TEMP TABLE forbidden(value)")).toThrow(/readonly|query only/i);
+      expect(reader.prepare("SELECT COUNT(*) AS n FROM tasks").get()).toEqual(expect.objectContaining({ n: expect.any(Number) }));
+    } finally {
+      reader.close();
+    }
+    expect(reader.open).toBe(false);
+    expect(() => new Database(`${databasePath}.missing`, { readonly: true, fileMustExist: true })).toThrow();
+  });
+
+  it("keeps identity selection title-free and one-result prefix reads bounded before IPC", () => {
+    const workerSource = fs.readFileSync(path.join(process.cwd(), "src/weekWorker.ts"), "utf8");
+    expect(WEEK_IDENTITY_SQL).not.toMatch(/\b(?:title|notes|description|outcome|materials)\b/i);
+    expect(workerSource).toContain("substr(CAST(title AS BLOB),1,?) AS prefix");
+    expect(workerSource).toContain("titleStatements[row.recordKind].get(prefixLimit, sourceId)");
+    expect(workerSource).not.toContain("titleStatements[row.recordKind].all");
+    expect(workerSource.indexOf("identities = database.prepare(WEEK_QUERY_SQL).all(params)")).toBeLessThan(
+      workerSource.indexOf("const fetched = titleFor(identity, titleBudget + 4)"),
+    );
+    expect(workerSource).toContain("for (const identity of identities.slice(0, WEEK_PAGE_SIZE))");
   });
 
   it("characterizes selected large-title native work without a pass/fail resource threshold", () => {

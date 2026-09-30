@@ -3,7 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import request from "supertest";
 import { createApp } from "../../src/app.js";
-import { readWeekPage, shutdownWeekProjection } from "../../src/db.js";
+import {
+  beginWeekRestore,
+  finishWeekRestore,
+  readWeekPage,
+  reopenDatabase,
+  shutdownWeekProjection,
+} from "../../src/db.js";
 import { buildWeekProjection } from "../../src/schemaV23.js";
 import { BackupError, createBackupArchive, importBackupArchive } from "../../src/services/backupService.js";
 import { resolveWeek } from "../../src/weekTime.js";
@@ -63,6 +69,14 @@ describe("GET /api/calendar/week request boundary", () => {
       "/api/calendar/week?weekStart=2026-10-26&timezone=UTC&timezone=UTC",
       "/api/calendar/week?weekStart=2026-10-26&timezone=UTC&unknown=1",
       "/api/calendar/week?weekStart=2026-10-26&timezone=utc",
+      "/api/calendar/week?weekStart=2026-10-26&timezone=US%2FEastern",
+      "/api/calendar/week?weekStart=2026-10-26&timezone=Etc%2FGMT%2B1",
+      "/api/calendar/week?weekStart=2026-10-26&timezone=%2B01%3A00",
+      "/api/calendar/week?weekStart=2026-10-26&timezone=CET",
+      "/api/calendar/week?weekStart=2026-10-26&timezone=%20UTC",
+      "/api/calendar/week?weekStart=2026-10-26&timezone=UTC%20",
+      "/api/calendar/week?weekStart=2026-10-26&timezone=%C3%89urope%2FBerlin",
+      `/api/calendar/week?weekStart=2026-10-26&timezone=A%2F${"z".repeat(129)}`,
       "/api/calendar/week?weekStart=9999-12-27&timezone=UTC",
     ]) {
       await request(app).get(target).expect(400, { error: "invalid-week-request" });
@@ -253,6 +267,60 @@ describe("Week projection, closed union, and paging", () => {
     }
     await request(app)
       .get(`/api/calendar/week?weekStart=2026-11-09&timezone=UTC&cursor=${encodeURIComponent(retainedCursor)}`)
+      .expect(200);
+  });
+
+  it("latches unavailable on pre/post-commit reopen-proof faults with exact cursor retention/rotation", async () => {
+    const beforePreCommit = await request(app)
+      .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
+      .expect(200);
+    const retainedCursor = beforePreCommit.body.nextCursor as string;
+    const preCommitArchive = createBackupArchive();
+    try {
+      await expect(importBackupArchive(preCommitArchive, undefined, {
+        beforeDatabaseCommit: () => { throw new Error("injected pre-commit swap fault"); },
+        reopenLiveDatabase: () => {
+          reopenDatabase();
+          throw new Error("injected missing reopen proof");
+        },
+      })).rejects.toThrow("injected missing reopen proof");
+    } finally {
+      fs.rmSync(preCommitArchive, { force: true });
+    }
+    await request(app)
+      .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
+      .expect(503, { error: "week-index-unavailable" });
+    await beginWeekRestore();
+    finishWeekRestore(false, true);
+    await request(app)
+      .get(`/api/calendar/week?weekStart=2026-11-09&timezone=UTC&cursor=${encodeURIComponent(retainedCursor)}`)
+      .expect(200);
+
+    const beforePostCommit = await request(app)
+      .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
+      .expect(200);
+    const rotatedCursor = beforePostCommit.body.nextCursor as string;
+    const postCommitArchive = createBackupArchive();
+    try {
+      await expect(importBackupArchive(postCommitArchive, undefined, {
+        reopenLiveDatabase: () => {
+          reopenDatabase();
+          throw new Error("injected post-commit missing reopen proof");
+        },
+      })).resolves.toEqual(expect.objectContaining({ pushRecoveryPending: true }));
+    } finally {
+      fs.rmSync(postCommitArchive, { force: true });
+    }
+    await request(app)
+      .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
+      .expect(503, { error: "week-index-unavailable" });
+    await beginWeekRestore();
+    finishWeekRestore(false, true);
+    await request(app)
+      .get(`/api/calendar/week?weekStart=2026-11-09&timezone=UTC&cursor=${encodeURIComponent(rotatedCursor)}`)
+      .expect(400, { error: "invalid-week-request" });
+    await request(app)
+      .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
       .expect(200);
   });
 

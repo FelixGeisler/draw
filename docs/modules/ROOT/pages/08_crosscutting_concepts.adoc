@@ -510,8 +510,11 @@ a resource guard, not a latency, throughput or storage SLA.
 The private `weekWorker.ts` entry is the sole third runtime importer. `db.ts`
 passes the path only as worker bootstrap data and exports application-level
 request/close/restore operations; no route receives it. One defensive read-only,
-query-only connection is reused sequentially and is closed before restore and
-shutdown. Cursor HMAC keys remain in the main process and never cross to SQLite,
+query-only connection is reused sequentially. Live and retiring workers remain
+owned through confirmed exit, so replacement, restore and shutdown cannot
+outpace native connection closure. Restore releases normal Week admission only
+after successful live reopen/validation; failed proof latches Week unavailable.
+Cursor HMAC keys remain in the main process and never cross to SQLite,
 the worker, backup or logs.
 
 ADR-75 Phases 1 and 2 are now implemented: `CURRENT_VERSION` is 23, exact

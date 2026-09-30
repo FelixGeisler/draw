@@ -4595,9 +4595,14 @@ One lazy long-lived Worker Thread is the sole third production runtime importer
 of `better-sqlite3`. Its one `readonly:true,fileMustExist:true`, query-only,
 untrusted-schema connection is an event-loop boundary only. Exactly one Week
 computation is admitted; there is no queue, coalescing, retry or timeout. A
-restore lease rejects active work, closes/proves worker exit before ADR-26's
-Push/checkpoint/last-connection/swap sequence, keeps admission closed through
-v23 reopen validation, and recreates lazily. Shutdown closes the worker.
+restore lease rejects active work, retains every faulted/retiring worker through
+an exit promise, and closes/proves all worker exits before ADR-26's
+Push/checkpoint/last-connection/swap sequence. Replacement, restore and shutdown
+cannot overtake a retiring native reader. Admission stays closed through the
+complete live reopen/migration/v23 validation proof. A failed proof latches Week
+unavailable and opens no worker until a later proven recovery; committed data
+rotates the cursor key even when its reopen proof fails, while pre-commit failure
+retains the key. Successful recovery recreates lazily. Shutdown closes the worker.
 
 Inside one ready equal-generation v23 snapshot, one title-free four-branch
 `UNION ALL` starts interval branches at the RTree, uses deadline indexes,

@@ -229,17 +229,26 @@ function withTitle(record: WeekRecord, title: string, titleTruncated: boolean): 
   return { ...record, title, titleTruncated } as WeekRecord;
 }
 
-function reservedBodyBytes(request: WeekWorkerRequest, records: WeekRecord[]): number {
+function reservedBodyBytes(
+  request: WeekWorkerRequest,
+  records: WeekRecord[],
+  hasMore: boolean,
+): number {
   return Buffer.byteLength(JSON.stringify({
     weekStart: request.week.weekStart,
     timezone: request.week.timezone,
     requestNow: request.requestNow,
     records,
-    nextCursor: "x".repeat(WEEK_CURSOR_RESERVE_CHARS),
+    nextCursor: hasMore ? "x".repeat(WEEK_CURSOR_RESERVE_CHARS) : null,
   }), "utf8");
 }
 
-function largestTitleThatFits(request: WeekWorkerRequest, base: WeekRecord, title: string): WeekRecord {
+function largestTitleThatFits(
+  request: WeekWorkerRequest,
+  base: WeekRecord,
+  title: string,
+  hasMore: boolean,
+): WeekRecord {
   const points = Array.from(title);
   let low = 0;
   let high = points.length;
@@ -247,7 +256,7 @@ function largestTitleThatFits(request: WeekWorkerRequest, base: WeekRecord, titl
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
     const candidate = withTitle(base, points.slice(0, middle).join(""), true);
-    if (reservedBodyBytes(request, [candidate]) <= WEEK_BODY_MAX_BYTES) {
+    if (reservedBodyBytes(request, [candidate], hasMore) <= WEEK_BODY_MAX_BYTES) {
       best = candidate;
       low = middle + 1;
     } else {
@@ -324,7 +333,9 @@ function queryPage(request: WeekWorkerRequest): WeekWorkerResult {
 
       const base = baseRecord(identity, request.requestNow, request.week.timezone);
       const empty = withTitle(base, "", false);
-      const titleBudget = WEEK_BODY_MAX_BYTES - reservedBodyBytes(request, [...records, empty]);
+      const hasMoreAfterIdentity = examined < identities.length || identities.length === 101;
+      const titleBudget = WEEK_BODY_MAX_BYTES -
+        reservedBodyBytes(request, [...records, empty], hasMoreAfterIdentity);
       if (titleBudget < 0) {
         if (records.length > 0) {
           examined -= 1;
@@ -334,7 +345,8 @@ function queryPage(request: WeekWorkerRequest): WeekWorkerResult {
       }
       const fetched = titleFor(identity, titleBudget + 4);
       const intact = withTitle(base, fetched.title, false);
-      if (fetched.complete && reservedBodyBytes(request, [...records, intact]) <= WEEK_BODY_MAX_BYTES) {
+      if (fetched.complete &&
+          reservedBodyBytes(request, [...records, intact], hasMoreAfterIdentity) <= WEEK_BODY_MAX_BYTES) {
         records.push(intact);
       } else if (records.length > 0) {
         // The intact identity is retried against an empty page; no partial
@@ -342,7 +354,7 @@ function queryPage(request: WeekWorkerRequest): WeekWorkerResult {
         examined -= 1;
         break;
       } else {
-        records.push(largestTitleThatFits(request, base, fetched.title));
+        records.push(largestTitleThatFits(request, base, fetched.title, hasMoreAfterIdentity));
       }
       last = { anchor: new Date(anchor as number).toISOString(), kindRank: rank as 0 | 1 | 2, id: sourceId };
     }

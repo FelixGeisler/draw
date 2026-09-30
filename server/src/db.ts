@@ -561,8 +561,8 @@ export function readWeekPage(
 export function beginWeekRestore(): Promise<void> {
   return weekProjection.beginRestore();
 }
-export function finishWeekRestore(committed: boolean): void {
-  weekProjection.finishRestore(committed);
+export function finishWeekRestore(committed: boolean, liveReopenSucceeded: boolean): void {
+  weekProjection.finishRestore(committed, liveReopenSucceeded);
 }
 export function shutdownWeekProjection(): Promise<void> {
   return weekProjection.shutdown();

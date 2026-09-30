@@ -6,6 +6,7 @@ import {
   WEEK_SEMANTIC_CURSOR_MAX_CHARS,
   createWeekCursorCodec,
 } from "../../src/weekCursor.js";
+import { parseWeekQueryTarget } from "../../src/routes/calendar.js";
 import { contextDateForInstant, resolveWeek } from "../../src/weekTime.js";
 
 function durationHours(weekStart: string, timezone: string): number {
@@ -20,9 +21,22 @@ describe("Week time and cursor contract", () => {
     expect(durationHours("2026-10-19", "Europe/Berlin")).toBe(169);
     expect(durationHours("2026-03-02", "America/New_York")).toBe(167);
     expect(durationHours("2026-10-26", "America/New_York")).toBe(169);
+    expect(durationHours("2026-03-30", "Australia/Lord_Howe")).toBe(168.5);
+    expect(durationHours("2026-09-28", "Australia/Lord_Howe")).toBe(167.5);
+    expect(durationHours("2026-05-04", "Pacific/Chatham")).toBe(168);
     expect(resolveWeek("2026-10-27", "UTC")).toBeNull();
     expect(resolveWeek("2026-10-26", "US/Eastern")).toBeNull();
     expect(resolveWeek("2026-10-26", " Europe/Berlin")).toBeNull();
+  });
+
+  it("enforces the raw 2,048/2,049-byte target gate before cursor semantics", () => {
+    const prefix = "/api/calendar/week?weekStart=2026-10-26&timezone=UTC&cursor=";
+    const atLimit = `${prefix}${"A".repeat(2_048 - Buffer.byteLength(prefix))}`;
+    expect(Buffer.byteLength(atLimit)).toBe(2_048);
+    expect(parseWeekQueryTarget(atLimit)).toEqual({
+      weekStart: "2026-10-26", timezone: "UTC", cursor: "A".repeat(2_048 - Buffer.byteLength(prefix)),
+    });
+    expect(parseWeekQueryTarget(`${atLimit}A`)).toBeNull();
   });
 
   it("enforces the four-digit lower and upper Week boundaries", () => {
@@ -73,32 +87,87 @@ describe("Week time and cursor contract", () => {
 });
 
 describe("shared closed Week response decoder", () => {
+  const context = resolveWeek("2026-10-26", "Europe/Berlin")!;
   const example = {
     weekStart: "2026-10-26",
     timezone: "Europe/Berlin",
     requestNow: "2026-10-29T12:00:00.000Z",
     records: [
       { kind: "task", id: 42, title: "Prepare review", titleTruncated: false, status: "open", fixed: { startsAt: "2026-10-27T08:00:00.000Z", endsAt: "2026-10-27T09:30:00.000Z", contextDate: "2026-10-27" }, deadline: { date: "2026-10-30" } },
-      { kind: "goal", id: 7, title: "Submit portfolio", titleTruncated: false, status: "active", deadline: { date: "2026-10-31" } },
       { kind: "tracked", id: 901, taskId: 42, taskStatus: "open", title: "Prepare review", titleTruncated: false, startedAt: "2026-10-29T10:15:00.000Z", effectiveEndAt: "2026-10-29T12:00:00.000Z", running: true },
+      { kind: "goal", id: 7, title: "Submit portfolio", titleTruncated: false, status: "active", deadline: { date: "2026-10-31" } },
     ],
     nextCursor: null,
   };
 
-  it("accepts the exact all-variant example and nullable fixed context", () => {
-    expect(decodeWeekResponse(example)).toEqual(example);
-    const boundary: unknown = structuredClone(example);
-    (boundary as { records: Array<{ fixed: { contextDate: string | null } }> })
-      .records[0].fixed.contextDate = null;
-    expect(decodeWeekResponse(boundary).records[0]).toMatchObject({ fixed: { contextDate: null } });
+  it("accepts an ordered all-variant page and rejects null ordinary context", () => {
+    expect(decodeWeekResponse(example, context)).toEqual(example);
+    const ordinaryNull: unknown = structuredClone(example);
+    (ordinaryNull as { records: Array<{ fixed?: { contextDate: string | null } }> })
+      .records[0].fixed!.contextDate = null;
+    expect(() => decodeWeekResponse(ordinaryNull, context)).toThrow(/contextDate/);
+
+    const lower = resolveWeek("0001-01-01", "America/New_York")!;
+    const boundary = {
+      weekStart: lower.weekStart,
+      timezone: lower.timezone,
+      requestNow: "0001-01-02T12:00:00.000Z",
+      records: [{
+        kind: "task", id: 1, title: "boundary", titleTruncated: false, status: "open",
+        fixed: { startsAt: "0001-01-01T00:00:00.000Z", endsAt: "0001-01-01T06:00:00.000Z", contextDate: null },
+        deadline: null,
+      }],
+      nextCursor: null,
+    };
+    expect(decodeWeekResponse(boundary, lower).records[0]).toMatchObject({ fixed: { contextDate: null } });
   });
 
-  it("rejects missing, additional, wrongly typed, and invariant-breaking fields", () => {
-    expect(() => decodeWeekResponse({ ...example, extra: true })).toThrow();
-    expect(() => decodeWeekResponse({ ...example, nextCursor: undefined })).toThrow();
-    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[0], id: 0 }] })).toThrow();
-    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[0], fixed: null, deadline: null }] })).toThrow();
-    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[0], status: "done" }] })).toThrow();
-    expect(() => decodeWeekResponse({ ...example, records: [example.records[2], example.records[2]] })).toThrow();
+  it("inspects cursor envelope/payload/final-record binding without browser MAC claims", () => {
+    const codec = createWeekCursorCodec(Buffer.alloc(32, 31));
+    const one = { ...example, records: [example.records[0]] };
+    const nextCursor = codec.encode(context, {
+      requestNow: example.requestNow,
+      anchor: "2026-10-27T08:00:00.000Z",
+      kindRank: 0,
+      id: 42,
+    });
+    expect(decodeWeekResponse({ ...one, nextCursor }, context).nextCursor).toBe(nextCursor);
+    const wrongFinal = codec.encode(context, {
+      requestNow: example.requestNow,
+      anchor: "2026-10-27T08:00:00.000Z",
+      kindRank: 0,
+      id: 43,
+    });
+    expect(() => decodeWeekResponse({ ...one, nextCursor: wrongFinal }, context)).toThrow(/final emitted record/);
+  });
+
+  it("rejects closed-shape, context, facet, running, ordering, truncation, and cursor violations", () => {
+    expect(() => decodeWeekResponse({ ...example, extra: true }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, nextCursor: undefined }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, timezone: "Unknown/Zone" }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, weekStart: "2026-10-27" }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[0], id: 0 }] }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[0], fixed: null, deadline: null }] }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[0], status: "done" }] }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, records: [example.records[0], example.records[0]] }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, records: [example.records[1], example.records[0]] }, context)).toThrow(/order/);
+    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[2], deadline: { date: "2026-11-02" } }] }, context)).toThrow();
+    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[1], effectiveEndAt: "2026-10-29T11:59:59.999Z" }] }, context)).toThrow(/requestNow/);
+    expect(() => decodeWeekResponse({ ...example, records: [{ ...example.records[0], titleTruncated: true }, example.records[1]] }, context)).toThrow(/only record/);
+    expect(() => decodeWeekResponse({ ...example, nextCursor: "not-a-cursor" }, context)).toThrow(/cursor/i);
+    const combined = structuredClone(example) as {
+      weekStart: string;
+      timezone: string;
+      records: Array<Record<string, any>>;
+      nextCursor: string | null;
+    };
+    combined.weekStart = "2026-10-27";
+    combined.timezone = "Unknown/Zone";
+    combined.records[0].fixed!.contextDate = null;
+    combined.records[2].deadline.date = "2026-11-02";
+    combined.records[0].titleTruncated = true;
+    combined.records[1].titleTruncated = true;
+    combined.nextCursor = "not-a-cursor";
+    expect(() => decodeWeekResponse(combined, context)).toThrow();
   });
 });

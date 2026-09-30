@@ -7,8 +7,7 @@ const MAX_REQUEST_TARGET_BYTES = 2_048;
 
 type ParsedQuery = { weekStart: string; timezone: string; cursor?: string };
 
-function parseQuery(req: Request): ParsedQuery | null {
-  const target = req.originalUrl;
+export function parseWeekQueryTarget(target: string): ParsedQuery | null {
   if (Buffer.byteLength(target, "utf8") > MAX_REQUEST_TARGET_BYTES) return null;
   const question = target.indexOf("?");
   const pathname = question < 0 ? target : target.slice(0, question);
@@ -37,6 +36,10 @@ function parseQuery(req: Request): ParsedQuery | null {
   }
   if (typeof result.weekStart !== "string" || typeof result.timezone !== "string") return null;
   return result as ParsedQuery;
+}
+
+function parseQuery(req: Request): ParsedQuery | null {
+  return parseWeekQueryTarget(req.originalUrl);
 }
 
 export const calendarRouter = Router();

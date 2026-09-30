@@ -459,7 +459,10 @@ canonical `requestNow`; continuations recover it only from the HMAC-bound compac
 payload. One lazy long-lived Worker Thread owns one
 `readonly:true,fileMustExist:true` connection with `trusted_schema=OFF`,
 `query_only=ON`, `cache_size=-2048` and `temp_store=FILE`. A second request is
-never queued or coalesced: it receives `week-projection-busy`.
+never queued or coalesced: it receives `week-projection-busy`. A failed worker
+remains owned by an exit promise; no replacement is created, and neither
+restore nor shutdown can proceed, until that worker has actually exited and
+released its native reader.
 
 One read transaction requires ready equal-generation schema v23, runs the
 four-branch RTree/deadline-index `UNION ALL` with continuation in every branch
@@ -469,6 +472,11 @@ only a record that cannot fit an empty page is truncated on a UTF-8 code-point
 boundary. The exact envelope plus cursor stays at or below 131,072 UTF-8 bytes.
 Success and recoverable errors are JSON with `Cache-Control: no-store`; the GET
 never repairs, falls back, writes, retries or makes an external request.
+Restore admission remains closed until the complete live reopen/migration/v23
+validation path reports success. A failed proof leaves Week explicitly
+unavailable with no lazy worker reopen; a later proven recovery clears that
+latch. The cursor key rotates at the database commit point even when the
+post-commit reopen proof fails, while every pre-commit failure retains it.
 
 The Worker Thread isolates the event loop only. SQLite may inspect or materialize
 all of a selected unbounded stored title while calculating BLOB length/prefix.
