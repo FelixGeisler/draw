@@ -13,6 +13,7 @@ import { useDeckScope } from "../DeckScopeContext";
 import { TaskForm } from "../components/TaskForm";
 import { TaskCalendar } from "../components/TaskCalendar";
 import { TaskRow } from "../components/TaskRow";
+import { WeekView } from "../components/WeekView";
 import { TaskDndContext, TaskDragOverlay, useTaskDnd } from "../components/TaskDnd";
 import { classifyTask, flattenOpen, groupSiblings, type DrawGroup } from "../lib/drawable";
 import { localToday } from "../lib/localDay";
@@ -41,13 +42,22 @@ const TRIAGE: { key: DrawGroup; title: string; hint: string }[] = [
 ];
 
 export function TasksPage() {
-  const categories = useCategories();
-  const goals = useGoals();
-  const settings = useSettings();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeParams = new URLSearchParams(location.search);
+  const weekActive = routeParams.get("view") === "week";
+  const routeWeek = routeParams.get("week");
+  // The Week screen owns a bounded projection. Keep every unpaged list-only
+  // task/goal query inactive while it is mounted; leaving Week restores the
+  // unchanged query keys and capture/list/calendar behavior.
+  const categories = useCategories({ enabled: !weekActive });
+  const goals = useGoals("active", { enabled: !weekActive });
+  const settings = useSettings({ enabled: !weekActive });
   const [showDone, setShowDone] = useState(false);
   const [view, setView] = useState<"list" | "calendar">("list");
+  const activeView = weekActive ? "week" : view;
   const [selectedMonth, setSelectedMonth] = useState(() => localToday().slice(0, 7));
-  const tasks = useTasks({ status: showDone ? "all" : "open" });
+  const tasks = useTasks({ status: showDone ? "all" : "open" }, { enabled: !weekActive });
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const reorderSubtask = useReorderSubtask();
@@ -108,16 +118,15 @@ export function TasksPage() {
   // Palette and durable item landing (#243/#343/#353, ADR-68/72). URL focus owns
   // focus/showDone, takes precedence over palette state, and is consumed once
   // while unrelated query bytes, hash and router-state fields survive.
-  const location = useLocation();
-  const navigate = useNavigate();
   const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
   useEffect(() => {
+    if (weekActive) return;
     const landing = consumeItemLanding(location, "task");
     if (!landing.consumed) return;
     if (landing.showDone) setShowDone(true);
     setPendingFocusId(landing.focusId);
     navigate(landing.destination, { replace: true, state: landing.state });
-  }, [location, navigate]);
+  }, [location, navigate, weekActive]);
 
   // Consume focus only after BOTH task and category prerequisites have
   // settled and the category-gated ordinary tree has had a paint opportunity.
@@ -210,23 +219,44 @@ export function TasksPage() {
     />
   );
 
+  function showStandardView(next: "list" | "calendar") {
+    setView(next);
+    const params = new URLSearchParams(location.search);
+    params.delete("view");
+    params.delete("week");
+    const search = params.toString();
+    navigate(`${location.pathname}${search ? `?${search}` : ""}${location.hash}`);
+  }
+
+  function showWeek() {
+    const params = new URLSearchParams(location.search);
+    params.set("view", "week");
+    params.delete("week");
+    params.delete("focus");
+    params.delete("showDone");
+    navigate(`${location.pathname}?${params}${location.hash}`);
+  }
+
   return (
     <div className={dnd.dragging ? "content dnd-active" : "content"}>
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <h1 style={{ flex: 1 }}>Tasks</h1>
         <div className="task-view-switch" role="group" aria-label="Tasks view">
-          <button type="button" aria-pressed={view === "list"} onClick={() => setView("list")}>
+          <button type="button" aria-pressed={activeView === "list"} onClick={() => showStandardView("list")}>
             List
           </button>
           <button
             type="button"
-            aria-pressed={view === "calendar"}
-            onClick={() => setView("calendar")}
+            aria-pressed={activeView === "calendar"}
+            onClick={() => showStandardView("calendar")}
           >
-            Calendar
+            Due dates
+          </button>
+          <button type="button" aria-pressed={activeView === "week"} onClick={showWeek}>
+            Week
           </button>
         </div>
-        {view === "list" && (
+        {activeView === "list" && (
           <label style={{ color: "var(--text-dim)", display: "flex", gap: 6, alignItems: "center" }}>
             <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
             show done
@@ -236,22 +266,26 @@ export function TasksPage() {
       {/* Quick capture (#151, formerly the Capture page): pinned on top, so
           the rapid-entry ritual survives the merge — autoFocus, title-only
           Enter submit, fields reset, focus kept for the next thought. */}
-      <div className="panel" data-testid="capture-form">
-        {categories.data && (
-          <TaskForm
-            // Remount on a scope change so the select picks up the new default
-            // (#214) — capturing into a category the page is not showing would
-            // make the new task vanish on submit.
-            key={scope ?? "all"}
-            autoFocus
-            categories={categories.data}
-            goals={goals.data}
-            defaultCategoryId={scope}
-            onSubmit={(t) => createTask.mutateAsync(t)}
-          />
-        )}
-      </div>
-      {view === "calendar" ? (
+      {!weekActive && (
+        <div className="panel" data-testid="capture-form">
+          {categories.data && (
+            <TaskForm
+              // Remount on a scope change so the select picks up the new default
+              // (#214) — capturing into a category the page is not showing would
+              // make the new task vanish on submit.
+              key={scope ?? "all"}
+              autoFocus
+              categories={categories.data}
+              goals={goals.data}
+              defaultCategoryId={scope}
+              onSubmit={(t) => createTask.mutateAsync(t)}
+            />
+          )}
+        </div>
+      )}
+      {weekActive ? (
+        <WeekView routeWeek={routeWeek} />
+      ) : view === "calendar" ? (
         categories.data && (
           <TaskCalendar
             roots={roots}
@@ -262,7 +296,7 @@ export function TasksPage() {
               scope == null ? undefined : categories.data.find((category) => category.id === scope)?.name
             }
             onSelectedMonthChange={setSelectedMonth}
-            onShowList={() => setView("list")}
+            onShowList={() => showStandardView("list")}
             onUpdate={(id, patch) => updateTask.mutateAsync({ id, ...patch })}
           />
         )

@@ -289,8 +289,10 @@ eligible fixed slot and tracked interval; `week_interval_rtree` indexes its
 inclusive UTC-day bounds and contains one row with the same `index_id`.
 `week_access_state` records source/built generations and readiness. The source
 tables remain authoritative and titles/descriptions never enter the projection.
-The Phase 2A Week worker now consumes it through the RTree-first bounded query;
-the Week client remains planned (ADR-75).
+The Phase 2A Week worker consumes it through the RTree-first bounded query.
+The completed Week client imports the shared closed decoder, resolves one exact
+frozen zone, and renders only explicitly paged records; it never substitutes the
+ordinary unpaged task/goal lists (ADR-75).
 
 Central semantics: completing a *recurring* task keeps it `open` and pushes
 `due_date` forward — that date is the task's *next occurrence*, so the card is

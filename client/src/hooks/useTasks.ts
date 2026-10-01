@@ -15,17 +15,23 @@ import type {
   Task,
 } from "../api/types";
 
-export function useCategories() {
+export function useCategories(
+  options?: Pick<UseQueryOptions<Category[]>, "enabled">,
+) {
   return useQuery({
     queryKey: ["categories"],
     queryFn: () => api.get<Category[]>("/api/categories"),
+    ...options,
   });
 }
 
-export function useSettings() {
+export function useSettings(
+  options?: Pick<UseQueryOptions<Settings>, "enabled">,
+) {
   return useQuery({
     queryKey: ["settings"],
     queryFn: () => api.get<Settings>("/api/settings"),
+    ...options,
   });
 }
 

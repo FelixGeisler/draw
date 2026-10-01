@@ -106,6 +106,10 @@ AI degradation > data integrity > cost transparency > responsiveness.
 |Q24
 |A selected source title is arbitrarily large or has a UTF-8 boundary/error
 |Only the page-budget prefix plus four bytes enters JavaScript; intact records defer and lone oversized records truncate code-point-safely at or below 131,072 bytes. Invalid fetched bytes fail the page. SQLite-native title materialization, fatal native OOM/abort response availability, and process survival remain explicitly unbounded residual risk (issue #360)
+
+|Q25
+|A user opens, pages, navigates or acts in Week while responses are delayed, a cursor expires, or the viewport narrows
+|Only the active strict-decoded generation renders; one continuation 400 resets once without mixing, every other failure is explicit, desktop lanes and narrow agenda preserve the same facts/order/actions, and Week starts no unpaged task/goal query or implicit write
 |===
 
 Q1, Q3 (guardrail), Q6–Q10 and Q13–Q22 are covered by the automated suites
@@ -131,8 +135,14 @@ fixtures: each uses the conservative 375-character continuation reservation,
 then distinguishes it from the real authenticated cursor and final wire body.
 They also prove intact deferral, actual continuation, code-point-safe
 truncation, escaping/control/combining/prefix boundaries and unchanged source
-bytes. Non-thresholded native characterization records observations only. The
-Phase 2A regression gate additionally runs server/client types, all unit and
+bytes. Non-thresholded native characterization records observations only. Q25
+is covered by pure zone/calendar/lane/page tests and deterministic browser
+fixtures for durable navigation, desktop/mobile/keyboard presentation, hostile
+text, strict invalid-page rejection, paging, stale aborts, once-only cursor
+reset, exact error states and the complete action matrix. A separate public
+server-clock journey starts and stops a real timer and checks bounded timestamps
+and unchanged planning facts. The Phase 2A/2B regression gate additionally runs
+server/client types, all unit and
 integration tests, documentation assembly, and the complete browser suite;
 this does not convert fakes, static checks or characterization into runtime
 claims. Q2 and Q4 need a live API key and are verified manually; Q5 is covered

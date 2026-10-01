@@ -397,8 +397,9 @@ staging invokes the same resolver for feedback but writes nothing, while apply
 revalidates through `createTaskWrite` inside the existing atomic consumed,
 versioned changeset. It still has no existing-task update operation. Strict
 schemas reject flat/resolved values and unknown child keys. The Phase 2A Week
-API consumes fixed slots read-only; the Phase 2B Week client, `/today`, daily
-digest and weekly Push remain planned and unchanged.
+API consumes fixed slots read-only; the Phase 2B Week client displays and edits
+them only through the existing authoritative task PATCH. `/today`, daily digest
+and weekly Push remain planned and unchanged.
 
 == 6.9 Safe database facade and staged-restore preflight
 
@@ -484,3 +485,29 @@ all of a selected unbounded stored title while calculating BLOB length/prefix.
 Native memory, I/O, RSS and latency may scale with that value; fatal native OOM
 or abort can terminate the process before any JSON response. JavaScript, IPC,
 serialization and wire data remain bounded.
+
+== 6.12 Week client generation
+
+`/tasks?view=week&week=YYYY-MM-DD` is the durable Monday-first route. Week alone
+reads the exact saved Push zone, falling back to exact browser membership in the
+frozen registry; an invalid candidate is neither sent nor persisted. Its local
+calendar helpers resolve eight zoned midnights, so previous/next/Today and
+visual clipping cross DST and year boundaries without adding `7 * 24h`.
+
+A page uses `fetch` with `cache: "no-store"` and the shared strict closed-union
+decoder. The client appends only a user-requested **Load more** page and verifies
+same `requestNow`, unique identities and strict cross-page order. Week/zone,
+navigation and action changes abort and invalidate the active generation; a
+late response cannot commit. The first continuation `invalid-week-request`
+discards all accumulated records and automatically starts one fresh generation.
+No second automatic reset is allowed; page-one 400 and all later 400/500/503
+failures require the explicit Retry control and never become an empty Week.
+
+Desktop presentation has a literal-date deadline rail and a deterministic
+first-free-lane Fixed/Tracked timeline. Source intervals stay unchanged while
+segments clip to the selected Week and local day; adjacency may reuse a lane.
+The narrow agenda preserves API identity/order, labels, facts and the closed
+action matrix. Titles are React text, truncation is explicit, archived tracked
+titles are not links, and every mutation uses existing server-authoritative
+task/timer routes. Week mounts neither Quick capture nor the unpaged task/goal
+queries. Leaving Week restores the unchanged List and **Due dates** screens.
