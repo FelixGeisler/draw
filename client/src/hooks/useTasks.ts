@@ -59,7 +59,7 @@ export function useTasks(
   const qs = params.toString();
   return useQuery({
     queryKey: ["tasks", qs],
-    queryFn: () => api.get<Task[]>(`/api/tasks${qs ? `?${qs}` : ""}`),
+    queryFn: ({ signal }) => api.get<Task[]>(`/api/tasks${qs ? `?${qs}` : ""}`, signal),
     ...options,
   });
 }

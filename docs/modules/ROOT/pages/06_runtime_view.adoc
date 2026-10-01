@@ -496,9 +496,12 @@ visual clipping cross DST and year boundaries without adding `7 * 24h`.
 
 A page uses `fetch` with `cache: "no-store"` and the shared strict closed-union
 decoder. The client appends only a user-requested **Load more** page and verifies
-same `requestNow`, unique identities and strict cross-page order. Week/zone,
-navigation and action changes abort and invalidate the active generation; a
-late response cannot commit. The first continuation `invalid-week-request`
+same `requestNow`, unique identities and strict cross-page order. Every action
+captures its originating mount, Week, zone, page generation and action token;
+every post-await error, success and refresh checks that token. Week/zone,
+navigation, action changes and unmount abort/invalidate the active generation,
+clear obsolete action state, and prevent a late operation from committing or
+starting an obsolete refresh. The first continuation `invalid-week-request`
 discards all accumulated records and automatically starts one fresh generation.
 No second automatic reset is allowed; page-one 400 and all later 400/500/503
 failures require the explicit Retry control and never become an empty Week.
@@ -509,5 +512,11 @@ segments clip to the selected Week and local day; adjacency may reuse a lane.
 The narrow agenda preserves API identity/order, labels, facts and the closed
 action matrix. Titles are React text, truncation is explicit, archived tracked
 titles are not links, and every mutation uses existing server-authoritative
-task/timer routes. Week mounts neither Quick capture nor the unpaged task/goal
-queries. Leaving Week restores the unchanged List and **Due dates** screens.
+task/timer routes. **Edit fixed** leaves Week for the existing authoritative
+Task editor; that editor reads the retained slot, including its ADR-74 entry
+zone and wall values, rather than reconstructing them in the viewer's Week
+zone. Week mounts neither Quick capture nor the List/Due dates subtree, so its
+unpaged task/goal observers and computations do not exist. After that subtree
+unmounts, only its exact inactive `status=open`, `status=all`, and active-goal
+queries are cancelled and removed; another active observer is preserved.
+Leaving Week remounts List or **Due dates** and refetches the ordinary data.

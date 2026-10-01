@@ -8,10 +8,13 @@ F:\Project (npm workspaces)
 └── server/          Express 5 + better-sqlite3 + Claude API proxy
 ....
 
-The layering below is the one rule the whole server obeys: routes validate and
-map status codes, services own the domain, and only `db.ts` opens SQLite. The
-MCP adapter (ADR-19) enters through the same REST front door as the browser —
-it is a second client, not a second back end.
+Routes validate and map status codes while services own the domain. `db.ts`
+alone opens the live read/write SQLite handle. The complete runtime-native
+import allowlist has two narrower exceptions: `backupService.ts` opens only
+identity-checked staged/snapshot/rewrite files, and private `weekWorker.ts`
+opens one defensive read-only live-file connection supplied by the closed Week
+controller (ADR-75). The MCP adapter (ADR-19) enters through the same REST front
+door as the browser — it is a second client, not a second back end.
 
 [plantuml,building-blocks,svg]
 ....
@@ -27,10 +30,11 @@ actor "User" as user
 component "MCP client\nClaude Code / Desktop" as mcpClient
 
 package "client/ — React SPA" {
-  component "pages + components\nDraw, Tasks, Goals,\nStats, Settings" as pages
+  component "pages + components\nDraw, Tasks, Goals,\nStats, Settings, Week" as pages
   component "lib/ — pure logic\ndrawable, focusView,\ndrawnCard, localDay, rarity" as clib
   component "hooks/ — TanStack Query\nuseTasks, useDraw, useTimer,\nuseGamification, useAi" as hooks
   component "api/client.ts\ntyped fetch wrapper" as apiClient
+  component "Week generation owner\nstrict no-store raw fetch,\nabort + context tokens" as weekClient
 }
 
 package "server/ — Express 5" {
@@ -45,18 +49,23 @@ package "server/ — Express 5" {
     component "aiService\ncardArtService" as aiSvc
     component "backupService" as backupSvc
   }
-  component "db.ts\nSQLite bootstrap, migrations" as dbmod
+  component "db.ts\nlive SQLite bootstrap, migrations" as dbmod
+  component "backupService.ts\nstaged/snapshot/rewrite SQLite" as stagedDb
+  component "weekService + private weekWorker\nadmission/cursor + read-only SQLite" as weekReader
 }
 
 database "app.db\nSQLite (WAL)" as sqlite
+database "staged/snapshot/rewrite .db\nnon-live SQLite" as stagedSqlite
 folder "data/files/" as files
 cloud "Claude API" as claude
 
 user --> pages
 pages --> hooks
 pages --> clib
+pages --> weekClient : "Week only"
 hooks --> apiClient
-apiClient --> routes : "JSON REST /api/*"
+weekClient --> routes : "raw no-store GET /api/calendar/week"
+apiClient --> routes : "usual JSON REST /api/*"
 mcpClient --> mcpAdapter : stdio
 mcpAdapter --> routes : "HTTP 127.0.0.1:3001"
 routes --> drawSvc
@@ -78,7 +87,12 @@ gamSvc --> dbmod
 statsSvc --> dbmod
 aiSvc --> dbmod
 backupSvc --> dbmod
-dbmod --> sqlite
+backupSvc --> stagedDb
+routes --> weekReader
+weekReader --> dbmod : "closed path capability"
+dbmod --> sqlite : "live read/write handle"
+stagedDb --> stagedSqlite : "identity-checked staged files only"
+weekReader --> sqlite : "one read-only worker handle"
 routes --> files
 aiSvc --> claude
 pages -[hidden]-> clib
@@ -97,7 +111,8 @@ server/src/
 ├── server.ts                startServer() — binds the given host (default loopback):API_PORT
 ├── app.ts                   createApp() — Express app + router mounting; serves
 │                            client/dist with SPA fallback in production (ADR-49)
-├── db.ts                    SQLite bootstrap, PRAGMA user_version migrations
+├── db.ts                    live SQLite bootstrap/controller, migrations, closed Week path capability
+├── weekWorker.ts            private read-only/query-only Week connection and bounded page query
 ├── schema.sql               Current full schema (fresh installs)
 ├── aiSchemas.ts             zod schemas for structured AI outputs
 ├── routes/                  HTTP layer (validation, status codes)
@@ -117,6 +132,7 @@ server/src/
 │   │                        validates before the atomic shop service (#266)
 │   ├── settings.ts          key-value settings
 │   ├── backup.ts            GET /api/backup/export, POST /api/backup/import (ADR-26)
+│   ├── week.ts              authenticated bounded GET /api/calendar/week (ADR-75)
 │   ├── cardArt.ts           GET /api/card-art — cache-only batch reads (#114),
 │   │                        deliberately not under /api/tasks/:id (never generates)
 │   └── ai.ts                status, key, estimate, breakdown, plan-goal, generate-tasks
@@ -133,7 +149,8 @@ server/src/
     │                        settings-owned collection/equipment and durable effects (#266)
     ├── packCatalog.ts       pure fixed catalog, Secret progression, rarity/item selection,
     │                        duplicate refund and effective bonus selection (#265, ADR-62)
-    ├── backupService.ts     zip export/import of app.db + files/ (ADR-26)
+    ├── backupService.ts     zip export/import plus identity-checked staged SQLite opens (ADR-26)
+    ├── weekService.ts       main-thread cursor/admission/lifecycle controller for private weekWorker
     ├── aiService.ts         Anthropic client, material blocks, prompts, token guard
     ├── aiPostprocess.ts     deterministic generate-tasks shaping (ADR-14): pure, SDK-/DB-free
     ├── svgSanitizer.ts      allowlist re-serializer for model-written SVG (ADR-22): pure
@@ -252,8 +269,15 @@ client/src/
                                (breakdown, plan, generate-tasks panels)
 ....
 
-All server state flows through TanStack Query. The independent `['shop']`
-snapshot is replaced only by a successful pack response or refetched after an
+Usual server state flows through TanStack Query. ADR-75's bounded Week screen
+is the deliberate exception: `WeekView` owns an abortable, mount/Week/zone/action-
+tokened raw `fetch` generation because cursor restart must atomically discard
+all accumulated pages. Entering Week unmounts the List/Due dates subtree,
+cancels its exact inactive unpaged task/goal requests, and releases those exact
+cached datasets; an independently observed query is not cancelled or cleared.
+Leaving Week remounts the ordinary subtree and refetches through its unchanged
+TanStack keys. The independent `['shop']` snapshot is replaced only by a
+successful pack response or refetched after an
 authoritative producer/equip invalidation; the pack client never derives or
 optimistically changes economy/collection state. A validated purchase response is
 also snapshotted into one mount-local reveal session keyed by its opening ref/order;

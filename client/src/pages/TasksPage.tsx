@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import {
   useCategories,
@@ -18,6 +19,7 @@ import { TaskDndContext, TaskDragOverlay, useTaskDnd } from "../components/TaskD
 import { classifyTask, flattenOpen, groupSiblings, type DrawGroup } from "../lib/drawable";
 import { localToday } from "../lib/localDay";
 import { consumeItemLanding } from "../lib/itemLanding";
+import { releaseTasksPageDatasets } from "../lib/tasksPageQueries";
 import type { Task } from "../api/types";
 
 /**
@@ -44,20 +46,71 @@ const TRIAGE: { key: DrawGroup; title: string; hint: string }[] = [
 export function TasksPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const routeParams = new URLSearchParams(location.search);
   const weekActive = routeParams.get("view") === "week";
   const routeWeek = routeParams.get("week");
-  // The Week screen owns a bounded projection. Keep every unpaged list-only
-  // task/goal query inactive while it is mounted; leaving Week restores the
-  // unchanged query keys and capture/list/calendar behavior.
-  const categories = useCategories({ enabled: !weekActive });
-  const goals = useGoals("active", { enabled: !weekActive });
-  const settings = useSettings({ enabled: !weekActive });
+
+  useEffect(() => {
+    if (!weekActive) return;
+    // Passive unmount cleanup has released this page's observers by the time
+    // this microtask runs. Exact-key observer checks protect any independent
+    // owner before cancelling and removing retained full-list data.
+    let current = true;
+    queueMicrotask(() => {
+      if (current) void releaseTasksPageDatasets(queryClient);
+    });
+    return () => { current = false; };
+  }, [queryClient, weekActive]);
+
+  if (!weekActive) return <TasksListPage />;
+
+  function leaveWeek(next: "list" | "calendar") {
+    const params = new URLSearchParams(location.search);
+    params.delete("view");
+    params.delete("week");
+    params.delete("focus");
+    params.delete("showDone");
+    const search = params.toString();
+    navigate(`${location.pathname}${search ? `?${search}` : ""}${location.hash}`, {
+      state: { tasksView: next },
+    });
+  }
+
+  return (
+    <div className="content">
+      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <h1 style={{ flex: 1 }}>Tasks</h1>
+        <div className="task-view-switch" role="group" aria-label="Tasks view">
+          <button type="button" aria-pressed="false" onClick={() => leaveWeek("list")}>List</button>
+          <button type="button" aria-pressed="false" onClick={() => leaveWeek("calendar")}>Due dates</button>
+          <button type="button" aria-pressed="true">Week</button>
+        </div>
+      </div>
+      <WeekView routeWeek={routeWeek} />
+    </div>
+  );
+}
+
+function TasksListPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  // This whole List/Due dates component is absent while Week is mounted, so
+  // its observers and list-only computations are released rather than merely
+  // disabled. The outer page then clears its exact inactive task/goal caches.
+  const categories = useCategories();
+  const goals = useGoals("active");
+  const settings = useSettings();
   const [showDone, setShowDone] = useState(false);
-  const [view, setView] = useState<"list" | "calendar">("list");
-  const activeView = weekActive ? "week" : view;
+  const [view, setView] = useState<"list" | "calendar">(() => {
+    const state = location.state;
+    return state && typeof state === "object" && "tasksView" in state && state.tasksView === "calendar"
+      ? "calendar"
+      : "list";
+  });
+  const activeView = view;
   const [selectedMonth, setSelectedMonth] = useState(() => localToday().slice(0, 7));
-  const tasks = useTasks({ status: showDone ? "all" : "open" }, { enabled: !weekActive });
+  const tasks = useTasks({ status: showDone ? "all" : "open" });
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const reorderSubtask = useReorderSubtask();
@@ -119,14 +172,29 @@ export function TasksPage() {
   // focus/showDone, takes precedence over palette state, and is consumed once
   // while unrelated query bytes, hash and router-state fields survive.
   const [pendingFocusId, setPendingFocusId] = useState<number | null>(null);
+  const [pendingFixedEditId, setPendingFixedEditId] = useState<number | null>(null);
   useEffect(() => {
-    if (weekActive) return;
     const landing = consumeItemLanding(location, "task");
-    if (!landing.consumed) return;
+    const rawState = location.state && typeof location.state === "object"
+      ? location.state as Record<string, unknown>
+      : null;
+    const requestedEditId = typeof rawState?.editFixedTaskId === "number" &&
+      Number.isSafeInteger(rawState.editFixedTaskId) && rawState.editFixedTaskId > 0
+      ? rawState.editFixedTaskId
+      : null;
+    if (!landing.consumed && requestedEditId === null) return;
     if (landing.showDone) setShowDone(true);
     setPendingFocusId(landing.focusId);
-    navigate(landing.destination, { replace: true, state: landing.state });
-  }, [location, navigate, weekActive]);
+    setPendingFixedEditId(requestedEditId === landing.focusId ? requestedEditId : null);
+    const nextState = landing.state && typeof landing.state === "object"
+      ? { ...(landing.state as Record<string, unknown>) }
+      : null;
+    if (nextState) delete nextState.editFixedTaskId;
+    navigate(landing.destination, {
+      replace: true,
+      state: nextState && Object.keys(nextState).length > 0 ? nextState : null,
+    });
+  }, [location, navigate]);
 
   // Consume focus only after BOTH task and category prerequisites have
   // settled and the category-gated ordinary tree has had a paint opportunity.
@@ -252,7 +320,7 @@ export function TasksPage() {
           >
             Due dates
           </button>
-          <button type="button" aria-pressed={activeView === "week"} onClick={showWeek}>
+          <button type="button" aria-pressed="false" onClick={showWeek}>
             Week
           </button>
         </div>
@@ -266,26 +334,22 @@ export function TasksPage() {
       {/* Quick capture (#151, formerly the Capture page): pinned on top, so
           the rapid-entry ritual survives the merge — autoFocus, title-only
           Enter submit, fields reset, focus kept for the next thought. */}
-      {!weekActive && (
-        <div className="panel" data-testid="capture-form">
-          {categories.data && (
-            <TaskForm
-              // Remount on a scope change so the select picks up the new default
-              // (#214) — capturing into a category the page is not showing would
-              // make the new task vanish on submit.
-              key={scope ?? "all"}
-              autoFocus
-              categories={categories.data}
-              goals={goals.data}
-              defaultCategoryId={scope}
-              onSubmit={(t) => createTask.mutateAsync(t)}
-            />
-          )}
-        </div>
-      )}
-      {weekActive ? (
-        <WeekView routeWeek={routeWeek} />
-      ) : view === "calendar" ? (
+      <div className="panel" data-testid="capture-form">
+        {categories.data && (
+          <TaskForm
+            // Remount on a scope change so the select picks up the new default
+            // (#214) — capturing into a category the page is not showing would
+            // make the new task vanish on submit.
+            key={scope ?? "all"}
+            autoFocus
+            categories={categories.data}
+            goals={goals.data}
+            defaultCategoryId={scope}
+            onSubmit={(t) => createTask.mutateAsync(t)}
+          />
+        )}
+      </div>
+      {view === "calendar" ? (
         categories.data && (
           <TaskCalendar
             roots={roots}
@@ -373,6 +437,7 @@ export function TasksPage() {
                       // straight out of the view you are working in.
                       rootTasks={roots}
                       focusTaskId={pendingFocusId}
+                      editFixedTaskId={pendingFixedEditId}
                     />
                   ))}
                 </div>
@@ -394,6 +459,7 @@ export function TasksPage() {
                     maxEffort={maxEffort}
                     rootTasks={roots}
                     focusTaskId={pendingFocusId}
+                    editFixedTaskId={pendingFixedEditId}
                   />
                 ))}
               </div>

@@ -4637,8 +4637,10 @@ candidate. Eight zoned local midnights drive calendar navigation, display,
 clipping and DST-aware day lengths. Literal deadlines remain literal dates.
 
 The client shares the Phase 2A strict decoder, uses no-store fetches and holds one
-abortable generation. It suppresses ordinary unpaged task/goal queries and Quick
-capture. Continuations are user-driven **Load more** requests. Pages append only
+abortable generation. Week unmounts the ordinary List/Due dates subtree and its
+unpaged task/goal observers/computations, then cancels and removes only the exact
+inactive full-list keys; a separately observed key is preserved. Quick capture is
+absent. Continuations are user-driven **Load more** requests. Pages append only
 when request generation, `requestNow`, identity uniqueness and global order all
 match. One active-generation continuation 400 may discard everything and restart
 page one automatically once; it cannot loop. Page-one/second 400 and every
@@ -4650,9 +4652,14 @@ only visually clipped. Narrow layout is an ordered agenda. Visible labels do not
 rely on color, hostile titles stay React text, and `titleTruncated` has the exact
 accessible indicator. The closed task/goal/tracked action matrix calls only the
 existing authoritative task PATCH, fixed-slot PATCH, timer start and bodyless
-timer stop routes. Archived tracked titles remain plain text. Actions and
-navigation invalidate stale work; viewing, paging, layout and clock display write
-nothing. List and renamed **Due dates** behavior are otherwise unchanged.
+timer stop routes. Fixed editing navigates out of Week to the existing Task editor,
+whose authoritative task read retains the ADR-74 entry zone and wall values; Week
+never fabricates them from its viewer zone. Archived tracked titles remain plain
+text. Actions bind every post-await state/error/refresh to their originating mount,
+Week, zone, page generation and action token; navigation, zone change and unmount
+clear and invalidate stale work. Viewing, paging, layout and clock display write
+nothing. List and renamed **Due dates** behavior are otherwise unchanged and
+refetch after returning from Week.
 `/today`, morning-digest changes, later weekly Push and Sunday Push remain
 planned.
 

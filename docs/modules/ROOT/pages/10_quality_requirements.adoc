@@ -109,7 +109,7 @@ AI degradation > data integrity > cost transparency > responsiveness.
 
 |Q25
 |A user opens, pages, navigates or acts in Week while responses are delayed, a cursor expires, or the viewport narrows
-|Only the active strict-decoded generation renders; one continuation 400 resets once without mixing, every other failure is explicit, desktop lanes and narrow agenda preserve the same facts/order/actions, and Week starts no unpaged task/goal query or implicit write
+|Only the active strict-decoded generation renders; action results/refreshes are mount/Week/zone/token-bound, one continuation 400 resets once without mixing, every other failure is explicit, desktop lanes and narrow agenda preserve the same facts/order/actions, authoritative fixed editing retains its entry zone, and Week unmounts/releases inactive exact unpaged List task/goal data without disturbing another observer or performing an implicit write
 |===
 
 Q1, Q3 (guardrail), Q6–Q10 and Q13–Q22 are covered by the automated suites

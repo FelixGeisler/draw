@@ -11,6 +11,12 @@ test.use({ timezoneId: "UTC" });
 const WEEK = "2026-10-26";
 const REQUEST_NOW = "2026-10-29T12:00:00.000Z";
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 function pushStatus(timezone: unknown = "UTC") {
   return {
     available: false,
@@ -64,6 +70,57 @@ async function fulfillWeek(route: Route, records: WeekRecord[] = []) {
   });
 }
 
+function waitForChildExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const onExit = () => {
+      clearTimeout(timeout);
+      resolve(true);
+    };
+    const timeout = setTimeout(() => {
+      child.off("exit", onExit);
+      resolve(child.exitCode !== null || child.signalCode !== null);
+    }, timeoutMs);
+    child.once("exit", onExit);
+  });
+}
+
+async function closeFixtureAndRemove(child: ChildProcess | null, root: string): Promise<void> {
+  if (child && child.exitCode === null && child.signalCode === null) {
+    let acknowledged = false;
+    child.on("message", (message) => {
+      if (message && typeof message === "object" && "type" in message && message.type === "shutdown-complete") {
+        acknowledged = true;
+      }
+    });
+    if (!child.connected) {
+      throw new Error(`fixture IPC disconnected before graceful shutdown; retained ${root}`);
+    }
+    child.send({ type: "shutdown" });
+    let exited = await waitForChildExit(child, 5_000);
+    if (!exited) {
+      child.kill("SIGKILL");
+      exited = await waitForChildExit(child, 5_000);
+    }
+    if (!exited) {
+      throw new Error(`fixture termination is unconfirmed; retained ${root}`);
+    }
+    if (child.exitCode === 0 && !acknowledged) {
+      throw new Error(`fixture exited without confirming server/worker/database closure; retained ${root}`);
+    }
+  }
+
+  if (child && child.exitCode === null && child.signalCode === null) {
+    throw new Error(`fixture child is still live; retained ${root}`);
+  }
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  } catch (error) {
+    throw new Error(`fixture Temp removal failed; retained ${root}: ${(error as Error).message}`);
+  }
+  if (fs.existsSync(root)) throw new Error(`fixture Temp path still exists after removal: ${root}`);
+}
+
 test("Week route is durable, saved-zone-first, Monday navigating, and suppresses unpaged lists and Quick capture", async ({ page }) => {
   const unpaged: string[] = [];
   await mockPush(page, pushStatus("Europe/Berlin"));
@@ -98,6 +155,86 @@ test("Week route is durable, saved-zone-first, Monday navigating, and suppresses
   await page.getByRole("button", { name: "List", exact: true }).click();
   await expect(page).toHaveURL("/tasks");
   await expect(page.getByTestId("capture-form")).toBeVisible();
+});
+
+test("List to Week unmounts and cancels exact list datasets, then List refetches without an old response", async ({ page, request }) => {
+  const categories = await (await request.get("/api/categories")).json() as Array<{ id: number }>;
+  const oldTitle = `Week transition stale ${Date.now()}`;
+  const oldTask = await (await request.post("/api/tasks", { data: {
+    title: oldTitle,
+    categoryId: categories[0].id,
+  } })).json() as { id: number };
+
+  let openTaskRequests = 0;
+  let allTaskRequests = 0;
+  let goalRequests = 0;
+  let releaseHeld!: () => void;
+  const held = new Promise<void>((resolve) => { releaseHeld = resolve; });
+  let heldTaskSeen!: () => void;
+  const taskSeen = new Promise<void>((resolve) => { heldTaskSeen = resolve; });
+  let abortedHeldTask = false;
+  page.on("requestfailed", (failed) => {
+    const url = new URL(failed.url());
+    if (url.pathname === "/api/tasks" && url.searchParams.get("status") === "all") abortedHeldTask = true;
+  });
+
+  await mockPush(page);
+  await page.route("**/api/calendar/week**", (route) => fulfillWeek(route));
+  await page.route("**/api/tasks**", async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() !== "GET" || url.pathname !== "/api/tasks") {
+      await route.continue();
+      return;
+    }
+    const status = url.searchParams.get("status");
+    if (status === "open") {
+      openTaskRequests += 1;
+      await route.continue();
+      return;
+    }
+    if (status !== "all") {
+      await route.continue();
+      return;
+    }
+    allTaskRequests += 1;
+    const response = await route.fetch();
+    heldTaskSeen();
+    await held;
+    try { await route.fulfill({ response }); } catch { /* cancellation closes the routed request */ }
+  });
+  await page.route("**/api/goals**", async (route) => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === "GET" && url.pathname === "/api/goals" && url.searchParams.get("status") === "active") {
+      goalRequests += 1;
+    }
+    await route.continue();
+  });
+
+  try {
+    await page.goto("/tasks");
+    await expect(page.getByText(oldTitle, { exact: true }).first()).toBeVisible();
+    const openBeforeWeek = openTaskRequests;
+    const goalsBeforeWeek = goalRequests;
+    await page.getByLabel("show done").check();
+    await taskSeen;
+    await page.getByRole("button", { name: "Week", exact: true }).click();
+    await expect(page.getByTestId("week-view")).toBeVisible();
+    await expect(page.getByTestId("task-tree")).toHaveCount(0);
+    await request.delete(`/api/tasks/${oldTask.id}`);
+    releaseHeld();
+    await expect.poll(() => abortedHeldTask).toBe(true);
+
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    await expect(page.getByTestId("task-tree")).toHaveCount(1);
+    await expect.poll(() => openTaskRequests).toBeGreaterThan(openBeforeWeek);
+    await expect.poll(() => goalRequests).toBeGreaterThan(goalsBeforeWeek);
+    expect(allTaskRequests).toBe(1);
+    await expect(page.getByText(oldTitle, { exact: true })).toHaveCount(0);
+    await expect(page.getByTestId("capture-form")).toBeVisible();
+  } finally {
+    releaseHeld();
+    await request.delete(`/api/tasks/${oldTask.id}`).catch(() => undefined);
+  }
 });
 
 test("frozen-invalid saved aliases fall through, and unavailable candidates make no Week request", async ({ page }) => {
@@ -216,15 +353,14 @@ test("desktop and narrow layouts preserve the closed action matrix, labels, host
   await expect(openTask.getByRole("link", { name: "<img src=x onerror=alert(1)>" })).toHaveAttribute("href", "/tasks?focus=1&showDone=1");
   await expect(openTask.getByRole("button", { name: "Complete" })).toBeVisible();
   await expect(openTask.getByRole("button", { name: "Start now" })).toBeVisible();
-  await expect(openTask.getByRole("button", { name: "Edit fixed" })).toBeVisible();
+  await expect(openTask.getByRole("link", { name: "Edit fixed" })).toHaveAttribute("href", "/tasks?focus=1&showDone=1");
   await expect(openTask.getByRole("button", { name: "Remove fixed" })).toBeVisible();
-  await openTask.getByRole("button", { name: "Edit fixed" }).click();
-  await expect(openTask.getByRole("form", { name: /Edit fixed time/ })).toBeVisible();
   await expect(openTask.getByText("source date 2026-10-25")).toBeVisible();
 
   const doneTask = page.locator('[data-week-identity="task:2"]');
   await expect(doneTask.getByRole("button", { name: "Reopen" })).toBeVisible();
   await expect(doneTask.getByRole("button", { name: "Start now" })).toHaveCount(0);
+  await expect(doneTask.getByRole("link", { name: "Edit fixed" })).toHaveAttribute("href", "/tasks?focus=2&showDone=1");
   const goal = page.locator('[data-week-identity="goal:3"]');
   await expect(goal.getByRole("link", { name: "Goal deadline" })).toHaveAttribute("href", "/goals?focus=3");
   await expect(goal.locator("button")).toHaveCount(0);
@@ -248,6 +384,70 @@ test("desktop and narrow layouts preserve the closed action matrix, labels, host
     .toEqual(["task:1", "task:2", "goal:3", "tracked:4", "tracked:5", "tracked:6"]);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test("Week fixed edit navigates to the authoritative retained-zone editor for unchanged and partial saves", async ({ page, request }) => {
+  const categories = await (await request.get("/api/categories")).json() as Array<{ id: number }>;
+  const title = `Week retained zone ${Date.now()}`;
+  const createdResponse = await request.post("/api/tasks", { data: {
+    title,
+    categoryId: categories[0].id,
+    fixedSlot: {
+      startLocal: "2026-10-27T10:00",
+      endLocal: "2026-10-27T11:00",
+      entryTimezone: "Europe/Berlin",
+    },
+  } });
+  expect(createdResponse.ok()).toBe(true);
+  const created = await createdResponse.json() as {
+    id: number;
+    fixedSlot: { startsAt: string; endsAt: string; startLocal: string; endLocal: string; entryTimezone: string };
+  };
+  const original = { ...created.fixedSlot };
+
+  try {
+    await mockPush(page, pushStatus("America/New_York"));
+    const record = taskRecord(created.id, title, {
+      fixed: [created.fixedSlot.startsAt, created.fixedSlot.endsAt],
+    }) as Extract<WeekRecord, { kind: "task" }>;
+    record.fixed!.contextDate = "2026-10-27";
+    await page.route("**/api/calendar/week**", (route) => fulfillWeek(route, [record]));
+    await page.goto(`/tasks?view=week&week=${WEEK}`);
+    await expect(page.getByTestId("week-view")).toContainText("America/New_York");
+
+    await page.locator(`[data-week-identity="task:${created.id}"]`).getByRole("link", { name: "Edit fixed" }).click();
+    await expect(page).toHaveURL(`/tasks`);
+    const tree = page.getByTestId("task-tree");
+    await expect(tree.getByLabel("Entry timezone")).toHaveValue("Europe/Berlin");
+    await expect(tree.getByLabel("Fixed start")).toHaveValue("2026-10-27T10:00");
+    await expect(tree.getByLabel("Fixed end")).toHaveValue("2026-10-27T11:00");
+
+    await tree.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(tree.getByLabel("Fixed start")).toHaveCount(0);
+    let stored = (await (await request.get("/api/tasks?status=all")).json()).find(
+      (candidate: { id: number }) => candidate.id === created.id,
+    );
+    expect(stored.fixedSlot).toEqual(original);
+
+    const taskRow = tree.getByText(title, { exact: true }).first().locator("..");
+    await taskRow.getByTitle("Edit", { exact: true }).click();
+    await expect(tree.getByLabel("Entry timezone")).toHaveValue("Europe/Berlin");
+    await tree.getByLabel("Fixed end").fill("2026-10-27T11:30");
+    await tree.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(tree.getByLabel("Fixed end")).toHaveCount(0);
+    stored = (await (await request.get("/api/tasks?status=all")).json()).find(
+      (candidate: { id: number }) => candidate.id === created.id,
+    );
+    expect(stored.fixedSlot).toMatchObject({
+      entryTimezone: "Europe/Berlin",
+      startLocal: "2026-10-27T10:00",
+      endLocal: "2026-10-27T11:30",
+      startsAt: original.startsAt,
+      endsAt: "2026-10-27T10:30:00.000Z",
+    });
+  } finally {
+    await request.delete(`/api/tasks/${created.id}`);
+  }
 });
 
 test("Load more completes 100 plus one records without a quantity promise or API cache", async ({ page }) => {
@@ -336,6 +536,71 @@ test("stale responses cannot overwrite navigation and invalid pages/errors stay 
   await expect(page.getByText(/Nothing has been treated as an empty Week/)).toBeVisible();
 });
 
+test("delayed action success and failure cannot cross Week navigation, zone reload, or unmount", async ({ page }) => {
+  let savedZone = "UTC";
+  const weekRequests: string[] = [];
+  const outcomes = [deferred<"success" | "failure">(), deferred<"success" | "failure">(), deferred<"success" | "failure">()];
+  const starts = [deferred<void>(), deferred<void>(), deferred<void>()];
+  let actionIndex = 0;
+
+  await page.route("**/api/push/status", (route) => route.fulfill({
+    contentType: "application/json",
+    body: JSON.stringify(pushStatus(savedZone)),
+  }));
+  await page.route("**/api/calendar/week**", async (route) => {
+    const url = new URL(route.request().url());
+    const week = url.searchParams.get("weekStart")!;
+    const zone = url.searchParams.get("timezone")!;
+    weekRequests.push(`${zone}:${week}`);
+    await fulfillWeek(route, [taskRecord(1, `Action ${zone} ${week}`, { deadline: week })]);
+  });
+  await page.route("**/api/tasks/*", async (route) => {
+    if (route.request().method() !== "PATCH") {
+      await route.continue();
+      return;
+    }
+    const index = actionIndex++;
+    starts[index].resolve(undefined);
+    const outcome = await outcomes[index].promise;
+    try {
+      await route.fulfill(outcome === "success"
+        ? { status: 200, contentType: "application/json", body: '{"newAchievements":[]}' }
+        : { status: 500, contentType: "application/json", body: '{"error":"delayed-old-action"}' });
+    } catch { /* a document unmount can close the old request */ }
+  });
+
+  await page.goto(`/tasks?view=week&week=${WEEK}`);
+  await page.locator('[data-week-identity="task:1"]').getByRole("button", { name: "Complete" }).click();
+  await starts[0].promise;
+  await page.getByRole("button", { name: "Next week" }).click();
+  await expect(page.getByText("Action UTC 2026-11-02", { exact: true })).toBeVisible();
+  outcomes[0].resolve("failure");
+  await page.waitForTimeout(100);
+  await expect(page.getByText("delayed-old-action", { exact: true })).toHaveCount(0);
+  expect(weekRequests.filter((entry) => entry === "UTC:2026-11-02")).toHaveLength(1);
+
+  await page.locator('[data-week-identity="task:1"]').getByRole("button", { name: "Complete" }).click();
+  await starts[1].promise;
+  savedZone = "Europe/Berlin";
+  await page.reload();
+  await expect(page.getByText("Action Europe/Berlin 2026-11-02", { exact: true })).toBeVisible();
+  const utcRequestsBeforeLateSuccess = weekRequests.filter((entry) => entry === "UTC:2026-11-02").length;
+  outcomes[1].resolve("success");
+  await page.waitForTimeout(100);
+  expect(weekRequests.filter((entry) => entry === "UTC:2026-11-02")).toHaveLength(utcRequestsBeforeLateSuccess);
+  await expect(page.getByText("delayed-old-action", { exact: true })).toHaveCount(0);
+
+  await page.locator('[data-week-identity="task:1"]').getByRole("button", { name: "Complete" }).click();
+  await starts[2].promise;
+  const weekRequestCountBeforeUnmount = weekRequests.length;
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  outcomes[2].resolve("failure");
+  await page.waitForTimeout(100);
+  expect(weekRequests).toHaveLength(weekRequestCountBeforeUnmount);
+  await expect(page.getByText("delayed-old-action", { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId("task-tree")).toHaveCount(1);
+});
+
 test("Title truncated indicator is exact and present only when the protocol says so", async ({ page }) => {
   await mockPush(page);
   await page.route("**/api/calendar/week**", (route) => fulfillWeek(route, [taskRecord(1, "Bounded title", { deadline: WEEK, truncated: true })]));
@@ -421,7 +686,7 @@ test("direct Temp-DB historical fixture drives real paging, deterministic lanes,
     fixture = spawn(
       process.execPath,
       [requireFromRepository.resolve("tsx/cli"), path.resolve("e2e/week-fixture-server.ts")],
-      { cwd: process.cwd(), env: { ...process.env, DATA_DIR: root }, stdio: ["ignore", "pipe", "pipe"] },
+      { cwd: process.cwd(), env: { ...process.env, DATA_DIR: root }, stdio: ["ignore", "pipe", "pipe", "ipc"] },
     );
     let stderr = "";
     fixture.stderr!.on("data", (chunk) => { stderr += String(chunk); });
@@ -472,11 +737,6 @@ test("direct Temp-DB historical fixture drives real paging, deterministic lanes,
     await expect(page.locator('[data-week-identity="task:109"]')).toBeVisible();
     await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
   } finally {
-    if (fixture && fixture.exitCode === null) {
-      const exited = new Promise<void>((resolve) => fixture!.once("exit", () => resolve()));
-      fixture.kill("SIGTERM");
-      await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 5_000))]);
-    }
-    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await closeFixtureAndRemove(fixture, root);
   }
 });

@@ -9,7 +9,7 @@ export function useGoals(
 ) {
   return useQuery({
     queryKey: ["goals", status],
-    queryFn: () => api.get<Goal[]>(`/api/goals?status=${status}`),
+    queryFn: ({ signal }) => api.get<Goal[]>(`/api/goals?status=${status}`, signal),
     ...options,
   });
 }

@@ -179,7 +179,7 @@ distinct from the saved Push-timezone policy.
 |Memory-keyed `base64url(P) + "." + base64url(HMAC-SHA-256(key,P))`, where canonical compact payload `P` is ordered `{v,w,z,n,a,k,i}`. The decoder reserves a conservative 375-character structural ceiling; the frozen-zone semantic maximum is 244. Restart and committed restore invalidate it
 
 |*Week view*
-|The durable `/tasks?view=week&week=<Monday>` client over the bounded Week API: exact saved-Push-zone-first selection, literal deadline rail, distinct Fixed/Tracked facts, deterministic overlap lanes, narrow ordered agenda, explicit Load more, strict whole-page decoding and abortable generations. It starts no unpaged task/goal query and performs no implicit write
+|The durable `/tasks?view=week&week=<Monday>` client over the bounded Week API: exact saved-Push-zone-first selection, literal deadline rail, distinct Fixed/Tracked facts, deterministic overlap lanes, narrow ordered agenda, explicit Load more, strict whole-page decoding and abortable generations. It unmounts and releases the inactive exact unpaged List task/goal datasets, preserves independently observed queries, and performs no implicit write
 
 |*Staged restore preflight*
 |The bounded v1–v23 admission step before integrity checks, migration, virtual access or source reads: scalar `sqlite_schema` inventory first, then one known SQL definition below its compiled byte cap and token-normalized hash at a time. Unknown executable/view/virtual/shadow inventory and altered/missing/oversized definitions reject without executing imported SQL or swapping live data

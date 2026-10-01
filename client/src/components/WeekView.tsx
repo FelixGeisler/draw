@@ -1,14 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { WeekRecord, WeekResponse, WeekValidationContext } from "../../../shared/weekContract";
-import { SCHEDULE_TIME_ZONES } from "../../../shared/scheduleTimezones";
 import { useUpdateTask } from "../hooks/useTasks";
 import { useStartTimer, useStopTimer } from "../hooks/useTimer";
 import {
   addWeekDays,
   appendWeekPage,
   createWeekContext,
-  formatLocalDateTimeInput,
   formatWeekDay,
   formatWeekTime,
   layoutWeekIntervals,
@@ -75,47 +73,6 @@ function TruncatedIndicator({ truncated }: { truncated: boolean }) {
   return truncated ? <span className="week-title-truncated" aria-label="Title truncated">Title truncated</span> : null;
 }
 
-interface FixedEditorProps {
-  record: Extract<WeekRecord, { kind: "task" }>;
-  timezone: string;
-  disabled: boolean;
-  onSave: (fixedSlot: { startLocal: string; endLocal: string; entryTimezone: string }) => Promise<void>;
-  onCancel: () => void;
-}
-
-function WeekFixedEditor({ record, timezone, disabled, onSave, onCancel }: FixedEditorProps) {
-  const fixed = record.fixed!;
-  const [startLocal, setStartLocal] = useState(() => formatLocalDateTimeInput(fixed.startsAt, timezone));
-  const [endLocal, setEndLocal] = useState(() => formatLocalDateTimeInput(fixed.endsAt, timezone));
-  const [entryTimezone, setEntryTimezone] = useState(timezone);
-  const [error, setError] = useState<string | null>(null);
-
-  return (
-    <form
-      className="week-fixed-editor"
-      aria-label={`Edit fixed time for ${record.title}`}
-      onSubmit={async (event) => {
-        event.preventDefault();
-        if (!startLocal || !endLocal || !entryTimezone) return;
-        setError(null);
-        try { await onSave({ startLocal, endLocal, entryTimezone }); }
-        catch (reason) { setError((reason as Error).message || "The fixed time could not be saved."); }
-      }}
-    >
-      <label>Start<input type="datetime-local" value={startLocal} disabled={disabled} onChange={(event) => setStartLocal(event.target.value)} required /></label>
-      <label>End<input type="datetime-local" value={endLocal} disabled={disabled} onChange={(event) => setEndLocal(event.target.value)} required /></label>
-      <label>Entry timezone<select value={entryTimezone} disabled={disabled} onChange={(event) => setEntryTimezone(event.target.value)} required>
-        {SCHEDULE_TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
-      </select></label>
-      <span className="week-fixed-editor-actions">
-        <button type="submit" className="primary" disabled={disabled}>Save fixed</button>
-        <button type="button" disabled={disabled} onClick={onCancel}>Cancel</button>
-      </span>
-      {error && <span role="alert" className="week-action-error">{error}</span>}
-    </form>
-  );
-}
-
 interface WeekRecordCardProps {
   record: WeekRecord;
   context: WeekValidationContext;
@@ -126,7 +83,6 @@ interface WeekRecordCardProps {
 }
 
 function WeekRecordCard({ record, context, disabled, runTaskUpdate, runStart, runStop }: WeekRecordCardProps) {
-  const [editingFixed, setEditingFixed] = useState(false);
   const anchor = weekRecordTuple(record, context)[0];
   const anchorDay = context.dates.find((_, index) =>
     anchor >= Date.parse(context.midnightInstants[index]) && anchor < Date.parse(context.midnightInstants[index + 1]),
@@ -179,23 +135,16 @@ function WeekRecordCard({ record, context, disabled, runTaskUpdate, runStart, ru
             {actions.stop && <button disabled={disabled} onClick={runStop}>Stop</button>}
             {record.kind === "task" && record.fixed && (
               <>
-                <button disabled={disabled} onClick={() => setEditingFixed((value) => !value)}>Edit fixed</button>
+                <Link
+                  aria-disabled={disabled}
+                  onClick={(event) => { if (disabled) event.preventDefault(); }}
+                  state={{ editFixedTaskId: record.id }}
+                  to={`/tasks?focus=${record.id}&showDone=1`}
+                >Edit fixed</Link>
                 <button disabled={disabled} onClick={() => runTaskUpdate(record.id, { fixedSlot: null })}>Remove fixed</button>
               </>
             )}
           </div>
-        )}
-        {editingFixed && record.kind === "task" && record.fixed && (
-          <WeekFixedEditor
-            record={record}
-            timezone={context.timezone}
-            disabled={disabled}
-            onCancel={() => setEditingFixed(false)}
-            onSave={async (fixedSlot) => {
-              await runTaskUpdate(record.id, { fixedSlot });
-              setEditingFixed(false);
-            }}
-          />
         )}
       </article>
     </li>
@@ -210,15 +159,30 @@ export function WeekView({ routeWeek, now = () => new Date() }: { routeWeek: str
   const [load, setLoad] = useState<WeekLoadState>({ response: null, loading: false, invalidating: false, error: null });
   const loadRef = useRef(load);
   const generationRef = useRef(0);
+  const actionGenerationRef = useRef(0);
+  const mountGenerationRef = useRef(0);
+  const mountedRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   const autoResetUsedRef = useRef(false);
   const contextRef = useRef<WeekValidationContext | null>(null);
+  const contextKeyRef = useRef<string | null>(null);
   const updateTask = useUpdateTask();
   const startTimer = useStartTimer();
   const stopTimer = useStopTimer();
   const [action, setAction] = useState<{ identity: string; error: string | null } | null>(null);
 
   useEffect(() => { loadRef.current = load; }, [load]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    mountGenerationRef.current += 1;
+    return () => {
+      mountedRef.current = false;
+      actionGenerationRef.current += 1;
+      generationRef.current += 1;
+      abortRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -241,6 +205,7 @@ export function WeekView({ routeWeek, now = () => new Date() }: { routeWeek: str
     [canonicalWeek, timezone.value],
   );
   contextRef.current = context;
+  contextKeyRef.current = context ? `${context.weekStart}\u0000${context.timezone}` : null;
 
   useEffect(() => {
     if (canonicalWeek && routeWeek !== canonicalWeek) {
@@ -275,6 +240,8 @@ export function WeekView({ routeWeek, now = () => new Date() }: { routeWeek: str
   }, [runFirstPage]);
 
   useEffect(() => {
+    actionGenerationRef.current += 1;
+    setAction(null);
     if (!context) {
       abortRef.current?.abort();
       generationRef.current += 1;
@@ -321,23 +288,34 @@ export function WeekView({ routeWeek, now = () => new Date() }: { routeWeek: str
     else resetGeneration(activeContext);
   }, [loadMore, resetGeneration]);
 
-  const refreshAfterAction = useCallback(() => {
-    const activeContext = contextRef.current;
-    if (activeContext) resetGeneration(activeContext);
-  }, [resetGeneration]);
-
   const runAction = useCallback(async (identity: string, operation: () => Promise<unknown>) => {
+    const originContextKey = contextKeyRef.current;
+    if (!originContextKey || !contextRef.current) return;
     abortRef.current?.abort();
     generationRef.current += 1;
+    const token = {
+      action: ++actionGenerationRef.current,
+      page: generationRef.current,
+      mount: mountGenerationRef.current,
+      context: originContextKey,
+    };
+    const isCurrent = () => mountedRef.current &&
+      actionGenerationRef.current === token.action &&
+      generationRef.current === token.page &&
+      mountGenerationRef.current === token.mount &&
+      contextKeyRef.current === token.context;
     setAction({ identity, error: null });
     try {
       await operation();
+      if (!isCurrent()) return;
       setAction(null);
-      refreshAfterAction();
+      const activeContext = contextRef.current;
+      if (activeContext && isCurrent()) resetGeneration(activeContext);
     } catch (reason) {
+      if (!isCurrent()) return;
       setAction({ identity, error: (reason as Error).message || "The action could not be completed." });
     }
-  }, [refreshAfterAction]);
+  }, [resetGeneration]);
 
   if (timezone.pending) return <section className="week-view" aria-label="Week"><p role="status">Resolving Week time zone…</p></section>;
   if (!timezone.value) return (

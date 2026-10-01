@@ -64,6 +64,8 @@ interface Props {
   estimateInput?: boolean;
   /** A durable Tasks-page landing expands the ordinary tree before focus. */
   focusTaskId?: number | null;
+  /** Week's fixed-edit handoff opens this existing authoritative task editor. */
+  editFixedTaskId?: number | null;
 }
 
 export function TaskRow({
@@ -76,6 +78,7 @@ export function TaskRow({
   rootTasks,
   estimateInput,
   focusTaskId,
+  editFixedTaskId,
 }: Props) {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
@@ -87,7 +90,7 @@ export function TaskRow({
   const [aiPanel, setAiPanel] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [snoozing, setSnoozing] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(editFixedTaskId === task.id);
   const [orderModeError, setOrderModeError] = useState<string | null>(null);
   const [movingUnder, setMovingUnder] = useState(false);
   const [moveTargetId, setMoveTargetId] = useState("");
@@ -104,6 +107,10 @@ export function TaskRow({
       setExpanded(true);
     }
   }, [focusTaskId, task.subtasks]);
+
+  useEffect(() => {
+    if (editFixedTaskId === task.id) setEditing(true);
+  }, [editFixedTaskId, task.id]);
 
   const category = categories.find((c) => c.id === task.categoryId);
   const hasSubtasks = (task.subtasks?.length ?? 0) > 0;
@@ -689,6 +696,7 @@ export function TaskRow({
               // the same root pool as its parent to list cross-parent targets.
               rootTasks={rootTasks}
               focusTaskId={focusTaskId}
+              editFixedTaskId={editFixedTaskId}
             />
           </Fragment>
         ))}
