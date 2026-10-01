@@ -64,26 +64,64 @@ describe("Phase 2A deterministic count, body, and source-oracle evidence", () =>
     }
   });
 
-  it("proves exact 131071/131072/131073 final JSON behavior and intact SQLite storage", async () => {
+  it("proves reservation-aware 131071/131072/131073 boundaries with real continuation envelopes", async () => {
     const cases = [
-      { id: 30_001, week: "2031-01-06", due: "2031-01-08", bytes: 131_071, truncated: false },
-      { id: 30_002, week: "2031-01-13", due: "2031-01-15", bytes: 131_072, truncated: false },
-      { id: 30_003, week: "2031-01-20", due: "2031-01-22", bytes: 131_073, truncated: true },
+      { id: 30_001, tailBase: 41_000, week: "2031-01-06", due: "2031-01-08", reservedCandidateBytes: 131_071, truncated: false },
+      { id: 30_002, tailBase: 42_000, week: "2031-01-13", due: "2031-01-15", reservedCandidateBytes: 131_072, truncated: false },
+      { id: 30_003, tailBase: 43_000, week: "2031-01-20", due: "2031-01-22", reservedCandidateBytes: 131_073, truncated: true },
     ] as const;
     for (const fixture of cases) {
-      await nativeWrite((database) => database.prepare(
-        "INSERT INTO tasks(id,title,category_id,due_date,status,created_at) VALUES (?, 'x',1,?,'open','2026-01-01T00:00:00.000Z')",
-      ).run(fixture.id, fixture.due));
-      const empty = await request(app).get(endpoint(fixture.week)).expect(200);
-      const overhead = Buffer.byteLength(empty.text, "utf8") - 1;
-      const sourceTitle = "x".repeat(fixture.bytes - overhead);
-      await nativeWrite((database) => database.prepare("UPDATE tasks SET title=? WHERE id=?").run(sourceTitle, fixture.id));
+      const candidate = {
+        weekStart: fixture.week,
+        timezone: "UTC",
+        requestNow: "2031-01-08T00:00:00.000Z",
+        records: [{
+          kind: "task", id: fixture.id, title: "", titleTruncated: false,
+          status: "open", fixed: null, deadline: { date: fixture.due },
+        }],
+        nextCursor: "x".repeat(375),
+      };
+      const titleBytes = fixture.reservedCandidateBytes - Buffer.byteLength(JSON.stringify(candidate), "utf8");
+      const sourceTitle = "x".repeat(titleBytes);
+      await nativeWrite((database) => {
+        const insert = database.prepare(
+          "INSERT INTO tasks(id,title,category_id,due_date,status,created_at) VALUES (?,?,1,?,'open','2026-01-01T00:00:00.000Z')",
+        );
+        insert.run(fixture.id, sourceTitle, fixture.due);
+        for (let index = 0; index < 100; index += 1) {
+          insert.run(fixture.tailBase + index, `intact-deferred-tail-${index}`, fixture.due);
+        }
+      });
 
       const response = await request(app).get(endpoint(fixture.week)).expect(200);
-      expect(Buffer.byteLength(response.text, "utf8")).toBe(Math.min(fixture.bytes, 131_072));
       expect(response.body.records).toHaveLength(1);
+      expect(response.body.nextCursor).toEqual(expect.any(String));
+      expect(response.body.nextCursor.length).toBeLessThanOrEqual(244);
+      const reservedEnvelope = { ...response.body, nextCursor: "x".repeat(375) };
+      const reservedBytes = Buffer.byteLength(JSON.stringify(reservedEnvelope), "utf8");
+      const wireBytes = Buffer.byteLength(response.text, "utf8");
+      expect(wireBytes).toBe(reservedBytes - (375 - response.body.nextCursor.length));
+      expect(wireBytes).toBeLessThanOrEqual(131_072);
       expect(response.body.records[0].titleTruncated).toBe(fixture.truncated);
       expect(sourceTitle.startsWith(response.body.records[0].title)).toBe(true);
+      if (fixture.truncated) {
+        expect(fixture.reservedCandidateBytes).toBe(131_073);
+        expect(response.body.records[0].title.length).toBeLessThan(sourceTitle.length);
+        expect(reservedBytes).toBeLessThanOrEqual(131_072);
+      } else {
+        expect(reservedBytes).toBe(fixture.reservedCandidateBytes);
+        expect(response.body.records[0].title).toBe(sourceTitle);
+      }
+
+      const final = await request(app).get(endpoint(fixture.week, response.body.nextCursor)).expect(200);
+      expect(final.body.records).toHaveLength(100);
+      expect(final.body.records[0]).toEqual(expect.objectContaining({
+        id: fixture.tailBase,
+        title: "intact-deferred-tail-0",
+        titleTruncated: false,
+      }));
+      expect(final.body.records.every((row: { titleTruncated: boolean }) => !row.titleTruncated)).toBe(true);
+      expect(final.body.nextCursor).toBeNull();
       const database = await testDb();
       expect(database.prepare("SELECT title FROM tasks WHERE id=?").get(fixture.id)).toEqual({ title: sourceTitle });
       database.close();
@@ -179,6 +217,7 @@ describe("Phase 2A deterministic count, body, and source-oracle evidence", () =>
       database.prepare("INSERT INTO task_fixed_slots(task_id,starts_at,ends_at,entry_timezone) VALUES (36001,'0000-01-01T00:00:00.000Z','2031-03-19T02:00:00.000Z','UTC')").run();
       const tracked = database.prepare("INSERT INTO time_entries(id,task_id,started_at,ended_at) VALUES (?,?,?,?)");
       for (const [id, start, end] of [
+        [36_009, "0000-01-01T00:00:00.000Z", "2031-03-19T02:00:00.000Z"],
         [36_010, "+010000-01-01T00:00:00.000Z", "2031-03-19T02:00:00.000Z"],
         [36_011, "31-03-19T00:00:00.000Z", "2031-03-19T02:00:00.000Z"],
         [36_012, "2031-02-30T00:00:00.000Z", "2031-03-19T02:00:00.000Z"],

@@ -91,8 +91,11 @@ function canonicalInstant(value: unknown): { text: string; ms: number } {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
     failed();
   }
+  const year = Number((value as string).slice(0, 4));
   const ms = Date.parse(value as string);
-  if (!Number.isSafeInteger(ms) || new Date(ms).toISOString() !== value) failed();
+  if (year < 1 || year > 9999 || !Number.isSafeInteger(ms) ||
+      new Date(ms).getUTCFullYear() < 1 || new Date(ms).getUTCFullYear() > 9999 ||
+      new Date(ms).toISOString() !== value) failed();
   return { text: value as string, ms };
 }
 
@@ -248,10 +251,14 @@ function largestTitleThatFits(
   base: WeekRecord,
   title: string,
   hasMore: boolean,
+  completeSourceTitle: boolean,
 ): WeekRecord {
   const points = Array.from(title);
   let low = 0;
-  let high = points.length;
+  // When the complete source title made the intact record too large, the
+  // truncated representation must actually omit at least one code point.
+  // Merely changing `false` to the one-byte-shorter `true` is not truncation.
+  let high = points.length - (completeSourceTitle ? 1 : 0);
   let best: WeekRecord | null = null;
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
@@ -354,7 +361,13 @@ function queryPage(request: WeekWorkerRequest): WeekWorkerResult {
         examined -= 1;
         break;
       } else {
-        records.push(largestTitleThatFits(request, base, fetched.title, hasMoreAfterIdentity));
+        records.push(largestTitleThatFits(
+          request,
+          base,
+          fetched.title,
+          hasMoreAfterIdentity,
+          fetched.complete,
+        ));
       }
       last = { anchor: new Date(anchor as number).toISOString(), kindRank: rank as 0 | 1 | 2, id: sourceId };
     }

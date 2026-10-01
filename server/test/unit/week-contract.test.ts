@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { SCHEDULE_TIME_ZONE_SET } from "../../../shared/scheduleTimezones.js";
 import {
   decodeWeekResponse as decodeWeekResponseWithRegistry,
+  isCanonicalDate,
+  isCanonicalInstant,
   type WeekValidationContext,
 } from "../../../shared/weekContract.js";
 import {
@@ -47,7 +49,13 @@ describe("Week time and cursor contract", () => {
     expect(parseWeekQueryTarget(`${atLimit}A`)).toBeNull();
   });
 
-  it("enforces the four-digit lower and upper Week boundaries", () => {
+  it("enforces the explicit 0001..9999 shared date and instant domain", () => {
+    expect(isCanonicalDate("0000-01-01")).toBe(false);
+    expect(isCanonicalInstant("0000-01-01T00:00:00.000Z")).toBe(false);
+    expect(isCanonicalDate("0001-01-01")).toBe(true);
+    expect(isCanonicalInstant("0001-01-01T00:00:00.000Z")).toBe(true);
+    expect(isCanonicalDate("9999-12-31")).toBe(true);
+    expect(isCanonicalInstant("9999-12-31T23:59:59.999Z")).toBe(true);
     expect(resolveWeek("0001-01-01", "UTC")).not.toBeNull();
     expect(resolveWeek("0001-01-01", "America/New_York")).not.toBeNull();
     expect(resolveWeek("0001-01-01", "Europe/Berlin")).toBeNull();
@@ -150,6 +158,17 @@ describe("shared closed Week response decoder", () => {
   });
 
   it("rejects closed-shape, context, facet, running, ordering, truncation, and cursor violations", () => {
+    expect(() => decodeWeekResponse({ ...example, requestNow: "0000-01-01T00:00:00.000Z" }, context)).toThrow(/requestNow/);
+    expect(() => decodeWeekResponse({
+      ...example,
+      records: [{
+        ...example.records[0],
+        fixed: {
+          ...example.records[0].fixed,
+          startsAt: "0000-01-01T00:00:00.000Z",
+        },
+      }],
+    }, context)).toThrow(/startsAt/);
     expect(() => decodeWeekResponse({ ...example, extra: true }, context)).toThrow();
     expect(() => decodeWeekResponse({ ...example, nextCursor: undefined }, context)).toThrow();
     expect(() => decodeWeekResponse({ ...example, timezone: "Unknown/Zone" }, context)).toThrow();

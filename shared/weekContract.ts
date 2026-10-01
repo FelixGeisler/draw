@@ -165,16 +165,22 @@ function id(value: unknown, label: string): number {
   return value as number;
 }
 
+function isFourDigitDomainYear(value: string): boolean {
+  const year = Number(value.slice(0, 4));
+  return Number.isInteger(year) && year >= 1 && year <= 9999;
+}
+
 export function isCanonicalDate(value: unknown): value is string {
-  if (typeof value !== "string" || !DATE.test(value)) return false;
+  if (typeof value !== "string" || !DATE.test(value) || !isFourDigitDomainYear(value)) return false;
   const parsed = Date.parse(`${value}T00:00:00.000Z`);
   return Number.isFinite(parsed) && new Date(parsed).toISOString().slice(0, 10) === value;
 }
 
 export function isCanonicalInstant(value: unknown): value is string {
-  if (typeof value !== "string" || !INSTANT.test(value)) return false;
+  if (typeof value !== "string" || !INSTANT.test(value) || !isFourDigitDomainYear(value)) return false;
   const parsed = Date.parse(value);
-  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+  return Number.isFinite(parsed) && new Date(parsed).getUTCFullYear() >= 1 &&
+    new Date(parsed).getUTCFullYear() <= 9999 && new Date(parsed).toISOString() === value;
 }
 
 function date(value: unknown, label: string): string {

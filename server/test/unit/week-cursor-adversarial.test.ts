@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import type { Worker } from "node:worker_threads";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createWeekCursorCodec, WEEK_CURSOR_MAX_CHARS } from "../../src/weekCursor.js";
 import { WeekProjectionService, type WeekWorkerFactory } from "../../src/weekService.js";
 import { resolveWeek } from "../../src/weekTime.js";
@@ -63,6 +63,23 @@ describe("Week cursor adversarial matrix", () => {
     expect(() => codec.decode(forged, week)).toThrow("invalid Week cursor");
     const tampered = signed(json(valid)).replace(/^[^.]/, "A");
     expect(() => codec.decode(tampered, week)).toThrow("invalid Week cursor");
+  });
+
+  it("rejects a correctly signed year-0000 requestNow at the semantic pre-worker gate", () => {
+    const random = vi.spyOn(crypto, "randomBytes").mockImplementation((() => Buffer.from(key)) as never);
+    try {
+      let workers = 0;
+      const factory: WeekWorkerFactory = (() => {
+        workers += 1;
+        throw new Error("worker must not be created by cursor decoding");
+      }) as unknown as WeekWorkerFactory;
+      const service = new WeekProjectionService("fixture.db", undefined, factory);
+      const invalidDomain = signed(json({ ...valid, n: "0000-01-01T00:00:00.000Z" }));
+      expect(() => service.decodeCursor(invalidDomain, week)).toThrow("invalid Week cursor");
+      expect(workers).toBe(0);
+    } finally {
+      random.mockRestore();
+    }
   });
 
   it("invalidates on restart/commit, retains before commit, and rejects malformed cursors before worker creation", async () => {
