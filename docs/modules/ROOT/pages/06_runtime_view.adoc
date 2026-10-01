@@ -396,8 +396,9 @@ assistant exposes only non-null slots on its existing staged `create_task`:
 staging invokes the same resolver for feedback but writes nothing, while apply
 revalidates through `createTaskWrite` inside the existing atomic consumed,
 versioned changeset. It still has no existing-task update operation. Strict
-schemas reject flat/resolved values and unknown child keys. Week, `/today`,
-daily digest and weekly Push do not consume fixed slots yet.
+schemas reject flat/resolved values and unknown child keys. The Phase 2A Week
+API consumes fixed slots read-only; the Phase 2B Week client, `/today`, daily
+digest and weekly Push remain planned and unchanged.
 
 == 6.9 Safe database facade and staged-restore preflight
 

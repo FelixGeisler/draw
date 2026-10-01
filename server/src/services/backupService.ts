@@ -24,7 +24,7 @@ import { validateV21Contract } from "../schemaV21.js";
 import { validateV22Contract } from "../schemaV22.js";
 import { resetImportedV23Projection, validateV23Contract } from "../schemaV23.js";
 import { disabledPushDependency, type PushDependency } from "../push/authority.js";
-import { WeekRestoreBusyError } from "../weekService.js";
+import { WeekRestoreBusyError, type WeekLiveReopenProof } from "../weekService.js";
 
 // Backup archive layout (#61, ADR-26): one zip holding a `VACUUM INTO`
 // snapshot of the database, every material file, and a manifest that lets
@@ -691,7 +691,7 @@ export async function importBackupArchive(
   const stagedDbPath = path.join(dataDir, `${IMPORT_PREFIX}${stem}.db`);
   const stagedFilesDir = path.join(dataDir, `${IMPORT_PREFIX}files-${stem}`);
   let committed = false;
-  let liveReopenSucceeded = true;
+  let liveReopenProof: WeekLiveReopenProof = "unattempted";
   try {
     stageAndValidate(zipPath, stagedDbPath, stagedFilesDir);
     // The idle Week worker has exited and closed its read connection before
@@ -702,8 +702,8 @@ export async function importBackupArchive(
         stagedDbPath,
         stagedFilesDir,
         () => { committed = true; },
-        () => { liveReopenSucceeded = false; },
-        () => { liveReopenSucceeded = true; },
+        () => { liveReopenProof = "failed"; },
+        () => { liveReopenProof = "succeeded"; },
         runtime.reopenLiveDatabase ?? reopenDatabase,
         runtime.beforeDatabaseCommit,
       );
@@ -729,7 +729,7 @@ export async function importBackupArchive(
     fs.rmSync(stagedFilesDir, { recursive: true, force: true });
     // A committed restore rotates the memory-only cursor key. Every failed
     // pre-commit attempt retains it. Worker recreation remains lazy.
-    finishWeekRestore(committed, liveReopenSucceeded);
+    finishWeekRestore(committed, liveReopenProof);
   }
 }
 

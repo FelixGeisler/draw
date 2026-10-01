@@ -15,6 +15,7 @@ import type {
 } from "./weekWorkerProtocol.js";
 
 export type WeekServiceErrorCode = "busy" | "unavailable" | "failed";
+export type WeekLiveReopenProof = "unattempted" | "failed" | "succeeded";
 export class WeekServiceError extends Error {
   constructor(readonly code: WeekServiceErrorCode) {
     super(code);
@@ -344,13 +345,15 @@ export class WeekProjectionService {
     }
   }
 
-  finishRestore(committed: boolean, liveReopenSucceeded: boolean): void {
+  finishRestore(committed: boolean, liveReopenProof: WeekLiveReopenProof): void {
     if (!this.#restoreLease) throw new Error("Week restore lease is not held");
     // The commit point invalidates old cursors even when the subsequent live
-    // reopen fails. A pre-commit failure retains the key. In either case no
-    // worker may reopen until the complete live reopen/validation is proven.
+    // reopen fails. A pre-commit failure retains the key. Only an affirmative
+    // live open+migration+v23-validation proof may clear an unavailable latch;
+    // a failure before reopen starts preserves the service's prior health.
     if (committed) this.#cursor.rotate();
-    this.#unavailable = !liveReopenSucceeded;
+    if (liveReopenProof === "failed") this.#unavailable = true;
+    if (liveReopenProof === "succeeded") this.#unavailable = false;
     this.#restoreLease = false;
   }
 

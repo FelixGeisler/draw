@@ -27,7 +27,7 @@ import {
   type WeekTrackedCloseHooks,
 } from "./schemaV23.js";
 import { createSafeDatabase } from "./safeDatabase.js";
-import { WeekProjectionService } from "./weekService.js";
+import { WeekProjectionService, type WeekLiveReopenProof } from "./weekService.js";
 import type { WeekCursorPosition } from "./weekCursor.js";
 import type { WeekResponse } from "../../shared/weekContract.js";
 import type { ResolvedWeek } from "./weekTime.js";
@@ -561,8 +561,8 @@ export function readWeekPage(
 export function beginWeekRestore(): Promise<void> {
   return weekProjection.beginRestore();
 }
-export function finishWeekRestore(committed: boolean, liveReopenSucceeded: boolean): void {
-  weekProjection.finishRestore(committed, liveReopenSucceeded);
+export function finishWeekRestore(committed: boolean, liveReopenProof: WeekLiveReopenProof): void {
+  weekProjection.finishRestore(committed, liveReopenProof);
 }
 export function shutdownWeekProjection(): Promise<void> {
   return weekProjection.shutdown();

@@ -4,13 +4,13 @@ import path from "node:path";
 import request from "supertest";
 import { createApp } from "../../src/app.js";
 import {
-  beginWeekRestore,
-  finishWeekRestore,
+  decodeWeekCursor,
   readWeekPage,
   reopenDatabase,
   shutdownWeekProjection,
 } from "../../src/db.js";
 import { buildWeekProjection } from "../../src/schemaV23.js";
+import { disabledPushDependency } from "../../src/push/authority.js";
 import { BackupError, createBackupArchive, importBackupArchive } from "../../src/services/backupService.js";
 import { resolveWeek } from "../../src/weekTime.js";
 import { testDb } from "../helpers.js";
@@ -270,11 +270,13 @@ describe("Week projection, closed union, and paging", () => {
       .expect(200);
   });
 
-  it("latches unavailable on pre/post-commit reopen-proof faults with exact cursor retention/rotation", async () => {
+  it("preserves a failed-reopen latch through unattempted restores until actual recovery", async () => {
+    const week = resolveWeek("2026-11-09", "UTC")!;
     const beforePreCommit = await request(app)
       .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
       .expect(200);
     const retainedCursor = beforePreCommit.body.nextCursor as string;
+
     const preCommitArchive = createBackupArchive();
     try {
       await expect(importBackupArchive(preCommitArchive, undefined, {
@@ -287,15 +289,58 @@ describe("Week projection, closed union, and paging", () => {
     } finally {
       fs.rmSync(preCommitArchive, { force: true });
     }
+    expect(() => decodeWeekCursor(retainedCursor, week)).not.toThrow();
     await request(app)
       .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
       .expect(503, { error: "week-index-unavailable" });
-    await beginWeekRestore();
-    finishWeekRestore(false, true);
-    await request(app)
-      .get(`/api/calendar/week?weekStart=2026-11-09&timezone=UTC&cursor=${encodeURIComponent(retainedCursor)}`)
-      .expect(200);
 
+    const invalidArchive = path.join(process.env.DATA_DIR!, "invalid-latched-week-restore.zip");
+    fs.writeFileSync(invalidArchive, "not a zip");
+    try {
+      await expect(importBackupArchive(invalidArchive)).rejects.toMatchObject({ status: 400 });
+    } finally {
+      fs.rmSync(invalidArchive, { force: true });
+    }
+    expect(() => decodeWeekCursor(retainedCursor, week)).not.toThrow();
+    await request(app)
+      .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
+      .expect(503, { error: "week-index-unavailable" });
+
+    const recoveryArchive = createBackupArchive();
+    let admissionDuringPushFailure: Promise<unknown> | undefined;
+    const failingPush = {
+      ...disabledPushDependency,
+      beginRestore: () => {
+        admissionDuringPushFailure = readWeekPage(week, null).then(
+          () => ({ code: "unexpected-success" }),
+          (error: unknown) => error,
+        );
+        throw new Error("injected Push beginRestore failure");
+      },
+    };
+    try {
+      await expect(importBackupArchive(recoveryArchive, failingPush))
+        .rejects.toThrow("injected Push beginRestore failure");
+      await expect(admissionDuringPushFailure).resolves.toMatchObject({ code: "busy" });
+      expect(() => decodeWeekCursor(retainedCursor, week)).not.toThrow();
+      await request(app)
+        .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
+        .expect(503, { error: "week-index-unavailable" });
+
+      await expect(importBackupArchive(recoveryArchive)).resolves.toEqual(
+        expect.objectContaining({ tasks: expect.any(Number) }),
+      );
+    } finally {
+      fs.rmSync(recoveryArchive, { force: true });
+    }
+    expect(() => decodeWeekCursor(retainedCursor, week)).toThrow();
+    await request(app)
+      .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
+      .expect(200);
+  });
+
+  it("keeps post-commit reopen-proof failure unavailable after rotating the key", async () => {
+    const week = resolveWeek("2026-11-09", "UTC")!;
     const beforePostCommit = await request(app)
       .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
       .expect(200);
@@ -311,14 +356,19 @@ describe("Week projection, closed union, and paging", () => {
     } finally {
       fs.rmSync(postCommitArchive, { force: true });
     }
+    expect(() => decodeWeekCursor(rotatedCursor, week)).toThrow();
     await request(app)
       .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
       .expect(503, { error: "week-index-unavailable" });
-    await beginWeekRestore();
-    finishWeekRestore(false, true);
-    await request(app)
-      .get(`/api/calendar/week?weekStart=2026-11-09&timezone=UTC&cursor=${encodeURIComponent(rotatedCursor)}`)
-      .expect(400, { error: "invalid-week-request" });
+
+    const recoveryArchive = createBackupArchive();
+    try {
+      await expect(importBackupArchive(recoveryArchive)).resolves.toEqual(
+        expect.objectContaining({ tasks: expect.any(Number) }),
+      );
+    } finally {
+      fs.rmSync(recoveryArchive, { force: true });
+    }
     await request(app)
       .get("/api/calendar/week?weekStart=2026-11-09&timezone=UTC")
       .expect(200);

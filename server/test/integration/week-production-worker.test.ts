@@ -223,7 +223,7 @@ describe.sequential("production Week worker instrumentation", () => {
       const failedThread = lifecycle.find((row) => row.type === "create")!.threadId;
       await service.beginRestore();
       expect(lifecycle.some((row) => row.type === "exit" && row.threadId === failedThread)).toBe(true);
-      service.finishRestore(false, true);
+      service.finishRestore(false, "succeeded");
 
       setMode("observe");
       await expect(service.requestPage(week, null)).resolves.toMatchObject({ records: expect.any(Array) });
@@ -280,7 +280,7 @@ describe.sequential("production Week worker instrumentation", () => {
     expect(closeEnd).toBeGreaterThanOrEqual(0);
     expect(closedMessage).toBeGreaterThan(closeEnd);
     expect(lifecycle.some((row) => row.type === "exit" && row.threadId === second && row.code === 0)).toBe(true);
-    service.finishRestore(false, true);
+    service.finishRestore(false, "succeeded");
 
     await service.requestPage(week, null);
     const third = lifecycle.filter((row) => row.type === "create").at(-1)!.threadId;
@@ -294,6 +294,6 @@ describe.sequential("production Week worker instrumentation", () => {
     const latestFault = lifecycle.filter((row) => row.type === "terminate").at(-1)!.threadId;
     await service.beginRestore();
     expect(lifecycle.some((row) => row.type === "exit" && row.threadId === latestFault)).toBe(true);
-    service.finishRestore(false, true);
+    service.finishRestore(false, "succeeded");
   });
 });

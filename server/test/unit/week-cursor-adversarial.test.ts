@@ -103,10 +103,10 @@ describe("Week cursor adversarial matrix", () => {
       (() => { throw new Error("not expected"); }) as unknown as WeekWorkerFactory);
     // A malformed cursor remains a pure main-process operation across restore.
     await retainedService.beginRestore();
-    retainedService.finishRestore(false, true);
+    retainedService.finishRestore(false, "succeeded");
     expect(() => retainedService.decodeCursor("not-a-cursor", week)).toThrow();
     await retainedService.beginRestore();
-    retainedService.finishRestore(true, true);
+    retainedService.finishRestore(true, "succeeded");
     expect(workers).toBe(0);
   });
 });

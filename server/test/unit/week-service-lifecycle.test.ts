@@ -183,7 +183,7 @@ describe("Week worker lifecycle ownership", () => {
     }
   });
 
-  it("awaits fault retirement before restore and latches unavailable after failed live reopen", async () => {
+  it("awaits retirement and changes the unavailable latch only on explicit reopen proof", async () => {
     const { service, workers } = harness();
     const failed = service.requestPage(week, null);
     await tick();
@@ -197,18 +197,37 @@ describe("Week worker lifecycle ownership", () => {
     expect(settled).toBe(false);
     workers[0].exit(1);
     await restore;
-    service.finishRestore(false, false);
+    service.finishRestore(false, "failed");
 
     await expect(service.requestPage(week, null)).rejects.toMatchObject({ code: "unavailable" });
     expect(workers).toHaveLength(1);
 
+    // A later staging/Push failure does not constitute reopen proof and must
+    // preserve the earlier fail-closed latch without creating a worker.
     await service.beginRestore();
-    service.finishRestore(false, true);
+    service.finishRestore(false, "unattempted");
+    await expect(service.requestPage(week, null)).rejects.toMatchObject({ code: "unavailable" });
+    expect(workers).toHaveLength(1);
+
+    await service.beginRestore();
+    service.finishRestore(false, "succeeded");
     const recovered = service.requestPage(week, null);
     await tick();
     expect(workers).toHaveLength(2);
     workers[1].finish();
     await recovered;
     await service.shutdown();
+
+    // The same unattempted outcome preserves a healthy service rather than
+    // unnecessarily converting a pre-swap staging failure to unavailable.
+    const healthy = harness();
+    await healthy.service.beginRestore();
+    healthy.service.finishRestore(false, "unattempted");
+    const stillHealthy = healthy.service.requestPage(week, null);
+    await tick();
+    expect(healthy.workers).toHaveLength(1);
+    healthy.workers[0].finish();
+    await stillHealthy;
+    await healthy.service.shutdown();
   });
 });
