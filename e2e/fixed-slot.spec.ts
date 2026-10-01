@@ -283,6 +283,9 @@ test("UI scheduling a revealed card clears it; reveal itself creates no slot or 
   await editor.getByLabel("Fixed end").fill("2026-10-20T11:00");
   await editor.getByLabel("Entry timezone").selectOption("UTC");
   await editor.getByRole("button", { name: "Save", exact: true }).click();
+  // Saving is mutation-backed; wait for the editor to close before reading
+  // server state so a busy full-suite run cannot race the PATCH response.
+  await expect(editor.getByPlaceholder("What needs doing?")).not.toBeVisible();
   expect(await (await page.request.get("/api/draw/current")).json()).toBeNull();
   const pool = await (await page.request.get(`/api/draw/pool?goalId=${goalId}`)).json();
   expect(pool.candidates).toEqual([]);

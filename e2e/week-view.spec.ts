@@ -389,7 +389,16 @@ test("public Start now and bodyless Stop create/finalize a distinct Tracked row 
     await runningRow.getByRole("button", { name: "Stop" }).click();
     await expect(page.locator('[data-week-identity^="tracked:"]', { hasText: title }).getByRole("button", { name: "Stop" })).toHaveCount(0);
     expect(stopBody ?? null).toBeNull();
-    const finalizedApi = await (await request.get(`/api/calendar/week?weekStart=${week}&timezone=UTC`)).json();
+    // The UI's refresh owns the sole Week worker briefly after Stop. Poll the
+    // public read until that admitted request releases it; never interpret its
+    // exact busy response as an empty Week.
+    let finalizedApi: any = null;
+    await expect.poll(async () => {
+      const response = await request.get(`/api/calendar/week?weekStart=${week}&timezone=UTC`);
+      if (!response.ok()) return response.status();
+      finalizedApi = await response.json();
+      return 200;
+    }).toBe(200);
     const finalized = finalizedApi.records.find((record: any) => record.kind === "tracked" && record.id === running.id);
     expect(finalized.running).toBe(false);
     expect(Date.parse(finalized.effectiveEndAt)).toBeGreaterThanOrEqual(Date.parse(running.startedAt));
