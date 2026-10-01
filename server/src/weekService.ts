@@ -10,7 +10,6 @@ import { createWeekCursorCodec, WeekCursorError, type WeekCursorPosition } from 
 import type { ResolvedWeek } from "./weekTime.js";
 import type {
   WeekWorkerFailure,
-  WeekWorkerMessage,
   WeekWorkerRequest,
   WeekWorkerResult,
 } from "./weekWorkerProtocol.js";
@@ -36,6 +35,7 @@ type WorkerSlot = {
   resolveReady: () => void;
   rejectReady: (error: Error) => void;
   readySettled: boolean;
+  closing: boolean;
   request: null | {
     id: number;
     resolve: (result: WeekWorkerResult) => void;
@@ -50,6 +50,43 @@ type WorkerSlot = {
 
 function serviceError(code: WeekServiceErrorCode): WeekServiceError {
   return new WeekServiceError(code);
+}
+
+function hasExactKeys(value: object, expected: readonly string[]): boolean {
+  const keys = Object.keys(value);
+  return keys.length === expected.length && expected.every((key) => Object.hasOwn(value, key));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isReadyMessage(value: unknown): value is Readonly<{ type: "ready" }> {
+  return isRecord(value) && hasExactKeys(value, ["type"]) && value.type === "ready";
+}
+
+function isClosedMessage(value: unknown): value is Readonly<{ type: "closed" }> {
+  return isRecord(value) && hasExactKeys(value, ["type"]) && value.type === "closed";
+}
+
+function isLastPosition(value: unknown): value is NonNullable<WeekWorkerResult["last"]> {
+  return isRecord(value) && hasExactKeys(value, ["anchor", "kindRank", "id"]) &&
+    typeof value.anchor === "string" &&
+    (value.kindRank === 0 || value.kindRank === 1 || value.kindRank === 2) &&
+    Number.isSafeInteger(value.id) && Number(value.id) > 0;
+}
+
+function isResultMessage(value: unknown): value is WeekWorkerResult {
+  return isRecord(value) && hasExactKeys(value, ["type", "id", "records", "hasMore", "last"]) &&
+    value.type === "result" && Number.isSafeInteger(value.id) && Number(value.id) > 0 &&
+    Array.isArray(value.records) && typeof value.hasMore === "boolean" &&
+    (value.last === null || isLastPosition(value.last));
+}
+
+function isFailureMessage(value: unknown): value is WeekWorkerFailure {
+  return isRecord(value) && hasExactKeys(value, ["type", "id", "code", "discard"]) &&
+    value.type === "failure" && Number.isSafeInteger(value.id) && Number(value.id) > 0 &&
+    (value.code === "unavailable" || value.code === "failed") && typeof value.discard === "boolean";
 }
 
 export class WeekProjectionService {
@@ -92,6 +129,7 @@ export class WeekProjectionService {
       resolveReady,
       rejectReady,
       readySettled: false,
+      closing: false,
       request: null,
       closedSeen: false,
       exited: false,
@@ -99,26 +137,41 @@ export class WeekProjectionService {
       resolveExit,
       retirement: null,
     };
-    worker.on("message", (message: WeekWorkerMessage) => {
-      if (message.type === "ready") {
-        if (!slot.readySettled) {
-          slot.readySettled = true;
-          slot.resolveReady();
-        }
+    worker.on("message", (message: unknown) => {
+      if (isReadyMessage(message) && !slot.readySettled && !slot.closing && !slot.request) {
+        slot.readySettled = true;
+        slot.resolveReady();
         return;
       }
-      if (message.type === "closed") {
+      if (isClosedMessage(message) && slot.closing && !slot.request) {
         slot.closedSeen = true;
         return;
       }
-      if (!slot.request || slot.request.id !== message.id) return;
       const pending = slot.request;
-      slot.request = null;
-      if (message.type === "result") pending.resolve(message);
-      else {
-        pending.reject(serviceError(message.code));
-        if (message.discard) void this.#retire(slot, true);
+      if (
+        pending &&
+        ((isResultMessage(message) && message.id === pending.id) ||
+          (isFailureMessage(message) && message.id === pending.id))
+      ) {
+        slot.request = null;
+        if (message.type === "result") pending.resolve(message);
+        else {
+          pending.reject(serviceError(message.code));
+          if (message.discard) void this.#retire(slot, true);
+        }
+        return;
       }
+
+      // Any out-of-state, malformed, or wrong-request worker message violates
+      // the closed protocol. Fail the owned request and retire this exact worker;
+      // later spawn/restore paths await its recorded exit.
+      slot.request = null;
+      if (!slot.readySettled) {
+        slot.readySettled = true;
+        slot.rejectReady(serviceError("failed"));
+      }
+      pending?.reject(serviceError("failed"));
+      void this.#retire(slot, true);
     });
     const fault = () => {
       if (!slot.readySettled) {
@@ -171,9 +224,9 @@ export class WeekProjectionService {
     }
   }
 
-  async #query(request: WeekWorkerRequest): Promise<WeekWorkerResult> {
+  async #query(request: WeekWorkerRequest): Promise<{ result: WeekWorkerResult; slot: WorkerSlot }> {
     const slot = await this.#worker();
-    return new Promise<WeekWorkerResult>((resolve, reject) => {
+    const result = await new Promise<WeekWorkerResult>((resolve, reject) => {
       if (slot.request) {
         reject(serviceError("failed"));
         return;
@@ -187,6 +240,7 @@ export class WeekProjectionService {
         void this.#retire(slot, true);
       }
     });
+    return { result, slot };
   }
 
   async requestPage(week: ResolvedWeek, cursor: WeekCursorPosition | null): Promise<WeekResponse> {
@@ -208,40 +262,46 @@ export class WeekProjectionService {
         : null,
     };
     try {
-      let result: WeekWorkerResult;
+      let query: { result: WeekWorkerResult; slot: WorkerSlot };
       try {
-        result = await this.#query(request);
+        query = await this.#query(request);
       } catch (error) {
         if (error instanceof WeekServiceError) throw error;
         throw serviceError("failed");
       }
-      if (result.hasMore && result.last === null) throw serviceError("failed");
-      const nextCursor = result.hasMore
-        ? this.#cursor.encode(week, {
-            requestNow,
-            anchor: result.last!.anchor,
-            kindRank: result.last!.kindRank,
-            id: result.last!.id,
-          })
-        : null;
-      const response: WeekResponse = {
-        weekStart: week.weekStart,
-        timezone: week.timezone,
-        requestNow,
-        records: result.records,
-        nextCursor,
-      };
-      const encoded = JSON.stringify(response);
-      if (Buffer.byteLength(encoded, "utf8") > WEEK_BODY_MAX_BYTES) throw serviceError("failed");
-      const validated = decodeWeekResponse(JSON.parse(encoded) as unknown, week, SCHEDULE_TIME_ZONE_SET);
-      if (nextCursor) {
-        const rebound = this.#cursor.decode(nextCursor, week);
-        if (
-          rebound.requestNow !== requestNow || rebound.anchor !== result.last!.anchor ||
-          rebound.kindRank !== result.last!.kindRank || rebound.id !== result.last!.id
-        ) throw serviceError("failed");
+      const { result, slot } = query;
+      try {
+        if (result.hasMore && result.last === null) throw serviceError("failed");
+        const nextCursor = result.hasMore
+          ? this.#cursor.encode(week, {
+              requestNow,
+              anchor: result.last!.anchor,
+              kindRank: result.last!.kindRank,
+              id: result.last!.id,
+            })
+          : null;
+        const response: WeekResponse = {
+          weekStart: week.weekStart,
+          timezone: week.timezone,
+          requestNow,
+          records: result.records,
+          nextCursor,
+        };
+        const encoded = JSON.stringify(response);
+        if (Buffer.byteLength(encoded, "utf8") > WEEK_BODY_MAX_BYTES) throw serviceError("failed");
+        const validated = decodeWeekResponse(JSON.parse(encoded) as unknown, week, SCHEDULE_TIME_ZONE_SET);
+        if (nextCursor) {
+          const rebound = this.#cursor.decode(nextCursor, week);
+          if (
+            rebound.requestNow !== requestNow || rebound.anchor !== result.last!.anchor ||
+            rebound.kindRank !== result.last!.kindRank || rebound.id !== result.last!.id
+          ) throw serviceError("failed");
+        }
+        return validated;
+      } catch {
+        await this.#retire(slot, true);
+        throw serviceError("failed");
       }
-      return validated;
     } finally {
       this.#busy = false;
       for (const resolve of this.#idleWaiters.splice(0)) resolve();
@@ -260,6 +320,7 @@ export class WeekProjectionService {
     }
     if (slot.request) throw serviceError("failed");
     try {
+      slot.closing = true;
       slot.worker.postMessage({ type: "close" });
     } catch {
       await this.#retire(slot, true);

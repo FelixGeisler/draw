@@ -49,6 +49,20 @@ class ControlledWorker extends EventEmitter {
     } satisfies WeekWorkerMessage);
   }
 
+  malformedProtocol() {
+    const request = this.query!;
+    this.query = null;
+    this.emit("message", { type: "unexpected", id: request.id });
+  }
+
+  structurallyInvalidResult() {
+    const request = this.query!;
+    this.query = null;
+    this.emit("message", {
+      type: "result", id: request.id, records: [], hasMore: true, last: null,
+    } satisfies WeekWorkerMessage);
+  }
+
   terminate() { return this.termination; }
 
   exit(code: number) {
@@ -137,6 +151,36 @@ describe("Week worker lifecycle ownership", () => {
     workers[1].finish();
     await recreation;
     await service.shutdown();
+  });
+
+  it("retires malformed protocol and structural results before later ownership", async () => {
+    for (const fault of ["protocol", "structural"] as const) {
+      const { service, workers } = harness();
+      const failed = service.requestPage(week, null);
+      const failure = expect(failed).rejects.toMatchObject({ code: "failed" });
+      await tick();
+      if (fault === "protocol") workers[0].malformedProtocol();
+      else workers[0].structurallyInvalidResult();
+      await tick();
+
+      let followUp: Promise<unknown>;
+      if (fault === "protocol") {
+        await failure;
+        followUp = service.requestPage(week, null);
+        await tick();
+        expect(workers).toHaveLength(1);
+        workers[0].exit(1);
+      } else {
+        workers[0].exit(1);
+        await failure;
+        followUp = service.requestPage(week, null);
+      }
+      await tick();
+      expect(workers).toHaveLength(2);
+      workers[1].finish();
+      await followUp;
+      await service.shutdown();
+    }
   });
 
   it("awaits fault retirement before restore and latches unavailable after failed live reopen", async () => {

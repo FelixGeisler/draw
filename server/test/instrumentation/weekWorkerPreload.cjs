@@ -40,7 +40,7 @@ parentPort.postMessage = (message, transfer) => {
     if (mode === "worker-failure") {
       outgoing = { type: "failure", id: message.id, code: "failed", discard: true };
     }
-    if (mode === "protocol") outgoing = { ...message, records: "invalid-record-array" };
+    if (mode === "protocol") outgoing = { type: "unexpected", id: message.id };
     if (mode === "structural") outgoing = { ...message, hasMore: true, last: null };
   }
   return originalPostMessage(outgoing, transfer);

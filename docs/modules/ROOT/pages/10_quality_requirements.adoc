@@ -121,7 +121,8 @@ no route, worker protocol field or production hook. The suite instruments the
 real `WeekProjectionService` and `weekWorker.ts` connection/query/result path,
 including lazy/reused sole connection, main-thread health during a blocked
 query, HTTP disconnect/busy behavior, prefix-query/IPC bounds, recoverable
-failure envelopes, fault retirement, restore and shutdown. Static native/import
+failure envelopes, and actual-worker protocol/structural fault retirement with
+owned exit before restore, lazy recreation and shutdown. Static native/import
 canaries are supplementary and are not treated as runtime proof. Existing WAL
 and restore suites cover coherent old/new/dirty snapshots and reopen/key order.
 

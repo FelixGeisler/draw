@@ -186,6 +186,54 @@ describe.sequential("production Week worker instrumentation", () => {
       expect(attempt.filter((row) => row.type === "connection-open")).toHaveLength(1);
       expect(attempt.filter((row) => row.type === "identity-all").length).toBeLessThanOrEqual(1);
       expect(attempt.filter((row) => row.type === "title-get-start").length).toBeLessThanOrEqual(100);
+
+      if (mode === "protocol" || mode === "structural") {
+        const failedThread = attempt.find((row) => row.type === "connection-open")!.threadId;
+        const recoveryStart = events().length;
+        setMode("observe");
+        await request(app)
+          .get("/api/calendar/week?weekStart=2033-12-26&timezone=UTC")
+          .expect(200);
+        const recovery = events().slice(recoveryStart);
+        const recoveredThread = recovery.find((row) => row.type === "connection-open")!.threadId;
+        expect(recoveredThread).not.toBe(failedThread);
+      }
+    }
+  });
+
+  it("retires actual workers with malformed protocol/structural results before restore, recreation, and shutdown", async () => {
+    await shutdownWeekProjection();
+    const { WeekProjectionService } = await import("../../src/weekService.js");
+    const { resolveWeek } = await import("../../src/weekTime.js");
+    const week = resolveWeek("2033-12-26", "UTC")!;
+
+    for (const mode of ["protocol", "structural"] as const) {
+      setMode(mode);
+      const lifecycle: Array<{ type: "create" | "exit"; threadId: number; code?: number }> = [];
+      const factory = (url: URL, options: ConstructorParameters<typeof Worker>[1]) => {
+        const worker = new Worker(url, options);
+        const workerThread = worker.threadId;
+        lifecycle.push({ type: "create", threadId: workerThread });
+        worker.once("exit", (code) => lifecycle.push({ type: "exit", threadId: workerThread, code }));
+        return worker;
+      };
+      const service = new WeekProjectionService(path.join(process.env.DATA_DIR!, "app.db"), undefined, factory);
+
+      await expect(service.requestPage(week, null)).rejects.toMatchObject({ code: "failed" });
+      const failedThread = lifecycle.find((row) => row.type === "create")!.threadId;
+      await service.beginRestore();
+      expect(lifecycle.some((row) => row.type === "exit" && row.threadId === failedThread)).toBe(true);
+      service.finishRestore(false, true);
+
+      setMode("observe");
+      await expect(service.requestPage(week, null)).resolves.toMatchObject({ records: expect.any(Array) });
+      const recoveredThread = lifecycle.filter((row) => row.type === "create").at(-1)!.threadId;
+      expect(recoveredThread).not.toBe(failedThread);
+      expect(lifecycle.findIndex((row) => row.type === "exit" && row.threadId === failedThread))
+        .toBeLessThan(lifecycle.findIndex((row) => row.type === "create" && row.threadId === recoveredThread));
+
+      await service.shutdown();
+      expect(lifecycle.some((row) => row.type === "exit" && row.threadId === recoveredThread && row.code === 0)).toBe(true);
     }
   });
 
