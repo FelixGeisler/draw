@@ -59,7 +59,7 @@ function calendar(page: Page) {
 }
 
 async function openCalendar(page: Page) {
-  await page.getByRole("button", { name: "Calendar", exact: true }).click();
+  await page.getByRole("button", { name: "Due dates", exact: true }).click();
   await expect(calendar(page)).toBeVisible();
 }
 

@@ -517,9 +517,11 @@ after successful live reopen/validation; failed proof latches Week unavailable.
 Cursor HMAC keys remain in the main process and never cross to SQLite,
 the worker, backup or logs.
 
-ADR-75 Phases 1 and 2 are now implemented: `CURRENT_VERSION` is 23, exact
+ADR-75 Phases 1 and 2 are implemented: `CURRENT_VERSION` is 23, exact
 `week_access_state`, `week_interval_access`, `week_interval_rtree`/shadow DDL
 and nine triggers are validated, owned fixed/timer mutations maintain affected
 identities, and boot/restore rederive the disposable projection. Phase 2A adds
-the authenticated bounded Week route, v2 cursor and worker reader. The Week
-client, navigation, `/today`, digest and Push behavior remain planned and unchanged.
+the authenticated bounded Week route, v2 cursor and worker reader. Phase 2B
+adds the no-store strict-decoding Week client, durable navigation, deterministic
+layout and stale-generation rejection. `/today`, morning-digest changes, later
+weekly Push and Sunday Push remain planned and unchanged.
