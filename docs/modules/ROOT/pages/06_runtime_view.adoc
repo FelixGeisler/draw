@@ -396,8 +396,9 @@ assistant exposes only non-null slots on its existing staged `create_task`:
 staging invokes the same resolver for feedback but writes nothing, while apply
 revalidates through `createTaskWrite` inside the existing atomic consumed,
 versioned changeset. It still has no existing-task update operation. Strict
-schemas reject flat/resolved values and unknown child keys. Week, `/today`,
-daily digest and weekly Push do not consume fixed slots yet.
+schemas reject flat/resolved values and unknown child keys. The Phase 2A Week
+API consumes fixed slots read-only; the Phase 2B Week client, `/today`, daily
+digest and weekly Push remain planned and unchanged.
 
 == 6.9 Safe database facade and staged-restore preflight
 
@@ -420,6 +421,10 @@ source row is read. SQL is then fetched one known object at a time under its
 compiled per-object cap and token-normalized hash. Only an exact preflight may
 continue through the existing version validator/migration, credential/claim
 sanitation, second physical rewrite, files-first/database-last swap and reopen.
+Restore first takes the exclusive Week lease; an active Week returns the exact
+409 without changing Push/live files. When idle, worker exit and read-connection
+closure precede Push restore, checkpoint and last-connection proof. A committed
+restore rotates the memory-only cursor key; a pre-commit failure retains it.
 Failure removes owned staging artifacts and leaves live database/material bytes
 unchanged (ADR-26/75).
 
@@ -444,5 +449,38 @@ resource bound, not a numeric performance SLA. SQL storage-class and 24-byte gua
 any timestamp reaches the strict parser. A v23 import must first pass bounded
 exact schema admission; its derived objects/data are then discarded, recreated
 from compiled SQL and rebuilt before sanitation and the existing physical
-rewrite/swap. No Week route, worker, client, cursor, `/today`, digest or Push
-consumer is introduced.
+rewrite/swap. The foundation path itself introduces no client, `/today`,
+digest or Push consumer.
+
+== 6.11 Bounded Week API read
+
+After ADR-50 and strict target/query/framing validation, the main process checks
+the ASCII authenticated v2 cursor before worker admission. Page one captures one
+canonical `requestNow`; continuations recover it only from the HMAC-bound compact
+payload. One lazy long-lived Worker Thread owns one
+`readonly:true,fileMustExist:true` connection with `trusted_schema=OFF`,
+`query_only=ON`, `cache_size=-2048` and `temp_store=FILE`. A second request is
+never queued or coalesced: it receives `week-projection-busy`. A failed worker
+remains owned by an exit promise; no replacement is created, and neither
+restore nor shutdown can proceed, until that worker has actually exited and
+released its native reader.
+
+One read transaction requires ready equal-generation schema v23, runs the
+four-branch RTree/deadline-index `UNION ALL` with continuation in every branch
+and one ordered `LIMIT 101`, validates reached source/companion values, then
+fetches at most 100 title prefixes one result at a time. Complete records defer;
+only a record that cannot fit an empty page is truncated on a UTF-8 code-point
+boundary. The exact envelope plus cursor stays at or below 131,072 UTF-8 bytes.
+Success and recoverable errors are JSON with `Cache-Control: no-store`; the GET
+never repairs, falls back, writes, retries or makes an external request.
+Restore admission remains closed until the complete live reopen/migration/v23
+validation path reports success. A failed proof leaves Week explicitly
+unavailable with no lazy worker reopen; a later proven recovery clears that
+latch. The cursor key rotates at the database commit point even when the
+post-commit reopen proof fails, while every pre-commit failure retains it.
+
+The Worker Thread isolates the event loop only. SQLite may inspect or materialize
+all of a selected unbounded stored title while calculating BLOB length/prefix.
+Native memory, I/O, RSS and latency may scale with that value; fatal native OOM
+or abort can terminate the process before any JSON response. JavaScript, IPC,
+serialization and wire data remain bounded.

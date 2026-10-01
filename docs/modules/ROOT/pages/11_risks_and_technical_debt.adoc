@@ -44,4 +44,9 @@
 |New completion paths could skip checks
 |Single entry point (`completeTask`) mitigates; keep completions flowing through it
 
+|R9
+|*A selected Week title remains unbounded inside SQLite/better-sqlite3* — prefix-bounded SQL can still inspect or materialize the complete stored value, and a Worker Thread shares the process/native address space
+|Native memory, I/O, RSS and latency may scale with one title; fatal native OOM/abort may terminate Draw before a JSON response
+|Explicitly accepted in https://github.com/FelixGeisler/draw/issues/360[#360]: preserve existing unbounded-title compatibility. Bound identities, JavaScript, IPC, serialization and the 131,072-byte wire response; promise no native-memory, native-I/O, OOM-resistance, latency or process-survival threshold
+
 |===

@@ -5,10 +5,12 @@ import path from "node:path";
 import {
   API_KEY_SETTING,
   CURRENT_VERSION,
+  beginWeekRestore,
   checkpointAndCloseLiveDatabaseForSwap,
   dataDir,
   db,
   filesDir,
+  finishWeekRestore,
   migrateDatabase,
   reopenDatabase,
   vacuumLiveDatabaseInto,
@@ -22,6 +24,7 @@ import { validateV21Contract } from "../schemaV21.js";
 import { validateV22Contract } from "../schemaV22.js";
 import { resetImportedV23Projection, validateV23Contract } from "../schemaV23.js";
 import { disabledPushDependency, type PushDependency } from "../push/authority.js";
+import { WeekRestoreBusyError, type WeekLiveReopenProof } from "../weekService.js";
 
 // Backup archive layout (#61, ADR-26): one zip holding a `VACUUM INTO`
 // snapshot of the database, every material file, and a manifest that lets
@@ -664,23 +667,46 @@ export function runScheduledBackup(retention: number, now: Date = new Date()): S
  *  2. Swap — restart-safe ordering (see swapIn) with the `app.db` rename as
  *     the atomic commit point, then reopen and migrate forward.
  */
-export function importBackupArchive(
+export type BackupImportRuntime = Readonly<{
+  /** Dependency seam; deterministic fault implementations live only under test/. */
+  reopenLiveDatabase?: () => void;
+  beforeDatabaseCommit?: () => void;
+}>;
+
+export async function importBackupArchive(
   zipPath: string,
   push: PushDependency = disabledPushDependency,
-): ImportSummary {
+  runtime: BackupImportRuntime = {},
+): Promise<ImportSummary> {
+  try {
+    // Admission closes synchronously before the first await. An active Week
+    // leaves both live data and Push state untouched.
+    await beginWeekRestore();
+  } catch (error) {
+    if (error instanceof WeekRestoreBusyError) throw new BackupError(409, error.message);
+    throw error;
+  }
+
   const stem = tempStem();
   const stagedDbPath = path.join(dataDir, `${IMPORT_PREFIX}${stem}.db`);
   const stagedFilesDir = path.join(dataDir, `${IMPORT_PREFIX}files-${stem}`);
   let committed = false;
+  let liveReopenProof: WeekLiveReopenProof = "unattempted";
   try {
     stageAndValidate(zipPath, stagedDbPath, stagedFilesDir);
-    // This boundary is intentionally after all archive/migration/sanitization
-    // validation and immediately before the existing swap.
+    // The idle Week worker has exited and closed its read connection before
+    // Push recovery, checkpointing, last-connection proof, or the swap.
     push.beginRestore();
     try {
-      swapIn(stagedDbPath, stagedFilesDir, () => {
-        committed = true;
-      });
+      swapIn(
+        stagedDbPath,
+        stagedFilesDir,
+        () => { committed = true; },
+        () => { liveReopenProof = "failed"; },
+        () => { liveReopenProof = "succeeded"; },
+        runtime.reopenLiveDatabase ?? reopenDatabase,
+        runtime.beforeDatabaseCommit,
+      );
     } catch (error) {
       if (!committed) {
         push.abortRestore();
@@ -701,6 +727,9 @@ export function importBackupArchive(
   } finally {
     removeDatabaseAndSidecars(stagedDbPath);
     fs.rmSync(stagedFilesDir, { recursive: true, force: true });
+    // A committed restore rotates the memory-only cursor key. Every failed
+    // pre-commit attempt retains it. Worker recreation remains lazy.
+    finishWeekRestore(committed, liveReopenProof);
   }
 }
 
@@ -848,7 +877,15 @@ export function stageFileEntries(entries: AdmZip.IZipEntry[], stagedFilesDir: st
  *    in a single same-volume rename — the atomic commit point. Before it: old
  *    state (files recoverable from files.bak). After it: new state.
  */
-function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => void) {
+function swapIn(
+  stagedDbPath: string,
+  stagedFilesDir: string,
+  onCommit: () => void,
+  onLiveReopenRequired: () => void,
+  onLiveReopenSucceeded: () => void,
+  reopenLiveDatabase: () => void,
+  beforeDatabaseCommit?: () => void,
+) {
   const bakPath = `${dbPath}.bak`;
   const filesBakDir = path.join(dataDir, "files.bak");
 
@@ -876,6 +913,10 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => vo
     removeDatabaseAndSidecars(bakRewrite);
   }
 
+  // From this point onward admission can reopen only after the complete live
+  // open+migration+v23 validation path succeeds. Mark it before the close so
+  // even a close/reopen fault remains fail-closed.
+  onLiveReopenRequired();
   checkpointAndCloseLiveDatabaseForSwap();
   try {
     if (fs.existsSync(`${dbPath}-wal`) || fs.existsSync(`${dbPath}-shm`)) {
@@ -893,6 +934,7 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => vo
     if (fs.existsSync(filesDir)) fs.renameSync(filesDir, filesBakDir);
     try {
       fs.renameSync(stagedFilesDir, filesDir);
+      beforeDatabaseCommit?.();
       fs.renameSync(stagedDbPath, dbPath); // commit point
       onCommit();
     } catch (e) {
@@ -908,6 +950,7 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => vo
     // Reopens whichever app.db is now in place (new on success, old on a
     // failed swap). The staged database was already migrated and fully
     // validated before this swap, so reopenDatabase() is a no-op migration.
-    reopenDatabase();
+    reopenLiveDatabase();
+    onLiveReopenSucceeded();
   }
 }
