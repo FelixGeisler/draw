@@ -2,9 +2,9 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { Server } from "node:http";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createRequire } from "node:module";
 import type { WeekRecord } from "../shared/weekContract.js";
-import { seedHistoricalWeek } from "./week-fixtures.js";
 
 test.use({ timezoneId: "UTC" });
 
@@ -415,24 +415,30 @@ test("public Start now and bodyless Stop create/finalize a distinct Tracked row 
 test("direct Temp-DB historical fixture drives real paging, deterministic lanes, archive policy, hostile text, overnight clipping, and byte truncation", async ({ page }) => {
   test.setTimeout(60_000);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "draw-week-client-fixture-"));
-  const previousDataDir = process.env.DATA_DIR;
-  process.env.DATA_DIR = root;
-  let server: Server | null = null;
-  const dbModule = await import("../server/src/db.js");
+  const requireFromRepository = createRequire(path.join(process.cwd(), "package.json"));
+  let fixture: ChildProcess | null = null;
   try {
-    seedHistoricalWeek({
-      db: dbModule.db,
-      maintainFixedIntervalWrite: dbModule.maintainFixedIntervalWrite,
-      beginWeekIntervalMutation: dbModule.beginWeekIntervalMutation,
-      reprojectTrackedIntervals: (token, ids) => dbModule.reprojectTrackedIntervals(token as never, ids),
-      finalizeWeekIntervalMutation: (token) => dbModule.finalizeWeekIntervalMutation(token as never),
+    fixture = spawn(
+      process.execPath,
+      [requireFromRepository.resolve("tsx/cli"), path.resolve("e2e/week-fixture-server.ts")],
+      { cwd: process.cwd(), env: { ...process.env, DATA_DIR: root }, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let stderr = "";
+    fixture.stderr!.on("data", (chunk) => { stderr += String(chunk); });
+    const port = await new Promise<number>((resolve, reject) => {
+      let stdout = "";
+      const timeout = setTimeout(() => reject(new Error(`fixture server timeout: ${stderr}`)), 15_000);
+      fixture!.once("error", reject);
+      fixture!.once("exit", (code) => reject(new Error(`fixture server exited ${code}: ${stderr}`)));
+      fixture!.stdout!.on("data", (chunk) => {
+        stdout += String(chunk);
+        const line = stdout.split(/\r?\n/).find((candidate) => candidate.startsWith('{"port":'));
+        if (!line) return;
+        clearTimeout(timeout);
+        resolve((JSON.parse(line) as { port: number }).port);
+      });
     });
-    const { createApp } = await import("../server/src/app.js");
-    server = createApp().listen(0, "127.0.0.1");
-    await new Promise<void>((resolve) => server!.listening ? resolve() : server!.once("listening", resolve));
-    const address = server.address();
-    if (!address || typeof address === "string") throw new Error("missing fixture listener");
-    const origin = `http://127.0.0.1:${address.port}`;
+    const origin = `http://127.0.0.1:${port}`;
 
     await mockPush(page, pushStatus("UTC"));
     await page.route("**/api/calendar/week**", async (route) => {
@@ -466,15 +472,11 @@ test("direct Temp-DB historical fixture drives real paging, deterministic lanes,
     await expect(page.locator('[data-week-identity="task:109"]')).toBeVisible();
     await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
   } finally {
-    if (server?.listening) {
-      const closed = new Promise<void>((resolve) => server!.close(() => resolve()));
-      server.closeAllConnections();
-      await closed;
+    if (fixture && fixture.exitCode === null) {
+      const exited = new Promise<void>((resolve) => fixture!.once("exit", () => resolve()));
+      fixture.kill("SIGTERM");
+      await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 5_000))]);
     }
-    await dbModule.shutdownWeekProjection();
-    dbModule.checkpointAndCloseLiveDatabaseForSwap();
-    if (previousDataDir === undefined) delete process.env.DATA_DIR;
-    else process.env.DATA_DIR = previousDataDir;
     fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
