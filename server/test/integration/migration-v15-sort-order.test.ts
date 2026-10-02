@@ -114,9 +114,9 @@ beforeAll(async () => {
 });
 
 describe("migration v14 → v15 adds tasks.sort_order (#157, ADR-43)", () => {
-  it("runs the forward chain through schema v21", async () => {
+  it("runs the forward chain through the current schema", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(22);
+    expect(db.pragma("user_version", { simple: true })).toBe(23);
   });
 
   it("adds sort_order as REAL NOT NULL DEFAULT 0", async () => {

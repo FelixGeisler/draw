@@ -14,6 +14,7 @@ import {
 import { V19_STATEMENTS } from "../../src/schemaV19.js";
 import { DEADLINE_REMINDER_CLAIMS_SQL } from "../../src/schemaV20.js";
 import { validateV21Contract } from "../../src/schemaV21.js";
+import { dropWeekSchema } from "../../src/schemaV23.js";
 import {
   AUTHORITY_FILE,
   PushLifecycle,
@@ -32,6 +33,7 @@ const dataDir = () => process.env.DATA_DIR!;
 const filesDir = () => path.join(dataDir(), "files");
 
 function dropV22Objects(database: Database.Database) {
+  dropWeekSchema(database);
   database.exec("DROP TABLE task_fixed_slots");
   database.exec("DROP INDEX idx_time_entries_range");
   database.exec("DROP INDEX idx_tasks_due_date");
@@ -383,7 +385,7 @@ describe("credential-free backup artifacts", () => {
       .attach("file", v18Bytes, "canonical-v18.zip")
       .expect(200);
     const migrated = await testDb();
-    expect(migrated.pragma("user_version", { simple: true })).toBe(22);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(23);
     expect(() => validateV21Contract(migrated)).not.toThrow();
   });
 

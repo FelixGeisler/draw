@@ -12,6 +12,26 @@ import {
 } from "./schemaV20.js";
 import { DAILY_DIGEST_CLAIMS_SQL, validateV21Contract } from "./schemaV21.js";
 import { TASK_FIXED_SLOTS_SQL, V22_INDEX_SQL, validateV22Contract } from "./schemaV22.js";
+import {
+  beginWeekMutation,
+  buildWeekProjection,
+  closeOpenTrackedIntervals,
+  createWeekSchema,
+  finishWeekMutation,
+  maintainWeekFixed,
+  maintainWeekTracked,
+  validateV23Contract,
+  validateV23Projection,
+  validateV23Structure,
+  type WeekMutationToken,
+  type WeekTrackedCloseHooks,
+} from "./schemaV23.js";
+import { createSafeDatabase } from "./safeDatabase.js";
+import { WeekProjectionService, type WeekLiveReopenProof } from "./weekService.js";
+import type { WeekCursorPosition } from "./weekCursor.js";
+import type { WeekResponse } from "../../shared/weekContract.js";
+import type { ResolvedWeek } from "./weekTime.js";
+export type { SafeDatabase, SafeStatement, SafeTransaction } from "./safeDatabase.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // DATA_DIR override lets tests (and E2E runs) use an isolated database.
@@ -19,33 +39,60 @@ export const dataDir = process.env.DATA_DIR
   ? path.resolve(process.env.DATA_DIR)
   : path.resolve(here, "../data");
 export const filesDir = path.join(dataDir, "files");
-export const dbPath = path.join(dataDir, "app.db");
+const dbPath = path.join(dataDir, "app.db");
+const weekProjection = new WeekProjectionService(dbPath);
 
 fs.mkdirSync(filesDir, { recursive: true });
 
 function openDatabase(): Database.Database {
   const handle = new Database(dbPath);
+  handle.unsafeMode(false);
   handle.pragma("journal_mode = WAL");
   handle.pragma("foreign_keys = ON");
+  handle.pragma("trusted_schema = OFF");
   return handle;
 }
 
-// `let`, not `const`: backup import (#61, ADR-26) swaps the database file on
-// disk and reopens the handle. ESM live bindings mean every module that
-// imports { db } sees the new handle on its next access — no code in this
-// repo caches prepared statements or transactions across requests, so a
-// reopen is safe between requests (better-sqlite3 is synchronous, and the
-// whole swap runs in one synchronous block: no request can interleave).
-export let db = openDatabase();
+// The native handle never leaves this module. The one exported facade is
+// stable across restore: each operation resolves this variable at call time.
+let nativeDatabase = openDatabase();
+export const db = createSafeDatabase(() => nativeDatabase);
 
-export const CURRENT_VERSION = 22;
+export const CURRENT_VERSION = 23;
 
-export function migrateDatabase(database: Database.Database = db) {
+export type WeekMigrationStage = "create" | "build" | "validate" | "ready" | "stamp";
+export interface MigrationOptions {
+  /** Test-only deterministic fault point; a throw proves the enclosing migration rolls back. */
+  afterWeekStage?: (stage: WeekMigrationStage) => void;
+}
+
+export function migrateDatabase(
+  database: Database.Database = nativeDatabase,
+  options: MigrationOptions = {},
+) {
   const version = database.pragma("user_version", { simple: true }) as number;
+  let activatedV23 = false;
   if (version < 1) {
-    // Fresh database — schema.sql is always the CURRENT schema.
+    // Fresh database — schema.sql is always the CURRENT schema. Creation,
+    // projection validation/readiness, and the stamp are one transaction.
     const schema = fs.readFileSync(path.join(here, "schema.sql"), "utf-8");
-    database.exec(schema);
+    database.transaction(() => {
+      database.exec(schema);
+      options.afterWeekStage?.("create");
+      buildWeekProjection(database);
+      options.afterWeekStage?.("build");
+      validateV23Structure(database, false);
+      validateV23Projection(database, true);
+      options.afterWeekStage?.("validate");
+      database.prepare(
+        "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
+      ).run();
+      options.afterWeekStage?.("ready");
+      validateV23Contract(database, { requireVersion: false });
+      database.pragma("user_version = 23");
+      options.afterWeekStage?.("stamp");
+    })();
+    activatedV23 = true;
   } else {
     if (version < 2) {
       database.exec("ALTER TABLE materials ADD COLUMN stored_name TEXT");
@@ -440,14 +487,51 @@ export function migrateDatabase(database: Database.Database = db) {
         database.pragma("user_version = 22");
       })();
     }
+    if (version < 23) {
+      // Compact Week access (#363, ADR-75): validate v22 before mutation and
+      // stamp only after exact DDL, keyset build, full data checks and ready.
+      validateV22Contract(database);
+      database.transaction(() => {
+        createWeekSchema(database);
+        options.afterWeekStage?.("create");
+        buildWeekProjection(database);
+        options.afterWeekStage?.("build");
+        validateV23Structure(database, false);
+        validateV23Projection(database, true);
+        options.afterWeekStage?.("validate");
+        database.prepare(
+          "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
+        ).run();
+        options.afterWeekStage?.("ready");
+        validateV23Contract(database, { requireVersion: false });
+        database.pragma("user_version = 23");
+        options.afterWeekStage?.("stamp");
+      })();
+      activatedV23 = true;
+    }
   }
-  if (version < 1) database.pragma(`user_version = ${CURRENT_VERSION}`);
 
-  // Startup, fresh creation, every migration, and a reopened restore all use
-  // the same complete v22 runtime contract. Historical validators remain
-  // independent input boundaries only.
+  // A normal v23 boot distrusts logical derived rows. Exact schema is proved
+  // first; then one owned transaction marks dirty, advances generation,
+  // keyset-rebuilds, validates, and declares readiness. Fresh/migrated files
+  // already completed that sequence above and must retain generation zero.
+  if (!activatedV23) {
+    validateV23Structure(database);
+    database.transaction(() => {
+      database.prepare(
+        "UPDATE week_access_state SET source_generation=source_generation+1,ready=0 WHERE singleton=1",
+      ).run();
+      buildWeekProjection(database);
+      validateV23Projection(database, true);
+      database.prepare(
+        "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
+      ).run();
+      validateV23Contract(database);
+    })();
+  }
+
   validateV18Contract(database);
-  validateV22Contract(database);
+  validateV23Contract(database);
 }
 
 migrateDatabase();
@@ -458,10 +542,97 @@ migrateDatabase();
  * after it has swapped a restored snapshot into place — the snapshot may come
  * from an older schema version, so migrate() must run exactly like on boot.
  */
-export function reopenDatabase() {
-  if (db.open) db.close();
-  db = openDatabase();
+export function reopenDatabase(): void {
+  if (nativeDatabase.open) nativeDatabase.close();
+  nativeDatabase = openDatabase();
   migrateDatabase();
+}
+
+/** Closed application-level Week operations; the database path and native handle stay private. */
+export function decodeWeekCursor(cursor: unknown, week: ResolvedWeek): WeekCursorPosition {
+  return weekProjection.decodeCursor(cursor, week);
+}
+export function readWeekPage(
+  week: ResolvedWeek,
+  cursor: WeekCursorPosition | null,
+): Promise<WeekResponse> {
+  return weekProjection.requestPage(week, cursor);
+}
+export function beginWeekRestore(): Promise<void> {
+  return weekProjection.beginRestore();
+}
+export function finishWeekRestore(committed: boolean, liveReopenProof: WeekLiveReopenProof): void {
+  weekProjection.finishRestore(committed, liveReopenProof);
+}
+export function shutdownWeekProjection(): Promise<void> {
+  return weekProjection.shutdown();
+}
+
+function requireBackupOwnedDestination(destination: string): string {
+  const resolved = path.resolve(destination);
+  const name = path.basename(resolved);
+  if (
+    path.dirname(resolved) !== dataDir ||
+    !/^backup-(?:export|import)-.+\.db(?:\.sanitized)?$/.test(name)
+  ) {
+    throw new Error("backup database destination is outside the owned path policy");
+  }
+  try {
+    fs.lstatSync(resolved);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return resolved;
+    throw error;
+  }
+  throw new Error("backup database destination already exists");
+}
+
+/** Semantic live capability: create one physical snapshot at an owned new path. */
+export function vacuumLiveDatabaseInto(destination: string): void {
+  nativeDatabase.prepare("VACUUM INTO ?").run(requireBackupOwnedDestination(destination));
+}
+
+/** Semantic live capability used only immediately before the restore swap. */
+export function checkpointAndCloseLiveDatabaseForSwap(): void {
+  nativeDatabase.pragma("wal_checkpoint(TRUNCATE)");
+  nativeDatabase.close();
+}
+
+/** Opaque semantic capability for one owned source-write transaction. */
+export function beginWeekIntervalMutation(): WeekMutationToken {
+  return beginWeekMutation(nativeDatabase);
+}
+export function maintainFixedIntervalWrite(taskId: number, write: () => void): void {
+  const token = beginWeekMutation(nativeDatabase);
+  write();
+  maintainWeekFixed(nativeDatabase, token, taskId);
+  finishWeekMutation(nativeDatabase, token);
+}
+export function reprojectTrackedIntervals(token: WeekMutationToken, entryIds: readonly number[]): void {
+  maintainWeekTracked(nativeDatabase, token, entryIds);
+}
+export function closeAllOpenTrackedIntervals(
+  token: WeekMutationToken,
+  endedAt: string,
+  hooks: WeekTrackedCloseHooks = {},
+): void {
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "all" }, hooks);
+}
+export function closeOpenTrackedIntervalsForTask(
+  token: WeekMutationToken,
+  endedAt: string,
+  taskId: number,
+): void {
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "task", taskId });
+}
+export function closeOpenTrackedIntervalById(
+  token: WeekMutationToken,
+  endedAt: string,
+  entryId: number,
+): void {
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "identity", entryId });
+}
+export function finalizeWeekIntervalMutation(token: WeekMutationToken): void {
+  finishWeekMutation(nativeDatabase, token);
 }
 
 // Settings key for the Claude API key. Stored plaintext in the local

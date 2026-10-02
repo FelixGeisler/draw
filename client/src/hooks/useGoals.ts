@@ -1,12 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Goal, Material } from "../api/types";
 import { announceAchievements } from "./useGamification";
 
-export function useGoals(status: string = "active") {
+export function useGoals(
+  status: string = "active",
+  options?: Pick<UseQueryOptions<Goal[]>, "enabled">,
+) {
   return useQuery({
     queryKey: ["goals", status],
-    queryFn: () => api.get<Goal[]>(`/api/goals?status=${status}`),
+    queryFn: ({ signal }) => api.get<Goal[]>(`/api/goals?status=${status}`, signal),
+    ...options,
   });
 }
 

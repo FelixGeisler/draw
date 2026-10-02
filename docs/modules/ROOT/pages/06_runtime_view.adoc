@@ -396,5 +396,127 @@ assistant exposes only non-null slots on its existing staged `create_task`:
 staging invokes the same resolver for feedback but writes nothing, while apply
 revalidates through `createTaskWrite` inside the existing atomic consumed,
 versioned changeset. It still has no existing-task update operation. Strict
-schemas reject flat/resolved values and unknown child keys. Week, `/today`,
-daily digest and weekly Push do not consume fixed slots yet.
+schemas reject flat/resolved values and unknown child keys. The Phase 2A Week
+API consumes fixed slots read-only; the Phase 2B Week client displays and edits
+them only through the existing authoritative task PATCH. `/today`, daily digest
+and weekly Push remain planned and unchanged.
+
+== 6.9 Safe database facade and staged-restore preflight
+
+An ordinary route or service calls the stable frozen `SafeDatabase`. `prepare`
+first tokenizes application-owned SQL, strips comments, enforces one
+`SELECT`/`WITH`/`INSERT`/`UPDATE`/`DELETE`/`REPLACE` statement, and rejects
+DDL, pragma, attachment, transaction control, path/introspection helpers and
+protected future `week_*` names in every SQLite identifier quoting form and in
+decoded single-quoted compatibility tokens. Only then is the current native
+statement prepared. Returned rows/results and statement/transaction callables
+are copied wrappers with no `.database`, iterator, path or native capability.
+A restore therefore changes the private handle without invalidating the facade.
+
+For import, the staged file is opened with `trusted_schema=OFF`. Its real
+`user_version` selects a compiled v1–v23 manifest. The first schema read returns
+only bounded type/name/owner/root-page, `typeof(sql)` and SQL byte length.
+Unknown, missing, virtual, view, trigger, deceptive-shadow or oversized objects
+reject before any SQL text, integrity check, migration, virtual-module access or
+source row is read. SQL is then fetched one known object at a time under its
+compiled per-object cap and token-normalized hash. Only an exact preflight may
+continue through the existing version validator/migration, credential/claim
+sanitation, second physical rewrite, files-first/database-last swap and reopen.
+Restore first takes the exclusive Week lease; an active Week returns the exact
+409 without changing Push/live files. When idle, worker exit and read-connection
+closure precede Push restore, checkpoint and last-connection proof. A committed
+restore rotates the memory-only cursor key; a pre-commit failure retains it.
+Failure removes owned staging artifacts and leaves live database/material bytes
+unchanged (ADR-26/75).
+
+== 6.10 Maintaining and rebuilding schema-v23 Week access
+
+Six source triggers mark `week_access_state` dirty for every fixed-slot or timer
+insert/update/delete; deletes also remove the source identity's companion. Three
+companion triggers mirror insert/update/delete into the `rtree_i32` table. An
+owned write captures whether the projection was clean before source mutation,
+uses `UPDATE ... RETURNING id` for every affected timer identity, reprojects
+those fixed/tracked identities through the private interval capability, and
+only then equalizes generations. A dirty-at-entry transaction updates affected
+rows but cannot claim global readiness. Any failure rolls source, companion,
+RTree and state back together.
+
+Boot first proves exact v23 DDL/inventory, then marks dirty, increments the
+bounded generation, streams bounded source keyset batches directly into the
+companion, and validates source/companion/RTree equivalence with the same bounded
+scan plus indexed identity comparisons, scalar counts and anti-joins before
+ready. No full-history JavaScript array is built. This memory property is a
+resource bound, not a numeric performance SLA. SQL storage-class and 24-byte guards run before
+any timestamp reaches the strict parser. A v23 import must first pass bounded
+exact schema admission; its derived objects/data are then discarded, recreated
+from compiled SQL and rebuilt before sanitation and the existing physical
+rewrite/swap. The foundation path itself introduces no client, `/today`,
+digest or Push consumer.
+
+== 6.11 Bounded Week API read
+
+After ADR-50 and strict target/query/framing validation, the main process checks
+the ASCII authenticated v2 cursor before worker admission. Page one captures one
+canonical `requestNow`; continuations recover it only from the HMAC-bound compact
+payload. One lazy long-lived Worker Thread owns one
+`readonly:true,fileMustExist:true` connection with `trusted_schema=OFF`,
+`query_only=ON`, `cache_size=-2048` and `temp_store=FILE`. A second request is
+never queued or coalesced: it receives `week-projection-busy`. A failed worker
+remains owned by an exit promise; no replacement is created, and neither
+restore nor shutdown can proceed, until that worker has actually exited and
+released its native reader.
+
+One read transaction requires ready equal-generation schema v23, runs the
+four-branch RTree/deadline-index `UNION ALL` with continuation in every branch
+and one ordered `LIMIT 101`, validates reached source/companion values, then
+fetches at most 100 title prefixes one result at a time. Complete records defer;
+only a record that cannot fit an empty page is truncated on a UTF-8 code-point
+boundary. The exact envelope plus cursor stays at or below 131,072 UTF-8 bytes.
+Success and recoverable errors are JSON with `Cache-Control: no-store`; the GET
+never repairs, falls back, writes, retries or makes an external request.
+Restore admission remains closed until the complete live reopen/migration/v23
+validation path reports success. A failed proof leaves Week explicitly
+unavailable with no lazy worker reopen; a later proven recovery clears that
+latch. The cursor key rotates at the database commit point even when the
+post-commit reopen proof fails, while every pre-commit failure retains it.
+
+The Worker Thread isolates the event loop only. SQLite may inspect or materialize
+all of a selected unbounded stored title while calculating BLOB length/prefix.
+Native memory, I/O, RSS and latency may scale with that value; fatal native OOM
+or abort can terminate the process before any JSON response. JavaScript, IPC,
+serialization and wire data remain bounded.
+
+== 6.12 Week client generation
+
+`/tasks?view=week&week=YYYY-MM-DD` is the durable Monday-first route. Week alone
+reads the exact saved Push zone, falling back to exact browser membership in the
+frozen registry; an invalid candidate is neither sent nor persisted. Its local
+calendar helpers resolve eight zoned midnights, so previous/next/Today and
+visual clipping cross DST and year boundaries without adding `7 * 24h`.
+
+A page uses `fetch` with `cache: "no-store"` and the shared strict closed-union
+decoder. The client appends only a user-requested **Load more** page and verifies
+same `requestNow`, unique identities and strict cross-page order. Every action
+captures its originating mount, Week, zone, page generation and action token;
+every post-await error, success and refresh checks that token. Week/zone,
+navigation, action changes and unmount abort/invalidate the active generation,
+clear obsolete action state, and prevent a late operation from committing or
+starting an obsolete refresh. The first continuation `invalid-week-request`
+discards all accumulated records and automatically starts one fresh generation.
+No second automatic reset is allowed; page-one 400 and all later 400/500/503
+failures require the explicit Retry control and never become an empty Week.
+
+Desktop presentation has a literal-date deadline rail and a deterministic
+first-free-lane Fixed/Tracked timeline. Source intervals stay unchanged while
+segments clip to the selected Week and local day; adjacency may reuse a lane.
+The narrow agenda preserves API identity/order, labels, facts and the closed
+action matrix. Titles are React text, truncation is explicit, archived tracked
+titles are not links, and every mutation uses existing server-authoritative
+task/timer routes. **Edit fixed** leaves Week for the existing authoritative
+Task editor; that editor reads the retained slot, including its ADR-74 entry
+zone and wall values, rather than reconstructing them in the viewer's Week
+zone. Week mounts neither Quick capture nor the List/Due dates subtree, so its
+unpaged task/goal observers and computations do not exist. After that subtree
+unmounts, only its exact inactive `status=open`, `status=all`, and active-goal
+queries are cancelled and removed; another active observer is preserved.
+Leaving Week remounts List or **Due dates** and refetches the ordinary data.

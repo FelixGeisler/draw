@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import type Database from "better-sqlite3";
+import type { SafeDatabase } from "../safeDatabase.js";
 import { PushService, type DigestClaim, type SendRow } from "./service.js";
 import { evaluateDigestEligibility, readDigestTiming } from "./digestEvaluator.js";
 
@@ -13,7 +13,7 @@ export interface DigestTimer {
 }
 
 export interface DigestSchedulerOptions {
-  database: () => Database.Database;
+  database: () => SafeDatabase;
   push: PushService;
   now?: () => Date;
   timer?: DigestTimer;
@@ -37,7 +37,7 @@ export function digestEventId(localDate: string): string {
     .digest().subarray(0, 16).toString("base64url");
 }
 
-function eligibleDevices(database: Database.Database, now: Date): { id: string }[] {
+function eligibleDevices(database: SafeDatabase, now: Date): { id: string }[] {
   return database.prepare(
     `SELECT id FROM push_subscriptions
      WHERE expiration_time IS NULL OR
@@ -47,7 +47,7 @@ function eligibleDevices(database: Database.Database, now: Date): { id: string }
 }
 
 function claim(
-  database: Database.Database,
+  database: SafeDatabase,
   push: PushService,
   deviceId: string,
   now: Date,

@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { SafeDatabase } from "../safeDatabase.js";
 import { addCalendarDays, createZonedFormatter, validCalendarDate, validTimeZone, zonedMinute } from "../services/localDay.js";
 
 export { addCalendarDays, createZonedFormatter, validTimeZone, zonedMinute } from "../services/localDay.js";
@@ -28,7 +28,7 @@ export function inQuietHours(time: string, start: string | null, end: string | n
   return start < end ? time >= start && time < end : time >= start || time < end;
 }
 
-export function readDigestTiming(database: Database.Database): DigestTiming | null {
+export function readDigestTiming(database: SafeDatabase): DigestTiming | null {
   const rows = database.prepare(
     `SELECT key,value FROM settings WHERE key IN
      ('push_send_time','push_timezone','push_quiet_start','push_quiet_end')`,

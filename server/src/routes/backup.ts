@@ -59,12 +59,12 @@ export function createBackupRouter(push: PushDependency): Router {
     });
   });
 
-  backupRouter.post("/import", backupUpload, (req, res) => {
+  backupRouter.post("/import", backupUpload, async (req, res) => {
     if (!req.file) {
       return res.status(400).json({ error: 'backup file is required (multipart field "file")' });
     }
     try {
-      res.json(importBackupArchive(req.file.path, push));
+      res.json(await importBackupArchive(req.file.path, push));
     } catch (e) {
       if (e instanceof BackupError) return res.status(e.status).json({ error: e.message });
       res.status(500).json({ error: e instanceof Error ? e.message : "backup import failed" });

@@ -55,7 +55,7 @@ function openV19(name: string): Database.Database {
 }
 
 describe("schema v19 Push persistence remains an exact migration boundary", () => {
-  it("validates a canonical v19 fixture, then migrates it through v20 to v21", async () => {
+  it("validates a canonical v19 fixture, then migrates it to the current schema", async () => {
     expect(v19Schema).not.toContain("daily_digest_claims");
     const handle = openV19("canonical-v19");
     try {
@@ -64,7 +64,7 @@ describe("schema v19 Push persistence remains an exact migration boundary", () =
       const { validateV21Contract } = await import("../../src/schemaV21.js");
       expect(() => validateV19Contract(handle)).not.toThrow();
       migrateDatabase(handle);
-      expect(handle.pragma("user_version", { simple: true })).toBe(22);
+      expect(handle.pragma("user_version", { simple: true })).toBe(23);
       expect(() => validateV21Contract(handle)).not.toThrow();
     } finally {
       handle.close();

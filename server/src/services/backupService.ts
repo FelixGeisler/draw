@@ -5,19 +5,26 @@ import path from "node:path";
 import {
   API_KEY_SETTING,
   CURRENT_VERSION,
+  beginWeekRestore,
+  checkpointAndCloseLiveDatabaseForSwap,
   dataDir,
   db,
-  dbPath,
   filesDir,
+  finishWeekRestore,
   migrateDatabase,
   reopenDatabase,
+  vacuumLiveDatabaseInto,
+  type SafeDatabase,
 } from "../db.js";
+import { preflightRestoreSchema } from "../restorePreflight.js";
 import { validateV18Contract } from "../schemaV18.js";
 import { validateV19Contract } from "../schemaV19.js";
 import { validateV20Contract } from "../schemaV20.js";
 import { validateV21Contract } from "../schemaV21.js";
 import { validateV22Contract } from "../schemaV22.js";
+import { resetImportedV23Projection, validateV23Contract } from "../schemaV23.js";
 import { disabledPushDependency, type PushDependency } from "../push/authority.js";
+import { WeekRestoreBusyError, type WeekLiveReopenProof } from "../weekService.js";
 
 // Backup archive layout (#61, ADR-26): one zip holding a `VACUUM INTO`
 // snapshot of the database, every material file, and a manifest that lets
@@ -26,6 +33,7 @@ export const MANIFEST_APP = "draw-task-planner";
 const MANIFEST_ENTRY = "manifest.json";
 const DB_ENTRY = "app.db";
 const FILES_PREFIX = "files/";
+const dbPath = path.join(dataDir, "app.db");
 
 export interface BackupManifest {
   app: string;
@@ -151,9 +159,36 @@ export function sweepBackupTemp(): string[] {
   return swept;
 }
 
-function countRows(handle: Database.Database): ImportSummary {
+function assertNotLiveDatabase(databasePath: string): void {
+  const candidate = path.resolve(databasePath);
+  if (candidate === dbPath) throw new Error("backup code cannot open the live database path");
+  try {
+    const candidateStat = fs.statSync(candidate, { bigint: true });
+    const liveStat = fs.statSync(dbPath, { bigint: true });
+    if (candidateStat.dev === liveStat.dev && candidateStat.ino === liveStat.ino) {
+      throw new Error("backup code cannot open the live database identity");
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+function openBackupDatabase(
+  databasePath: string,
+  options: { readonly?: boolean; fileMustExist?: boolean } = {},
+): Database.Database {
+  assertNotLiveDatabase(databasePath);
+  const handle = new Database(databasePath, options);
+  handle.unsafeMode(false);
+  handle.pragma("trusted_schema = OFF");
+  return handle;
+}
+
+function countRows(handle: Database.Database | SafeDatabase): ImportSummary {
   const count = (table: string) =>
-    (handle.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+    ((handle.prepare(`SELECT COUNT(*) AS n FROM ${table}`) as unknown as {
+      get(): { n: number };
+    }).get()).n;
   return { tasks: count("tasks"), goals: count("goals"), materials: count("materials") };
 }
 
@@ -199,7 +234,7 @@ function sanitizeDatabaseFile(
   removeApiKey: boolean,
 ): void {
   removeDatabaseAndSidecars(rewrittenPath);
-  const source = new Database(sourcePath, { fileMustExist: true });
+  const source = openBackupDatabase(sourcePath, { fileMustExist: true });
   try {
     source.pragma("journal_mode = DELETE");
     scrubCredentialRows(source, removeApiKey);
@@ -488,7 +523,7 @@ export function createBackupArchive(materialReadHooks: MaterialReadHooks = {}): 
   const firstSnapshotPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}-source.db`);
   const rewrittenPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}-sanitized.db`);
   const zipPath = path.join(dataDir, `${EXPORT_PREFIX}${stem}.zip`);
-  db.prepare("VACUUM INTO ?").run(firstSnapshotPath);
+  vacuumLiveDatabaseInto(firstSnapshotPath);
   try {
     sanitizeDatabaseFile(firstSnapshotPath, rewrittenPath, true);
     // Delete the credential-bearing first phase and every possible sidecar
@@ -496,7 +531,7 @@ export function createBackupArchive(materialReadHooks: MaterialReadHooks = {}): 
     removeDatabaseAndSidecars(firstSnapshotPath);
 
     let manifest: BackupManifest;
-    const sanitized = new Database(rewrittenPath, { readonly: true, fileMustExist: true });
+    const sanitized = openBackupDatabase(rewrittenPath, { readonly: true, fileMustExist: true });
     try {
       manifest = buildManifest(
         sanitized.pragma("user_version", { simple: true }) as number,
@@ -632,23 +667,46 @@ export function runScheduledBackup(retention: number, now: Date = new Date()): S
  *  2. Swap — restart-safe ordering (see swapIn) with the `app.db` rename as
  *     the atomic commit point, then reopen and migrate forward.
  */
-export function importBackupArchive(
+export type BackupImportRuntime = Readonly<{
+  /** Dependency seam; deterministic fault implementations live only under test/. */
+  reopenLiveDatabase?: () => void;
+  beforeDatabaseCommit?: () => void;
+}>;
+
+export async function importBackupArchive(
   zipPath: string,
   push: PushDependency = disabledPushDependency,
-): ImportSummary {
+  runtime: BackupImportRuntime = {},
+): Promise<ImportSummary> {
+  try {
+    // Admission closes synchronously before the first await. An active Week
+    // leaves both live data and Push state untouched.
+    await beginWeekRestore();
+  } catch (error) {
+    if (error instanceof WeekRestoreBusyError) throw new BackupError(409, error.message);
+    throw error;
+  }
+
   const stem = tempStem();
   const stagedDbPath = path.join(dataDir, `${IMPORT_PREFIX}${stem}.db`);
   const stagedFilesDir = path.join(dataDir, `${IMPORT_PREFIX}files-${stem}`);
   let committed = false;
+  let liveReopenProof: WeekLiveReopenProof = "unattempted";
   try {
     stageAndValidate(zipPath, stagedDbPath, stagedFilesDir);
-    // This boundary is intentionally after all archive/migration/sanitization
-    // validation and immediately before the existing swap.
+    // The idle Week worker has exited and closed its read connection before
+    // Push recovery, checkpointing, last-connection proof, or the swap.
     push.beginRestore();
     try {
-      swapIn(stagedDbPath, stagedFilesDir, () => {
-        committed = true;
-      });
+      swapIn(
+        stagedDbPath,
+        stagedFilesDir,
+        () => { committed = true; },
+        () => { liveReopenProof = "failed"; },
+        () => { liveReopenProof = "succeeded"; },
+        runtime.reopenLiveDatabase ?? reopenDatabase,
+        runtime.beforeDatabaseCommit,
+      );
     } catch (error) {
       if (!committed) {
         push.abortRestore();
@@ -669,6 +727,9 @@ export function importBackupArchive(
   } finally {
     removeDatabaseAndSidecars(stagedDbPath);
     fs.rmSync(stagedFilesDir, { recursive: true, force: true });
+    // A committed restore rotates the memory-only cursor key. Every failed
+    // pre-commit attempt retains it. Worker recreation remains lazy.
+    finishWeekRestore(committed, liveReopenProof);
   }
 }
 
@@ -701,18 +762,13 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
   // version gate reads the real pragma, not the manifest: `user_version` up
   // to CURRENT_VERSION is accepted and migrated forward on reopen; anything
   // newer would be silently misread by this build's SQL.
-  const staged = new Database(stagedDbPath, { fileMustExist: true });
+  const staged = openBackupDatabase(stagedDbPath, { fileMustExist: true });
   try {
-    let integrity: unknown;
     let version: number;
     try {
-      integrity = staged.pragma("integrity_check", { simple: true });
       version = staged.pragma("user_version", { simple: true }) as number;
     } catch {
       throw new BackupError(400, "the archive's app.db is not a SQLite database");
-    }
-    if (integrity !== "ok") {
-      throw new BackupError(400, "the backup database is corrupt (integrity_check failed)");
     }
     if (version < 1) {
       throw new BackupError(400, "the backup database carries no schema version");
@@ -723,31 +779,15 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
         `this backup was made by a newer version of the app (schema v${version}, this server supports up to v${CURRENT_VERSION}) — update the app, then restore`,
       );
     }
-    // A forged user_version on an arbitrary SQLite file would pass the checks
-    // above. Require the v1 core before running any migration, then migrate
-    // this staging file (never the live DB) and validate the complete v18
-    // v18/v19 runtime contracts before the swap commit point (ADR-26/72).
-    const REQUIRED_TABLES = [
-      "categories",
-      "goals",
-      "tasks",
-      "time_entries",
-      "completions",
-      "materials",
-      "achievements",
-      "settings",
-    ];
-    const hasTable = staged.prepare(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
-    );
-    const missing = REQUIRED_TABLES.filter((table) => !hasTable.get(table));
-    if (missing.length > 0) {
-      throw new BackupError(
-        400,
-        `the backup database is missing required tables: ${missing.join(", ")}`,
-      );
-    }
     try {
+      // Bounded scalar inventory and exact compiled definitions come first:
+      // no integrity/virtual-module operation, migration or source read may
+      // observe a staged schema before this gate succeeds.
+      preflightRestoreSchema(staged, version);
+      if (staged.pragma("integrity_check", { simple: true }) !== "ok") {
+        throw new Error("integrity_check failed");
+      }
+
       // Validate a stamped input under its own version before migration or
       // credential/claim deletion. In particular, v20's nullable settings
       // must never be sent through v19's non-null settings validator.
@@ -755,9 +795,10 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
       if (version === 20) validateV20Contract(staged);
       if (version === 21) validateV21Contract(staged);
       if (version === 22) validateV22Contract(staged);
-      migrateDatabase(staged);
+      if (version === 23) resetImportedV23Projection(staged);
+      else migrateDatabase(staged);
       validateV18Contract(staged);
-      validateV22Contract(staged);
+      validateV23Contract(staged);
       scrubCredentialRows(staged, false);
       if (staged.pragma("integrity_check", { simple: true }) !== "ok") {
         throw new Error("integrity_check failed after migration");
@@ -765,7 +806,7 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
     } catch (error) {
       throw new BackupError(
         400,
-        `the backup database does not satisfy the schema v18 contract, schema v19 contract, schema v20 contract, schema v21 contract, or schema v22 contract: ${
+        `the backup database is corrupt, is missing required tables, or does not satisfy bounded schema preflight or the schema v18 contract, schema v19 contract, schema v20 contract, schema v21 contract, schema v22 contract, or schema v23 contract: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -836,7 +877,15 @@ export function stageFileEntries(entries: AdmZip.IZipEntry[], stagedFilesDir: st
  *    in a single same-volume rename — the atomic commit point. Before it: old
  *    state (files recoverable from files.bak). After it: new state.
  */
-function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => void) {
+function swapIn(
+  stagedDbPath: string,
+  stagedFilesDir: string,
+  onCommit: () => void,
+  onLiveReopenRequired: () => void,
+  onLiveReopenSucceeded: () => void,
+  reopenLiveDatabase: () => void,
+  beforeDatabaseCommit?: () => void,
+) {
   const bakPath = `${dbPath}.bak`;
   const filesBakDir = path.join(dataDir, "files.bak");
 
@@ -846,7 +895,7 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => vo
   const bakStem = tempStem();
   const bakSource = path.join(dataDir, `${IMPORT_PREFIX}bak-${bakStem}-source.db`);
   const bakRewrite = path.join(dataDir, `${IMPORT_PREFIX}bak-${bakStem}-sanitized.db`);
-  db.prepare("VACUUM INTO ?").run(bakSource);
+  vacuumLiveDatabaseInto(bakSource);
   try {
     sanitizeDatabaseFile(bakSource, bakRewrite, false);
     removeDatabaseAndSidecars(bakSource);
@@ -864,8 +913,11 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => vo
     removeDatabaseAndSidecars(bakRewrite);
   }
 
-  db.pragma("wal_checkpoint(TRUNCATE)");
-  db.close();
+  // From this point onward admission can reopen only after the complete live
+  // open+migration+v23 validation path succeeds. Mark it before the close so
+  // even a close/reopen fault remains fail-closed.
+  onLiveReopenRequired();
+  checkpointAndCloseLiveDatabaseForSwap();
   try {
     if (fs.existsSync(`${dbPath}-wal`) || fs.existsSync(`${dbPath}-shm`)) {
       throw new BackupError(
@@ -882,6 +934,7 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => vo
     if (fs.existsSync(filesDir)) fs.renameSync(filesDir, filesBakDir);
     try {
       fs.renameSync(stagedFilesDir, filesDir);
+      beforeDatabaseCommit?.();
       fs.renameSync(stagedDbPath, dbPath); // commit point
       onCommit();
     } catch (e) {
@@ -897,6 +950,7 @@ function swapIn(stagedDbPath: string, stagedFilesDir: string, onCommit: () => vo
     // Reopens whichever app.db is now in place (new on success, old on a
     // failed swap). The staged database was already migrated and fully
     // validated before this swap, so reopenDatabase() is a no-op migration.
-    reopenDatabase();
+    reopenLiveDatabase();
+    onLiveReopenSucceeded();
   }
 }

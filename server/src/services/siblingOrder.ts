@@ -68,7 +68,7 @@ export function reorderSibling(parentId: number, taskId: number, beforeId: numbe
     .prepare(
       "SELECT id, sort_order AS sortOrder FROM tasks WHERE parent_id = ? AND id != ? ORDER BY sort_order ASC, id ASC",
     )
-    .all(parentId, taskId) as OrderedSibling[];
+    .all(parentId, taskId) as unknown as OrderedSibling[];
 
   let beforeOrder: number | null;
   let afterOrder: number | null;

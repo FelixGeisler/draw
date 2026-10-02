@@ -1,4 +1,4 @@
-import type Database from "better-sqlite3";
+import type { SafeDatabase } from "../safeDatabase.js";
 import { z } from "zod";
 import {
   SCHEDULE_TIME_ZONE_SET,
@@ -324,26 +324,31 @@ export function validateStoredFixedSlot(
   }
 }
 
+export type FixedIntervalMaintainer = (taskId: number, write: () => void) => void;
+
 export function applyFixedSlot(
-  database: Database.Database,
+  database: SafeDatabase,
   taskId: number,
   parsed: ParsedFixedSlot,
+  maintainInterval: FixedIntervalMaintainer,
 ): void {
   if (!parsed.present) return;
-  if (parsed.value === null) {
-    database.prepare("DELETE FROM task_fixed_slots WHERE task_id = ?").run(taskId);
-    return;
-  }
-  database
-    .prepare(
-      `INSERT INTO task_fixed_slots (task_id, starts_at, ends_at, entry_timezone)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(task_id) DO UPDATE SET
-         starts_at = excluded.starts_at,
-         ends_at = excluded.ends_at,
-         entry_timezone = excluded.entry_timezone`,
-    )
-    .run(taskId, parsed.value.startsAt, parsed.value.endsAt, parsed.value.entryTimezone);
+  maintainInterval(taskId, () => {
+    if (parsed.value === null) {
+      database.prepare("DELETE FROM task_fixed_slots WHERE task_id = ?").run(taskId);
+    } else {
+      database
+        .prepare(
+          `INSERT INTO task_fixed_slots (task_id, starts_at, ends_at, entry_timezone)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(task_id) DO UPDATE SET
+             starts_at = excluded.starts_at,
+             ends_at = excluded.ends_at,
+             entry_timezone = excluded.entry_timezone`,
+        )
+        .run(taskId, parsed.value.startsAt, parsed.value.endsAt, parsed.value.entryTimezone);
+    }
+  });
 }
 
 export const FIXED_RECURRENCE_ERROR =
@@ -355,7 +360,7 @@ export function finalHasFixedSlot(current: boolean, parsed: ParsedFixedSlot): bo
 
 /** Authoritative stored-state invariant check, called before transaction commit. */
 export function taskHasFixedRecurrenceConflict(
-  database: Database.Database,
+  database: SafeDatabase,
   taskId: number,
 ): boolean {
   return Boolean(

@@ -361,9 +361,15 @@ that immutable v21 boundary, then atomically adds `task_fixed_slots` and the
 four approved range/date indexes, validates the complete target, and stamps 22
 last. Its validator proves exact DDL/columns/index/FK/cascade, four-digit
 canonical instants, order, frozen-zone membership, wall/instant round trips and
-absence beside recurrence. Backup import dispatches stamped v19–v22 files to
-their own validators before migration and validates final v22 before swap. The
-inherited validator still proves exact DDL, columns, PK index, FK, retained Push
+absence beside recurrence. Version 23 validates that complete v22 source
+contract, then atomically creates the exact compact Week interval state,
+companion, RTree and trigger inventory, keyset-rebuilds the disposable
+projection, proves source/companion/RTree equivalence and stamps 23 last. Normal
+v23 boot repeats the exact structure check and a transactional keyset rebuild;
+the Phase 2A worker consumes only a ready equal-generation snapshot. Backup
+import dispatches stamped v19–v23 files
+to their own validators before migration and validates final v23 before swap.
+The inherited validator still proves exact DDL, columns, PK index, FK, retained Push
 shape, persistent trigger/no-view allowlist,
 Hide-details, and all four timing domains/nullability. Unapproved executable
 schema is rejected before sanitation. Registration still upserts at most 16
@@ -400,16 +406,25 @@ Safety nets, both inside `DATA_DIR`:
   (overwritten on the next import),
 - the previous material files as `files.bak`.
 
-Every rejected import (foreign zip, corrupt or newer-than-v22 database,
-unsafe paths) is a `400` with the live data untouched. Versions through v22
-are accepted; older snapshots migrate in staging. The staged database must
+Every rejected import (foreign zip, corrupt or newer-than-v23 database,
+unsafe paths) is a `400` with the live data untouched. Versions through v23
+are accepted; older snapshots migrate in staging. Before integrity checking,
+migration, virtual-module access or source-data reads, a bounded scalar
+`sqlite_schema` pass selects the exact compiled inventory for the stamped
+version. Unknown/missing/oversized executable objects, views, triggers, virtual
+objects and deceptive shadows reject without fetching their SQL. Each known
+SQL definition is fetched only below its compiled byte cap and must match its
+token-normalized hash; imported SQL is never executed. The staged database must
 then match the complete runtime v18 contract: both owner columns, exact
 Gold/opening definitions and CHECK/unique/AUTOINCREMENT rules, all six
 immutable triggers (definition and rollback-only behavior), and the
 XP-ledger reason index; it must also match v21's exact nullable-settings,
 four-field timing domain, digest-claims index/FK, inherited Push shape, and
 persistent-schema allowlist, plus v22's complete fixed-slot relation, registry,
-instant and recurrence contract. Fixed slots and entry zones are portable user
+instant and recurrence contract. Exact admitted v23 archives additionally have
+their known derived objects discarded and recreated from compiled DDL; the
+projection is rebuilt and fully validated from authoritative source before the
+second physical rewrite and swap. Fixed slots and entry zones are portable user
 data and survive manual/scheduled archives, restore, and sanitized `app.db.bak`;
 Push credentials/claims remain physically absent. Only that validated,
 row-scrubbed, physically rewritten file reaches
@@ -469,3 +484,44 @@ A whole-`DATA_DIR` or volume copy is instead a privileged full-state snapshot:
 it may contain reusable Push authority, recovery markers, or credentials and
 is not equivalent to a Draw-created application backup. Use the application
 backup when credential-free portability is required (ADR-72).
+
+== 8.10 SQLite capability boundary
+
+`db.ts` is the only runtime importer that owns the live read/write handle. It owns
+the path and current handle and exports one frozen `SafeDatabase` with copied
+`run/get/all` values and wrapped deferred/immediate/exclusive transactions.
+The SQL lexical gate excludes schema mutation, pragma, attachment, explicit
+transaction control, file helpers, native introspection and the reserved
+schema-v23 Week projection namespace. Request values remain bound parameters;
+dynamic sort/column fragments remain closed internal allowlists. Production
+assembly, Push, digest, daily overview, fixed-slot and ordinary route/service
+seams consume this facade, not a native type.
+
+`backupService` is the second runtime binding importer. It may open only
+identity-checked, non-live staged/snapshot/rewrite files and receives semantic
+live capabilities for a new-path `VACUUM INTO`, checkpoint-and-close and
+reopen. Migration/schema validators remain private native consumers. Schema v23 adds
+one allowlisted private interval capability: compiled state, companion and
+bounded keyset-streaming rebuild/validation operations only, with lazy
+24-byte-TEXT timestamp admission and no all-history JavaScript array, handle,
+SQL, UDF/table registration or extension exposed to callers. The batch bound is
+a resource guard, not a latency, throughput or storage SLA.
+
+The private `weekWorker.ts` entry is the sole third runtime importer. `db.ts`
+passes the path only as worker bootstrap data and exports application-level
+request/close/restore operations; no route receives it. One defensive read-only,
+query-only connection is reused sequentially. Live and retiring workers remain
+owned through confirmed exit, so replacement, restore and shutdown cannot
+outpace native connection closure. Restore releases normal Week admission only
+after successful live reopen/validation; failed proof latches Week unavailable.
+Cursor HMAC keys remain in the main process and never cross to SQLite,
+the worker, backup or logs.
+
+ADR-75 Phases 1 and 2 are implemented: `CURRENT_VERSION` is 23, exact
+`week_access_state`, `week_interval_access`, `week_interval_rtree`/shadow DDL
+and nine triggers are validated, owned fixed/timer mutations maintain affected
+identities, and boot/restore rederive the disposable projection. Phase 2A adds
+the authenticated bounded Week route, v2 cursor and worker reader. Phase 2B
+adds the no-store strict-decoding Week client, durable navigation, deterministic
+layout and stale-generation rejection. `/today`, morning-digest changes, later
+weekly Push and Sunday Push remain planned and unchanged.
