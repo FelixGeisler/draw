@@ -27,6 +27,10 @@ import {
   type WeekTrackedCloseHooks,
 } from "./schemaV23.js";
 import { createSafeDatabase } from "./safeDatabase.js";
+import { WeekProjectionService, type WeekLiveReopenProof } from "./weekService.js";
+import type { WeekCursorPosition } from "./weekCursor.js";
+import type { WeekResponse } from "../../shared/weekContract.js";
+import type { ResolvedWeek } from "./weekTime.js";
 export type { SafeDatabase, SafeStatement, SafeTransaction } from "./safeDatabase.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +40,7 @@ export const dataDir = process.env.DATA_DIR
   : path.resolve(here, "../data");
 export const filesDir = path.join(dataDir, "files");
 const dbPath = path.join(dataDir, "app.db");
+const weekProjection = new WeekProjectionService(dbPath);
 
 fs.mkdirSync(filesDir, { recursive: true });
 
@@ -541,6 +546,26 @@ export function reopenDatabase(): void {
   if (nativeDatabase.open) nativeDatabase.close();
   nativeDatabase = openDatabase();
   migrateDatabase();
+}
+
+/** Closed application-level Week operations; the database path and native handle stay private. */
+export function decodeWeekCursor(cursor: unknown, week: ResolvedWeek): WeekCursorPosition {
+  return weekProjection.decodeCursor(cursor, week);
+}
+export function readWeekPage(
+  week: ResolvedWeek,
+  cursor: WeekCursorPosition | null,
+): Promise<WeekResponse> {
+  return weekProjection.requestPage(week, cursor);
+}
+export function beginWeekRestore(): Promise<void> {
+  return weekProjection.beginRestore();
+}
+export function finishWeekRestore(committed: boolean, liveReopenProof: WeekLiveReopenProof): void {
+  weekProjection.finishRestore(committed, liveReopenProof);
+}
+export function shutdownWeekProjection(): Promise<void> {
+  return weekProjection.shutdown();
 }
 
 function requireBackupOwnedDestination(destination: string): string {

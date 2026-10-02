@@ -788,7 +788,12 @@ test.describe("Daily digest composed production journey", () => {
       expect(requests).toHaveLength(3);
     } finally {
       assembly.digestScheduler?.stop();
-      await new Promise<void>((resolve) => assembly.server.close(() => resolve()));
+      // Release the browser first, stop accepting connections, then close any
+      // remaining test-owned keep-alive sockets before awaiting server close.
+      if (!page.isClosed()) await page.close();
+      const serverClosed = new Promise<void>((resolve) => assembly.server.close(() => resolve()));
+      assembly.server.closeAllConnections();
+      await serverClosed;
       dbModule.checkpointAndCloseLiveDatabaseForSwap();
       if (previousDataDir === undefined) delete process.env.DATA_DIR;
       else process.env.DATA_DIR = previousDataDir;

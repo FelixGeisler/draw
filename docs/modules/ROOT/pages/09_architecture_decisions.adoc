@@ -4514,8 +4514,8 @@ delivery policies and still do not consume fixed slots after Phase 1B.
 == ADR-75: Compact Week interval access foundation behind a safe SQLite capability boundary
 
 *Status:* Accepted and implemented by issue #363: Phase 1 safe facade/preflight
-and Phase 2 schema-v23 interval-access activation. The Week API/client/worker
-remains planned separately.
+and Phase 2 schema-v23 interval-access activation. Issue #360 Phase 2A implements
+the bounded Week API/worker/cursor; Phase 2B implements the Week client.
 
 *Context:* A later Week read needs complete historical interval access without a
 lifetime cutoff. The selected compact design uses a rebuildable RTree projection,
@@ -4582,9 +4582,86 @@ recreated and rebuilt; v1–v22 continue through the compiled migration chain.
 Manual, scheduled and safety-copy backup behavior and API-key/Push sanitation
 remain ADR-26/72 behavior.
 
-This activation is access foundation only. There is still no Week endpoint,
-interval read/query policy, worker, client, cursor, `/today` change, digest
-change or Push behavior. Those consumers remain separately governed.
+*Phase 2A reader decision and consequences:* Bodyless authenticated
+`GET /api/calendar/week` accepts one Monday, one exact frozen ADR-74 zone and
+one optional authenticated cursor. Main-process validation and HMAC verification
+precede worker admission and SQL. Cursor payload v2 is canonical ordered
+`{v,w,z,n,a,k,i}`; the random 32-byte key is memory-only, with a conservative
+375-character structural ceiling and 244-character frozen-registry semantic
+maximum. Restart and committed restore rotate validity; a failed pre-commit
+restore retains it.
+
+One lazy long-lived Worker Thread is the sole third production runtime importer
+of `better-sqlite3`. Its one `readonly:true,fileMustExist:true`, query-only,
+untrusted-schema connection is an event-loop boundary only. Exactly one Week
+computation is admitted; there is no queue, coalescing, retry or timeout. A
+restore lease rejects active work, retains every faulted/retiring worker through
+an exit promise, and closes/proves all worker exits before ADR-26's
+Push/checkpoint/last-connection/swap sequence. Replacement, restore and shutdown
+cannot overtake a retiring native reader. Admission stays closed through the
+complete live reopen/migration/v23 validation proof. A failed proof latches Week
+unavailable and opens no worker until a later proven recovery; committed data
+rotates the cursor key even when its reopen proof fails, while pre-commit failure
+retains the key. Successful recovery recreates lazily. Shutdown closes the worker.
+
+Inside one ready equal-generation v23 snapshot, one title-free four-branch
+`UNION ALL` starts interval branches at the RTree, uses deadline indexes,
+pushes continuation into every branch, and applies one ordered `LIMIT 101`.
+Reached source/companion values are checked. At most 100 selected titles are
+queried one result at a time as BLOB length plus no more than the current page
+title budget and four boundary bytes. Complete records defer; only a record
+that cannot fit alone is UTF-8-prefix-truncated. The exact closed union,
+JavaScript values, worker IPC and final JSON are bounded; every final body is at
+most 131,072 UTF-8 bytes after reserving a 375-character cursor.
+
+The title bound deliberately does not extend through SQLite's native execution.
+For compatibility, stored titles remain unbounded and SQLite/better-sqlite3 may
+inspect or materialize all of a selected title while evaluating BLOB length or
+prefix. Native title memory, I/O, RSS and latency may scale with that value. A
+Worker Thread shares the process/native address space: fatal native OOM or abort
+may terminate Draw and prevent any JSON response. No title cap, native-memory,
+OOM-resistance, latency or process-survival promise is introduced (accepted
+residual risk in issue #360).
+
+Every post-auth response that can be produced is no-store JSON with the closed
+200/400/500/503 classes. No read repairs, rebuilds, falls back, writes, caches,
+retries or calls externally. Phase 2A adds no client and does not change
+`/today`, due-date UI, daily digest, later weekly Push, timer writes, fixed-slot
+writes, source schema or Push-zone acceptance.
+
+*Phase 2B client decision and consequences:* The canonical route is
+`/tasks?view=week&week=YYYY-MM-DD`, where the date is Monday. Week chooses the
+exact saved Push zone only when it belongs to the browser-safe frozen registry,
+otherwise exact browser detection; it never canonicalizes or writes either
+candidate. Eight zoned local midnights drive calendar navigation, display,
+clipping and DST-aware day lengths. Literal deadlines remain literal dates.
+
+The client shares the Phase 2A strict decoder, uses no-store fetches and holds one
+abortable generation. Week unmounts the ordinary List/Due dates subtree and its
+unpaged task/goal observers/computations, then cancels and removes only the exact
+inactive full-list keys; a separately observed key is preserved. Quick capture is
+absent. Continuations are user-driven **Load more** requests. Pages append only
+when request generation, `requestNow`, identity uniqueness and global order all
+match. One active-generation continuation 400 may discard everything and restart
+page one automatically once; it cannot loop. Page-one/second 400 and every
+500/503 remain distinct explicit Retry failures, never empty success.
+
+Desktop renders a deadline rail plus Fixed/Tracked blocks in deterministic
+first-free overlap lanes; adjacency may share and crossing source intervals are
+only visually clipped. Narrow layout is an ordered agenda. Visible labels do not
+rely on color, hostile titles stay React text, and `titleTruncated` has the exact
+accessible indicator. The closed task/goal/tracked action matrix calls only the
+existing authoritative task PATCH, fixed-slot PATCH, timer start and bodyless
+timer stop routes. Fixed editing navigates out of Week to the existing Task editor,
+whose authoritative task read retains the ADR-74 entry zone and wall values; Week
+never fabricates them from its viewer zone. Archived tracked titles remain plain
+text. Actions bind every post-await state/error/refresh to their originating mount,
+Week, zone, page generation and action token; navigation, zone change and unmount
+clear and invalidate stale work. Viewing, paging, layout and clock display write
+nothing. List and renamed **Due dates** behavior are otherwise unchanged and
+refetch after returning from Week.
+`/today`, morning-digest changes, later weekly Push and Sunday Push remain
+planned.
 
 *Cross-links:* ADR-26 owns physical backup/restore and swap atomicity; ADR-50
 keeps optional authentication/passwordless behavior unchanged; ADR-73 keeps the

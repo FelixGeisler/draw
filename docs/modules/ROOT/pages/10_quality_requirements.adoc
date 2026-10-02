@@ -98,9 +98,53 @@ AI degradation > data integrity > cost transparency > responsiveness.
 |Q22
 |Schema v23 sees historical, boundary, open, malformed or drifting fixed/tracked interval source, or an owned mutation fails mid-transaction
 |Lazy guards admit only canonical 24-byte TEXT timestamps; bounded keyset rebuild/validation retains no full-history JavaScript array; the numeric companion and RTree are complete for eligible source, dirty/rebuild is explicit, and source/companion/RTree/state roll back together without a history cutoff, numeric performance SLA or user-content projection
+
+|Q23
+|A Week request covers dense history, a DST/boundary Week, concurrent access, stale/tampered cursor, or a restore
+|The ready-v23 RTree/index query returns one coherent ordered page of at most 100 records; all JavaScript/IPC/wire data are bounded, a second request is busy, cursor failure reaches no SQL, and restore proves worker closure and rotates the key only after commit
+
+|Q24
+|A selected source title is arbitrarily large or has a UTF-8 boundary/error
+|Only the page-budget prefix plus four bytes enters JavaScript; intact records defer and lone oversized records truncate code-point-safely at or below 131,072 bytes. Invalid fetched bytes fail the page. SQLite-native title materialization, fatal native OOM/abort response availability, and process survival remain explicitly unbounded residual risk (issue #360)
+
+|Q25
+|A user opens, pages, navigates or acts in Week while responses are delayed, a cursor expires, or the viewport narrows
+|Only the active strict-decoded generation renders; action results/refreshes are mount/Week/zone/token-bound, one continuation 400 resets once without mixing, every other failure is explicit, desktop lanes and narrow agenda preserve the same facts/order/actions, authoritative fixed editing retains its entry zone, and Week unmounts/releases inactive exact unpaged List task/goal data without disturbing another observer or performing an implicit write
 |===
 
-Q1, Q3 (guardrail), Q6–Q10 and Q13–Q22 are covered by the automated test suites (unit /
-integration / E2E — see xref:08_crosscutting_concepts.adoc[8.7]) and run in CI on every
-PR. Q2 and Q4 need a live API key and are verified manually; Q5 is covered by the
-E2E timer journey; Q11/Q12 are properties of SQLite WAL and prebuilt binaries.
+Q1, Q3 (guardrail), Q6–Q10 and Q13–Q22 are covered by the automated suites
+(unit / integration / E2E — see xref:08_crosscutting_concepts.adoc[8.7]). For
+Q23, `week-full-source-oracle.test.ts` scans the source tables with an
+independent test algorithm (it does not import the production projection query
+or ordering helpers) and compares the complete concatenated production pages
+for DST/domain, sparse/dense, crosser, state, tie, deep-page and exact
+99/100/101 fixtures. `week-production-worker.test.ts` loads test-only observer
+and deterministic-fault modules from `test/instrumentation/` through the test
+process options; those modules are outside the production import graph and add
+no route, worker protocol field or production hook. The suite instruments the
+real `WeekProjectionService` and `weekWorker.ts` connection/query/result path,
+including lazy/reused sole connection, main-thread health during a blocked
+query, HTTP disconnect/busy behavior, prefix-query/IPC bounds, recoverable
+failure envelopes, and actual-worker protocol/structural fault retirement with
+owned exit before restore, lazy recreation and shutdown. Static native/import
+canaries are supplementary and are not treated as runtime proof. Existing WAL
+and restore suites cover coherent old/new/dirty snapshots and reopen/key order.
+
+Q24 is covered by reservation-aware 131,071/131,072/131,073 candidate-envelope
+fixtures: each uses the conservative 375-character continuation reservation,
+then distinguishes it from the real authenticated cursor and final wire body.
+They also prove intact deferral, actual continuation, code-point-safe
+truncation, escaping/control/combining/prefix boundaries and unchanged source
+bytes. Non-thresholded native characterization records observations only. Q25
+is covered by pure zone/calendar/lane/page tests and deterministic browser
+fixtures for durable navigation, desktop/mobile/keyboard presentation, hostile
+text, strict invalid-page rejection, paging, stale aborts, once-only cursor
+reset, exact error states and the complete action matrix. A separate public
+server-clock journey starts and stops a real timer and checks bounded timestamps
+and unchanged planning facts. The Phase 2A/2B regression gate additionally runs
+server/client types, all unit and
+integration tests, documentation assembly, and the complete browser suite;
+this does not convert fakes, static checks or characterization into runtime
+claims. Q2 and Q4 need a live API key and are verified manually; Q5 is covered
+by the E2E timer journey; Q11/Q12 are properties of SQLite WAL and prebuilt
+binaries.

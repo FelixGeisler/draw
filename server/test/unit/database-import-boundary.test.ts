@@ -15,7 +15,7 @@ function productionTypescript(directory: string): string[] {
 }
 
 describe("production native-binding boundary", () => {
-  it("allows runtime better-sqlite3 imports only in db.ts and staged backup code", () => {
+  it("allows runtime better-sqlite3 imports only in db.ts, staged backup code, and the private Week worker", () => {
     const runtimeImporters: string[] = [];
     for (const file of productionTypescript(sourceRoot)) {
       const source = fs.readFileSync(file, "utf8");
@@ -23,7 +23,25 @@ describe("production native-binding boundary", () => {
       const dynamicImport = /(?:import\s*\(\s*|require\s*\(\s*)["']better-sqlite3["']/.test(source);
       if (runtimeImport || dynamicImport) runtimeImporters.push(path.relative(sourceRoot, file).replaceAll("\\", "/"));
     }
-    expect(runtimeImporters.sort()).toEqual(["db.ts", "services/backupService.ts"]);
+    expect(runtimeImporters.sort()).toEqual(["db.ts", "services/backupService.ts", "weekWorker.ts"]);
+  });
+
+  it("pins the sole private Week native connection and denies route capability leakage", () => {
+    const worker = fs.readFileSync(path.join(sourceRoot, "weekWorker.ts"), "utf8");
+    expect(worker).toContain("new Database(bootstrap.databasePath, { readonly: true, fileMustExist: true })");
+    for (const pragma of [
+      'unsafeMode(false)',
+      'pragma("trusted_schema = OFF")',
+      'pragma("query_only = ON")',
+      'pragma("cache_size = -2048")',
+      'pragma("temp_store = FILE")',
+    ]) expect(worker).toContain(pragma);
+    expect(worker).not.toMatch(/journal_mode|loadExtension|\.function\(|\.table\(/);
+
+    const route = fs.readFileSync(path.join(sourceRoot, "routes/calendar.ts"), "utf8");
+    expect(route).not.toMatch(/better-sqlite3|databasePath|SafeDatabase|week_interval_/);
+    const controller = fs.readFileSync(path.join(sourceRoot, "weekService.ts"), "utf8");
+    expect(controller).toContain("private readonly databasePath: string");
   });
 
   it("contains no environment-selected global fixture bridge in production source", () => {
