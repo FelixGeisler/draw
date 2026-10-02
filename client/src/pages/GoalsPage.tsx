@@ -11,9 +11,9 @@ import { AiGenerateTasksPanel, AiPlanPanel } from "../components/AiSuggestionPan
 import { TaskForm } from "../components/TaskForm";
 import { VictoryOverlay } from "../components/VictoryOverlay";
 import { daysUntil, feasibility, type Feasibility } from "../lib/feasibility";
-import { bossBar } from "../lib/bossBar";
+import { effortProgress } from "../lib/effortProgress";
 import { consumeItemLanding } from "../lib/itemLanding";
-import { BossBar } from "../components/BossBar";
+import { EffortProgress } from "../components/EffortProgress";
 
 const VERDICT_STYLE = {
   "on-track": { label: "On track", color: "var(--ok)" },
@@ -87,10 +87,9 @@ function GoalCard({
   const days = goal.targetDate ? daysUntil(goal.targetDate) : null;
   const feas = feasibility(goal);
   const progress = goal.taskCount > 0 ? goal.doneCount / goal.taskCount : 0;
-  // Boss battle (#229): with estimated leaves the goal renders as an
-  // opponent — HP bar instead of the count bar. Unestimated goals keep the
-  // count bar: no minutes, no HP to mean anything.
-  const boss = bossBar(goal, feas?.state ?? null);
+  // Estimated leaves use neutral completed-effort progress (#372), while
+  // unestimated goals retain the existing count-based fallback.
+  const estimatedProgress = effortProgress(goal);
   const defaultCategory =
     categories.data?.find((c) => c.name === "Study")?.id ?? categories.data?.[0]?.id ?? 1;
 
@@ -230,8 +229,8 @@ function GoalCard({
       {/* flexWrap: five buttons plus the AI select overflow a phone; the
           progress bar keeps flex:1 and simply takes the first line (#193). */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-        {boss ? (
-          <BossBar bar={boss} />
+        {estimatedProgress ? (
+          <EffortProgress progress={estimatedProgress} />
         ) : (
           <div style={{ flex: "1 1 120px", background: "var(--bg)", borderRadius: 6, height: 8 }}>
             <div

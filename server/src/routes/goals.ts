@@ -23,11 +23,10 @@ const GOAL_STATUSES = ["active", "achieved", "missed", "dropped"];
 //   all done (a recurring parent stays open in that state) has no remaining
 //   work of its own, so its stored estimate stays out too. NULL when no open
 //   leaf is estimated.
-// - totalEffortMinutes (#229) is the same leaf rule over open AND done leaves
-//   — the boss bar's max HP, of which remainingOpenEffortMinutes is what still
-//   stands. Remaining <= total by construction (same leaves, same NULL skips),
-//   so the HP fraction can never overflow. Archived leaves stay out of both:
-//   a split-in-place original (ADR-21) was replaced, not defeated.
+// - totalEffortMinutes (#229/#372) is the same leaf rule over open AND done
+//   leaves. remainingOpenEffortMinutes is the still-open part, and remaining <=
+//   total by construction (same leaves, same NULL skips). Archived leaves stay
+//   out of both because a split-in-place original (ADR-21) was replaced.
 // - trackedMinutes14d reuses the stats MINUTES_EXPR so a running entry counts
 //   up to now (#22); the window filter compares ISO strings lexicographically,
 //   like every stats range filter.

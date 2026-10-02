@@ -3398,6 +3398,10 @@ feature.
 
 == ADR-61: Boss battles — a goal's remaining work as an HP bar, derived twice over and never a judgement
 
+*Status:* Superseded by ADR-76. This section is retained only as historical
+record of the accepted decision that ADR-76 replaced; its combat terminology is
+not current product language or implementation guidance.
+
 *Context:* A goal with 400 minutes of open work was a number in a chip, and
 the count-based progress bar (done/taskCount) treats a 5-minute errand and a
 90-minute session as equal progress. The app's language is cards and rarity;
@@ -4668,3 +4672,44 @@ keeps optional authentication/passwordless behavior unchanged; ADR-73 keeps the
 existing daily digest and Push claims unchanged; ADR-74 remains authoritative
 for fixed-slot facts and lifecycle; arc42 sections 5, 6, 8, 10 and 12 record the
 implemented facade, restore and compact interval-access boundaries and evidence.
+
+== ADR-76: Neutral goal effort progress supersedes boss battles
+
+*Status:* Accepted and implemented by issue #372. Supersedes ADR-61.
+
+*Context:* Goal progress already has useful derived effort totals, but the
+rejected presentation does not belong in a productive-work application.
+Removing that presentation must not discard the more representative effort
+weighting, alter the goals API, or turn feasibility into a judgement about the
+user. ADR-48's descriptive-over-prescriptive
+principle remains authoritative.
+
+*Decision:* Goals with estimated leaves render neutral completed-effort
+progress. `total` is the existing `totalEffortMinutes`; `remaining` clamps the
+existing `remainingOpenEffortMinutes` to `[0,total]`; and `completed` is
+`total - remaining`. The visible text is exactly
+`<completed>/<total> min complete`, the fill grows with `completed / total`,
+and the progressbar is named **Effort progress** with minimum 0, maximum
+`total`, and current value `completed`. The clamp makes partially refreshed
+payloads safe to publish and a completed estimated goal reads total/total.
+
+Goals without estimated leaves retain the count-based progress presentation.
+The API arithmetic and invalidation, feasibility classification and chip, task
+counts, goal resolution, cards, and achievements are unchanged. The derivation
+and component use neutral names and styles; current code, tests, and
+documentation contain no active superseded presentation. ADR-61 remains above as
+a clearly superseded historical record rather than being rewritten.
+
+*Rationale:* Completed-direction effort progress communicates useful work
+without the rejected metaphor or user judgement. Reusing the existing totals
+keeps one source of truth and zero persistence or API expansion. A client clamp
+is still required because independently refreshed fields can be briefly skewed,
+even though one server response normally derives both totals together.
+
+*Out of scope:* forest/session behavior, schema or API changes, estimate
+recalibration, feasibility changes, goal redesign, unrelated gamification
+cleanup, historical ADR rewriting, and new dependencies.
+
+*Cross-links:* ADR-2 keeps this presentation derived rather than stored; ADR-48
+prohibits grading the user; ADR-61 is the superseded historical decision; issue
+#372 records the approved behavior and acceptance evidence.
