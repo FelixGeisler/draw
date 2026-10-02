@@ -1,0 +1,36 @@
+.effort-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.effort-progress-track {
+  flex: 1;
+  min-width: 0;
+  height: 12px;
+  border-radius: 7px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.effort-progress-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: var(--ok);
+}
+
+.effort-progress-caption {
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .effort-progress-fill {
+    transition: width 0.5s ease;
+  }
+}

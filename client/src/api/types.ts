@@ -217,9 +217,9 @@ export interface Goal {
    */
   remainingOpenEffortMinutes: number | null;
   /**
-   * The boss bar's max HP (#229): the same leaf rule over open AND done
-   * leaves, so remaining <= total always holds. NULL when no leaf carries an
-   * estimate — no bar without numbers to mean anything.
+   * Total estimated goal effort (#229/#372): the same leaf rule over open AND
+   * done leaves. NULL when no leaf carries an estimate, so the client retains
+   * count-based progress for an unestimated goal.
    */
   totalEffortMinutes: number | null;
   trackedMinutes14d: number;

@@ -70,7 +70,7 @@ test("an existing goal-less task can be linked from the goal card", async ({ pag
   await expect(goalCard.getByTitle(`Attach "${LOOSE_TASK}" to this goal`)).not.toBeVisible();
   await goalCard.getByTitle("Close the picker").click();
   await expect(goalCard.getByText(LOOSE_TASK, { exact: true })).toBeVisible();
-  await expect(goalCard.getByText("15 min")).toBeVisible();
+  await expect(goalCard.getByText("15 min", { exact: true })).toBeVisible();
   await expect(goalCard.getByTitle("Impact 3/5")).toBeVisible();
   // Goal progress updates without a reload.
   await expect(goalCard.getByRole("button", { name: "0/1 tasks" })).toBeVisible();
