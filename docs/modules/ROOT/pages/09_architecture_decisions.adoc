@@ -4547,7 +4547,7 @@ Backup code receives closed semantic live operations for a new owned-path
 `VACUUM INTO`, checkpoint/close and reopen. Its own native opener rejects the
 live path or identity. Before any staged integrity check, migration,
 virtual-module operation or source read, it reads bounded scalar schema metadata
-for the real stamped v1–v23 version. Unknown/missing objects and every unapproved
+for the real stamped v1–v24 version. Unknown/missing objects and every unapproved
 view, trigger, virtual/shadow or oversized definition reject before SQL fetch.
 Known SQL is fetched individually below its generated LF/CRLF byte cap and must
 match one of the token-normalized hashes generated from checked-in fresh,
@@ -4562,8 +4562,9 @@ daily-overview/fixed-slot seams use `SafeDatabase`. Tests provide a separate
 fixture adapter and Windows/Linux lexical/native canaries. Rejections preserve
 live/source bytes and owned stage cleanup.
 
-*Phase 2 decision and consequences:* `CURRENT_VERSION` is 23. Exact compiled
-DDL creates singleton generation/readiness state, one numeric companion per
+*Phase 2 decision and consequences:* This phase introduced schema v23; ADR-77
+subsequently advances `CURRENT_VERSION` to 24 without changing the Week
+projection. Exact compiled DDL creates singleton generation/readiness state, one numeric companion per
 eligible fixed (`source_kind=0`) or tracked (`2`) interval, an `rtree_i32` row
 with inclusive UTC-day bounds, six source dirty/delete triggers and three
 companion/RTree triggers. IDs and timestamps are admitted only inside the
@@ -4603,7 +4604,9 @@ restore lease rejects active work, retains every faulted/retiring worker through
 an exit promise, and closes/proves all worker exits before ADR-26's
 Push/checkpoint/last-connection/swap sequence. Replacement, restore and shutdown
 cannot overtake a retiring native reader. Admission stays closed through the
-complete live reopen/migration/v23 validation proof. A failed proof latches Week
+complete live reopen/migration/current-v24 validation proof, including the
+unchanged v23 Week projection structure and equivalence checks described above.
+A failed proof latches Week
 unavailable and opens no worker until a later proven recovery; committed data
 rotates the cursor key even when its reopen proof fails, while pre-commit failure
 retains the key. Successful recovery recreates lazily. Shutdown closes the worker.
@@ -4713,3 +4716,65 @@ cleanup, historical ADR rewriting, and new dependencies.
 *Cross-links:* ADR-2 keeps this presentation derived rather than stored; ADR-48
 prohibits grading the user; ADR-61 is the superseded historical decision; issue
 #372 records the approved behavior and acceptance evidence.
+
+== ADR-77: Working-session outcomes and the bounded global forest
+
+*Status:* Accepted and implemented by issue #374. The client forest is deferred
+to issue #375.
+
+*Context:* One Start already creates one authoritative `time_entries` identity,
+but a closed row did not say whether the working session ended successfully or
+was stopped. A later forest needs those terminal facts without copying session
+identity, guessing legacy history, exposing task metadata, or reading unbounded
+history. Task deletion must retain its existing destructive cascade, including
+finished and running entries.
+
+*Decision:* Schema v24 adds nullable `time_entries.end_reason`, constrained to
+`done|stop`, and a partial descending-id index over classified rows. Open rows
+have null `ended_at` and reason; legacy ended rows retain null reason and remain
+outside the forest. The one guarded close capability writes timestamp and reason
+atomically. Direct/recurring and real automatic parent completion use `done`;
+explicit Stop, replacement Start and split use `stop`. The first committed close
+wins. Reopen never edits a finished reason and every Start inserts a new row.
+Archive does not close its own timer, while child archive/delete may still cause
+a separately timed parent to complete `done`. Deletion cascades its subtree's
+entries without classifying them. Reparent, fixed-slot edits, unarchive/reopen,
+focus exit, reload/browser close and estimate expiry do not close a session.
+Week retains its strict-positive interval projection, so a valid zero-duration
+classified session is omitted there without being rejected.
+
+The unchanged default Node HTTP parser owns transport admission. In particular,
+a raw target containing literal UTF-8 bytes `C3 A9` after `beforeId=` receives
+Node's native 400 with an empty body before Express, authentication, or the
+forest route runs. No global `clientError` handler or lenient parser mode is
+added. For requests Node admits and delivers to Express, the existing
+authentication gate remains first. Bodyless `GET /api/forest` then admits only
+an optional canonical `beforeId` safe integer under the 2,048-byte raw-target
+ceiling. Authenticated HEAD is bodyless 400; all other admitted malformed
+methods, framing, or targets—including ASCII `%C3%A9`—receive the exact
+`invalid-forest-request` JSON. One indexed read takes at most 101 classified
+rows, validates the whole result, publishes at most 100 exact
+`{id,startedAt,endedAt,endReason}` records, and returns the last emitted id only
+when a lookahead exists. Reads are no-store, metadata-free and never include the
+running row; `/api/timer/current` remains that sole source. Any read or
+result-contract failure returns the exact `forest-read-failed` JSON, never a
+partial page.
+
+The v23→v24 DDL, validation and stamp are atomic. Startup and staged restore
+prove exact schema/index shape plus every classified safe-id, canonical
+four-digit UTC timestamp, nonnegative interval and closed reason before service
+or swap. Fresh schema, generated restore admission and supported historical
+fixtures advance together. Unclassified legacy ended rows are not reinterpreted
+or newly rejected merely for forest population.
+
+*Consequences:* The forest has one global, bounded, gap-tolerant session feed and
+no duplicate tree table, task text, anonymous retention or history guess. No
+client, pause/interruption/idle state, automatic estimate outcome, telemetry,
+new MCP tool, dependency, external call or deployment behavior is introduced.
+
+*Cross-links:* ADR-2 keeps facts separate from derivable views; ADR-6 owns
+recurring completion; ADR-12 owns task-completion timer closure; ADR-21 records
+destructive task-history cascades; ADR-26 owns exact staged restore and atomic
+swap; ADR-29 keeps focus exit view-only; ADR-32 owns parent lifecycle exceptions;
+ADR-50 keeps authentication precedence; ADR-75 keeps the safe SQLite and
+positive-interval Week capability boundaries.

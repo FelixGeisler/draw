@@ -36,7 +36,7 @@ function normalizedHash(sql: string): string {
 }
 
 /**
- * Admit only the checked-in schema for a stamped v1-v23 staged database.
+ * Admit only the checked-in schema for a stamped v1-v24 staged database.
  * The first read is bounded scalar metadata only. SQL text is fetched one
  * known object at a time, and only after its per-object byte cap is proven.
  */

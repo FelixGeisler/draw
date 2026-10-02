@@ -291,6 +291,11 @@ counts its real tokens, so the estimate and the 180K guard stay honest.
 == 8.6 Time handling
 
 Actual-work timestamps and fixed-slot instants are stored as ISO 8601 UTC strings.
+A classified schema-v24 session requires canonical 24-byte
+`YYYY-MM-DDTHH:mm:ss.sssZ` values in years `0001`–`9999`, a positive safe id
+and `ended_at >= started_at`; equality is a valid immediate Done/Stop. Week's
+separate tracked-interval projection remains strictly positive and omits that
+zero-duration row (ADR-77).
 Fixed slots additionally retain the exact canonical IANA entry-zone identifier:
 strict `YYYY-MM-DDTHH:mm` wall inputs resolve independently, spring gaps reject,
 fall folds choose the earlier instant, and both UTC results must remain in years
@@ -366,9 +371,13 @@ contract, then atomically creates the exact compact Week interval state,
 companion, RTree and trigger inventory, keyset-rebuilds the disposable
 projection, proves source/companion/RTree equivalence and stamps 23 last. Normal
 v23 boot repeats the exact structure check and a transactional keyset rebuild;
-the Phase 2A worker consumes only a ready equal-generation snapshot. Backup
-import dispatches stamped v19–v23 files
-to their own validators before migration and validates final v23 before swap.
+the Phase 2A worker consumes only a ready equal-generation snapshot. Version 24
+validates v23, then atomically adds nullable constrained `end_reason`, the
+partial descending classified-session index, complete classified-data checks
+and a stamp-last transition. Legacy ended rows remain null/unclassified.
+Normal v24 startup validates exact DDL/index shape and classified rows before
+service, then rebuilds Week. Backup import dispatches stamped v19–v24 files
+to their own validators before migration and validates final v24 before swap.
 The inherited validator still proves exact DDL, columns, PK index, FK, retained Push
 shape, persistent trigger/no-view allowlist,
 Hide-details, and all four timing domains/nullability. Unapproved executable
@@ -406,8 +415,8 @@ Safety nets, both inside `DATA_DIR`:
   (overwritten on the next import),
 - the previous material files as `files.bak`.
 
-Every rejected import (foreign zip, corrupt or newer-than-v23 database,
-unsafe paths) is a `400` with the live data untouched. Versions through v23
+Every rejected import (foreign zip, corrupt or newer-than-v24 database,
+unsafe paths) is a `400` with the live data untouched. Versions through v24
 are accepted; older snapshots migrate in staging. Before integrity checking,
 migration, virtual-module access or source-data reads, a bounded scalar
 `sqlite_schema` pass selects the exact compiled inventory for the stamped
@@ -421,10 +430,12 @@ immutable triggers (definition and rollback-only behavior), and the
 XP-ledger reason index; it must also match v21's exact nullable-settings,
 four-field timing domain, digest-claims index/FK, inherited Push shape, and
 persistent-schema allowlist, plus v22's complete fixed-slot relation, registry,
-instant and recurrence contract. Exact admitted v23 archives additionally have
+instant and recurrence contract. Exact admitted v23/v24 archives additionally have
 their known derived objects discarded and recreated from compiled DDL; the
 projection is rebuilt and fully validated from authoritative source before the
-second physical rewrite and swap. Fixed slots and entry zones are portable user
+second physical rewrite and swap. V24 admission also rejects malformed
+classified reason/id/timestamp/interval data before that swap while preserving
+supported unclassified legacy history. Fixed slots and entry zones are portable user
 data and survive manual/scheduled archives, restore, and sanitized `app.db.bak`;
 Push credentials/claims remain physically absent. Only that validated,
 row-scrubbed, physically rewritten file reaches
@@ -517,7 +528,7 @@ after successful live reopen/validation; failed proof latches Week unavailable.
 Cursor HMAC keys remain in the main process and never cross to SQLite,
 the worker, backup or logs.
 
-ADR-75 Phases 1 and 2 are implemented: `CURRENT_VERSION` is 23, exact
+ADR-75 Phases 1 and 2 remain implemented under `CURRENT_VERSION` 24: exact
 `week_access_state`, `week_interval_access`, `week_interval_rtree`/shadow DDL
 and nine triggers are validated, owned fixed/timer mutations maintain affected
 identities, and boot/restore rederive the disposable projection. Phase 2A adds

@@ -31,15 +31,16 @@ describe("completion closes the task's own timer", () => {
     // ended_at is exactly the completion timestamp, not just "some time later"
     const entry = db
       .prepare(
-        "SELECT ended_at AS endedAt FROM time_entries WHERE task_id = ? ORDER BY id DESC LIMIT 1",
+        "SELECT ended_at AS endedAt,end_reason AS endReason FROM time_entries WHERE task_id = ? ORDER BY id DESC LIMIT 1",
       )
-      .get(task.id) as { endedAt: string | null };
+      .get(task.id) as { endedAt: string | null; endReason: string | null };
     const completion = db
       .prepare(
         "SELECT completed_at AS completedAt FROM completions WHERE task_id = ? ORDER BY id DESC LIMIT 1",
       )
       .get(task.id) as { completedAt: string };
     expect(entry.endedAt).toBe(completion.completedAt);
+    expect(entry.endReason).toBe("done");
   });
 
   it("leaves a different task's running timer untouched", async () => {
@@ -74,5 +75,8 @@ describe("completion closes the task's own timer", () => {
       .prepare("SELECT COUNT(*) AS n FROM time_entries WHERE task_id = ? AND ended_at IS NULL")
       .get(chore.id) as { n: number };
     expect(open.n).toBe(0);
+    expect(db.prepare(
+      "SELECT end_reason AS endReason FROM time_entries WHERE task_id=? ORDER BY id DESC LIMIT 1",
+    ).get(chore.id)).toEqual({ endReason: "done" });
   });
 });

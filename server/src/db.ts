@@ -23,9 +23,17 @@ import {
   validateV23Contract,
   validateV23Projection,
   validateV23Structure,
+  type TimeEntryEndReason,
   type WeekMutationToken,
   type WeekTrackedCloseHooks,
 } from "./schemaV23.js";
+import {
+  V24_END_REASON_COLUMN_SQL,
+  V24_FOREST_INDEX_SQL,
+  validateV24ClassifiedRows,
+  validateV24Contract,
+  validateV24Structure,
+} from "./schemaV24.js";
 import { createSafeDatabase } from "./safeDatabase.js";
 import { WeekProjectionService, type WeekLiveReopenProof } from "./weekService.js";
 import type { WeekCursorPosition } from "./weekCursor.js";
@@ -58,12 +66,14 @@ function openDatabase(): Database.Database {
 let nativeDatabase = openDatabase();
 export const db = createSafeDatabase(() => nativeDatabase);
 
-export const CURRENT_VERSION = 23;
+export const CURRENT_VERSION = 24;
 
 export type WeekMigrationStage = "create" | "build" | "validate" | "ready" | "stamp";
+export type ForestMigrationStage = "create" | "validate" | "stamp";
 export interface MigrationOptions {
-  /** Test-only deterministic fault point; a throw proves the enclosing migration rolls back. */
+  /** Test-only deterministic fault points; a throw proves the enclosing migration rolls back. */
   afterWeekStage?: (stage: WeekMigrationStage) => void;
+  afterForestStage?: (stage: ForestMigrationStage) => void;
 }
 
 export function migrateDatabase(
@@ -81,15 +91,15 @@ export function migrateDatabase(
       options.afterWeekStage?.("create");
       buildWeekProjection(database);
       options.afterWeekStage?.("build");
-      validateV23Structure(database, false);
+      validateV23Structure(database, false, {}, true);
       validateV23Projection(database, true);
       options.afterWeekStage?.("validate");
       database.prepare(
         "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
       ).run();
       options.afterWeekStage?.("ready");
-      validateV23Contract(database, { requireVersion: false });
-      database.pragma("user_version = 23");
+      validateV24Contract(database, { requireVersion: false });
+      database.pragma("user_version = 24");
       options.afterWeekStage?.("stamp");
     })();
     activatedV23 = true;
@@ -509,14 +519,43 @@ export function migrateDatabase(
       })();
       activatedV23 = true;
     }
+    if (version < 24) {
+      // Session outcomes (#374, ADR-77): preserve every legacy close as
+      // unclassified, add the constrained terminal fact and bounded keyset
+      // index, validate the complete v24 contract, then stamp last. A direct
+      // v23 boot also rebuilds its disposable Week projection inside this
+      // same transaction before the source schema changes.
+      validateV23Structure(database);
+      database.transaction(() => {
+        if (!activatedV23) {
+          database.prepare(
+            "UPDATE week_access_state SET source_generation=source_generation+1,ready=0 WHERE singleton=1",
+          ).run();
+          buildWeekProjection(database);
+          validateV23Projection(database, true);
+          database.prepare(
+            "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
+          ).run();
+        }
+        validateV23Contract(database);
+        database.exec(V24_END_REASON_COLUMN_SQL);
+        database.exec(V24_FOREST_INDEX_SQL);
+        options.afterForestStage?.("create");
+        validateV24Contract(database, { requireVersion: false });
+        options.afterForestStage?.("validate");
+        database.pragma("user_version = 24");
+        options.afterForestStage?.("stamp");
+      })();
+      activatedV23 = true;
+    }
   }
 
-  // A normal v23 boot distrusts logical derived rows. Exact schema is proved
-  // first; then one owned transaction marks dirty, advances generation,
-  // keyset-rebuilds, validates, and declares readiness. Fresh/migrated files
-  // already completed that sequence above and must retain generation zero.
+  // A normal v24 boot distrusts logical derived rows. Exact source/schema
+  // validation (including classified session rows) happens before one owned
+  // transaction marks Week dirty, rebuilds it and declares readiness.
   if (!activatedV23) {
-    validateV23Structure(database);
+    validateV24Structure(database);
+    validateV24ClassifiedRows(database);
     database.transaction(() => {
       database.prepare(
         "UPDATE week_access_state SET source_generation=source_generation+1,ready=0 WHERE singleton=1",
@@ -526,12 +565,12 @@ export function migrateDatabase(
       database.prepare(
         "UPDATE week_access_state SET built_generation=source_generation,ready=1 WHERE singleton=1",
       ).run();
-      validateV23Contract(database);
+      validateV24Contract(database);
     })();
   }
 
   validateV18Contract(database);
-  validateV23Contract(database);
+  validateV24Contract(database);
 }
 
 migrateDatabase();
@@ -613,23 +652,26 @@ export function reprojectTrackedIntervals(token: WeekMutationToken, entryIds: re
 export function closeAllOpenTrackedIntervals(
   token: WeekMutationToken,
   endedAt: string,
+  endReason: TimeEntryEndReason,
   hooks: WeekTrackedCloseHooks = {},
 ): void {
-  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "all" }, hooks);
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, endReason, { kind: "all" }, hooks);
 }
 export function closeOpenTrackedIntervalsForTask(
   token: WeekMutationToken,
   endedAt: string,
+  endReason: TimeEntryEndReason,
   taskId: number,
 ): void {
-  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "task", taskId });
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, endReason, { kind: "task", taskId });
 }
 export function closeOpenTrackedIntervalById(
   token: WeekMutationToken,
   endedAt: string,
+  endReason: TimeEntryEndReason,
   entryId: number,
 ): void {
-  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, { kind: "identity", entryId });
+  closeOpenTrackedIntervals(nativeDatabase, token, endedAt, endReason, { kind: "identity", entryId });
 }
 export function finalizeWeekIntervalMutation(token: WeekMutationToken): void {
   finishWeekMutation(nativeDatabase, token);

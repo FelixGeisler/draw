@@ -28,6 +28,7 @@ import { disabledPushDependency, type PushDependency } from "./push/authority.js
 import { createPushRouter } from "./routes/push.js";
 import { dailyOverviewRouter } from "./routes/dailyOverview.js";
 import { calendarRouter } from "./routes/calendar.js";
+import { forestRouter } from "./routes/forest.js";
 
 export interface AppOptions {
   /**
@@ -82,7 +83,8 @@ export function createApp(options: AppOptions = {}, dependencies: AppDependencie
   app.use((req, res, next) => {
     if (
       /^\/api\/push(?:\/|$)/i.test(req.path) ||
-      /^\/api\/calendar\/week\/?$/i.test(req.path)
+      /^\/api\/calendar\/week\/?$/i.test(req.path) ||
+      /^\/api\/forest\/?$/i.test(req.path)
     ) return next();
     generalJson(req, res, next);
   });
@@ -115,6 +117,7 @@ export function createApp(options: AppOptions = {}, dependencies: AppDependencie
 
   app.use("/api/push", createPushRouter(push));
   app.use("/api/calendar", calendarRouter);
+  app.use("/api/forest", forestRouter);
   app.use("/api/daily-overview", dailyOverviewRouter);
   app.use("/api/tasks", tasksRouter);
   app.use("/api/categories", categoriesRouter);

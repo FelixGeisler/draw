@@ -670,10 +670,52 @@ describe("complete_task invariants", () => {
       .prepare("SELECT COUNT(*) AS n FROM time_entries WHERE ended_at IS NULL")
       .get() as { n: number };
     expect(open.n).toBe(0);
+    expect(db.prepare(
+      "SELECT end_reason AS endReason FROM time_entries WHERE task_id=? ORDER BY id DESC LIMIT 1",
+    ).get(goalTaskId)).toEqual({ endReason: "done" });
   });
 });
 
 describe("timer invariants", () => {
+  it("keeps the first outcome in a real MCP Stop versus REST Done close race", async () => {
+    const task = (await callTool("create_task", {
+      title: "MCP close race",
+      categoryId: 1,
+      effortMinutes: 5,
+    })).json<TaskJson>();
+    await callTool("start_timer", { taskId: task.id });
+
+    const [mcpStop, restDone] = await Promise.all([
+      callTool("stop_timer"),
+      fetch(`${base}/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "done" }),
+      }),
+    ]);
+    expect(restDone.status).toBe(200);
+    if (mcpStop.isError) {
+      expect(mcpStop.text).toContain("no running timer");
+    } else {
+      expect(mcpStop.json<{ endedAt: string }>().endedAt).toBeTruthy();
+    }
+
+    const database = await testDb();
+    const first = database.prepare(
+      "SELECT ended_at AS endedAt,end_reason AS endReason FROM time_entries WHERE task_id=?",
+    ).get(task.id) as { endedAt: string; endReason: "done" | "stop" };
+    expect(first.endedAt).toBeTruthy();
+    expect(["done", "stop"]).toContain(first.endReason);
+
+    const laterStop = await callTool("stop_timer");
+    expect(laterStop.isError).toBe(true);
+    expect(database.prepare(
+      "SELECT ended_at AS endedAt,end_reason AS endReason FROM time_entries WHERE task_id=?",
+    ).get(task.id)).toEqual(first);
+    database.close();
+    expect((await fetch(`${base}/api/tasks/${task.id}`, { method: "DELETE" })).status).toBe(200);
+  });
+
   it("start_timer closes any previously running entry — never two open", async () => {
     const db = await testDb();
     await callTool("start_timer", { taskId: readCh1Id });
@@ -685,12 +727,19 @@ describe("timer invariants", () => {
       .all() as Array<{ taskId: number }>;
     expect(open).toHaveLength(1);
     expect(open[0].taskId).toBe(parentId);
+    expect(db.prepare(
+      "SELECT end_reason AS endReason FROM time_entries WHERE task_id=? ORDER BY id DESC LIMIT 1",
+    ).get(readCh1Id)).toEqual({ endReason: "stop" });
   });
 
   it("stop_timer stops the running entry and errors when none runs", async () => {
     const stopped = await callTool("stop_timer");
     expect(stopped.isError).toBe(false);
     expect(stopped.json<{ endedAt: string | null }>().endedAt).toBeTruthy();
+    const db = await testDb();
+    expect(db.prepare(
+      "SELECT end_reason AS endReason FROM time_entries WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1",
+    ).get()).toEqual({ endReason: "stop" });
 
     const again = await callTool("stop_timer");
     expect(again.isError).toBe(true);

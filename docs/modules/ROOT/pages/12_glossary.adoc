@@ -46,6 +46,25 @@ earlier instant.
 only, excluding aliases, abbreviations, numeric offsets and `Etc/GMT±N`. It is
 distinct from the saved Push-timezone policy.
 
+|*Working session*
+|One `time_entries` row created by Start. A new Start always creates a new row,
+even for the same task. Running means both terminal fields are null; the session
+is not a task, completion row, pause or interruption record (ADR-77).
+
+|*Session outcome*
+|The authoritative nullable schema-v24 terminal reason on a working session:
+`done` for direct/recurring or real automatic parent completion, `stop` for
+explicit Stop, replacement Start or split. Legacy ended rows remain null and
+unknown; reopen does not rewrite a reason, and destructive task deletion removes
+the row instead of classifying it.
+
+|*Forest feed*
+|The authenticated no-store global `GET /api/forest` projection of classified
+finished sessions only. It exposes no task metadata or running row, reads 101
+safe/canonical rows to emit at most 100 strictly descending unique trees, and
+uses exclusive `beforeId` with nullable exhaustion. Gaps from legacy omission
+or deletion are expected.
+
 |*Recurring task*
 |A task with `recur_every_days`: it never closes. Its `due_date` is its *next occurrence* — the first one as entered, every later one set to `completion date + interval` — and the card is out of the deck until that day (ADR-6, #205). Without a due date it has no schedule to wait for and is always drawable
 
@@ -182,7 +201,7 @@ distinct from the saved Push-timezone policy.
 |The durable `/tasks?view=week&week=<Monday>` client over the bounded Week API: exact saved-Push-zone-first selection, literal deadline rail, distinct Fixed/Tracked facts, deterministic overlap lanes, narrow ordered agenda, explicit Load more, strict whole-page decoding and abortable generations. It unmounts and releases the inactive exact unpaged List task/goal datasets, preserves independently observed queries, and performs no implicit write
 
 |*Staged restore preflight*
-|The bounded v1–v23 admission step before integrity checks, migration, virtual access or source reads: scalar `sqlite_schema` inventory first, then one known SQL definition below its compiled byte cap and token-normalized hash at a time. Unknown executable/view/virtual/shadow inventory and altered/missing/oversized definitions reject without executing imported SQL or swapping live data
+|The bounded v1–v24 admission step before integrity checks, migration, virtual access or source reads: scalar `sqlite_schema` inventory first, then one known SQL definition below its compiled byte cap and token-normalized hash at a time. Unknown executable/view/virtual/shadow inventory and altered/missing/oversized definitions reject without executing imported SQL or swapping live data
 
 |*Weekly run report*
 |The "This week" recap card atop Stats (#233, ADR-65): completions, minutes, XP, minted trophy rarities, best day, and deltas against the previous seven days — folded client-side (`lib/weeklyReport.ts`) from the activity payload over Monday-first LOCAL weeks; no new API, no stored aggregates, hidden when the week is empty

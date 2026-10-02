@@ -13,7 +13,7 @@ import {
   createBackupArchive,
   runScheduledBackup,
 } from "../../src/services/backupService.js";
-import { validateV23Contract } from "../../src/schemaV23.js";
+import { validateV24Contract } from "../../src/schemaV24.js";
 
 let app: express.Express;
 const dataDir = () => process.env.DATA_DIR!;
@@ -73,7 +73,7 @@ function mutateCurrentArchive(name: string, mutate: (database: Database.Database
 }
 
 describe("bounded staged restore schema preflight", () => {
-  it("admits real fresh v1 and every checked-in historical boundary through v23", async () => {
+  it("admits real fresh v1 and every checked-in historical boundary through v24", async () => {
     for (let version = 1; version <= CURRENT_VERSION; version += 1) {
       const response = await request(app)
         .post("/api/backup/import")
@@ -153,7 +153,7 @@ describe("bounded staged restore schema preflight", () => {
         expect(restored.prepare(
           "SELECT start_ms AS startMs FROM week_interval_access WHERE source_kind=2 AND source_id=?",
         ).get(source.id)).toEqual({ startMs: Date.parse(source.startedAt) });
-        expect(() => validateV23Contract(restored)).not.toThrow();
+        expect(() => validateV24Contract(restored)).not.toThrow();
       } finally {
         restored.close();
       }
@@ -168,8 +168,13 @@ describe("bounded staged restore schema preflight", () => {
     await restorePoisoned(bakArchive.toBuffer(), "app-db-bak");
   });
 
-  it("rejects unknown executable, virtual, shadow-like and altered known inventory without swapping live data", async () => {
-    await request(app).post("/api/tasks").send({ title: "preflight live canary", categoryId: 1 }).expect(201);
+  it("rejects altered schema and malformed classified v24 data before swapping live data", async () => {
+    const canary = (await request(app).post("/api/tasks").send({
+      title: "preflight live canary",
+      categoryId: 1,
+    }).expect(201)).body as { id: number };
+    await request(app).post(`/api/tasks/${canary.id}/timer/start`).expect(200);
+    await request(app).post("/api/timer/stop").expect(200);
     const cases: Array<[string, (database: Database.Database) => void]> = [
       ["view", (database) => database.exec("CREATE VIEW unknown_view AS SELECT title FROM tasks")],
       ["trigger", (database) => database.exec(
@@ -182,6 +187,19 @@ describe("bounded staged restore schema preflight", () => {
       }],
       ["missing-trigger", (database) => database.exec("DROP TRIGGER tasks_stamp_sort_order")],
       ["missing-week-trigger", (database) => database.exec("DROP TRIGGER week_time_entries_ai_dirty")],
+      ["missing-forest-index", (database) => database.exec("DROP INDEX idx_time_entries_forest")],
+      ["invalid-forest-reason", (database) => {
+        database.pragma("ignore_check_constraints=ON");
+        database.prepare("UPDATE time_entries SET end_reason='other' WHERE end_reason IS NOT NULL").run();
+        database.pragma("ignore_check_constraints=OFF");
+      }],
+      ["invalid-forest-interval", (database) => {
+        database.pragma("ignore_check_constraints=ON");
+        database.prepare(
+          "UPDATE time_entries SET started_at='9999-12-31T23:59:59.999Z',ended_at='0001-01-01T00:00:00.000Z' WHERE end_reason IS NOT NULL",
+        ).run();
+        database.pragma("ignore_check_constraints=OFF");
+      }],
       ["altered-week-trigger", (database) => {
         database.exec("DROP TRIGGER week_time_entries_ai_dirty");
         database.exec(`CREATE TRIGGER week_time_entries_ai_dirty AFTER INSERT ON time_entries

@@ -54,8 +54,8 @@ describe("schema v21 atomic digest replacement", () => {
       migrated.prepare("UPDATE settings SET value='Europe/Berlin' WHERE key='push_timezone'").run();
       migrateDatabase(migrated);
 
-      expect(fresh.pragma("user_version", { simple: true })).toBe(23);
-      expect(migrated.pragma("user_version", { simple: true })).toBe(23);
+      expect(fresh.pragma("user_version", { simple: true })).toBe(24);
+      expect(migrated.pragma("user_version", { simple: true })).toBe(24);
       expect(() => validateV21Contract(fresh)).not.toThrow();
       expect(() => validateV21Contract(migrated)).not.toThrow();
       expect(snapshot(migrated)).toEqual({

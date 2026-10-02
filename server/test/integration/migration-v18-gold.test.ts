@@ -79,7 +79,7 @@ afterAll(() => database.close());
 describe("v17 → v18 migration", () => {
   it("is the exact complete schema contract and applies owner defaults without rewrites", async () => {
     const { validateV18Contract } = await import("../../src/schemaV18.js");
-    expect(database.pragma("user_version", { simple: true })).toBe(23);
+    expect(database.pragma("user_version", { simple: true })).toBe(24);
     expect(() => validateV18Contract(database)).not.toThrow();
     expect(
       database
@@ -198,7 +198,7 @@ describe("fresh v18 schema", () => {
       const { migrateDatabase } = await import("../../src/db.js");
       const { validateV18Contract } = await import("../../src/schemaV18.js");
       migrateDatabase(fresh);
-      expect(fresh.pragma("user_version", { simple: true })).toBe(23);
+      expect(fresh.pragma("user_version", { simple: true })).toBe(24);
       expect(() => validateV18Contract(fresh)).not.toThrow();
       expect(
         fresh

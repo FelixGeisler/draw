@@ -393,13 +393,17 @@ export function validateV23Structure(
   database: Database.Database,
   requireVersion = true,
   hooks: WeekProjectionScanHooks = {},
+  allowV24Forest = false,
 ): void {
   validateV22Contract(database, {
-    fixedSlotBatch: ({ rowCount }) => hooks.batch?.(Object.freeze({
-      phase: "source-contract",
-      sourceKind: WEEK_FIXED_KIND,
-      rowCount,
-    })),
+    hooks: {
+      fixedSlotBatch: ({ rowCount }) => hooks.batch?.(Object.freeze({
+        phase: "source-contract",
+        sourceKind: WEEK_FIXED_KIND,
+        rowCount,
+      })),
+    },
+    allowForestIndex: allowV24Forest,
   });
   if (requireVersion && database.pragma("user_version", { simple: true }) !== 23) {
     throw new Error("schema v23 contract mismatch: user_version");
@@ -414,7 +418,11 @@ export function validateV23Structure(
   for (const [name, sql] of Object.entries(SHADOW_SQL)) exactSql(database, "table", name, sql);
 
   equal("table inventory", names(database, "table"), EXPECTED_TABLES);
-  equal("index inventory", names(database, "index"), EXPECTED_INDEXES);
+  equal(
+    "index inventory",
+    names(database, "index"),
+    allowV24Forest ? [...EXPECTED_INDEXES, "idx_time_entries_forest"].sort() : EXPECTED_INDEXES,
+  );
   equal("trigger inventory", names(database, "trigger"), EXPECTED_TRIGGERS);
   equal("view inventory", names(database, "view"), []);
 
@@ -539,6 +547,8 @@ export type WeekTrackedCloseScope =
   | Readonly<{ kind: "task"; taskId: number }>
   | Readonly<{ kind: "identity"; entryId: number }>;
 
+export type TimeEntryEndReason = "done" | "stop";
+
 export type WeekTrackedCloseHooks = Readonly<{
   identityBatch?: (batch: Readonly<{ rowCount: number; retainedIdentityCount: number }>) => void;
 }>;
@@ -554,10 +564,15 @@ export function closeOpenTrackedIntervals(
   database: Database.Database,
   token: WeekMutationToken,
   endedAt: string,
+  endReason: TimeEntryEndReason,
   scope: WeekTrackedCloseScope,
   hooks: WeekTrackedCloseHooks = {},
 ): void {
   assertToken(token);
+  const closedAt = parseWeekTimestamp(endedAt, "tracked close end");
+  if (closedAt === null || (endReason !== "done" && endReason !== "stop")) {
+    throw new Error("tracked close outcome domain mismatch");
+  }
   const predicate = scope.kind === "all"
     ? "ended_at IS NULL"
     : scope.kind === "task"
@@ -566,7 +581,42 @@ export function closeOpenTrackedIntervals(
   const scopeBindings = scope.kind === "all"
     ? []
     : [scope.kind === "task" ? scope.taskId : scope.entryId];
-  const close = database.prepare(`UPDATE time_entries SET ended_at = ?
+
+  // Validate the complete future classified set before the first write. The
+  // source scan is keyset-batched and guarded so even admitted legacy open
+  // rows cannot be turned into invalid v24 forest history. Callers own the
+  // surrounding transaction, so a failure also rolls back their sibling work.
+  const candidateColumns = `CASE WHEN typeof(id)='integer' AND id BETWEEN 1 AND 9007199254740991
+        THEN id ELSE NULL END AS id,
+      CASE WHEN typeof(started_at)='text'
+        THEN CASE WHEN octet_length(started_at)=24 THEN started_at ELSE NULL END
+        ELSE NULL END AS startedAt`;
+  const firstCandidates = database.prepare(`SELECT ${candidateColumns}
+    FROM time_entries
+    WHERE ${predicate}
+    ORDER BY id LIMIT ?`);
+  const nextCandidates = database.prepare(`SELECT ${candidateColumns}
+    FROM time_entries
+    WHERE ${predicate} AND id > ?
+    ORDER BY id LIMIT ?`);
+  let after: number | null = null;
+  for (;;) {
+    const rows = (after === null
+      ? firstCandidates.all(...scopeBindings, WEEK_PROJECTION_BATCH_SIZE)
+      : nextCandidates.all(...scopeBindings, after, WEEK_PROJECTION_BATCH_SIZE)
+    ) as Array<{ id: number | null; startedAt: string | null }>;
+    if (rows.length === 0) break;
+    for (const row of rows) {
+      if (!safePositiveId(row.id)) throw new Error("tracked close id domain mismatch");
+      const startedAt = parseWeekTimestamp(row.startedAt, "tracked close start");
+      if (startedAt === null || closedAt < startedAt) {
+        throw new Error("tracked close timestamp domain mismatch");
+      }
+      after = row.id;
+    }
+  }
+
+  const close = database.prepare(`UPDATE time_entries SET ended_at = ?, end_reason = ?
     WHERE id IN (
       SELECT id FROM time_entries WHERE ${predicate}
       ORDER BY id LIMIT ?
@@ -577,6 +627,7 @@ export function closeOpenTrackedIntervals(
     const returnedIds: number[] = [];
     const rows = close.iterate(
       endedAt,
+      endReason,
       ...scopeBindings,
       WEEK_PROJECTION_BATCH_SIZE,
     ) as Iterable<{ id: number }>;

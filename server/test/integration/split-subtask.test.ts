@@ -194,9 +194,10 @@ describe("the split transaction", () => {
 
     expect((await request(app).get("/api/timer/current").expect(200)).body).toBeNull();
     const entry = db
-      .prepare("SELECT ended_at AS endedAt FROM time_entries WHERE task_id = ?")
-      .get(original.id) as { endedAt: string | null };
+      .prepare("SELECT ended_at AS endedAt,end_reason AS endReason FROM time_entries WHERE task_id = ?")
+      .get(original.id) as { endedAt: string | null; endReason: string | null };
     expect(entry.endedAt).not.toBeNull();
+    expect(entry.endReason).toBe("stop");
   });
 
   it("clears the current-draw pointer when the split original was the persisted draw", async () => {

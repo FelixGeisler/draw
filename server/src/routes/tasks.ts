@@ -400,7 +400,7 @@ tasksRouter.post("/:id/split", (req, res) => {
     // at split time, mirroring what completion does (ADR-12). Its minutes
     // stay attributed to the original, whose stats survive archiving.
     const weekMutation = beginWeekIntervalMutation();
-    closeOpenTrackedIntervalsForTask(weekMutation, new Date().toISOString(), id);
+    closeOpenTrackedIntervalsForTask(weekMutation, new Date().toISOString(), "stop", id);
     finalizeWeekIntervalMutation(weekMutation);
     // The original can normally never BE the current draw (too big = not
     // drawable), but the endpoint has no size gate, so an API/MCP caller can

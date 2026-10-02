@@ -1,6 +1,6 @@
 /**
  * Generated from every checked-in fresh schema, supported legacy fixture, and
- * the compiled v1→v23 migration chain. SQL hashes use schemaSqlTokens
+ * the compiled v1→v24 migration chain. SQL hashes use schemaSqlTokens
  * normalization; byte caps include LF and CRLF checkout forms. Keep this
  * manifest in lockstep with migrations and schema.sql.
  */
@@ -528,7 +528,9 @@ export const RESTORE_SCHEMA_OBJECTS = [
   ["trigger", "week_task_fixed_slots_au_dirty", "task_fixed_slots", 0, 234, "83f887b773b5d626cf39fc693eae15b63dc568a594e7531585951875e62297dc"],
   ["trigger", "week_time_entries_ad_dirty_delete", "time_entries", 0, 287, "e54531413c59eda2850f27faecaafd2cc3921f21b45f6bafd41b4728bc3abdb7"],
   ["trigger", "week_time_entries_ai_dirty", "time_entries", 0, 195, "8df45525b1d59756615851de5dd42cd3d66c95a34c233ca51d9a055fa0403adf"],
-  ["trigger", "week_time_entries_au_dirty", "time_entries", 0, 232, "f7cd5af40e299196e0aae738396f447231fc7bc92fabfa351f9f7226f51fdeaa"]
+  ["trigger", "week_time_entries_au_dirty", "time_entries", 0, 232, "f7cd5af40e299196e0aae738396f447231fc7bc92fabfa351f9f7226f51fdeaa"],
+  ["table", "time_entries", "time_entries", 1, 341, "7d1449d34f47960357ebd7f0019654a5f108227774d97cf537a1a5bec5886fdf"],
+  ["index", "idx_time_entries_forest", "time_entries", 1, 90, "3eb18846ec7abd7dec02423b6140b5c0843dc9e1f8801ecf9137270c130cb753"]
 ] as const;
 
 export const RESTORE_SCHEMA_VERSIONS: Readonly<Record<number, readonly number[]>> = {
@@ -1042,5 +1044,11 @@ export const RESTORE_SCHEMA_VERSIONS: Readonly<Record<number, readonly number[]>
     21, 32, 31, 60, 20, 8, 61, 55, 27, 25, 40, 62, 41, 50, 53, 33, 22, 63,
     28, 14, 34, 42, 43, 44, 45, 46, 47, 29,
     64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79
+  ],
+  "24": [
+    0, 56, 57, 58, 1, 2, 59, 3, 35, 30, 4, 5, 54, 36, 37, 48, 49, 6,
+    21, 32, 31, 60, 20, 8, 61, 55, 27, 25, 40, 62, 41, 50, 53, 33, 22, 63,
+    28, 80, 34, 42, 43, 44, 45, 46, 47, 29,
+    64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 81
   ]
 };
