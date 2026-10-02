@@ -4604,7 +4604,9 @@ restore lease rejects active work, retains every faulted/retiring worker through
 an exit promise, and closes/proves all worker exits before ADR-26's
 Push/checkpoint/last-connection/swap sequence. Replacement, restore and shutdown
 cannot overtake a retiring native reader. Admission stays closed through the
-complete live reopen/migration/v23 validation proof. A failed proof latches Week
+complete live reopen/migration/current-v24 validation proof, including the
+unchanged v23 Week projection structure and equivalence checks described above.
+A failed proof latches Week
 unavailable and opens no worker until a later proven recovery; committed data
 rotates the cursor key even when its reopen proof fails, while pre-commit failure
 retains the key. Successful recovery recreates lazily. Shutdown closes the worker.

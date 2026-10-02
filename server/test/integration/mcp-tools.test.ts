@@ -677,6 +677,45 @@ describe("complete_task invariants", () => {
 });
 
 describe("timer invariants", () => {
+  it("keeps the first outcome in a real MCP Stop versus REST Done close race", async () => {
+    const task = (await callTool("create_task", {
+      title: "MCP close race",
+      categoryId: 1,
+      effortMinutes: 5,
+    })).json<TaskJson>();
+    await callTool("start_timer", { taskId: task.id });
+
+    const [mcpStop, restDone] = await Promise.all([
+      callTool("stop_timer"),
+      fetch(`${base}/api/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ status: "done" }),
+      }),
+    ]);
+    expect(restDone.status).toBe(200);
+    if (mcpStop.isError) {
+      expect(mcpStop.text).toContain("no running timer");
+    } else {
+      expect(mcpStop.json<{ endedAt: string }>().endedAt).toBeTruthy();
+    }
+
+    const database = await testDb();
+    const first = database.prepare(
+      "SELECT ended_at AS endedAt,end_reason AS endReason FROM time_entries WHERE task_id=?",
+    ).get(task.id) as { endedAt: string; endReason: "done" | "stop" };
+    expect(first.endedAt).toBeTruthy();
+    expect(["done", "stop"]).toContain(first.endReason);
+
+    const laterStop = await callTool("stop_timer");
+    expect(laterStop.isError).toBe(true);
+    expect(database.prepare(
+      "SELECT ended_at AS endedAt,end_reason AS endReason FROM time_entries WHERE task_id=?",
+    ).get(task.id)).toEqual(first);
+    database.close();
+    expect((await fetch(`${base}/api/tasks/${task.id}`, { method: "DELETE" })).status).toBe(200);
+  });
+
   it("start_timer closes any previously running entry — never two open", async () => {
     const db = await testDb();
     await callTool("start_timer", { taskId: readCh1Id });

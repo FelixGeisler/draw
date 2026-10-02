@@ -135,6 +135,10 @@ describe("GET /api/forest request contract", () => {
       expect(chunked.status).toBe(400);
       expect(chunked.headers["cache-control"]).toBe("no-store");
       expect(JSON.parse(chunked.body)).toEqual({ error: "invalid-forest-request" });
+      expect(parseForestQueryTarget("/api/forest?beforeId=é")).toBeUndefined();
+      const encodedNonAscii = await request(app).get("/api/forest?beforeId=é");
+      expect(encodedNonAscii.status).toBe(400);
+      expect(encodedNonAscii.body).toEqual({ error: "invalid-forest-request" });
       const head = await rawRequest(server, "HEAD", "/api/forest");
       expect(head.status).toBe(400);
       expect(head.headers["cache-control"]).toBe("no-store");
@@ -217,6 +221,29 @@ describe("GET /api/forest bounded feed", () => {
     });
   });
 
+  it("admits the upper safe id boundary without rounding", async () => {
+    const database = await testDb();
+    database.prepare(
+      "INSERT INTO time_entries(id,task_id,started_at,ended_at,end_reason) VALUES (?,?,?,?,?)",
+    ).run(
+      9_007_199_254_740_991,
+      taskId,
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.001Z",
+      "done",
+    );
+    database.close();
+
+    const response = await request(app).get("/api/forest").expect(200);
+    expect(response.body.trees).toEqual([{
+      id: 9_007_199_254_740_991,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      endedAt: "2026-01-01T00:00:00.001Z",
+      endReason: "done",
+    }]);
+    expect(response.body.nextBeforeId).toBeNull();
+  });
+
   it("implements 99/100/101 lookahead, exclusive cursors, gaps and exhaustion", async () => {
     for (const count of [99, 100, 101]) {
       const database = await testDb();
@@ -247,18 +274,49 @@ describe("GET /api/forest bounded feed", () => {
     expect(empty.body).toEqual({ trees: [], nextBeforeId: null });
   });
 
-  it("fails the whole page on a read/contract violation", async () => {
+  it("reads and validates only the selected 101-row keyset window", async () => {
+    const database = await testDb();
+    database.pragma("ignore_check_constraints=ON");
+    const malformedId = Number(database.prepare(
+      "INSERT INTO time_entries(task_id,started_at,ended_at,end_reason) VALUES (?,?,?,?)",
+    ).run(taskId, "2026-01-02T00:00:00.000Z", "2026-01-01T00:00:00.000Z", "done").lastInsertRowid);
+    database.pragma("ignore_check_constraints=OFF");
+    insertRows(database, 101);
+    database.close();
+
+    const first = await request(app).get("/api/forest").expect(200);
+    expect(first.body.trees).toHaveLength(100);
+    expect(first.body.nextBeforeId).toBe(first.body.trees[99].id);
+    expect(first.body.trees.every((tree: { id: number }) => tree.id > malformedId)).toBe(true);
+
+    const second = await request(app)
+      .get(`/api/forest?beforeId=${first.body.nextBeforeId}`)
+      .expect(500);
+    expect(second.body).toEqual({ error: "forest-read-failed" });
+  });
+
+  it("fails the whole page on selected contract violations and actual database read errors", async () => {
     const database = await testDb();
     database.pragma("ignore_check_constraints=ON");
     database.prepare(
       "INSERT INTO time_entries(task_id,started_at,ended_at,end_reason) VALUES (?,?,?,?)",
     ).run(taskId, "2026-01-02T00:00:00.000Z", "2026-01-01T00:00:00.000Z", "done");
     database.pragma("ignore_check_constraints=OFF");
-    database.close();
 
-    const response = await request(app).get("/api/forest");
-    expect(response.status).toBe(500);
-    expect(response.body).toEqual({ error: "forest-read-failed" });
-    expect(response.headers["cache-control"]).toBe("no-store");
+    const contractFailure = await request(app).get("/api/forest");
+    expect(contractFailure.status).toBe(500);
+    expect(contractFailure.body).toEqual({ error: "forest-read-failed" });
+    expect(contractFailure.headers["cache-control"]).toBe("no-store");
+
+    database.exec("SAVEPOINT forest_read_failure; ALTER TABLE time_entries RENAME TO time_entries_unavailable");
+    try {
+      const readFailure = await request(app).get("/api/forest");
+      expect(readFailure.status).toBe(500);
+      expect(readFailure.body).toEqual({ error: "forest-read-failed" });
+      expect(readFailure.headers["cache-control"]).toBe("no-store");
+    } finally {
+      database.exec("ROLLBACK TO forest_read_failure; RELEASE forest_read_failure");
+      database.close();
+    }
   });
 });

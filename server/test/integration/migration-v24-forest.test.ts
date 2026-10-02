@@ -135,6 +135,18 @@ describe("schema v24 session outcomes", () => {
       database.prepare(
         "INSERT INTO time_entries(id,task_id,started_at,ended_at,end_reason) VALUES (?,?,?,?,?)",
       ).run(
+        9_007_199_254_740_991,
+        taskId,
+        "2026-01-01T00:00:00.000Z",
+        "2026-01-01T00:00:00.000Z",
+        "stop",
+      );
+      expect(() => validateV24ClassifiedRows(database)).not.toThrow();
+      database.prepare("DELETE FROM time_entries WHERE id=9007199254740991").run();
+
+      database.prepare(
+        "INSERT INTO time_entries(id,task_id,started_at,ended_at,end_reason) VALUES (?,?,?,?,?)",
+      ).run(
         9_007_199_254_740_992n,
         taskId,
         "2026-01-01T00:00:00.000Z",

@@ -34,23 +34,27 @@ function readForestPage(beforeId: number | null): {
 } {
   const cursorPredicate = beforeId === null ? "" : "AND id < ?";
   const bindings = beforeId === null ? [] : [beforeId];
-  const malformed = db.prepare(`SELECT 1 FROM time_entries
-    WHERE end_reason IS NOT NULL ${cursorPredicate} AND NOT (
-      typeof(id)='integer' AND id BETWEEN 1 AND 9007199254740991
-      AND typeof(end_reason)='text' AND end_reason IN ('done','stop')
-      AND ended_at IS NOT NULL
-      AND CASE WHEN typeof(started_at)='text'
-               THEN CASE WHEN octet_length(started_at)=24 THEN 1 ELSE 0 END ELSE 0 END=1
-      AND CASE WHEN typeof(ended_at)='text'
-               THEN CASE WHEN octet_length(ended_at)=24 THEN 1 ELSE 0 END ELSE 0 END=1
-    ) LIMIT 1`).get(...bindings);
-  if (malformed) throw new Error("forest classified row storage domain");
-
-  const rows = db.prepare(`SELECT id,started_at AS startedAt,ended_at AS endedAt,
-      end_reason AS endReason
+  // The index-ordered keyset selection is the only history read. Storage-class
+  // and byte guards stay inside that same 101-row window so malformed large
+  // values are represented as null rather than materialized into JavaScript.
+  // The loop below then validates every selected row, including lookahead.
+  const rows = db.prepare(`SELECT id,
+      CASE WHEN typeof(started_at)='text'
+        THEN CASE WHEN octet_length(started_at)=24 THEN started_at ELSE NULL END
+        ELSE NULL END AS startedAt,
+      CASE WHEN typeof(ended_at)='text'
+        THEN CASE WHEN octet_length(ended_at)=24 THEN ended_at ELSE NULL END
+        ELSE NULL END AS endedAt,
+      CASE WHEN typeof(end_reason)='text' AND end_reason IN ('done','stop')
+        THEN end_reason ELSE NULL END AS endReason
     FROM time_entries
     WHERE end_reason IS NOT NULL ${cursorPredicate}
-    ORDER BY id DESC LIMIT 101`).all(...bindings) as ForestTree[];
+    ORDER BY id DESC LIMIT 101`).all(...bindings) as Array<{
+      id: number;
+      startedAt: string | null;
+      endedAt: string | null;
+      endReason: string | null;
+    }>;
 
   let previous = beforeId ?? WEEK_MAX_SAFE_ID + 1;
   for (const row of rows) {
@@ -72,10 +76,10 @@ function readForestPage(beforeId: number | null): {
   }
 
   const trees = rows.slice(0, PAGE_SIZE).map(({ id, startedAt, endedAt, endReason }) => ({
-    id,
-    startedAt,
-    endedAt,
-    endReason,
+    id: id as number,
+    startedAt: startedAt as string,
+    endedAt: endedAt as string,
+    endReason: endReason as ForestEndReason,
   }));
   return {
     trees,

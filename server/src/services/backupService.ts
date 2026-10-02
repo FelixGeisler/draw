@@ -918,7 +918,8 @@ function swapIn(
   }
 
   // From this point onward admission can reopen only after the complete live
-  // open+migration+v23 validation path succeeds. Mark it before the close so
+  // open/migration/current-v24 validation path succeeds (including the
+  // preserved v23 Week projection proof). Mark it before the close so
   // even a close/reopen fault remains fail-closed.
   onLiveReopenRequired();
   checkpointAndCloseLiveDatabaseForSwap();

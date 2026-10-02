@@ -1,7 +1,12 @@
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import type express from "express";
 import { freshApp, testDb } from "../helpers.js";
+import {
+  beginWeekMutation,
+  closeOpenTrackedIntervals,
+  finishWeekMutation,
+} from "../../src/schemaV23.js";
 
 let app: express.Express;
 
@@ -76,6 +81,106 @@ describe("authoritative session outcomes", () => {
       .expect(200);
     expect(response.body.recurring).toBe(true);
     expect((await entries(recurring.id))[0].endReason).toBe("done");
+  });
+
+  it("validates every future classified domain before all/task/current writes and rolls back", async () => {
+    const allSource = await createTask("unsafe all source");
+    const allReplacement = await createTask("unsafe all replacement");
+    let database = await testDb();
+    database.prepare(
+      "INSERT INTO time_entries(id,task_id,started_at) VALUES (?,?,?)",
+    ).run(9_007_199_254_740_992n, allSource.id, "2026-01-01T00:00:00.000Z");
+    database.close();
+    await request(app).post(`/api/tasks/${allReplacement.id}/timer/start`).expect(500);
+    expect(await entries(allReplacement.id)).toEqual([]);
+    expect((await entries(allSource.id))[0]).toMatchObject({ endedAt: null, endReason: null });
+    await request(app).delete(`/api/tasks/${allSource.id}`).expect(200);
+
+    const lowIdSource = await createTask("low id all source");
+    const lowIdReplacement = await createTask("low id all replacement");
+    database = await testDb();
+    database.prepare(
+      "INSERT INTO time_entries(id,task_id,started_at) VALUES (?,?,?)",
+    ).run(0, lowIdSource.id, "2026-01-01T00:00:00.000Z");
+    database.close();
+    await request(app).post(`/api/tasks/${lowIdReplacement.id}/timer/start`).expect(500);
+    expect(await entries(lowIdReplacement.id)).toEqual([]);
+    expect((await entries(lowIdSource.id))[0]).toMatchObject({ endedAt: null, endReason: null });
+    await request(app).delete(`/api/tasks/${lowIdSource.id}`).expect(200);
+
+    const taskScope = await createTask("malformed task scope");
+    database = await testDb();
+    database.prepare(
+      "INSERT INTO time_entries(task_id,started_at) VALUES (?,?)",
+    ).run(taskScope.id, "not-a-canonical-timestamp");
+    database.close();
+    await request(app).patch(`/api/tasks/${taskScope.id}`).send({ status: "done" }).expect(500);
+    database = await testDb();
+    expect(database.prepare("SELECT status FROM tasks WHERE id=?").get(taskScope.id)).toEqual({
+      status: "open",
+    });
+    expect(database.prepare(
+      "SELECT COUNT(*) AS n FROM completions WHERE task_id=?",
+    ).get(taskScope.id)).toEqual({ n: 0 });
+    database.close();
+    expect((await entries(taskScope.id))[0]).toMatchObject({ endedAt: null, endReason: null });
+    await request(app).delete(`/api/tasks/${taskScope.id}`).expect(200);
+
+    const currentScope = await createTask("future current scope");
+    database = await testDb();
+    database.prepare(
+      "INSERT INTO time_entries(task_id,started_at) VALUES (?,?)",
+    ).run(currentScope.id, "9999-12-31T23:59:59.999Z");
+    database.close();
+    await request(app).post("/api/timer/stop").expect(500);
+    expect((await entries(currentScope.id))[0]).toMatchObject({ endedAt: null, endReason: null });
+    await request(app).delete(`/api/tasks/${currentScope.id}`).expect(200);
+
+    const invalidEnd = await createTask("invalid end domain");
+    database = await testDb();
+    const entryId = Number(database.prepare(
+      "INSERT INTO time_entries(task_id,started_at) VALUES (?,?)",
+    ).run(invalidEnd.id, "2026-01-01T00:00:00.000Z").lastInsertRowid);
+    expect(() => database.transaction(() => {
+      const token = beginWeekMutation(database);
+      closeOpenTrackedIntervals(
+        database,
+        token,
+        "2026-01-01T00:00:00.00Z",
+        "done",
+        { kind: "identity", entryId },
+      );
+      finishWeekMutation(database, token);
+    })()).toThrow(/outcome domain/);
+    database.close();
+    expect((await entries(invalidEnd.id))[0]).toMatchObject({ endedAt: null, endReason: null });
+  });
+
+  it("classifies an admitted legacy open row at zero duration and omits it from Week", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-05T06:07:08.009Z"));
+    try {
+      const task = await createTask("legacy zero duration");
+      const database = await testDb();
+      database.prepare(
+        "INSERT INTO time_entries(task_id,started_at) VALUES (?,?)",
+      ).run(task.id, "2026-04-05T06:07:08.009Z");
+      database.close();
+
+      await request(app).post("/api/timer/stop").expect(200);
+      expect((await entries(task.id))[0]).toMatchObject({
+        startedAt: "2026-04-05T06:07:08.009Z",
+        endedAt: "2026-04-05T06:07:08.009Z",
+        endReason: "stop",
+      });
+      const after = await testDb();
+      expect(after.prepare(
+        "SELECT COUNT(*) AS n FROM week_interval_access WHERE source_kind=2",
+      ).get()).toEqual({ n: 0 });
+      after.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps first committed close immutable and reopening never rewrites its reason", async () => {

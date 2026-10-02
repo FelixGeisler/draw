@@ -366,6 +366,49 @@ describe("POST /api/backup/import — round trip", () => {
   it("keeps the previous material files as files.bak", async () => {
     expect(fs.existsSync(path.join(dataDir(), "files.bak"))).toBe(true);
   });
+
+  it("successfully exports and imports classified v24 Done and Stop sessions", async () => {
+    await request(app).post(`/api/tasks/${taskId}/timer/start`).expect(200);
+    await request(app).post("/api/timer/stop").expect(200);
+    await request(app).post(`/api/tasks/${taskId}/timer/start`).expect(200);
+    await request(app).patch(`/api/tasks/${taskId}`).send({ status: "done" }).expect(200);
+
+    let database = await testDb();
+    const before = database.prepare(
+      `SELECT id,task_id AS taskId,started_at AS startedAt,ended_at AS endedAt,
+              end_reason AS endReason
+       FROM time_entries WHERE end_reason IS NOT NULL ORDER BY id`,
+    ).all() as Array<{
+      id: number;
+      taskId: number;
+      startedAt: string;
+      endedAt: string;
+      endReason: "done" | "stop";
+    }>;
+    expect(before.map((row) => row.endReason)).toEqual(["stop", "done"]);
+    database.close();
+
+    const { body: archive } = await exportArchive();
+    database = await testDb();
+    database.prepare("DELETE FROM time_entries").run();
+    database.close();
+    expect((await request(app).get("/api/forest").expect(200)).body.trees).toEqual([]);
+
+    await importArchive(archive).then((response) => expect(response.status).toBe(200));
+    database = await testDb();
+    expect(database.pragma("user_version", { simple: true })).toBe(24);
+    expect(database.prepare(
+      `SELECT id,task_id AS taskId,started_at AS startedAt,ended_at AS endedAt,
+              end_reason AS endReason
+       FROM time_entries WHERE end_reason IS NOT NULL ORDER BY id`,
+    ).all()).toEqual(before);
+    database.close();
+    const forest = await request(app).get("/api/forest").expect(200);
+    expect(forest.body.trees.map((tree: { endReason: string }) => tree.endReason)).toEqual([
+      "done",
+      "stop",
+    ]);
+  });
 });
 
 describe("POST /api/backup/import — rejections (live data untouched)", () => {
