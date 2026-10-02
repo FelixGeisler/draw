@@ -5,6 +5,7 @@ import {
   type UseQueryOptions,
 } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { forestWriteMayHaveCommitted, resetForest } from "../lib/forest";
 import { announceAchievements } from "./useGamification";
 import type {
   Category,
@@ -131,6 +132,9 @@ export function useUpdateTask() {
       api.patch<CompletionResponse>(`/api/tasks/${id}`, patch),
     onSuccess: (data, variables) => {
       invalidate(taskMutationCanChangeCompletion("update", variables));
+      // Done can close this task's session; archiving a child can complete a
+      // separately timed parent. Reopen and ordinary edits never reset it.
+      if (variables.status === "done" || variables.status === "archived") resetForest(qc);
       // Completing a task may have closed its running timer server-side.
       qc.invalidateQueries({ queryKey: ["timer"] });
       // A subtask completion can auto-complete its parent (#111, ADR-32) —
@@ -141,14 +145,28 @@ export function useUpdateTask() {
         ...(data.parentCompletion?.newAchievements ?? []),
       ]);
     },
+    onError: (error, variables) => {
+      const completing = variables.status === "done";
+      const archiving = variables.status === "archived";
+      if ((completing || archiving) && forestWriteMayHaveCommitted(error, completing ? [404, 409] : [])) {
+        resetForest(qc);
+      }
+    },
   });
 }
 
 export function useDeleteTask() {
   const invalidate = useInvalidateTasks();
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api.delete<{ ok: boolean }>(`/api/tasks/${id}`),
-    onSuccess: () => invalidate(taskMutationCanChangeCompletion("delete")),
+    onSuccess: () => {
+      invalidate(taskMutationCanChangeCompletion("delete"));
+      resetForest(qc);
+    },
+    onError: (error) => {
+      if (forestWriteMayHaveCommitted(error, [404])) resetForest(qc);
+    },
   });
 }
 
@@ -171,10 +189,14 @@ export function useSplitTask() {
     }) => api.post<Task[]>(`/api/tasks/${id}/split`, { parts }),
     onSuccess: () => {
       invalidate(taskMutationCanChangeCompletion("split"));
+      resetForest(qc);
       // The split closes a running time entry on the original server-side
       // (ADR-12 mirror) — refresh the TimerBar now instead of letting it
       // show a dead timer until the next 60 s poll.
       qc.invalidateQueries({ queryKey: ["timer"] });
+    },
+    onError: (error) => {
+      if (forestWriteMayHaveCommitted(error)) resetForest(qc);
     },
   });
 }

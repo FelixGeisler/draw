@@ -553,3 +553,39 @@ otherwise it is null, including exactly 100 rows. Gaps and an out-of-history
 cursor are normal. Any SQL or contract failure returns exact
 `forest-read-failed` JSON and no partial page. The read performs no write,
 repair, task join, external call or running-session projection (ADR-77).
+
+== 6.14 Session forest publication and recovery
+
+Stats mounts one global Session forest independently of date, project and goal
+filters. A page-one, Newest, reload, focus refresh or accepted mutation reset
+starts one monotonically increasing generation and concurrently reads
+`/api/forest` plus unchanged `/api/timer/current`. Exact-key decoders validate
+both complete responses before the generation publishes. The timer decoder is
+the same function used by the existing TimerBar query. Cancellation and a
+final generation check prevent late page or current responses from replacing a
+newer snapshot.
+
+The client retains one finished page of at most 100 trees and at most one
+current tree. **Older** replaces that page with the validated exclusive cursor;
+**Newest** replaces it with cursorless page one. There is no page array,
+back-stack, virtualizer, age cutoff or optimistic result. An Older failure keeps
+the prior page and retries the same cursor. An ordinary Newest/focus failure may
+keep prior validated data. Mutation resets clear first, so either-source failure
+keeps the forest empty until Retry completes a fresh pair; other Stats sections
+remain mounted.
+
+Start success, every Stop settlement, completion races, archive success,
+delete races or ambiguous transport, split ambiguity, and backup replacement or
+ambiguous post-request failure use the shared destructive reset. A validated
+pre-write 4xx may preserve the snapshot. Planning edits, reorder, reparent,
+reopen, goal deletion, estimate expiry and focus Exit do not reset it solely for
+that action. Existing window-focus behavior is retained without a new poll,
+cross-tab protocol or convergence promise.
+
+Finished `done` trees are leafy and labelled **Living**; `stop` trees are bare
+and labelled **Dead**, with equal footprint and ordinary prominence. The
+current leafy tree is labelled **Growing** and scales from elapsed minutes `m`
+by `0.72 + 0.28 × m/(m+30)` on the local elapsed-display tick. Text exposes
+state, canonical source time and duration; SVG is decorative, task text is
+absent, and reduced motion removes visual transitions without changing the
+computed scale or data.

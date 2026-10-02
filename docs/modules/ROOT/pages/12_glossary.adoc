@@ -65,6 +65,9 @@ safe/canonical rows to emit at most 100 strictly descending unique trees, and
 uses exclusive `beforeId` with nullable exhaustion. Gaps from legacy omission
 or deletion are expected.
 
+|*Session forest*
+|The global Stats presentation of one current working session plus one replace-only page of at most 100 finished Forest-feed rows. Done is a leafy **Living** tree, Stop is an equally prominent bare **Dead** tree, and current is **Growing** from elapsed time alone. It atomically publishes strict Forest/current responses, exposes state/time/duration but no task text, and retains no page stack, optimistic outcome, persisted growth stage, history cutoff or new synchronization cadence (ADR-77).
+
 |*Recurring task*
 |A task with `recur_every_days`: it never closes. Its `due_date` is its *next occurrence* — the first one as entered, every later one set to `completion date + interval` — and the card is out of the deck until that day (ADR-6, #205). Without a due date it has no schedule to wait for and is always drawable
 
