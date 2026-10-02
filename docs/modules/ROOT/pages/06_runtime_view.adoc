@@ -305,9 +305,14 @@ User commits           → POST /api/tasks            (one umbrella parent, no e
 
 == 6.4 Timer invariant
 
-`POST /api/tasks/:id/timer/start` closes any running entry and opens a new one in
-one transaction — at most one `time_entries` row with `ended_at IS NULL` exists.
-The TimerBar restores itself after reload from `GET /api/timer/current`.
+`POST /api/tasks/:id/timer/start` closes any running entry `stop` and opens a
+new one in one transaction — at most one `time_entries` row with `ended_at IS
+NULL` exists. Explicit Stop also records `stop`; direct/recurring and real
+automatic parent completion record `done`; split records `stop`. The guarded
+close writes timestamp and reason atomically, so the first committed closer wins.
+Archive/reopen/view-only exits do not close, while task deletion cascades the row
+without classifying it (ADR-77). The TimerBar restores itself after reload from
+`GET /api/timer/current`, the sole running-session source.
 
 == 6.5 Focus mode (derived view)
 
@@ -414,7 +419,7 @@ are copied wrappers with no `.database`, iterator, path or native capability.
 A restore therefore changes the private handle without invalidating the facade.
 
 For import, the staged file is opened with `trusted_schema=OFF`. Its real
-`user_version` selects a compiled v1–v23 manifest. The first schema read returns
+`user_version` selects a compiled v1–v24 manifest. The first schema read returns
 only bounded type/name/owner/root-page, `typeof(sql)` and SQL byte length.
 Unknown, missing, virtual, view, trigger, deceptive-shadow or oversized objects
 reject before any SQL text, integrity check, migration, virtual-module access or
@@ -422,6 +427,9 @@ source row is read. SQL is then fetched one known object at a time under its
 compiled per-object cap and token-normalized hash. Only an exact preflight may
 continue through the existing version validator/migration, credential/claim
 sanitation, second physical rewrite, files-first/database-last swap and reopen.
+A stamped v24 file additionally validates every classified session's safe id,
+canonical 24-byte four-digit UTC timestamps, nonnegative interval and closed
+reason before import swap; legacy null-reason history remains admissible.
 Restore first takes the exclusive Week lease; an active Week returns the exact
 409 without changing Push/live files. When idle, worker exit and read-connection
 closure precede Push restore, checkpoint and last-connection proof. A committed
@@ -466,7 +474,7 @@ remains owned by an exit promise; no replacement is created, and neither
 restore nor shutdown can proceed, until that worker has actually exited and
 released its native reader.
 
-One read transaction requires ready equal-generation schema v23, runs the
+One read transaction requires schema v24 with the ready equal-generation v23 Week projection, runs the
 four-branch RTree/deadline-index `UNION ALL` with continuation in every branch
 and one ordered `LIMIT 101`, validates reached source/companion values, then
 fetches at most 100 title prefixes one result at a time. Complete records defer;
@@ -474,7 +482,7 @@ only a record that cannot fit an empty page is truncated on a UTF-8 code-point
 boundary. The exact envelope plus cursor stays at or below 131,072 UTF-8 bytes.
 Success and recoverable errors are JSON with `Cache-Control: no-store`; the GET
 never repairs, falls back, writes, retries or makes an external request.
-Restore admission remains closed until the complete live reopen/migration/v23
+Restore admission remains closed until the complete live reopen/migration/v24
 validation path reports success. A failed proof leaves Week explicitly
 unavailable with no lazy worker reopen; a later proven recovery clears that
 latch. The cursor key rotates at the database commit point even when the
@@ -520,3 +528,21 @@ unpaged task/goal observers and computations do not exist. After that subtree
 unmounts, only its exact inactive `status=open`, `status=all`, and active-goal
 queries are cancelled and removed; another active observer is preserved.
 Leaving Week remounts List or **Due dates** and refetches the ordinary data.
+
+== 6.13 Bounded forest read
+
+After ADR-50 authentication, the all-method forest route sets `no-store` and
+checks the raw request target before any read. Only bodyless `GET /api/forest`
+and canonical `?beforeId=<positive-safe-decimal>` are admitted under 2,048
+bytes. HEAD receives bodyless 400; every other rejected form receives exact
+`invalid-forest-request` JSON.
+
+The route selects classified finished `time_entries` in descending id order,
+optionally below the exclusive cursor, with `LIMIT 101`. It validates every
+selected safe identity, canonical timestamp, nonnegative interval and
+`done|stop` reason before serializing anything. At most 100 exact metadata-free
+trees are emitted. A lookahead makes `nextBeforeId` the last emitted id;
+otherwise it is null, including exactly 100 rows. Gaps and an out-of-history
+cursor are normal. Any SQL or contract failure returns exact
+`forest-read-failed` JSON and no partial page. The read performs no write,
+repair, task join, external call or running-session projection (ADR-77).

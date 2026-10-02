@@ -33,6 +33,8 @@ const dataDir = () => process.env.DATA_DIR!;
 const filesDir = () => path.join(dataDir(), "files");
 
 function dropV22Objects(database: Database.Database) {
+  database.exec("DROP INDEX idx_time_entries_forest");
+  database.exec("ALTER TABLE time_entries DROP COLUMN end_reason");
   dropWeekSchema(database);
   database.exec("DROP TABLE task_fixed_slots");
   database.exec("DROP INDEX idx_time_entries_range");
@@ -385,7 +387,7 @@ describe("credential-free backup artifacts", () => {
       .attach("file", v18Bytes, "canonical-v18.zip")
       .expect(200);
     const migrated = await testDb();
-    expect(migrated.pragma("user_version", { simple: true })).toBe(23);
+    expect(migrated.pragma("user_version", { simple: true })).toBe(24);
     expect(() => validateV21Contract(migrated)).not.toThrow();
   });
 

@@ -92,7 +92,7 @@ AI degradation > data integrity > cost transparency > responsiveness.
 |Valid slot/zone data survives; malformed relation/index/zone/instant/order/round-trip/recurrence state rejects before live swap
 
 |Q21
-|Ordinary production code or a crafted v1–v23 restore attempts native/path recovery, schema mutation, protected-name access, unknown executable/virtual schema, or oversized schema SQL
+|Ordinary production code or a crafted v1–v24 restore attempts native/path recovery, schema mutation, protected-name access, unknown executable/virtual schema, or oversized schema SQL
 |The frozen facade rejects before native preparation and leaves bytes unchanged; bounded exact staged preflight rejects before integrity/migration/source access and never swaps live data
 
 |Q22
@@ -110,9 +110,17 @@ AI degradation > data integrity > cost transparency > responsiveness.
 |Q25
 |A user opens, pages, navigates or acts in Week while responses are delayed, a cursor expires, or the viewport narrows
 |Only the active strict-decoded generation renders; action results/refreshes are mount/Week/zone/token-bound, one continuation 400 resets once without mixing, every other failure is explicit, desktop lanes and narrow agenda preserve the same facts/order/actions, authoritative fixed editing retains its entry zone, and Week unmounts/releases inactive exact unpaged List task/goal data without disturbing another observer or performing an implicit write
+
+|Q26
+|Done, Stop, replacement Start, split, parent lifecycle, reopen, archive or destructive delete races to finish or remove a working session
+|The guarded owner writes timestamp plus `done{vbar}stop` atomically and first close wins; non-closing paths leave it running, reopen preserves finished reason, parent exceptions retain their existing transaction, and task/subtree deletion erases its own sessions without classification
+
+|Q27
+|A forest request is malformed, paginates dense/sparse history, reaches zero duration or malformed classified data, or encounters a read failure
+|Authentication remains first; the strict 2,048-byte bodyless raw-target grammar rejects without writes; the 101-row read emits at most 100 exact metadata-free trees with exclusive nullable exhaustion, validates the complete page, keeps no-store, and returns exact 400/500 contracts without partial success
 |===
 
-Q1, Q3 (guardrail), Q6–Q10 and Q13–Q22 are covered by the automated suites
+Q1, Q3 (guardrail), Q6–Q10, Q13–Q22 and Q26–Q27 are covered by the automated suites
 (unit / integration / E2E — see xref:08_crosscutting_concepts.adoc[8.7]). For
 Q23, `week-full-source-oracle.test.ts` scans the source tables with an
 independent test algorithm (it does not import the production projection query

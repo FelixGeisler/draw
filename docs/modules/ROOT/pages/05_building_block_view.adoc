@@ -39,7 +39,7 @@ package "client/ — React SPA" {
 
 package "server/ — Express 5" {
   component "tools/ — MCP adapter\nno domain logic (ADR-19)" as mcpAdapter
-  component "routes/ — HTTP layer\ntasks, draw, timer, goals, stats,\nactivity, gamification, shop, ai, backup" as routes
+  component "routes/ — HTTP layer\ntasks, draw, timer, forest, goals, stats,\nactivity, gamification, shop, ai, backup" as routes
   package "services/ — domain logic" {
     component "drawService\ndrawability, weights,\nwarm-up, current draw" as drawSvc
     component "fixedSlots\nwall-time resolution,\nset/replace/clear" as fixedSvc
@@ -112,6 +112,7 @@ server/src/
 ├── app.ts                   createApp() — Express app + router mounting; serves
 │                            client/dist with SPA fallback in production (ADR-49)
 ├── db.ts                    live SQLite bootstrap/controller, migrations, closed Week path capability
+├── schemaV24.ts             exact session-outcome schema/data/startup/restore contract
 ├── weekWorker.ts            private read-only/query-only Week connection and bounded page query
 ├── schema.sql               Current full schema (fresh installs)
 ├── aiSchemas.ts             zod schemas for structured AI outputs
@@ -122,6 +123,7 @@ server/src/
 │   ├── goals.ts             CRUD with task/material counts
 │   ├── materials.ts         multer upload, download, delete (disk + row)
 │   ├── timer.ts             current/stop; start lives on tasks route
+│   ├── forest.ts            authenticated bounded classified-session feed (ADR-77)
 │   ├── draw.ts              POST /api/draw, POST/GET /api/draw/warmup (#57),
 │   │                        GET /api/draw/current (restore)
 │   ├── stats.ts             GET /api/stats (UTC date-range handling),
@@ -181,7 +183,7 @@ server/src/
 
 |`backupService` + restore preflight
 |Own staged SQLite handles and semantic live snapshot/checkpoint/close/reopen capabilities
-|A bounded exact v1–v23 `sqlite_schema` inventory precedes integrity checks, migration, virtual-module access and source reads; imported SQL is never executed
+|A bounded exact v1–v24 `sqlite_schema` inventory precedes integrity checks, migration, virtual-module access and source reads; imported SQL is never executed
 
 |`gamificationService`
 |Completion side-effects
@@ -294,7 +296,7 @@ other state management.
 ....
 categories 1─n tasks n─1 goals 1─n materials
                 │ 0─1 task_fixed_slots
-                │ 1─n time_entries
+                │ 1─n time_entries (nullable done/stop outcome)
                 │ 1─n completions        achievements (unlocked keys)
                 └─ self-reference: parent_id (breakdown tree, depth 1)
  task_fixed_slots ─┐                    settings (key/value)
@@ -314,6 +316,12 @@ inclusive UTC-day bounds and contains one row with the same `index_id`.
 `week_access_state` records source/built generations and readiness. The source
 tables remain authoritative and titles/descriptions never enter the projection.
 The Phase 2A Week worker consumes it through the RTree-first bounded query.
+Schema v24 keeps each Start as the same `time_entries` identity and adds only
+nullable terminal `end_reason`: `done|stop` is authoritative, legacy ended rows
+remain null/unclassified, and open rows keep both terminal fields null. The
+partial descending-id index backs the metadata-free 101-row `/api/forest`
+lookahead; task deletion retains the existing cascade. `/api/timer/current`
+remains the only running-session source (ADR-77).
 The completed Week client imports the shared closed decoder, resolves one exact
 frozen zone, and renders only explicitly paged records; it never substitutes the
 ordinary unpaged task/goal lists (ADR-75).

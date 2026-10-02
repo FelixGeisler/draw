@@ -300,7 +300,7 @@ function queryPage(request: WeekWorkerRequest): WeekWorkerResult {
         source_generation AS sourceGeneration,built_generation AS builtGeneration
         FROM week_access_state LIMIT 2`).all() as Array<Record<string, unknown>>;
       if (
-        version !== 23 || state.length !== 1 || state[0].singleton !== 1 ||
+        version !== 24 || state.length !== 1 || state[0].singleton !== 1 ||
         state[0].projection_format !== 1 || state[0].ready !== 1 ||
         state[0].sourceGeneration !== state[0].builtGeneration
       ) unavailable();

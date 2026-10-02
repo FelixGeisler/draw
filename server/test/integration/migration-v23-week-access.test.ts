@@ -14,9 +14,11 @@ import {
   validateV23Contract,
 } from "../../src/schemaV23.js";
 import { validateV22Contract } from "../../src/schemaV22.js";
-import { stripV23Schema } from "../schemaFixtures.js";
+import { validateV24Contract } from "../../src/schemaV24.js";
+import { stripV23Schema, stripV24Schema } from "../schemaFixtures.js";
 
 const schema = fs.readFileSync(fileURLToPath(new URL("../../src/schema.sql", import.meta.url)), "utf8");
+const v23 = stripV24Schema(schema);
 const v22 = stripV23Schema(schema);
 
 function open(name: string, sql = v22, version = 22): Database.Database {
@@ -62,7 +64,7 @@ describe("schema v23 compact Week interval projection", () => {
       const stages: WeekMigrationStage[] = [];
       migrateDatabase(database, { afterWeekStage: (stage) => stages.push(stage) });
       expect(stages).toEqual(["create", "build", "validate", "ready", "stamp"]);
-      expect(database.pragma("user_version", { simple: true })).toBe(23);
+      expect(database.pragma("user_version", { simple: true })).toBe(24);
       expect(database.prepare("SELECT * FROM week_access_state").get()).toEqual({
         singleton: 1,
         projection_format: 1,
@@ -95,7 +97,7 @@ describe("schema v23 compact Week interval projection", () => {
       expect(rows).toHaveLength(3);
       expect(rows).not.toContainEqual(expect.objectContaining({ title: expect.anything() }));
       expect(database.prepare("SELECT COUNT(*) AS n FROM week_interval_rtree").get()).toEqual({ n: 3 });
-      expect(() => validateV23Contract(database)).not.toThrow();
+      expect(() => validateV24Contract(database)).not.toThrow();
     } finally {
       database.close();
     }
@@ -139,7 +141,7 @@ describe("schema v23 compact Week interval projection", () => {
   });
 
   it("uses lazy guards, independent fixed/tracked oracles, and lossless coarse candidates", () => {
-    const database = open("v23-lazy", schema, 23);
+    const database = open("v23-lazy", v23, 23);
     database.pragma("foreign_keys=OFF");
     try {
       const fixedLong = insertTask(database, "TOP SECRET fixed long");
@@ -259,7 +261,7 @@ describe("schema v23 compact Week interval projection", () => {
   }, 30_000);
 
   it("keeps full v23 source validation and projection work in bounded keyset batches", () => {
-    const database = open("v23-bounded-batches", schema, 23);
+    const database = open("v23-bounded-batches", v23, 23);
     try {
       const trackedTask = insertTask(database, "bounded tracked source");
       const insertTracked = database.prepare(
@@ -319,7 +321,7 @@ describe("schema v23 compact Week interval projection", () => {
   });
 
   it("rejects a foreign-key violation with the existence-only v23 probe", () => {
-    const database = open("v23-foreign-key-invalid", schema, 23);
+    const database = open("v23-foreign-key-invalid", v23, 23);
     try {
       database.pragma("foreign_keys=OFF");
       database.prepare(
@@ -335,7 +337,7 @@ describe("schema v23 compact Week interval projection", () => {
   });
 
   it("rebuilds dirty logical rows on boot but rejects missing exact trigger structure", () => {
-    const database = open("v23-boot-rebuild", schema, 23);
+    const database = open("v23-boot-rebuild", v23, 23);
     try {
       const task = insertTask(database, "boot rebuild");
       database.prepare("INSERT INTO time_entries(task_id,started_at) VALUES (?,?)").run(
@@ -356,7 +358,7 @@ describe("schema v23 compact Week interval projection", () => {
   });
 
   it("fails generation and index-id exhaustion atomically instead of wrapping", () => {
-    const generation = open("v23-generation-overflow", schema, 23);
+    const generation = open("v23-generation-overflow", v23, 23);
     try {
       const task = insertTask(generation, "generation overflow");
       generation.prepare(`UPDATE week_access_state SET
@@ -370,7 +372,7 @@ describe("schema v23 compact Week interval projection", () => {
       generation.close();
     }
 
-    const index = open("v23-index-overflow", schema, 23);
+    const index = open("v23-index-overflow", v23, 23);
     try {
       const task = insertTask(index, "index overflow");
       index.prepare("UPDATE week_access_state SET ready=1,built_generation=source_generation").run();
@@ -395,7 +397,7 @@ describe("schema v23 compact Week interval projection", () => {
   });
 
   it("marks direct drift dirty, deletes companion/RTree rows, and covers task cascades", () => {
-    const database = open("v23-drift", schema, 23);
+    const database = open("v23-drift", v23, 23);
     try {
       database.prepare(
         "UPDATE week_access_state SET ready=1,built_generation=source_generation WHERE singleton=1",

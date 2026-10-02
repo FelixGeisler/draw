@@ -139,7 +139,7 @@ describe("fixed-slot REST contract", () => {
     ).run(task.id, "2026-10-19T08:00:00.123Z", "2026-10-19T08:45:59.987Z");
     database.prepare(
       "INSERT INTO time_entries(task_id,started_at,ended_at) VALUES (?,?,NULL)",
-    ).run(task.id, "2026-10-20T09:01:02.003Z");
+    ).run(task.id, "2026-09-20T09:01:02.003Z");
     const workBytes = () => database
       .prepare("SELECT id,task_id,started_at,ended_at FROM time_entries WHERE task_id=? ORDER BY id")
       .all(task.id);

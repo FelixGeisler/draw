@@ -307,7 +307,7 @@ describe("migration v6 → v7 re-parents pre-guard nested breakdowns to the root
 describe("migration v2 → v21 (including Push and daily digest)", () => {
   it("bumps user_version to the current schema", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(23);
+    expect(db.pragma("user_version", { simple: true })).toBe(24);
   });
 
   it("creates the xp_ledger table, empty (#230, ADR-62)", async () => {

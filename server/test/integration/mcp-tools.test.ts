@@ -670,6 +670,9 @@ describe("complete_task invariants", () => {
       .prepare("SELECT COUNT(*) AS n FROM time_entries WHERE ended_at IS NULL")
       .get() as { n: number };
     expect(open.n).toBe(0);
+    expect(db.prepare(
+      "SELECT end_reason AS endReason FROM time_entries WHERE task_id=? ORDER BY id DESC LIMIT 1",
+    ).get(goalTaskId)).toEqual({ endReason: "done" });
   });
 });
 
@@ -685,12 +688,19 @@ describe("timer invariants", () => {
       .all() as Array<{ taskId: number }>;
     expect(open).toHaveLength(1);
     expect(open[0].taskId).toBe(parentId);
+    expect(db.prepare(
+      "SELECT end_reason AS endReason FROM time_entries WHERE task_id=? ORDER BY id DESC LIMIT 1",
+    ).get(readCh1Id)).toEqual({ endReason: "stop" });
   });
 
   it("stop_timer stops the running entry and errors when none runs", async () => {
     const stopped = await callTool("stop_timer");
     expect(stopped.isError).toBe(false);
     expect(stopped.json<{ endedAt: string | null }>().endedAt).toBeTruthy();
+    const db = await testDb();
+    expect(db.prepare(
+      "SELECT end_reason AS endReason FROM time_entries WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT 1",
+    ).get()).toEqual({ endReason: "stop" });
 
     const again = await callTool("stop_timer");
     expect(again.isError).toBe(true);

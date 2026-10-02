@@ -23,6 +23,7 @@ import { validateV20Contract } from "../schemaV20.js";
 import { validateV21Contract } from "../schemaV21.js";
 import { validateV22Contract } from "../schemaV22.js";
 import { resetImportedV23Projection, validateV23Contract } from "../schemaV23.js";
+import { resetImportedV24Projection, validateV24Contract } from "../schemaV24.js";
 import { disabledPushDependency, type PushDependency } from "../push/authority.js";
 import { WeekRestoreBusyError, type WeekLiveReopenProof } from "../weekService.js";
 
@@ -795,10 +796,13 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
       if (version === 20) validateV20Contract(staged);
       if (version === 21) validateV21Contract(staged);
       if (version === 22) validateV22Contract(staged);
-      if (version === 23) resetImportedV23Projection(staged);
-      else migrateDatabase(staged);
+      if (version === 24) resetImportedV24Projection(staged);
+      else {
+        if (version === 23) resetImportedV23Projection(staged);
+        migrateDatabase(staged);
+      }
       validateV18Contract(staged);
-      validateV23Contract(staged);
+      validateV24Contract(staged);
       scrubCredentialRows(staged, false);
       if (staged.pragma("integrity_check", { simple: true }) !== "ok") {
         throw new Error("integrity_check failed after migration");
@@ -806,7 +810,7 @@ function stageAndValidate(zipPath: string, stagedDbPath: string, stagedFilesDir:
     } catch (error) {
       throw new BackupError(
         400,
-        `the backup database is corrupt, is missing required tables, or does not satisfy bounded schema preflight or the schema v18 contract, schema v19 contract, schema v20 contract, schema v21 contract, schema v22 contract, or schema v23 contract: ${
+        `the backup database is corrupt, is missing required tables, or does not satisfy bounded schema preflight or the schema v18 contract, schema v19 contract, schema v20 contract, schema v21 contract, schema v22 contract, schema v23 contract, or schema v24 contract: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );

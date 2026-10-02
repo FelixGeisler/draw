@@ -191,7 +191,7 @@ export function completeTask(
   // applies on the recurring path too — the task stays open, but XP was just
   // awarded for the session, so the entry is finished (ADR-12).
   const weekMutation = beginWeekIntervalMutation();
-  closeOpenTrackedIntervalsForTask(weekMutation, now.toISOString(), task.id);
+  closeOpenTrackedIntervalsForTask(weekMutation, now.toISOString(), "done", task.id);
   finalizeWeekIntervalMutation(weekMutation);
 
   // A recurring task never closes: completing it SCHEDULES the next

@@ -71,7 +71,7 @@ beforeAll(async () => {
 describe("migration v13 → v14 (#156, ADR-42)", () => {
   it("runs the chain through the current schema", async () => {
     const db = await testDb();
-    expect(db.pragma("user_version", { simple: true })).toBe(23);
+    expect(db.pragma("user_version", { simple: true })).toBe(24);
   });
 
   it("creates the draws log with the append-only shape", async () => {

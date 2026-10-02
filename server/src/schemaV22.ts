@@ -107,11 +107,20 @@ export type V22ValidationHooks = Readonly<{
   fixedSlotBatch?: (batch: Readonly<{ rowCount: number }>) => void;
 }>;
 
+export type V22ValidationOptions = Readonly<{
+  hooks?: V22ValidationHooks;
+  /** Only schema v24 may add its exact partial forest index. */
+  allowForestIndex?: boolean;
+}>;
+
 /** Independent complete schema-v22 validator; v21 remains immutable. */
 export function validateV22Contract(
   database: Database.Database,
-  hooks: V22ValidationHooks = {},
+  options: V22ValidationOptions = {},
 ): void {
+  const hooks = options.hooks ?? {};
+  const allowForestIndex = options.allowForestIndex ??
+    database.pragma("user_version", { simple: true }) === 24;
   validateV21Contract(database);
   assertScheduleTimeZoneRuntime();
   exactSql(database, "table", "task_fixed_slots", TASK_FIXED_SLOTS_SQL);
@@ -133,6 +142,7 @@ export function validateV22Contract(
   const expectedIndexes: Record<string, unknown[][]> = {
     task_fixed_slots: [["idx_task_fixed_slots_range", 0, "c", 0]],
     time_entries: [
+      ...(allowForestIndex ? [["idx_time_entries_forest", 0, "c", 1]] : []),
       ["idx_time_entries_range", 0, "c", 0],
       ["idx_time_entries_task", 0, "c", 0],
     ],

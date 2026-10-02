@@ -1,6 +1,22 @@
+/** Remove schema-v24 session outcome additions from today's fresh schema. */
+export function stripV24Schema(sql: string): string {
+  return sql
+    .replace(
+      /,\r?\n  end_reason TEXT CHECK \(\r?\n    \(ended_at IS NULL AND end_reason IS NULL\) OR\r?\n    \(ended_at IS NOT NULL AND \(end_reason IS NULL OR end_reason IN \('done', 'stop'\)\)\)\r?\n  \)/,
+      "",
+    )
+    .replace(
+      /CREATE INDEX idx_time_entries_forest ON time_entries\(id DESC\) WHERE end_reason IS NOT NULL;\r?\n/,
+      "",
+    );
+}
+
 /** Remove schema-v23 projection DDL from today's fresh schema. */
 export function stripV23Schema(sql: string): string {
-  return sql.replace(/-- Compact Week interval-access foundation \(#363, ADR-75\)\.[\s\S]*$/, "");
+  return stripV24Schema(sql).replace(
+    /-- Compact Week interval-access foundation \(#363, ADR-75\)\.[\s\S]*$/,
+    "",
+  );
 }
 
 /**

@@ -393,13 +393,17 @@ export function validateV23Structure(
   database: Database.Database,
   requireVersion = true,
   hooks: WeekProjectionScanHooks = {},
+  allowV24Forest = false,
 ): void {
   validateV22Contract(database, {
-    fixedSlotBatch: ({ rowCount }) => hooks.batch?.(Object.freeze({
-      phase: "source-contract",
-      sourceKind: WEEK_FIXED_KIND,
-      rowCount,
-    })),
+    hooks: {
+      fixedSlotBatch: ({ rowCount }) => hooks.batch?.(Object.freeze({
+        phase: "source-contract",
+        sourceKind: WEEK_FIXED_KIND,
+        rowCount,
+      })),
+    },
+    allowForestIndex: allowV24Forest,
   });
   if (requireVersion && database.pragma("user_version", { simple: true }) !== 23) {
     throw new Error("schema v23 contract mismatch: user_version");
@@ -414,7 +418,11 @@ export function validateV23Structure(
   for (const [name, sql] of Object.entries(SHADOW_SQL)) exactSql(database, "table", name, sql);
 
   equal("table inventory", names(database, "table"), EXPECTED_TABLES);
-  equal("index inventory", names(database, "index"), EXPECTED_INDEXES);
+  equal(
+    "index inventory",
+    names(database, "index"),
+    allowV24Forest ? [...EXPECTED_INDEXES, "idx_time_entries_forest"].sort() : EXPECTED_INDEXES,
+  );
   equal("trigger inventory", names(database, "trigger"), EXPECTED_TRIGGERS);
   equal("view inventory", names(database, "view"), []);
 
@@ -539,6 +547,8 @@ export type WeekTrackedCloseScope =
   | Readonly<{ kind: "task"; taskId: number }>
   | Readonly<{ kind: "identity"; entryId: number }>;
 
+export type TimeEntryEndReason = "done" | "stop";
+
 export type WeekTrackedCloseHooks = Readonly<{
   identityBatch?: (batch: Readonly<{ rowCount: number; retainedIdentityCount: number }>) => void;
 }>;
@@ -554,6 +564,7 @@ export function closeOpenTrackedIntervals(
   database: Database.Database,
   token: WeekMutationToken,
   endedAt: string,
+  endReason: TimeEntryEndReason,
   scope: WeekTrackedCloseScope,
   hooks: WeekTrackedCloseHooks = {},
 ): void {
@@ -566,7 +577,7 @@ export function closeOpenTrackedIntervals(
   const scopeBindings = scope.kind === "all"
     ? []
     : [scope.kind === "task" ? scope.taskId : scope.entryId];
-  const close = database.prepare(`UPDATE time_entries SET ended_at = ?
+  const close = database.prepare(`UPDATE time_entries SET ended_at = ?, end_reason = ?
     WHERE id IN (
       SELECT id FROM time_entries WHERE ${predicate}
       ORDER BY id LIMIT ?
@@ -577,6 +588,7 @@ export function closeOpenTrackedIntervals(
     const returnedIds: number[] = [];
     const rows = close.iterate(
       endedAt,
+      endReason,
       ...scopeBindings,
       WEEK_PROJECTION_BATCH_SIZE,
     ) as Iterable<{ id: number }>;

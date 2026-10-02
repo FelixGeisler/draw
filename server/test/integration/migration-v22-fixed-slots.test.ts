@@ -48,7 +48,7 @@ describe("schema v22 fixed-slot migration and complete validator", () => {
     try {
       expect(() => validateV21Contract(migrated!)).not.toThrow();
       migrateDatabase(migrated!);
-      expect(migrated!.pragma("user_version", { simple: true })).toBe(23);
+      expect(migrated!.pragma("user_version", { simple: true })).toBe(24);
       expect(v22Objects(migrated!)).toEqual(v22Objects(fresh));
       for (const [index, vector] of validUtcBoundarySlots.entries()) {
         const id = Number(migrated!.prepare(
@@ -65,7 +65,7 @@ describe("schema v22 fixed-slot migration and complete validator", () => {
       const reopened = new Database(migratedPath);
       reopened.pragma("foreign_keys=ON");
       try {
-        expect(reopened.pragma("user_version", { simple: true })).toBe(23);
+        expect(reopened.pragma("user_version", { simple: true })).toBe(24);
         expect(v22Objects(reopened)).toEqual(v22Objects(fresh));
         expect(() => validateV22Contract(reopened)).not.toThrow();
         expect(

@@ -29,7 +29,7 @@ export function startTimer(taskId: number): { error?: string; status?: number } 
 
   db.transaction(() => {
     const weekMutation = beginWeekIntervalMutation();
-    closeAllOpenTrackedIntervals(weekMutation, new Date().toISOString());
+    closeAllOpenTrackedIntervals(weekMutation, new Date().toISOString(), "stop");
     const inserted = db.prepare("INSERT INTO time_entries (task_id, started_at) VALUES (?, ?)").run(
       taskId,
       new Date().toISOString(),
@@ -58,7 +58,7 @@ timerRouter.post("/stop", (_req, res) => {
   const now = new Date();
   const outcome = db.transaction(() => {
     const weekMutation = beginWeekIntervalMutation();
-    closeOpenTrackedIntervalById(weekMutation, now.toISOString(), entry.id);
+    closeOpenTrackedIntervalById(weekMutation, now.toISOString(), "stop", entry.id);
     finalizeWeekIntervalMutation(weekMutation);
     // Timer close and both challenge owners are one transaction. Any XP/Gold
     // failure (including a Gold-only anomaly) leaves the entry running.

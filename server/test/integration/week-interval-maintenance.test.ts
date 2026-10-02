@@ -186,7 +186,7 @@ describe("owned schema-v23 interval maintenance", () => {
     try {
       expect(() => database.transaction(() => {
         const token = beginWeekIntervalMutation();
-        closeAllOpenTrackedIntervals(token, "2026-08-01T01:00:00.000Z");
+        closeAllOpenTrackedIntervals(token, "2026-08-01T01:00:00.000Z", "stop");
         finalizeWeekIntervalMutation(token);
       })()).toThrow(/injected many-open projection failure/);
     } finally {
@@ -195,6 +195,9 @@ describe("owned schema-v23 interval maintenance", () => {
     expect(database.prepare(
       "SELECT COUNT(*) AS count FROM time_entries WHERE ended_at IS NULL",
     ).get()).toEqual({ count: openCount });
+    expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM time_entries WHERE task_id=? AND end_reason IS NOT NULL",
+    ).get(task.id)).toEqual({ count: 0 });
     expect(state()).toEqual(before);
 
     const batches: Array<{ rowCount: number; retainedIdentityCount: number }> = [];
@@ -203,6 +206,7 @@ describe("owned schema-v23 interval maintenance", () => {
       closeAllOpenTrackedIntervals(
         token,
         "2026-08-01T01:00:00.000Z",
+        "stop",
         { identityBatch: (batch) => batches.push(batch) },
       );
       finalizeWeekIntervalMutation(token);
@@ -216,6 +220,9 @@ describe("owned schema-v23 interval maintenance", () => {
     expect(database.prepare(
       "SELECT COUNT(*) AS count FROM time_entries WHERE ended_at IS NULL",
     ).get()).toEqual({ count: 0 });
+    expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM time_entries WHERE task_id=? AND end_reason='stop'",
+    ).get(task.id)).toEqual({ count: openCount });
     for (const id of ids) expect(interval(2, id)?.endMs).not.toBeNull();
     expect(state().ready).toBe(1);
     expect(state().builtGeneration).toBe(state().sourceGeneration);

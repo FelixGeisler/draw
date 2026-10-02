@@ -108,11 +108,16 @@ CREATE TABLE time_entries (
   id INTEGER PRIMARY KEY,
   task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   started_at TEXT NOT NULL,
-  ended_at TEXT
+  ended_at TEXT,
+  end_reason TEXT CHECK (
+    (ended_at IS NULL AND end_reason IS NULL) OR
+    (ended_at IS NOT NULL AND (end_reason IS NULL OR end_reason IN ('done', 'stop')))
+  )
 );
 
 CREATE INDEX idx_time_entries_task ON time_entries(task_id);
 CREATE INDEX idx_time_entries_range ON time_entries(started_at, ended_at, id);
+CREATE INDEX idx_time_entries_forest ON time_entries(id DESC) WHERE end_reason IS NOT NULL;
 
 CREATE TABLE completions (
   id INTEGER PRIMARY KEY,
@@ -348,7 +353,7 @@ INSERT INTO settings (key, value) VALUES
 
 -- Compact Week interval-access foundation (#363, ADR-75). Authoritative facts
 -- remain in task_fixed_slots/time_entries; this projection contains identifiers
--- and interval numbers only and has no public Week consumer in schema v23.
+-- and interval numbers only; it was introduced as the schema-v23 foundation.
 CREATE TABLE week_access_state (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   projection_format INTEGER NOT NULL CHECK (projection_format = 1),

@@ -64,7 +64,7 @@ describe("schema v19 Push persistence remains an exact migration boundary", () =
       const { validateV21Contract } = await import("../../src/schemaV21.js");
       expect(() => validateV19Contract(handle)).not.toThrow();
       migrateDatabase(handle);
-      expect(handle.pragma("user_version", { simple: true })).toBe(23);
+      expect(handle.pragma("user_version", { simple: true })).toBe(24);
       expect(() => validateV21Contract(handle)).not.toThrow();
     } finally {
       handle.close();
