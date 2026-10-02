@@ -117,7 +117,7 @@ AI degradation > data integrity > cost transparency > responsiveness.
 
 |Q27
 |A forest request is malformed, paginates dense/sparse history, reaches zero duration or malformed classified data, or encounters a read failure
-|Authentication remains first; the strict 2,048-byte bodyless raw-target grammar rejects without writes; the 101-row read emits at most 100 exact metadata-free trees with exclusive nullable exhaustion, validates the complete page, keeps no-store, and returns exact 400/500 contracts without partial success
+|The unchanged Node parser returns native 400 with an empty body and zero application dispatch for the literal UTF-8 `C3 A9` target; admitted requests retain authentication-first ordering, ASCII `%C3%A9` reaches that gate and then exact authenticated no-store JSON 400, and the strict 2,048-byte bodyless raw-target grammar rejects without writes. The 101-row read emits at most 100 exact metadata-free trees with exclusive nullable exhaustion, validates the complete page, keeps no-store, and returns exact application 400/500 contracts without partial success
 |===
 
 Q1, Q3 (guardrail), Q6–Q10, Q13–Q22 and Q26–Q27 are covered by the automated suites

@@ -531,11 +531,18 @@ Leaving Week remounts List or **Due dates** and refetches the ordinary data.
 
 == 6.13 Bounded forest read
 
-After ADR-50 authentication, the all-method forest route sets `no-store` and
-checks the raw request target before any read. Only bodyless `GET /api/forest`
-and canonical `?beforeId=<positive-safe-decimal>` are admitted under 2,048
-bytes. HEAD receives bodyless 400; every other rejected form receives exact
-`invalid-forest-request` JSON.
+The unchanged default Node HTTP parser first decides whether a request reaches
+the application. A raw target containing literal UTF-8 bytes `C3 A9` after
+`beforeId=` receives native 400 with an empty body and never invokes Express,
+authentication, or the forest route. The listener adds neither a global
+`clientError` handler nor lenient parsing.
+
+For parser-admitted requests, ADR-50 authentication remains first. The
+all-method forest route then sets `no-store` and checks the raw request target
+before any read. Only bodyless `GET /api/forest` and canonical
+`?beforeId=<positive-safe-decimal>` are admitted under 2,048 bytes. HEAD receives
+bodyless 400; every other admitted rejected form, including ASCII `%C3%A9`,
+receives exact `invalid-forest-request` JSON.
 
 The route selects classified finished `time_entries` in descending id order,
 optionally below the exclusive cursor, with `LIMIT 101`. It validates every

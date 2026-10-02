@@ -4743,16 +4743,22 @@ focus exit, reload/browser close and estimate expiry do not close a session.
 Week retains its strict-positive interval projection, so a valid zero-duration
 classified session is omitted there without being rejected.
 
-After the existing authentication gate, bodyless `GET /api/forest` admits only
+The unchanged default Node HTTP parser owns transport admission. In particular,
+a raw target containing literal UTF-8 bytes `C3 A9` after `beforeId=` receives
+Node's native 400 with an empty body before Express, authentication, or the
+forest route runs. No global `clientError` handler or lenient parser mode is
+added. For requests Node admits and delivers to Express, the existing
+authentication gate remains first. Bodyless `GET /api/forest` then admits only
 an optional canonical `beforeId` safe integer under the 2,048-byte raw-target
-ceiling. Authenticated HEAD is bodyless 400; all other malformed methods,
-framing or targets receive the exact `invalid-forest-request` JSON. One indexed
-read takes at most 101 classified rows, validates the whole result, publishes at
-most 100 exact `{id,startedAt,endedAt,endReason}` records, and returns the last
-emitted id only when a lookahead exists. Reads are no-store, metadata-free and
-never include the running row; `/api/timer/current` remains that sole source.
-Any read or result-contract failure returns the exact `forest-read-failed` JSON,
-never a partial page.
+ceiling. Authenticated HEAD is bodyless 400; all other admitted malformed
+methods, framing, or targets—including ASCII `%C3%A9`—receive the exact
+`invalid-forest-request` JSON. One indexed read takes at most 101 classified
+rows, validates the whole result, publishes at most 100 exact
+`{id,startedAt,endedAt,endReason}` records, and returns the last emitted id only
+when a lookahead exists. Reads are no-store, metadata-free and never include the
+running row; `/api/timer/current` remains that sole source. Any read or
+result-contract failure returns the exact `forest-read-failed` JSON, never a
+partial page.
 
 The v23→v24 DDL, validation and stamp are atomic. Startup and staged restore
 prove exact schema/index shape plus every classified safe-id, canonical
