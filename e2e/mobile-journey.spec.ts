@@ -477,7 +477,7 @@ test.describe("at 360px — the narrowest width the acceptance criterion names",
   test.use({ viewport: { width: 360, height: 780 } });
 
   test("no main page scrolls sideways", async ({ page }) => {
-    for (const path of ["/", "/tasks", "/goals", "/stats", "/settings", "/assistant"]) {
+    for (const path of ["/", "/tasks", "/goals", "/forest", "/stats", "/settings", "/assistant"]) {
       await page.goto(path);
       // Wait for the page's own content, not just the shell — an unrendered
       // route would pass the overflow check vacuously.

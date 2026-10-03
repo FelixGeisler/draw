@@ -4766,8 +4766,9 @@ or swap. Fresh schema, generated restore admission and supported historical
 fixtures advance together. Unclassified legacy ended rows are not reinterpreted
 or newly rejected merely for forest population.
 
-The Stats client owns one replace-only page of at most 100 finished trees plus
-one current tree. One strict current-timer decoder is shared with existing timer
+The original Stats placement is superseded by the first-class `/forest` route
+in ADR-78; its client owns one replace-only page of at most 100 finished trees
+plus one current tree. One strict current-timer decoder is shared with existing timer
 consumers. Every page-one/reset/navigation generation validates the complete
 forest page and current response before publishing either. The shared reset
 epoch is checked again synchronously inside the actual TanStack cache write, so
@@ -4797,3 +4798,72 @@ destructive task-history cascades; ADR-26 owns exact staged restore and atomic
 swap; ADR-29 keeps focus exit view-only; ADR-32 owns parent lifecycle exceptions;
 ADR-50 keeps authentication precedence; ADR-75 keeps the safe SQLite and
 positive-interval Week capability boundaries.
+
+== ADR-78: Forest is a first-class landscape route, not a Stats panel
+
+*Status:* Accepted by issue #378.
+
+*Context:* ADR-77 first mounted the bounded Session forest inside Stats as a
+uniform grid of boxed per-session reports. The accepted product correction is
+that a forest is an experience the user visits, not another statistics panel.
+The ADR-77 session facts, bounded publication, lifecycle, privacy and recovery
+contracts remain authoritative; this decision changes only client placement,
+presentation and interaction.
+
+*Decision:* Forest has its own `/forest` page and **Forest** heading. Its global
+navigation entry is immediately before Stats (after the conditional Assistant),
+and **Go to Forest** occupies the corresponding command-palette position without
+a shortcut. Stats removes only its Forest subtree and retains every other
+section. Production serves `/forest` through the existing SPA fallback.
+
+The view is an ordinary responsive DOM/CSS world grid on one continuous local
+backdrop and full-row terrain bands. Transparent, non-overlapping tree labels
+add rows vertically at the existing 640px breakpoint; no cell has a panel
+background, border, radius, shadow or isolated ground. The root never gains a
+horizontal Forest scroller or document overflow. Exactly three inline-SVG
+silhouettes and bounded offsets derive deterministically from the positive safe
+session id alone. Every finished variant shares one envelope and base size;
+Living and Dead have equal footprint, opacity, prominence, placement and
+z-order. Growing retains ADR-77's elapsed tick and formula. Art is decorative,
+pointer-inert and local; all motion is opt-in under
+`prefers-reduced-motion: no-preference`.
+
+The scene is one native radio group whose full transparent cells are labels and
+mobile hit targets. Initial and fallback selection is current-then-first;
+selection survives only while its session remains in the published window and
+is never stored in a URL, browser store, API or database. Native Tab, arrows,
+pointer and touch update the same checked state without moving focus. Checked
+and focus-visible treatments combine a visible radio, text mark and tree
+halo/lift rather than rebuilding a card. History controls precede the group.
+Exactly one secondary region shows only the selected state, local Started/Ended
+time and duration; tree art, labels and details never consume task metadata or
+analytics.
+
+ADR-77's strict paired decoders, generation and final cache-write epoch guard,
+destructive reset matrix, response-loss policy, replace-only cursor paging,
+source APIs, producer hooks, growth formula and lifecycle meanings are reused
+unchanged. Loading, unavailable, empty, retained-navigation, same-cursor Retry,
+Newest and exhaustion behavior remain local to the route while its heading and
+global link stay available.
+
+*Rejected alternatives:* Keeping or recoloring cards on Stats still makes the
+forest a report. A fixed one-viewBox diorama cannot keep 101 trees legible
+without a new pan/zoom interaction. Canvas, WebGL, 3D or a scene framework add
+unneeded dependencies and accessibility work. Per-tree tab stops or repeated
+fact cards create up to 101 stops/reports. Persisted selection adds state with
+no product value.
+
+*Consequences:* Forest becomes a direct, keyboard- and touch-operable landscape
+while the data/security boundary remains exactly ADR-77. Automated evidence
+covers both six- and seven-tab shells, production deep linking, command
+navigation, Stats exclusion, native selection/fallback, load/recovery/paging,
+continuous-terrain structure, dense 100-tree wrapping, 44px targets and 360px
+no-overflow. Deterministic desktop, mobile and dense captures replace a
+subjective pixel threshold. No server, schema, API, auth, backup, retention,
+service worker, dependency, remote asset, telemetry, polling, synchronization,
+deployment or provider behavior changes.
+
+*Cross-links:* ADR-54 owns the mobile shell; ADR-68 owns the command palette;
+ADR-69 owns inline icons, tokens and reduced-motion gating; ADR-71 owns the
+restrained visual identity; ADR-77 remains the complete Forest data, lifecycle,
+API, formula, privacy and recovery decision.

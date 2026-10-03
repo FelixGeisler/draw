@@ -661,7 +661,7 @@ textarea:focus {
   }
 
   /* The sidenav becomes a fixed bottom tab bar: icon over label, one flex
-     share per entry (5 entries, 6 with the Assistant). z-index sits above
+     share per entry (6 entries, 7 with the Assistant). z-index sits above
      page chrome (dnd overlays top out at 40) but below the command palette
      and shortcut sheet (85, CommandPalette.css — a modal must cover the nav),
      the fullscreen focus/victory overlays (90) and the achievement toast

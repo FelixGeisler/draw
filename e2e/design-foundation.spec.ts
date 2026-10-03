@@ -329,7 +329,7 @@ test.describe("desktop, 1080px", () => {
 
     // …that must NOT leak into the accessible name (today's emoji spans are
     // aria-hidden and five specs select tabs by bare label — keep that).
-    for (const name of ["Draw", "Tasks", "Goals", "Stats", "Settings"]) {
+    for (const name of ["Draw", "Tasks", "Goals", "Forest", "Stats", "Settings"]) {
       await expect(nav.getByRole("link", { name, exact: true })).toBeVisible();
     }
 

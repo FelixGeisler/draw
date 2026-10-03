@@ -2,6 +2,7 @@ import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom"
 import { DrawPage } from "./pages/DrawPage";
 import { TasksPage } from "./pages/TasksPage";
 import { StatsPage } from "./pages/StatsPage";
+import { ForestPage } from "./pages/ForestPage";
 import { GoalsPage } from "./pages/GoalsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TodayPage } from "./pages/TodayPage";
@@ -19,6 +20,7 @@ import {
   GearIcon,
   TargetIcon,
   TasksIcon,
+  TreeIcon,
 } from "./components/icons";
 
 // Each entry wears an icon from the app's single SVG set (#244, ADR-69) —
@@ -30,6 +32,7 @@ const NAV = [
   { to: "/", label: "Draw", icon: CardsIcon },
   { to: "/tasks", label: "Tasks", icon: TasksIcon },
   { to: "/goals", label: "Goals", icon: TargetIcon },
+  { to: "/forest", label: "Forest", icon: TreeIcon },
   { to: "/stats", label: "Stats", icon: ChartIcon },
   { to: "/settings", label: "Settings", icon: GearIcon },
 ];
@@ -91,6 +94,7 @@ export default function App() {
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/goals" element={<GoalsPage />} />
             <Route path="/assistant" element={<AssistantPage />} />
+            <Route path="/forest" element={<ForestPage />} />
             <Route path="/stats" element={<StatsPage />} />
             {/* History merged into Stats (#155, ADR-41) — the route survives
                 as a redirect for muscle memory and old links. */}

@@ -61,6 +61,17 @@ export function TargetIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** A tree on shared ground. Nav "Forest". */
+export function TreeIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Svg {...props}>
+      <path d="M12 21v-5" />
+      <path d="M8.5 21h7" />
+      <path d="M12 3.2 6.5 11h3L5.8 16h12.4l-3.7-5h3Z" />
+    </Svg>
+  );
+}
+
 /** Bar chart. Nav "Stats". */
 export function ChartIcon(props: SVGProps<SVGSVGElement>) {
   return (

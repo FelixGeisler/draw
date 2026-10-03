@@ -19,12 +19,13 @@ test.describe("production serve mode", () => {
     await expect(page.locator(".sidenav .brand")).toHaveText("Draw");
   });
 
-  test("a deep link survives a full page load", async ({ page }) => {
-    // Straight to /stats with no client-side navigation — only the SPA
+  test("the Forest deep link survives a full page load", async ({ page }) => {
+    // Straight to /forest with no client-side navigation — only the SPA
     // fallback can answer this, and the page must then boot the real app.
     // The query string rides along: shared links carry them.
-    await page.goto(`${PROD}/stats?from=shared-link`);
-    await expect(page.getByRole("heading", { name: "Stats" })).toBeVisible();
+    await page.goto(`${PROD}/forest?from=shared-link`);
+    await expect(page.getByRole("heading", { name: "Forest", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Forest", exact: true })).toHaveClass(/active/);
   });
 
   test("unknown API paths 404 as JSON, not index.html", async ({ request }) => {
