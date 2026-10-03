@@ -5,26 +5,29 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import { api } from "../api/client";
-import type { Task } from "../api/types";
+import {
+  fetchCurrentTimer,
+  forestWriteMayHaveCommitted,
+  resetForest,
+  type CurrentTimer,
+} from "../lib/forest";
 
-export interface TimerState {
-  entry: { id: number; taskId: number; startedAt: string; endedAt: null };
-  task: Pick<Task, "id" | "title" | "categoryId" | "impact" | "effortMinutes" | "goalId" | "status">;
-}
+export type TimerState = CurrentTimer;
 
 export function useCurrentTimer() {
   return useQuery({
     queryKey: ["timer"],
-    queryFn: () => api.get<TimerState | null>("/api/timer/current"),
+    // One strict decoder is shared by the global TimerBar and Session forest.
+    queryFn: ({ signal }) => fetchCurrentTimer(signal),
     refetchInterval: 60_000,
   });
 }
 
-export function useStartTimer() {
-  const qc = useQueryClient();
-  return useMutation({
+export function startTimerMutation(qc: QueryClient) {
+  return {
     mutationFn: (taskId: number) => api.post<{ ok: boolean }>(`/api/tasks/${taskId}/timer/start`),
     onSuccess: () => {
+      resetForest(qc);
       qc.invalidateQueries({ queryKey: ["timer"] });
       // Starting a timer lights up today's cell in the History calendar (Stats).
       qc.invalidateQueries({ queryKey: ["activity"] });
@@ -32,7 +35,18 @@ export function useStartTimer() {
       // running entry already counts toward the window via MINUTES_EXPR.
       qc.invalidateQueries({ queryKey: ["goals"] });
     },
-  });
+    // Start atomically stops a prior session before inserting the replacement.
+    // A lost response or 5xx can therefore hide a committed replacement; only
+    // a validated pre-write 4xx is allowed to preserve the prior snapshot.
+    onError: (error: unknown) => {
+      if (forestWriteMayHaveCommitted(error)) resetForest(qc);
+    },
+  };
+}
+
+export function useStartTimer() {
+  const qc = useQueryClient();
+  return useMutation(startTimerMutation(qc));
 }
 
 export function stopTimerMutation(qc: QueryClient) {
@@ -44,6 +58,9 @@ export function stopTimerMutation(qc: QueryClient) {
     // the revealed card immediately (ADR-29: never a dead overlay) instead
     // of counting down a dead entry until the next interval tick.
     onSettled: () => {
+      // A Stop settlement includes the expected 404 race. Clear first so a
+      // response-loss or raced close can never leave a fabricated snapshot.
+      resetForest(qc);
       qc.invalidateQueries({ queryKey: ["timer"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["activity"] });

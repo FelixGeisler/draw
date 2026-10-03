@@ -553,3 +553,47 @@ otherwise it is null, including exactly 100 rows. Gaps and an out-of-history
 cursor are normal. Any SQL or contract failure returns exact
 `forest-read-failed` JSON and no partial page. The read performs no write,
 repair, task join, external call or running-session projection (ADR-77).
+
+== 6.14 Session forest publication and recovery
+
+Stats mounts one global Session forest independently of date, project and goal
+filters. A page-one, Newest, reload, focus refresh or accepted mutation reset
+starts one monotonically increasing generation and concurrently reads
+`/api/forest` plus unchanged `/api/timer/current`. Exact-key decoders validate
+both complete responses before the generation publishes. The timer decoder is
+the same function used by the existing TimerBar query. Cancellation and the
+shared reset epoch guard both validation and the actual TanStack cache write,
+so a reset after a navigation/query resolves but before cache publication still
+wins and late page or current responses cannot replace a newer or cleared
+snapshot.
+
+The client retains one finished page of at most 100 trees and at most one
+current tree. **Older** replaces that page with the validated exclusive cursor;
+**Newest** replaces it with cursorless page one. There is no page array,
+back-stack, virtualizer, age cutoff or optimistic result. An Older failure keeps
+the prior page and retries the same cursor. An ordinary Newest/focus failure may
+keep prior validated data. Mutation resets clear first, so either-source failure
+keeps the forest empty until Retry completes a fresh pair; other Stats sections
+remain mounted.
+
+The shared destructive reset follows the exact source-event matrix: Start
+success or ambiguous transport/server result; every Stop settlement including
+a 404 race; successful direct or recurring completion and its
+not-found/conflict races; archive success; delete success, not-found race, or
+ambiguous transport result; split success or ambiguous transport result; and
+backup-import success or ambiguous post-request result. Automatic parent
+completion needs no separate hook. A validated pre-write 4xx that proves no
+commit may preserve the snapshot, including for Start. Create, title,
+estimate, category, goal, reparent, fixed-slot or reorder edits,
+unarchive/reopen, and goal deletion do not reset it solely for that operation;
+existing unrelated invalidations remain. Estimate expiry and focus Exit also do
+not invent an outcome or reset. Existing window-focus behavior is retained
+without a new poll, cross-tab protocol or convergence promise.
+
+Finished `done` trees are leafy and labelled **Living**; `stop` trees are bare
+and labelled **Dead**, with equal footprint and ordinary prominence. The
+current leafy tree is labelled **Growing** and scales from elapsed minutes `m`
+by `0.72 + 0.28 × m/(m+30)` on the local elapsed-display tick. Text exposes
+state, canonical source time and duration; SVG is decorative, task text is
+absent, and reduced motion removes visual transitions without changing the
+computed scale or data.

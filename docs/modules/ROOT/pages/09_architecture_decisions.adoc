@@ -4719,8 +4719,7 @@ prohibits grading the user; ADR-61 is the superseded historical decision; issue
 
 == ADR-77: Working-session outcomes and the bounded global forest
 
-*Status:* Accepted and implemented by issue #374. The client forest is deferred
-to issue #375.
+*Status:* Accepted and implemented by issues #374 (foundation) and #375 (client).
 
 *Context:* One Start already creates one authoritative `time_entries` identity,
 but a closed row did not say whether the working session ended successfully or
@@ -4767,10 +4766,30 @@ or swap. Fresh schema, generated restore admission and supported historical
 fixtures advance together. Unclassified legacy ended rows are not reinterpreted
 or newly rejected merely for forest population.
 
+The Stats client owns one replace-only page of at most 100 finished trees plus
+one current tree. One strict current-timer decoder is shared with existing timer
+consumers. Every page-one/reset/navigation generation validates the complete
+forest page and current response before publishing either. The shared reset
+epoch is checked again synchronously inside the actual TanStack cache write, so
+a reset between response validation and publication wins and late generations
+cannot republish old trees, current state, or cursors. Older replaces by the
+validated exclusive cursor; Newest, focus refresh and mutation recovery return
+to page one. Accepted producer hooks clear before mutation recovery where a
+commit or response-loss may have changed the feed, including an ambiguous
+replacement Start; a proven pre-write 4xx preserves the validated snapshot. No
+page stack, append, optimistic outcome, history cutoff, new poll or cross-tab
+protocol is introduced.
+
+Presentation is local inline SVG/CSS: `done` is equally prominent leafy
+**Living**, `stop` is bare **Dead**, and the current **Growing** silhouette uses
+`0.72 + 0.28 × m/(m+30)` from elapsed minutes only. State/time/duration remain
+textual, art is decorative, reduced motion is static at the same computed size,
+and task metadata never enters the forest view.
+
 *Consequences:* The forest has one global, bounded, gap-tolerant session feed and
 no duplicate tree table, task text, anonymous retention or history guess. No
-client, pause/interruption/idle state, automatic estimate outcome, telemetry,
-new MCP tool, dependency, external call or deployment behavior is introduced.
+pause/interruption/idle state, automatic estimate outcome, telemetry, new MCP
+tool, dependency, external call or deployment behavior is introduced.
 
 *Cross-links:* ADR-2 keeps facts separate from derivable views; ADR-6 owns
 recurring completion; ADR-12 owns task-completion timer closure; ADR-21 records

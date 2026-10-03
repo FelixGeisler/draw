@@ -77,7 +77,7 @@ describe("Gold producer cache invalidation", () => {
     expect(invalidate).not.toHaveBeenCalled();
   });
 
-  it("keeps timer challenge/gamification/shop refetches in onSettled for success and races/errors", async () => {
+  it("keeps timer challenge/gamification/shop refetches in onSettled and clears only forest for success and races/errors", async () => {
     for (const result of ["success", "error"] as const) {
       const qc = new QueryClient();
       const invalidate = vi.spyOn(qc, "invalidateQueries");
@@ -96,7 +96,8 @@ describe("Gold producer cache invalidation", () => {
           JSON.stringify(["shop"]),
         ]),
       );
-      expect(setData).not.toHaveBeenCalled();
+      expect(setData).toHaveBeenCalledTimes(1);
+      expect(setData).toHaveBeenCalledWith(["forest"], { kind: "cleared" });
     }
   });
 });

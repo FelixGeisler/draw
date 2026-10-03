@@ -1,4 +1,6 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { ApiError } from "../api/client";
+import { forestWriteMayHaveCommitted, resetForest } from "../lib/forest";
 
 export interface ImportSummary {
   tasks: number;
@@ -21,9 +23,8 @@ export function backupRestoreMessage(summary: ImportSummary): string {
  * server-side — tasks, goals, materials, settings, gamification history, the
  * current draw — so every cached query is invalidated, not a curated list.
  */
-export function useImportBackup() {
-  const qc = useQueryClient();
-  return useMutation({
+export function importBackupMutation(qc: QueryClient) {
+  return {
     mutationFn: async (file: File): Promise<ImportSummary> => {
       const form = new FormData();
       form.append("file", file);
@@ -36,12 +37,25 @@ export function useImportBackup() {
         } catch {
           // non-JSON error body
         }
-        throw new Error(message);
+        throw new ApiError(res.status, message);
       }
       return res.json() as Promise<ImportSummary>;
     },
     // Either 200 shape means the database commit succeeded. A pending Push
     // finalization is recovered on boot and must not leave stale client data.
-    onSuccess: () => qc.invalidateQueries(),
-  });
+    onSuccess: () => {
+      resetForest(qc);
+      return qc.invalidateQueries();
+    },
+    // Network/5xx/invalid-success-body failures can follow the atomic swap;
+    // clear the old snapshot. A validated 4xx proves the write did not begin.
+    onError: (error: Error) => {
+      if (forestWriteMayHaveCommitted(error)) resetForest(qc);
+    },
+  };
+}
+
+export function useImportBackup() {
+  const qc = useQueryClient();
+  return useMutation(importBackupMutation(qc));
 }
