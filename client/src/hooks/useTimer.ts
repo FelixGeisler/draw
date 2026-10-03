@@ -22,9 +22,8 @@ export function useCurrentTimer() {
   });
 }
 
-export function useStartTimer() {
-  const qc = useQueryClient();
-  return useMutation({
+export function startTimerMutation(qc: QueryClient) {
+  return {
     mutationFn: (taskId: number) => api.post<{ ok: boolean }>(`/api/tasks/${taskId}/timer/start`),
     onSuccess: () => {
       resetForest(qc);
@@ -35,7 +34,12 @@ export function useStartTimer() {
       // running entry already counts toward the window via MINUTES_EXPR.
       qc.invalidateQueries({ queryKey: ["goals"] });
     },
-  });
+  };
+}
+
+export function useStartTimer() {
+  const qc = useQueryClient();
+  return useMutation(startTimerMutation(qc));
 }
 
 export function stopTimerMutation(qc: QueryClient) {

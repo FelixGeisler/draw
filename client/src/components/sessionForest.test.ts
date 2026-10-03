@@ -56,10 +56,19 @@ describe("Session forest presentation", () => {
     expect(markup).not.toContain("effortMinutes");
   });
 
-  it("keeps zero duration visible and freezes visual motion under reduced motion", () => {
+  it("keeps both normal outcomes equally prominent without error punishment", () => {
+    const css = readFileSync(new URL("./SessionForest.css", import.meta.url), "utf8");
+    expect(css).not.toMatch(/\.forest-tree\.dead[^}]*\{[^}]*(?:opacity|color|filter)\s*:/s);
+    expect(css).not.toMatch(/\.forest-tree\.living[^}]*\{[^}]*(?:opacity|color|filter)\s*:/s);
+  });
+
+  it("keeps zero duration visible and enables named-duration motion only for no-preference", () => {
     expect(formatForestDuration(0)).toBe("0s");
     const css = readFileSync(new URL("./SessionForest.css", import.meta.url), "utf8");
-    expect(css).toMatch(/prefers-reduced-motion:\s*reduce/);
-    expect(css).toMatch(/\.forest-tree-growth\s*\{[\s\S]*?transition:\s*none;[\s\S]*?animation:\s*none;/);
+    const defaultGrowth = css.match(/\.forest-tree-growth\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(defaultGrowth).not.toContain("transition");
+    expect(defaultGrowth).not.toContain("animation");
+    expect(css).toMatch(/@media \(prefers-reduced-motion:\s*no-preference\)\s*\{[\s\S]*?--forest-growth-duration:\s*1s;[\s\S]*?transition:\s*transform var\(--forest-growth-duration\) linear;/);
+    expect(css).not.toMatch(/prefers-reduced-motion:\s*reduce/);
   });
 });

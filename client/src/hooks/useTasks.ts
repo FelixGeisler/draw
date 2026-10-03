@@ -2,6 +2,7 @@ import {
   useMutation,
   useQuery,
   useQueryClient,
+  type QueryClient,
   type UseQueryOptions,
 } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -115,23 +116,25 @@ function useInvalidateTasks() {
     invalidateTaskMutationQueries(qc, completionCapable);
 }
 
-export function useCreateTask() {
-  const invalidate = useInvalidateTasks();
-  return useMutation({
+export function createTaskMutation(qc: QueryClient) {
+  return {
     mutationFn: (task: NewTask) => api.post<Task>("/api/tasks", task),
-    onSuccess: (_data, variables) =>
-      invalidate(taskMutationCanChangeCompletion("create", variables)),
-  });
+    onSuccess: (_data: Task, variables: NewTask) =>
+      invalidateTaskMutationQueries(qc, taskMutationCanChangeCompletion("create", variables)),
+  };
 }
 
-export function useUpdateTask() {
-  const invalidate = useInvalidateTasks();
+export function useCreateTask() {
   const qc = useQueryClient();
-  return useMutation({
+  return useMutation(createTaskMutation(qc));
+}
+
+export function updateTaskMutation(qc: QueryClient) {
+  return {
     mutationFn: ({ id, ...patch }: { id: number } & Record<string, unknown>) =>
       api.patch<CompletionResponse>(`/api/tasks/${id}`, patch),
-    onSuccess: (data, variables) => {
-      invalidate(taskMutationCanChangeCompletion("update", variables));
+    onSuccess: (data: CompletionResponse, variables: { id: number } & Record<string, unknown>) => {
+      invalidateTaskMutationQueries(qc, taskMutationCanChangeCompletion("update", variables));
       // Done can close this task's session; archiving a child can complete a
       // separately timed parent. Reopen and ordinary edits never reset it.
       if (variables.status === "done" || variables.status === "archived") resetForest(qc);
@@ -145,35 +148,41 @@ export function useUpdateTask() {
         ...(data.parentCompletion?.newAchievements ?? []),
       ]);
     },
-    onError: (error, variables) => {
+    onError: (error: unknown, variables: { id: number } & Record<string, unknown>) => {
       const completing = variables.status === "done";
       const archiving = variables.status === "archived";
       if ((completing || archiving) && forestWriteMayHaveCommitted(error, completing ? [404, 409] : [])) {
         resetForest(qc);
       }
     },
-  });
+  };
+}
+
+export function useUpdateTask() {
+  const qc = useQueryClient();
+  return useMutation(updateTaskMutation(qc));
+}
+
+export function deleteTaskMutation(qc: QueryClient) {
+  return {
+    mutationFn: (id: number) => api.delete<{ ok: boolean }>(`/api/tasks/${id}`),
+    onSuccess: () => {
+      invalidateTaskMutationQueries(qc, taskMutationCanChangeCompletion("delete"));
+      resetForest(qc);
+    },
+    onError: (error: unknown) => {
+      if (forestWriteMayHaveCommitted(error, [404])) resetForest(qc);
+    },
+  };
 }
 
 export function useDeleteTask() {
-  const invalidate = useInvalidateTasks();
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (id: number) => api.delete<{ ok: boolean }>(`/api/tasks/${id}`),
-    onSuccess: () => {
-      invalidate(taskMutationCanChangeCompletion("delete"));
-      resetForest(qc);
-    },
-    onError: (error) => {
-      if (forestWriteMayHaveCommitted(error, [404])) resetForest(qc);
-    },
-  });
+  return useMutation(deleteTaskMutation(qc));
 }
 
-export function useSplitTask() {
-  const invalidate = useInvalidateTasks();
-  const qc = useQueryClient();
-  return useMutation({
+export function splitTaskMutation(qc: QueryClient) {
+  return {
     // Split-in-place (#108, widened past too-big in #209): replaces a
     // subtask with >= 2 parts as
     // siblings; the original ends archived, so the row disappears from the
@@ -188,22 +197,26 @@ export function useSplitTask() {
       parts: { title: string; effortMinutes: number; description?: string }[];
     }) => api.post<Task[]>(`/api/tasks/${id}/split`, { parts }),
     onSuccess: () => {
-      invalidate(taskMutationCanChangeCompletion("split"));
+      invalidateTaskMutationQueries(qc, taskMutationCanChangeCompletion("split"));
       resetForest(qc);
       // The split closes a running time entry on the original server-side
       // (ADR-12 mirror) — refresh the TimerBar now instead of letting it
       // show a dead timer until the next 60 s poll.
       qc.invalidateQueries({ queryKey: ["timer"] });
     },
-    onError: (error) => {
+    onError: (error: unknown) => {
       if (forestWriteMayHaveCommitted(error)) resetForest(qc);
     },
-  });
+  };
 }
 
-export function useReorderSubtask() {
-  const invalidate = useInvalidateTasks();
-  return useMutation({
+export function useSplitTask() {
+  const qc = useQueryClient();
+  return useMutation(splitTaskMutation(qc));
+}
+
+export function reorderSubtaskMutation(qc: QueryClient) {
+  return {
     // Reorder a subtask before `beforeId` (#157, ADR-43); beforeId null moves
     // it to the end. Invalidate-refetch, like the reparent path (useUpdateTask)
     // the drag shares: the server owns the midpoint/renormalize placement and a
@@ -211,8 +224,13 @@ export function useReorderSubtask() {
     // source of the new order rather than a guessed optimistic splice.
     mutationFn: ({ id, beforeId }: { id: number; beforeId: number | null }) =>
       api.post<Task>(`/api/tasks/${id}/reorder`, { beforeId }),
-    onSuccess: () => invalidate(taskMutationCanChangeCompletion("reorder")),
-  });
+    onSuccess: () => invalidateTaskMutationQueries(qc, taskMutationCanChangeCompletion("reorder")),
+  };
+}
+
+export function useReorderSubtask() {
+  const qc = useQueryClient();
+  return useMutation(reorderSubtaskMutation(qc));
 }
 
 export function useCreateSubtasks() {

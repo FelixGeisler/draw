@@ -64,7 +64,6 @@
 .forest-tree-growth {
   transform-box: fill-box;
   transform-origin: center bottom;
-  transition: transform 1s linear;
 }
 
 .forest-trunk,
@@ -84,10 +83,6 @@
 .forest-leaves {
   fill: var(--ok);
   opacity: 0.85;
-}
-
-.forest-tree.dead .forest-tree-art {
-  color: var(--text-dim);
 }
 
 .forest-tree.growing {
@@ -125,9 +120,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .forest-tree-growth {
-    transition: none;
-    animation: none;
+    --forest-growth-duration: 1s;
+    transition: transform var(--forest-growth-duration) linear;
   }
 }

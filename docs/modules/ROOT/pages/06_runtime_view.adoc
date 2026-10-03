@@ -574,13 +574,18 @@ keep prior validated data. Mutation resets clear first, so either-source failure
 keeps the forest empty until Retry completes a fresh pair; other Stats sections
 remain mounted.
 
-Start success, every Stop settlement, completion races, archive success,
-delete races or ambiguous transport, split ambiguity, and backup replacement or
-ambiguous post-request failure use the shared destructive reset. A validated
-pre-write 4xx may preserve the snapshot. Planning edits, reorder, reparent,
-reopen, goal deletion, estimate expiry and focus Exit do not reset it solely for
-that action. Existing window-focus behavior is retained without a new poll,
-cross-tab protocol or convergence promise.
+The shared destructive reset follows the exact source-event matrix: Start
+success; every Stop settlement including a 404 race; successful direct or
+recurring completion and its not-found/conflict races; archive success; delete
+success, not-found race, or ambiguous transport result; split success or
+ambiguous transport result; and backup-import success or ambiguous post-request
+result. Automatic parent completion needs no separate hook. A validated
+pre-write 4xx that proves no commit may preserve the snapshot. Create, title,
+estimate, category, goal, reparent, fixed-slot or reorder edits,
+unarchive/reopen, and goal deletion do not reset it solely for that operation;
+existing unrelated invalidations remain. Estimate expiry and focus Exit also do
+not invent an outcome or reset. Existing window-focus behavior is retained
+without a new poll, cross-tab protocol or convergence promise.
 
 Finished `done` trees are leafy and labelled **Living**; `stop` trees are bare
 and labelled **Dead**, with equal footprint and ordinary prominence. The

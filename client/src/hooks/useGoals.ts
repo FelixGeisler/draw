@@ -1,4 +1,10 @@
-import { useMutation, useQuery, useQueryClient, type UseQueryOptions } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type UseQueryOptions,
+} from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Goal, Material } from "../api/types";
 import { announceAchievements } from "./useGamification";
@@ -43,16 +49,20 @@ export function useUpdateGoal() {
   });
 }
 
-export function useDeleteGoal() {
-  const qc = useQueryClient();
-  return useMutation({
+export function deleteGoalMutation(qc: QueryClient) {
+  return {
     mutationFn: (id: number) => api.delete<{ ok: boolean }>(`/api/goals/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["goals"] });
       qc.invalidateQueries({ queryKey: ["tasks"] });
       qc.invalidateQueries({ queryKey: ["daily-overview"] });
     },
-  });
+  };
+}
+
+export function useDeleteGoal() {
+  const qc = useQueryClient();
+  return useMutation(deleteGoalMutation(qc));
 }
 
 export function useMaterials(goalId: number) {
