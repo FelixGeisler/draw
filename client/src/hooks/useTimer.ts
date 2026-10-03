@@ -7,6 +7,7 @@ import {
 import { api } from "../api/client";
 import {
   fetchCurrentTimer,
+  forestWriteMayHaveCommitted,
   resetForest,
   type CurrentTimer,
 } from "../lib/forest";
@@ -33,6 +34,12 @@ export function startTimerMutation(qc: QueryClient) {
       // Goal cards derive trackedMinutes14d from time_entries (#60), and a
       // running entry already counts toward the window via MINUTES_EXPR.
       qc.invalidateQueries({ queryKey: ["goals"] });
+    },
+    // Start atomically stops a prior session before inserting the replacement.
+    // A lost response or 5xx can therefore hide a committed replacement; only
+    // a validated pre-write 4xx is allowed to preserve the prior snapshot.
+    onError: (error: unknown) => {
+      if (forestWriteMayHaveCommitted(error)) resetForest(qc);
     },
   };
 }

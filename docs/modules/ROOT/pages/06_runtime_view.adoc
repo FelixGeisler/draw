@@ -561,9 +561,11 @@ filters. A page-one, Newest, reload, focus refresh or accepted mutation reset
 starts one monotonically increasing generation and concurrently reads
 `/api/forest` plus unchanged `/api/timer/current`. Exact-key decoders validate
 both complete responses before the generation publishes. The timer decoder is
-the same function used by the existing TimerBar query. Cancellation and a
-final generation check prevent late page or current responses from replacing a
-newer snapshot.
+the same function used by the existing TimerBar query. Cancellation and the
+shared reset epoch guard both validation and the actual TanStack cache write,
+so a reset after a navigation/query resolves but before cache publication still
+wins and late page or current responses cannot replace a newer or cleared
+snapshot.
 
 The client retains one finished page of at most 100 trees and at most one
 current tree. **Older** replaces that page with the validated exclusive cursor;
@@ -575,12 +577,13 @@ keeps the forest empty until Retry completes a fresh pair; other Stats sections
 remain mounted.
 
 The shared destructive reset follows the exact source-event matrix: Start
-success; every Stop settlement including a 404 race; successful direct or
-recurring completion and its not-found/conflict races; archive success; delete
-success, not-found race, or ambiguous transport result; split success or
-ambiguous transport result; and backup-import success or ambiguous post-request
-result. Automatic parent completion needs no separate hook. A validated
-pre-write 4xx that proves no commit may preserve the snapshot. Create, title,
+success or ambiguous transport/server result; every Stop settlement including
+a 404 race; successful direct or recurring completion and its
+not-found/conflict races; archive success; delete success, not-found race, or
+ambiguous transport result; split success or ambiguous transport result; and
+backup-import success or ambiguous post-request result. Automatic parent
+completion needs no separate hook. A validated pre-write 4xx that proves no
+commit may preserve the snapshot, including for Start. Create, title,
 estimate, category, goal, reparent, fixed-slot or reorder edits,
 unarchive/reopen, and goal deletion do not reset it solely for that operation;
 existing unrelated invalidations remain. Estimate expiry and focus Exit also do

@@ -157,6 +157,7 @@ type TimerLoader = (signal?: AbortSignal) => Promise<CurrentTimer | null>;
 export class ForestGenerationLoader {
   private generation = 0;
   private controller: AbortController | null = null;
+  private readonly publicationGenerations = new WeakMap<PublishedForest, number>();
 
   constructor(
     private readonly pageLoader: PageLoader = fetchForestPage,
@@ -167,6 +168,25 @@ export class ForestGenerationLoader {
     this.generation += 1;
     this.controller?.abort();
     this.controller = null;
+  }
+
+  epoch(): number {
+    return this.generation;
+  }
+
+  isEpochCurrent(epoch: number): boolean {
+    return epoch === this.generation;
+  }
+
+  /**
+   * The check and replacement happen synchronously inside QueryClient's actual
+   * cache write. A reset can therefore invalidate a result even after load()
+   * validated it but before TanStack Query or navigation publishes it.
+   */
+  publishIfCurrent(previous: ForestState | undefined, candidate: PublishedForest): ForestState {
+    return this.publicationGenerations.get(candidate) === this.generation
+      ? candidate
+      : previous ?? CLEARED_FOREST;
   }
 
   async load(beforeId: number | null, outerSignal?: AbortSignal): Promise<PublishedForest> {
@@ -183,7 +203,9 @@ export class ForestGenerationLoader {
         this.timerLoader(controller.signal),
       ]);
       if (generation !== this.generation || controller.signal.aborted) throw new StaleForestGenerationError();
-      return { kind: "published", page, current, requestedBeforeId: beforeId };
+      const publication: PublishedForest = { kind: "published", page, current, requestedBeforeId: beforeId };
+      this.publicationGenerations.set(publication, generation);
+      return publication;
     } catch (error) {
       if (generation !== this.generation || controller.signal.aborted) throw new StaleForestGenerationError();
       // One failed half invalidates the pair; stop the still-pending sibling.

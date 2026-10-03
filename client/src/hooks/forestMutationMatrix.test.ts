@@ -49,19 +49,19 @@ function expectCleared(qc: QueryClient): void {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("real forest producer mutation options", () => {
-  it("clears after Start success but preserves the validated snapshot on failed Start", async () => {
-    {
-      installFetch(response({ ok: true }));
-      const { qc } = clientWithForest();
-      await new MutationObserver(qc, startTimerMutation(qc)).mutate(7);
-      expectCleared(qc);
-    }
-    {
-      installFetch(response({ error: "invalid task" }, 400));
-      const { qc, previous } = clientWithForest();
-      await expect(new MutationObserver(qc, startTimerMutation(qc)).mutate(7)).rejects.toBeInstanceOf(ApiError);
-      expect(qc.getQueryData(FOREST_QUERY_KEY)).toEqual(previous);
-    }
+  it.each([
+    ["success", response({ ok: true }), true],
+    ["ambiguous transport", new TypeError("response lost"), true],
+    ["ambiguous server result", response({ error: "unknown result" }, 500), true],
+    ["proven pre-write 400", response({ error: "invalid task" }, 400), false],
+  ])("handles Start %s through the actual producer according to the approved matrix", async (_name, result, clears) => {
+    installFetch(result);
+    const { qc, previous } = clientWithForest();
+    const mutation = new MutationObserver(qc, startTimerMutation(qc)).mutate(7);
+    if (result instanceof Error || result.status >= 400) await expect(mutation).rejects.toThrow();
+    else await mutation;
+    if (clears) expectCleared(qc);
+    else expect(qc.getQueryData(FOREST_QUERY_KEY)).toEqual(previous);
   });
 
   it.each([

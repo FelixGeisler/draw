@@ -4769,12 +4769,16 @@ or newly rejected merely for forest population.
 The Stats client owns one replace-only page of at most 100 finished trees plus
 one current tree. One strict current-timer decoder is shared with existing timer
 consumers. Every page-one/reset/navigation generation validates the complete
-forest page and current response before publishing either, and late generations
-cannot publish. Older replaces by the validated exclusive cursor; Newest,
-focus refresh and mutation recovery return to page one. Accepted producer hooks
-clear before mutation recovery where a commit or response-loss may have changed
-the feed. No page stack, append, optimistic outcome, history cutoff, new poll or
-cross-tab protocol is introduced.
+forest page and current response before publishing either. The shared reset
+epoch is checked again synchronously inside the actual TanStack cache write, so
+a reset between response validation and publication wins and late generations
+cannot republish old trees, current state, or cursors. Older replaces by the
+validated exclusive cursor; Newest, focus refresh and mutation recovery return
+to page one. Accepted producer hooks clear before mutation recovery where a
+commit or response-loss may have changed the feed, including an ambiguous
+replacement Start; a proven pre-write 4xx preserves the validated snapshot. No
+page stack, append, optimistic outcome, history cutoff, new poll or cross-tab
+protocol is introduced.
 
 Presentation is local inline SVG/CSS: `done` is equally prominent leafy
 **Living**, `stop` is bare **Dead**, and the current **Growing** silhouette uses

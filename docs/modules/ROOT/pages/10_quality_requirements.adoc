@@ -121,7 +121,7 @@ AI degradation > data integrity > cost transparency > responsiveness.
 
 |Q28
 |The Session forest mounts, pages, reloads or recovers while either source fails, mutations race, responses arrive late, history is dense, or motion is reduced
-|One generation strictly decodes and atomically publishes at most one current plus one replace-only 100-tree page; late work is ignored, destructive recovery clears first, navigation failures preserve only an already validated window, and Retry repeats both sources. Living/Dead/Growing remain equal-footprint text-and-silhouette states with time/duration, no task text, elapsed-only growth, decorative art and a static reduced-motion presentation
+|One generation strictly decodes and atomically publishes at most one current plus one replace-only 100-tree page; a shared reset epoch guards the actual cache write so a delete, replacement Start or backup reset after validation still wins. Late work is ignored, ambiguous committed-write results clear first, proven pre-write 4xx preserves the validated snapshot, navigation failures preserve only an already validated window, and Retry repeats both sources. Living/Dead/Growing remain equal-footprint text-and-silhouette states with time/duration, no task text, elapsed-only growth, decorative art and a static reduced-motion presentation
 |===
 
 Q1, Q3 (guardrail), Q6–Q10, Q13–Q22 and Q26–Q28 are covered by the automated suites
@@ -153,9 +153,9 @@ fixtures for durable navigation, desktop/mobile/keyboard presentation, hostile
 text, strict invalid-page rejection, paging, stale aborts, once-only cursor
 reset, exact error states and the complete action matrix. A separate public
 server-clock journey starts and stops a real timer and checks bounded timestamps
-and unchanged planning facts. Q28 adds strict forest/current decoder, generation,
-replacement-bound, growth, SVG/accessibility/reduced-motion and mutation-policy
-unit/component tests plus browser journeys for Start/Stop/Done, same-task
+and unchanged planning facts. Q28 adds strict forest/current decoder, generation, final cache-publication
+reset races, replacement-bound, growth, SVG/accessibility/reduced-motion and
+actual-producer mutation-policy unit/component tests plus browser journeys for Start/Stop/Done, same-task
 identity, reload/deletion, parent and timed-child lifecycle edges, and bounded
 Older/Newest replacement. The Phase 2A/2B regression gate additionally runs
 server/client types, all unit and

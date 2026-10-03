@@ -16,11 +16,21 @@ import {
 
 export function forestQueryOptions(
   queryClient: QueryClient,
-): UseQueryOptions<PublishedForest, Error, ForestState, typeof FOREST_QUERY_KEY> {
+): UseQueryOptions<ForestState, Error, ForestState, typeof FOREST_QUERY_KEY> {
   const loader = forestLoader(queryClient);
   return {
     queryKey: FOREST_QUERY_KEY,
     queryFn: ({ signal }) => loader.load(null, signal),
+    // TanStack Query calls structuralSharing from Query.setData, immediately
+    // before the cache replacement. That is the final shared-epoch guard for
+    // a reset racing an already-resolved query function.
+    structuralSharing: (previous, candidate) => {
+      const priorState = previous as ForestState | undefined;
+      const nextState = candidate as ForestState;
+      return nextState.kind === "published"
+        ? loader.publishIfCurrent(priorState, nextState)
+        : nextState;
+    },
     retry: false,
   };
 }
@@ -48,6 +58,7 @@ export class ForestNavigationController {
     private readonly queryClient: QueryClient,
     private readonly loader: ForestGenerationLoader = forestLoader(queryClient),
     private readonly onStateChange: () => void = () => undefined,
+    private readonly beforePublication?: (result: PublishedForest) => void | Promise<void>,
   ) {}
 
   snapshot(): Readonly<ForestNavigationState> {
@@ -56,13 +67,21 @@ export class ForestNavigationController {
 
   navigate = async (beforeId: number | null): Promise<void> => {
     const attempt = ++this.attempt;
+    const startingEpoch = this.loader.epoch();
     this.state = { navigationPending: true, navigationError: null, retryCursor: beforeId };
     this.onStateChange();
     await this.queryClient.cancelQueries({ queryKey: FOREST_QUERY_KEY, exact: true }, { revert: false });
     try {
+      // A reset while cancelQueries was settling owns page one; this older
+      // navigation must not start afterward and supersede that recovery.
+      if (attempt !== this.attempt || !this.loader.isEpochCurrent(startingEpoch)) return;
       const result = await this.loader.load(beforeId);
       if (attempt !== this.attempt) return;
-      this.queryClient.setQueryData<ForestState>(FOREST_QUERY_KEY, result);
+      if (this.beforePublication) await this.beforePublication(result);
+      if (attempt !== this.attempt) return;
+      this.queryClient.setQueryData<ForestState>(FOREST_QUERY_KEY, (previous) =>
+        this.loader.publishIfCurrent(previous, result),
+      );
     } catch (error) {
       if (attempt !== this.attempt || error instanceof StaleForestGenerationError) return;
       this.state = { ...this.state, navigationError: "The forest could not be refreshed." };
@@ -80,7 +99,7 @@ export class ForestNavigationController {
 
 export function useForest() {
   const queryClient = useQueryClient();
-  const query = useQuery<PublishedForest, Error, ForestState, typeof FOREST_QUERY_KEY>(
+  const query = useQuery<ForestState, Error, ForestState, typeof FOREST_QUERY_KEY>(
     forestQueryOptions(queryClient),
   );
   const [, setNavigationRevision] = useState(0);

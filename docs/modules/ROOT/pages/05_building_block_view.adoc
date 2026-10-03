@@ -294,9 +294,11 @@ which holds a pointer a task mutation can invalidate (ADR-13). The Session
 forest is the other bounded exception: one `['forest']` cache entry contains
 only one validated finished page (at most 100) plus the current session. Its
 single generation aborts/supersedes navigation and paired page/current reads;
-accepted mutation hooks clear it before a page-one refresh. It never retains a
-page stack, appends history or derives an optimistic outcome. There is no other
-state management.
+its shared reset epoch is rechecked synchronously at the actual TanStack cache
+write. Accepted mutation hooks clear it before a page-one refresh, including an
+ambiguous replacement Start while preserving proven pre-write 4xx snapshots. It
+never retains a page stack, appends history or derives an optimistic outcome.
+There is no other state management.
 
 == 5.4 Data Model
 

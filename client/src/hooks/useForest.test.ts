@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
-import { FOREST_QUERY_KEY, type ForestState } from "../lib/forest";
-import {
-  ForestNavigationController,
-  forestQueryOptions,
-} from "./useForest";
+import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { FOREST_QUERY_KEY, forestLoader, type ForestState } from "../lib/forest";
+import { importBackupMutation } from "./useBackup";
+import { ForestNavigationController, forestQueryOptions } from "./useForest";
+import { deleteTaskMutation } from "./useTasks";
 
 const START = "2026-01-02T03:04:05.006Z";
 const END = "2026-01-02T03:05:05.006Z";
@@ -160,6 +159,73 @@ describe("useForest query and navigation controller", () => {
     expect(controller.snapshot().navigationError).not.toBeNull();
   });
 
+  it.each([
+    [
+      "delete",
+      "/api/tasks/7",
+      json({ ok: true }),
+      (qc: QueryClient) => new MutationObserver(qc, deleteTaskMutation(qc)).mutate(7),
+    ],
+    [
+      "backup replacement",
+      "/api/backup/import",
+      json({ tasks: 1, goals: 2, materials: 3 }),
+      (qc: QueryClient) => new MutationObserver(qc, importBackupMutation(qc)).mutate(
+        new File(["archive"], "draw.zip"),
+      ),
+    ],
+  ])("does not resurrect old trees/current/cursor when %s resets after navigation validation but before publication", async (
+    _name,
+    producerUrl,
+    producerResponse,
+    settleProducer,
+  ) => {
+    installHttp({
+      "/api/forest?beforeId=101": [json(page(80))],
+      "/api/timer/current": [json({
+        entry: { id: 70, taskId: 7, startedAt: START, endedAt: null },
+        task: { id: 7, title: "must not resurrect", categoryId: 2, impact: 3, effortMinutes: 20, goalId: null, status: "open" },
+      })],
+      [producerUrl]: [producerResponse],
+    });
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    qc.setQueryData(FOREST_QUERY_KEY, published(150, null));
+    const controller = new ForestNavigationController(
+      qc,
+      forestLoader(qc),
+      () => undefined,
+      async () => { await settleProducer(qc); },
+    );
+
+    await controller.navigate(101);
+
+    expect(qc.getQueryData(FOREST_QUERY_KEY)).toEqual({ kind: "cleared" });
+    expect(qc.getQueryData(FOREST_QUERY_KEY)).not.toMatchObject({
+      requestedBeforeId: 101,
+      page: { trees: [{ id: 80 }] },
+      current: { entry: { id: 70 } },
+    });
+  });
+
+  it("guards TanStack Query's final cache publication with the reset epoch", async () => {
+    installHttp({
+      "/api/forest?beforeId=101": [json(page(80))],
+      "/api/timer/current": [json(null)],
+      "/api/tasks/7": [json({ ok: true })],
+    });
+    const qc = new QueryClient({ defaultOptions: { mutations: { retry: false }, queries: { retry: false } } });
+    qc.setQueryData(FOREST_QUERY_KEY, published(150, null));
+    const stalePublication = await forestLoader(qc).load(101);
+
+    await new MutationObserver(qc, deleteTaskMutation(qc)).mutate(7);
+    await qc.fetchQuery({
+      ...forestQueryOptions(qc),
+      queryFn: async () => stalePublication,
+    });
+
+    expect(qc.getQueryData(FOREST_QUERY_KEY)).toEqual({ kind: "cleared" });
+  });
+
   it("rejects late Older/current results after Newest publishes", async () => {
     const oldForest = deferred<Response>();
     const oldCurrent = deferred<Response>();
@@ -175,7 +241,7 @@ describe("useForest query and navigation controller", () => {
     const controller = new ForestNavigationController(qc);
 
     const older = controller.navigate(101);
-    await Promise.resolve();
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
     const newest = controller.navigate(null);
     newForest.resolve(json(page(99)));
     newCurrent.resolve(json(null));
