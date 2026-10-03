@@ -556,9 +556,10 @@ repair, task join, external call or running-session projection (ADR-77).
 
 == 6.14 Session forest publication and recovery
 
-Stats mounts one global Session forest independently of date, project and goal
-filters. A page-one, Newest, reload, focus refresh or accepted mutation reset
-starts one monotonically increasing generation and concurrently reads
+The dedicated `/forest` route mounts one global Forest landscape independently
+of Stats date, project and goal filters. A page-one, Newest, reload, focus
+refresh or accepted mutation reset starts one monotonically increasing
+generation and concurrently reads
 `/api/forest` plus unchanged `/api/timer/current`. Exact-key decoders validate
 both complete responses before the generation publishes. The timer decoder is
 the same function used by the existing TimerBar query. Cancellation and the
@@ -573,8 +574,8 @@ current tree. **Older** replaces that page with the validated exclusive cursor;
 back-stack, virtualizer, age cutoff or optimistic result. An Older failure keeps
 the prior page and retries the same cursor. An ordinary Newest/focus failure may
 keep prior validated data. Mutation resets clear first, so either-source failure
-keeps the forest empty until Retry completes a fresh pair; other Stats sections
-remain mounted.
+keeps the forest empty until Retry completes a fresh pair; the dedicated heading
+and global navigation remain mounted, and Stats has no Forest subtree.
 
 The shared destructive reset follows the exact source-event matrix: Start
 success or ambiguous transport/server result; every Stop settlement including
@@ -593,7 +594,17 @@ without a new poll, cross-tab protocol or convergence promise.
 Finished `done` trees are leafy and labelled **Living**; `stop` trees are bare
 and labelled **Dead**, with equal footprint and ordinary prominence. The
 current leafy tree is labelled **Growing** and scales from elapsed minutes `m`
-by `0.72 + 0.28 × m/(m+30)` on the local elapsed-display tick. Text exposes
-state, canonical source time and duration; SVG is decorative, task text is
-absent, and reduced motion removes visual transitions without changing the
-computed scale or data.
+by `0.72 + 0.28 × m/(m+30)` on the local elapsed-display tick. Exactly three
+session-id-derived local silhouettes and bounded offsets occupy transparent,
+non-overlapping CSS-grid cells over one continuous responsive terrain; the id
+mapping uses no time, duration, task data or randomness.
+
+The scene is one native radio group. It selects current-then-first initially,
+retains a session only while that id remains in the published window, and falls
+back or clears without persistence or focus movement. Each whole cell is the
+label/hit target; one secondary region exposes only the selected state, local
+Started/Ended time and duration. History controls precede the group. Text
+retains every state, SVG is decorative and pointer-inert, task text is absent,
+and reduced motion removes visual transitions without changing computed scale
+or data. The shared world adds rows at the sole 640px breakpoint and must not
+create document-level horizontal overflow, including a 100-tree page at 360px.

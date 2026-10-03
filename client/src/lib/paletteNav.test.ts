@@ -92,6 +92,7 @@ describe("commandForEntry", () => {
       [{ kind: "action", action: "capture" }, { type: "capture" }],
       [{ kind: "action", action: "toggle-timer" }, { type: "toggle-timer" }],
       [{ kind: "action", action: "goto-goals" }, { type: "navigate", to: "/goals" }],
+      [{ kind: "action", action: "goto-forest" }, { type: "navigate", to: "/forest" }],
       [{ kind: "action", action: "goto-stats" }, { type: "navigate", to: "/stats" }],
       [{ kind: "action", action: "goto-settings" }, { type: "navigate", to: "/settings" }],
     ];

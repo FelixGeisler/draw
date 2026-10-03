@@ -66,8 +66,10 @@ test("degraded mode hides the Assistant from the nav; a direct visit hints at Se
   page,
 }) => {
   await page.goto("/");
-  await expect(page.locator(".sidenav")).toContainText("Draw");
-  await expect(page.locator(".sidenav a", { hasText: "Assistant" })).toHaveCount(0);
+  const nav = page.locator(".sidenav");
+  await expect(nav).toContainText("Draw");
+  await expect(nav.locator("a", { hasText: "Assistant" })).toHaveCount(0);
+  await expect(nav.getByRole("link")).toHaveText(["Draw", "Tasks", "Goals", "Forest", "Stats", "Settings"]);
 
   await page.goto("/assistant");
   await expect(page.getByText(/add your API key in Settings/)).toBeVisible();
@@ -83,7 +85,11 @@ test("ask → review changeset → apply → tasks visible on the Tasks page", a
   await stubAgentLoop(page);
 
   await page.goto("/assistant");
-  await expect(page.locator(".sidenav a", { hasText: "Assistant" })).toBeVisible();
+  const nav = page.locator(".sidenav");
+  await expect(nav.locator("a", { hasText: "Assistant" })).toBeVisible();
+  await expect(nav.getByRole("link")).toHaveText([
+    "Draw", "Tasks", "Goals", "Assistant", "Forest", "Stats", "Settings",
+  ]);
 
   // Ask — the first send is estimate-gated.
   await page.getByTitle("Message to the assistant").fill("Import my mock exam as tasks");

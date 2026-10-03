@@ -7,7 +7,6 @@ import { api } from "../api/client";
 import { useGamification } from "../hooks/useGamification";
 import { AchievementCard } from "../components/AchievementCard";
 import { HistoryCalendar } from "../components/HistoryCalendar";
-import { SessionForest } from "../components/SessionForest";
 import { biasStatement } from "../lib/estimationCoach";
 import { partitionAchievements } from "../lib/achievementEdit";
 import { collapseAchievementChains } from "../lib/achievementChains";
@@ -248,10 +247,6 @@ export function StatsPage() {
 
       {/* The weekly recap (#233): a closed week, not another dashboard row. */}
       <WeeklyReport />
-
-      {/* Global working-session outcomes are intentionally independent of the
-          range and project/goal filters used by the surrounding summaries. */}
-      <SessionForest />
 
       {s && (
         <>

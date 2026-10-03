@@ -33,6 +33,7 @@ const ACTIONS: { action: PaletteAction; label: string; keyHint: string }[] = [
   { action: "capture", label: "Capture a task", keyHint: "n" },
   { action: "toggle-timer", label: "Start/stop timer", keyHint: "space" },
   { action: "goto-goals", label: "Go to Goals", keyHint: "" },
+  { action: "goto-forest", label: "Go to Forest", keyHint: "" },
   { action: "goto-stats", label: "Go to Stats", keyHint: "" },
   { action: "goto-settings", label: "Go to Settings", keyHint: "" },
 ];

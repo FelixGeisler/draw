@@ -55,6 +55,15 @@ test("Ctrl+K on Stats opens the palette; search + Enter lands on the task's row 
   // Empty query = the Actions group, the shortcut discovery surface.
   await expect(palette.getByText("Draw a card")).toBeVisible();
   await expect(palette.getByText("Capture a task")).toBeVisible();
+  await expect(palette.getByTestId("palette-result")).toHaveText([
+    "Draw a cardd",
+    "Capture a taskn",
+    "Start/stop timerspace",
+    "Go to Goals",
+    "Go to Forest",
+    "Go to Stats",
+    "Go to Settings",
+  ]);
 
   await input.pressSequentially("Dandelion band");
   const result = page.getByTestId("palette-result").filter({ hasText: TASK_TITLE });
@@ -71,6 +80,17 @@ test("Ctrl+K on Stats opens the palette; search + Enter lands on the task's row 
   // Scrolled into view with a transient highlight; the row being visible in
   // the tree is the stable, animation-agnostic half of that promise.
   await expect(taskTree(page).getByText(TASK_TITLE)).toBeVisible();
+});
+
+test("Go to Forest is a no-shortcut action between Goals and Stats", async ({ page }) => {
+  await page.goto("/stats");
+  await page.keyboard.press("Control+k");
+  const action = page.getByTestId("palette-result").filter({ hasText: "Go to Forest" });
+  await expect(action).toBeVisible();
+  await expect(action.locator(".palette-meta")).toHaveText("");
+  await action.click();
+  await expect(page).toHaveURL(/\/forest$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Forest", exact: true })).toBeVisible();
 });
 
 test("Ctrl+Enter on a task result starts its timer and closes the palette", async ({ page }) => {

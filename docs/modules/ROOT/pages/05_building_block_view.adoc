@@ -30,7 +30,7 @@ actor "User" as user
 component "MCP client\nClaude Code / Desktop" as mcpClient
 
 package "client/ — React SPA" {
-  component "pages + components\nDraw, Tasks, Goals,\nStats, Settings, Week" as pages
+  component "pages + components\nDraw, Tasks, Goals, Forest,\nStats, Settings, Week" as pages
   component "lib/ — pure logic\ndrawable, focusView,\ndrawnCard, localDay, rarity" as clib
   component "hooks/ — TanStack Query\nuseTasks, useDraw, useTimer,\nuseGamification, useAi" as hooks
   component "api/client.ts\ntyped fetch wrapper" as apiClient
@@ -249,9 +249,10 @@ client/src/
 │                              plus the tab-scoped pack purchase-intent/retry helper (#267)
 ├── pages/                     Draw (centerpiece, incl. the CSS-3D card flip),
 │                              Tasks (capture-first: quick capture + triage strip +
-│                              category tree, ADR-40), Goals, Stats (summary tiles,
-│                              time bars, estimation summary, Session forest,
-│                              History calendar, achievements — ADR-41/ADR-77), Settings
+│                              category tree, ADR-40), Goals, Forest (first-class
+│                              shared landscape, ADR-78), Stats (summary tiles,
+│                              time bars, estimation summary, History calendar,
+│                              achievements — ADR-41), Settings
 ├── lib/                       pure client logic (drawable classification, effort display,
 │                              generate-tasks review model,
 │                              shared local-day math, estimation coaching decisions,
@@ -264,7 +265,8 @@ client/src/
                                FocusOverlay (fullscreen focus mode, ADR-29),
                                EmptyPoolReason (one voice for an empty pool),
                                GamificationHeader, TrophyDeck, SessionForest
-                               (local accessible SVG trees), HistoryCalendar,
+                               (responsive shared terrain, native tree selection and
+                               local decorative SVG variants), HistoryCalendar,
                                AchievementToast, ShopPanel (authoritative Gold/Ticket
                                controls and shared back swatches), PackRevealModal
                                (current-response portal, focus/inert and ordered cards)
@@ -290,9 +292,9 @@ Task mutations invalidate the
 `tasks`/`gamification`/`stats`/`activity`/`goals` query keys (goal cards derive
 their task counts from tasks; timer start/stop also touches `activity` — a
 started task lights up today's cell in the History calendar), plus `draw.current`,
-which holds a pointer a task mutation can invalidate (ADR-13). The Session
-forest is the other bounded exception: one `['forest']` cache entry contains
-only one validated finished page (at most 100) plus the current session. Its
+which holds a pointer a task mutation can invalidate (ADR-13). The first-class `/forest` landscape (ADR-78) is the other bounded exception:
+one `['forest']` cache entry contains only one validated finished page (at most
+100) plus the current session. Its
 single generation aborts/supersedes navigation and paired page/current reads;
 its shared reset epoch is rechecked synchronously at the actual TanStack cache
 write. Accepted mutation hooks clear it before a page-one refresh, including an

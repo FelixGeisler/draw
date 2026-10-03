@@ -9,6 +9,7 @@ export type PaletteAction =
   | "capture" // → navigate to /tasks, focus the quick-capture title input
   | "toggle-timer" // → resolved via timerToggleCommand at execution time
   | "goto-goals"
+  | "goto-forest"
   | "goto-stats"
   | "goto-settings";
 
@@ -72,6 +73,8 @@ export function commandForEntry(entry: PaletteEntry, withCtrl: boolean): Palette
           return { type: "toggle-timer" };
         case "goto-goals":
           return { type: "navigate", to: "/goals" };
+        case "goto-forest":
+          return { type: "navigate", to: "/forest" };
         case "goto-stats":
           return { type: "navigate", to: "/stats" };
         case "goto-settings":
